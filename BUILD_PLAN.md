@@ -103,3 +103,28 @@
 - Fly.io or Railway deployment
 - CI/CD with GitHub Actions
 - Production PostgreSQL (Neon or Supabase)
+
+## Phase 4: Media Processing Tools
+
+### MTA-16: Audio Transcription Endpoint (Whisper) ✅
+- [x] POST /api/v1/audio/transcribe — multipart file upload (mp3, wav, m4a, ogg, flac, webm)
+- [x] Max 25MB file size (Whisper API limit)
+- [x] OpenAI Whisper API integration via OPENAI_API_KEY env var
+- [x] Graceful handling when API key not configured
+- [x] audio_transcriptions table (migration 005)
+- [x] Handler: internal/handlers/audio.go
+- [x] Service: internal/services/audio/transcriber.go
+- [x] GET endpoints for retrieval and listing
+- [x] Frontend: /audio route with drag-and-drop upload
+- [x] Copy/download transcription results
+
+### MTA-17: PDF Text Extraction Endpoint ✅
+- [x] POST /api/v1/pdf/extract — multipart PDF upload (max 50MB)
+- [x] Pure Go PDF text extraction (ledongthuc/pdf library)
+- [x] Page count, word count, text with page break markers
+- [x] pdf_extractions table (migration 006)
+- [x] Handler: internal/handlers/pdf.go
+- [x] Service: internal/services/pdf/extractor.go
+- [x] GET endpoints for retrieval and listing
+- [x] Frontend: /pdf route with drag-and-drop, page-break display
+- [x] Copy all / download as .txt
