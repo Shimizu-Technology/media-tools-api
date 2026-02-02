@@ -230,3 +230,53 @@ export async function downloadExport(transcriptId: string, format: ExportFormat)
   }
   return res.blob();
 }
+
+// ── Delete + History (MTA-13) ──
+
+/** Delete a transcript by ID */
+export async function deleteTranscript(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/transcripts/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+  if (!res.ok && res.status !== 404) {
+    const error: APIError = await res.json().catch(() => ({
+      error: 'unknown',
+      message: `HTTP ${res.status}: ${res.statusText}`,
+      code: res.status,
+    }));
+    throw error;
+  }
+}
+
+// ── LocalStorage helpers for history tracking ──
+
+const HISTORY_KEY = 'mta_transcript_ids';
+
+/** Get stored transcript IDs from localStorage */
+export function getStoredTranscriptIds(): string[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as string[];
+  } catch {
+    return [];
+  }
+}
+
+/** Add a transcript ID to localStorage history */
+export function addTranscriptToHistory(id: string): void {
+  const ids = getStoredTranscriptIds();
+  if (!ids.includes(id)) {
+    ids.unshift(id);
+    // Keep max 100 entries
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(ids.slice(0, 100)));
+  }
+}
+
+/** Remove transcript IDs from localStorage history */
+export function removeTranscriptsFromHistory(idsToRemove: string[]): void {
+  const ids = getStoredTranscriptIds();
+  const filtered = ids.filter((id) => !idsToRemove.includes(id));
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(filtered));
+}

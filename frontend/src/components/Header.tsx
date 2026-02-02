@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
-import { Sun, Moon, FileText, Github } from 'lucide-react';
+import { useLocation, Link } from 'react-router-dom';
+import { Sun, Moon, FileText, Github, History, Book } from 'lucide-react';
 
 interface HeaderProps {
   isDark: boolean;
@@ -7,10 +8,18 @@ interface HeaderProps {
 }
 
 /**
- * App header with branding, theme toggle, and navigation.
+ * App header with branding, navigation, theme toggle, and GitHub link.
  * NO emoji — using Lucide React icons only (Shimizu design guide).
  */
 export function Header({ isDark, onToggleTheme }: HeaderProps) {
+  const location = useLocation();
+
+  const navLinks = [
+    { to: '/', label: 'Extract', icon: FileText },
+    { to: '/history', label: 'History', icon: History },
+    { to: '/docs', label: 'API Docs', icon: Book },
+  ];
+
   return (
     <motion.header
       initial={{ opacity: 0, y: -20 }}
@@ -24,14 +33,14 @@ export function Header({ isDark, onToggleTheme }: HeaderProps) {
     >
       <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
         {/* Logo + Brand */}
-        <div className="flex items-center gap-3">
+        <Link to="/" className="flex items-center gap-3">
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center"
             style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             <FileText className="w-5 h-5 text-white" />
           </div>
-          <div>
+          <div className="hidden sm:block">
             <h1 className="text-base font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>
               Media Tools
             </h1>
@@ -39,7 +48,28 @@ export function Header({ isDark, onToggleTheme }: HeaderProps) {
               YouTube Transcripts & AI Summaries
             </p>
           </div>
-        </div>
+        </Link>
+
+        {/* Navigation */}
+        <nav className="flex items-center gap-1">
+          {navLinks.map((link) => {
+            const isActive = location.pathname === link.to;
+            return (
+              <Link
+                key={link.to}
+                to={link.to}
+                className="relative flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200"
+                style={{
+                  color: isActive ? 'var(--color-brand-500)' : 'var(--color-text-secondary)',
+                  minHeight: '40px',
+                }}
+              >
+                <link.icon className="w-4 h-4" />
+                <span className="hidden sm:inline">{link.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
 
         {/* Actions */}
         <div className="flex items-center gap-2">
