@@ -24,6 +24,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/config"
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/router"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
@@ -88,6 +89,14 @@ func main() {
 	// AI summary service (uses OpenRouter API)
 	summarizer := summary.New(cfg.OpenRouterAPIKey, cfg.OpenRouterModel)
 
+	// Audio transcription service (uses OpenAI Whisper API) — MTA-16
+	audioTranscriber := audio.NewTranscriber(cfg.OpenAIAPIKey)
+	if audioTranscriber.IsConfigured() {
+		log.Println("✅ Audio transcription enabled (Whisper API)")
+	} else {
+		log.Println("⚠️  Audio transcription disabled (set OPENAI_API_KEY to enable)")
+	}
+
 	// ────────────────────────────────────────────
 	// Step 4: Create and Start Worker Pool
 	// ────────────────────────────────────────────
@@ -100,7 +109,7 @@ func main() {
 	// ────────────────────────────────────────────
 	// Step 5: Setup HTTP Router
 	// ────────────────────────────────────────────
-	r := router.Setup(db, wp, cfg.AllowedOrigins)
+	r := router.Setup(db, wp, audioTranscriber, cfg.AllowedOrigins)
 
 	// ────────────────────────────────────────────
 	// Step 6: Start the HTTP Server

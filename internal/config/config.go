@@ -30,6 +30,9 @@ type Config struct {
 	OpenRouterAPIKey string
 	OpenRouterModel  string // Default model for summaries
 
+	// OpenAI settings (for Whisper audio transcription)
+	OpenAIAPIKey string
+
 	// Worker settings
 	WorkerCount    int // Number of background worker goroutines
 	JobQueueSize   int // Size of the in-memory job queue buffer
@@ -61,6 +64,9 @@ func Load() (*Config, error) {
 		// OpenRouter AI
 		OpenRouterAPIKey: getEnv("OPENROUTER_API_KEY", ""),
 		OpenRouterModel:  getEnv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
+
+		// OpenAI (Whisper API for audio transcription)
+		OpenAIAPIKey: getEnv("OPENAI_API_KEY", ""),
 
 		// Worker defaults
 		WorkerCount:  getEnvInt("WORKER_COUNT", 3),

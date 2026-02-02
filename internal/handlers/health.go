@@ -16,6 +16,7 @@ import (
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
@@ -24,15 +25,17 @@ import (
 // variables or service locators, we pass dependencies explicitly.
 // This makes testing easy — just create a Handler with mock dependencies.
 type Handler struct {
-	DB     *database.DB
-	Worker *worker.Pool
+	DB               *database.DB
+	Worker           *worker.Pool
+	AudioTranscriber *audio.Transcriber // MTA-16: Whisper API transcriber
 }
 
 // NewHandler creates a new handler with all dependencies.
-func NewHandler(db *database.DB, wp *worker.Pool) *Handler {
+func NewHandler(db *database.DB, wp *worker.Pool, at *audio.Transcriber) *Handler {
 	return &Handler{
-		DB:     db,
-		Worker: wp,
+		DB:               db,
+		Worker:           wp,
+		AudioTranscriber: at,
 	}
 }
 

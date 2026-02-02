@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { useLocation, Link } from 'react-router-dom';
-import { Sun, Moon, FileText, Github, History, Book } from 'lucide-react';
+import { Sun, Moon, FileText, Github, History, Book, Mic, FileType2 } from 'lucide-react';
 
 interface HeaderProps {
   isDark: boolean;
@@ -16,6 +16,8 @@ export function Header({ isDark, onToggleTheme }: HeaderProps) {
 
   const navLinks = [
     { to: '/', label: 'Extract', icon: FileText },
+    { to: '/audio', label: 'Audio', icon: Mic },
+    { to: '/pdf', label: 'PDF', icon: FileType2 },
     { to: '/history', label: 'History', icon: History },
     { to: '/docs', label: 'API Docs', icon: Book },
   ];

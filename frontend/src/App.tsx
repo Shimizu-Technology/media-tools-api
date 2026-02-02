@@ -5,6 +5,8 @@ import { useTheme } from './hooks/useTheme';
 import { HomePage } from './pages/HomePage';
 import { HistoryPage } from './pages/HistoryPage';
 import { DocsPage } from './pages/DocsPage';
+import { AudioPage } from './pages/AudioPage';
+import { PdfPage } from './pages/PdfPage';
 
 /**
  * Media Tools API — Main Application
@@ -17,6 +19,8 @@ import { DocsPage } from './pages/DocsPage';
  *   /         — Home: URL input + transcript display (MTA-11)
  *   /history  — History dashboard (MTA-13)
  *   /docs     — API documentation (MTA-15)
+ *   /audio    — Audio transcription via Whisper (MTA-16)
+ *   /pdf      — PDF text extraction (MTA-17)
  */
 function App() {
   const { isDark, toggle: toggleTheme } = useTheme();
@@ -42,6 +46,8 @@ function App() {
         <Routes>
           <Route path="/" element={<HomePage isDark={isDark} />} />
           <Route path="/history" element={<HistoryPage />} />
+          <Route path="/audio" element={<AudioPage />} />
+          <Route path="/pdf" element={<PdfPage />} />
           <Route path="/docs" element={<DocsPage />} />
         </Routes>
 

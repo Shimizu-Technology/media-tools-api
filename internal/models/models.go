@@ -159,6 +159,50 @@ type PaginatedResponse[T any] struct {
 	TotalPages int `json:"total_pages"`
 }
 
+// --- Audio Transcription Models (MTA-16) ---
+
+// AudioTranscription represents an audio file transcription via Whisper API.
+type AudioTranscription struct {
+	ID             string    `json:"id" db:"id"`
+	Filename       string    `json:"filename" db:"filename"`
+	OriginalName   string    `json:"original_name" db:"original_name"`
+	Duration       float64   `json:"duration" db:"duration"`
+	Language       string    `json:"language" db:"language"`
+	TranscriptText string    `json:"transcript_text" db:"transcript_text"`
+	WordCount      int       `json:"word_count" db:"word_count"`
+	Status         string    `json:"status" db:"status"`
+	ErrorMessage   string    `json:"error_message,omitempty" db:"error_message"`
+	CreatedAt      time.Time `json:"created_at" db:"created_at"`
+}
+
+// AudioTranscriptionResponse is the API response for audio transcription.
+type AudioTranscriptionResponse struct {
+	ID             string  `json:"id"`
+	OriginalName   string  `json:"original_name"`
+	Duration       float64 `json:"duration"`
+	Language       string  `json:"language"`
+	TranscriptText string  `json:"transcript_text"`
+	WordCount      int     `json:"word_count"`
+	Status         string  `json:"status"`
+	ErrorMessage   string  `json:"error_message,omitempty"`
+	CreatedAt      string  `json:"created_at"`
+}
+
+// --- PDF Extraction Models (MTA-17) ---
+
+// PDFExtraction represents a PDF text extraction result.
+type PDFExtraction struct {
+	ID           string    `json:"id" db:"id"`
+	Filename     string    `json:"filename" db:"filename"`
+	OriginalName string    `json:"original_name" db:"original_name"`
+	PageCount    int       `json:"page_count" db:"page_count"`
+	TextContent  string    `json:"text_content" db:"text_content"`
+	WordCount    int       `json:"word_count" db:"word_count"`
+	Status       string    `json:"status" db:"status"`
+	ErrorMessage string    `json:"error_message,omitempty" db:"error_message"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+}
+
 // ErrorResponse is a standard error format for all API errors.
 type ErrorResponse struct {
 	Error   string `json:"error"`

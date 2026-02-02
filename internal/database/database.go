@@ -291,3 +291,96 @@ func (db *DB) RevokeAPIKey(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// --- Audio Transcription Operations (MTA-16) ---
+
+// CreateAudioTranscription inserts a new audio transcription record.
+func (db *DB) CreateAudioTranscription(ctx context.Context, at *models.AudioTranscription) error {
+	query := `
+		INSERT INTO audio_transcriptions (filename, original_name, duration, language, transcript_text, word_count, status, error_message)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id, created_at`
+
+	return db.QueryRowContext(ctx, query,
+		at.Filename, at.OriginalName, at.Duration, at.Language,
+		at.TranscriptText, at.WordCount, at.Status, at.ErrorMessage,
+	).Scan(&at.ID, &at.CreatedAt)
+}
+
+// GetAudioTranscription retrieves a single audio transcription by ID.
+func (db *DB) GetAudioTranscription(ctx context.Context, id string) (*models.AudioTranscription, error) {
+	var at models.AudioTranscription
+	err := db.GetContext(ctx, &at, `SELECT * FROM audio_transcriptions WHERE id = $1`, id)
+	if err != nil {
+		return nil, fmt.Errorf("audio transcription not found: %w", err)
+	}
+	return &at, nil
+}
+
+// UpdateAudioTranscription updates an audio transcription record after processing.
+func (db *DB) UpdateAudioTranscription(ctx context.Context, at *models.AudioTranscription) error {
+	query := `
+		UPDATE audio_transcriptions
+		SET duration = $2, language = $3, transcript_text = $4, word_count = $5,
+			status = $6, error_message = $7
+		WHERE id = $1`
+
+	_, err := db.ExecContext(ctx, query,
+		at.ID, at.Duration, at.Language, at.TranscriptText,
+		at.WordCount, at.Status, at.ErrorMessage,
+	)
+	return err
+}
+
+// ListAudioTranscriptions returns recent audio transcriptions.
+func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int) ([]models.AudioTranscription, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	var transcriptions []models.AudioTranscription
+	err := db.SelectContext(ctx, &transcriptions,
+		`SELECT * FROM audio_transcriptions ORDER BY created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list audio transcriptions: %w", err)
+	}
+	return transcriptions, nil
+}
+
+// --- PDF Extraction Operations (MTA-17) ---
+
+// CreatePDFExtraction inserts a new PDF extraction record.
+func (db *DB) CreatePDFExtraction(ctx context.Context, pe *models.PDFExtraction) error {
+	query := `
+		INSERT INTO pdf_extractions (filename, original_name, page_count, text_content, word_count, status, error_message)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, created_at`
+
+	return db.QueryRowContext(ctx, query,
+		pe.Filename, pe.OriginalName, pe.PageCount, pe.TextContent,
+		pe.WordCount, pe.Status, pe.ErrorMessage,
+	).Scan(&pe.ID, &pe.CreatedAt)
+}
+
+// GetPDFExtraction retrieves a single PDF extraction by ID.
+func (db *DB) GetPDFExtraction(ctx context.Context, id string) (*models.PDFExtraction, error) {
+	var pe models.PDFExtraction
+	err := db.GetContext(ctx, &pe, `SELECT * FROM pdf_extractions WHERE id = $1`, id)
+	if err != nil {
+		return nil, fmt.Errorf("pdf extraction not found: %w", err)
+	}
+	return &pe, nil
+}
+
+// ListPDFExtractions returns recent PDF extractions.
+func (db *DB) ListPDFExtractions(ctx context.Context, limit int) ([]models.PDFExtraction, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	var extractions []models.PDFExtraction
+	err := db.SelectContext(ctx, &extractions,
+		`SELECT * FROM pdf_extractions ORDER BY created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pdf extractions: %w", err)
+	}
+	return extractions, nil
+}

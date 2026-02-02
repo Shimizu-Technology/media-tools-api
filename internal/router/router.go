@@ -18,11 +18,12 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/handlers"
 	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
 // Setup creates and configures the Gin router with all routes.
-func Setup(db *database.DB, wp *worker.Pool, allowedOrigins []string) *gin.Engine {
+func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, allowedOrigins []string) *gin.Engine {
 	// Create the Gin router with default middleware:
 	// - Logger: logs every request (method, path, status, duration)
 	// - Recovery: catches panics and returns 500 instead of crashing
@@ -32,7 +33,7 @@ func Setup(db *database.DB, wp *worker.Pool, allowedOrigins []string) *gin.Engin
 	r.Use(middleware.CORS(allowedOrigins))
 
 	// Create the handler with dependencies
-	h := handlers.NewHandler(db, wp)
+	h := handlers.NewHandler(db, wp, at)
 
 	// Create the rate limiter (shared across all routes)
 	rateLimiter := middleware.NewRateLimiter()
@@ -82,6 +83,16 @@ func Setup(db *database.DB, wp *worker.Pool, allowedOrigins []string) *gin.Engin
 		// API key management
 		protected.GET("/keys", h.ListAPIKeys)
 		protected.DELETE("/keys/:id", h.RevokeAPIKey)
+
+		// Audio transcription endpoints (MTA-16)
+		protected.POST("/audio/transcribe", h.TranscribeAudio)
+		protected.GET("/audio/transcriptions/:id", h.GetAudioTranscription)
+		protected.GET("/audio/transcriptions", h.ListAudioTranscriptions)
+
+		// PDF extraction endpoints (MTA-17)
+		protected.POST("/pdf/extract", h.ExtractPDF)
+		protected.GET("/pdf/extractions/:id", h.GetPDFExtraction)
+		protected.GET("/pdf/extractions", h.ListPDFExtractions)
 	}
 
 	return r

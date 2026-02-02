@@ -280,3 +280,102 @@ export function removeTranscriptsFromHistory(idsToRemove: string[]): void {
   const filtered = ids.filter((id) => !idsToRemove.includes(id));
   localStorage.setItem(HISTORY_KEY, JSON.stringify(filtered));
 }
+
+// ── Audio Transcription (MTA-16) ──
+
+export interface AudioTranscription {
+  id: string;
+  filename: string;
+  original_name: string;
+  duration: number;
+  language: string;
+  transcript_text: string;
+  word_count: number;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  error_message?: string;
+  created_at: string;
+}
+
+/** Upload an audio file for transcription */
+export async function transcribeAudio(file: File): Promise<AudioTranscription> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const headers: Record<string, string> = {};
+  const apiKey = localStorage.getItem('mta_api_key');
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey;
+  }
+
+  const res = await fetch(`${API_BASE}/audio/transcribe`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  return handleResponse<AudioTranscription>(res);
+}
+
+/** Get a single audio transcription by ID */
+export async function getAudioTranscription(id: string): Promise<AudioTranscription> {
+  const res = await fetch(`${API_BASE}/audio/transcriptions/${id}`, {
+    headers: getHeaders(),
+  });
+  return handleResponse<AudioTranscription>(res);
+}
+
+/** List recent audio transcriptions */
+export async function listAudioTranscriptions(): Promise<AudioTranscription[]> {
+  const res = await fetch(`${API_BASE}/audio/transcriptions`, {
+    headers: getHeaders(),
+  });
+  return handleResponse<AudioTranscription[]>(res);
+}
+
+// ── PDF Extraction (MTA-17) ──
+
+export interface PDFExtraction {
+  id: string;
+  filename: string;
+  original_name: string;
+  page_count: number;
+  text_content: string;
+  word_count: number;
+  status: 'completed' | 'failed';
+  error_message?: string;
+  created_at: string;
+}
+
+/** Upload a PDF file for text extraction */
+export async function extractPDF(file: File): Promise<PDFExtraction> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const headers: Record<string, string> = {};
+  const apiKey = localStorage.getItem('mta_api_key');
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey;
+  }
+
+  const res = await fetch(`${API_BASE}/pdf/extract`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  return handleResponse<PDFExtraction>(res);
+}
+
+/** Get a single PDF extraction by ID */
+export async function getPDFExtraction(id: string): Promise<PDFExtraction> {
+  const res = await fetch(`${API_BASE}/pdf/extractions/${id}`, {
+    headers: getHeaders(),
+  });
+  return handleResponse<PDFExtraction>(res);
+}
+
+/** List recent PDF extractions */
+export async function listPDFExtractions(): Promise<PDFExtraction[]> {
+  const res = await fetch(`${API_BASE}/pdf/extractions`, {
+    headers: getHeaders(),
+  });
+  return handleResponse<PDFExtraction[]>(res);
+}
