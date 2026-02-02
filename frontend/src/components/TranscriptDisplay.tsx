@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import type { Transcript, ExportFormat } from '../lib/api';
 import { downloadExport } from '../lib/api';
+import { SaveToWorkspace } from './SaveToWorkspace';
 
 interface TranscriptDisplayProps {
   transcript: Transcript;
@@ -282,6 +283,9 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
             active={showTimestamps}
           />
         )}
+
+        {/* Save to workspace (MTA-20) */}
+        <SaveToWorkspace itemType="transcript" itemId={transcript.id} />
 
         {/* Spacer */}
         <div className="flex-1" />

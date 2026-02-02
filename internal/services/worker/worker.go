@@ -26,6 +26,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
+	webhookservice "github.com/Shimizu-Technology/media-tools-api/internal/services/webhook"
 )
 
 // JobType identifies what kind of work a job represents.
@@ -55,24 +56,27 @@ type SummaryPayload struct {
 
 // Pool manages a pool of worker goroutines.
 type Pool struct {
-	// Go Pattern: Channels are the backbone of Go concurrency.
-	// This buffered channel acts as our job queue.
-	// Buffered means it can hold `queueSize` jobs before blocking.
-	jobs    chan Job
-	workers int
-	db      *database.DB
-	extractor transcript.Extractor
+	jobs       chan Job
+	workers    int
+	db         *database.DB
+	extractor  transcript.Extractor
 	summarizer *summary.Service
+	webhooks   *webhookservice.Service // MTA-18: webhook notifications
+	wg         sync.WaitGroup
+	ctx        context.Context
+	cancel     context.CancelFunc
+}
 
-	// Go Pattern: sync.WaitGroup tracks running goroutines.
-	// We call wg.Add(1) when starting a worker, wg.Done() when it finishes,
-	// and wg.Wait() blocks until all workers are done (used for graceful shutdown).
-	wg sync.WaitGroup
+// SetWebhookService sets the webhook service for notifications (MTA-18).
+func (p *Pool) SetWebhookService(ws *webhookservice.Service) {
+	p.webhooks = ws
+}
 
-	// Go Pattern: context.Context with cancel for graceful shutdown.
-	// When we call cancel(), all workers' contexts are cancelled.
-	ctx    context.Context
-	cancel context.CancelFunc
+// notifyWebhook fires a webhook event if the service is configured.
+func (p *Pool) notifyWebhook(event string, data interface{}) {
+	if p.webhooks != nil {
+		p.webhooks.NotifyEvent(p.ctx, event, data)
+	}
 }
 
 // NewPool creates a new worker pool.
@@ -196,20 +200,16 @@ func (p *Pool) processTranscript(job Job) error {
 	// Extract the transcript
 	result, err := p.extractor.Extract(ctx, t.YouTubeID)
 	if err != nil {
-		// Mark as failed
 		t.Status = models.StatusFailed
 		t.ErrorMessage = err.Error()
 		p.db.UpdateTranscript(ctx, t)
-
-		// Update batch counts if this transcript belongs to a batch
+		p.notifyWebhook("transcript.failed", t) // MTA-18
 		if t.BatchID != nil {
 			p.db.UpdateBatchCounts(ctx, *t.BatchID)
 		}
-
 		return fmt.Errorf("extraction failed: %w", err)
 	}
 
-	// Update the transcript with extracted data
 	t.Title = result.Title
 	t.ChannelName = result.ChannelName
 	t.Duration = result.Duration
@@ -222,13 +222,16 @@ func (p *Pool) processTranscript(job Job) error {
 		return fmt.Errorf("failed to save transcript: %w", err)
 	}
 
-	// If this transcript belongs to a batch, update the batch progress.
-	// Go Pattern: We update batch counts after each transcript completes
-	// so that GET /batches/:id always returns fresh progress data.
+	p.notifyWebhook("transcript.completed", t) // MTA-18
+
 	if t.BatchID != nil {
 		if err := p.db.UpdateBatchCounts(ctx, *t.BatchID); err != nil {
 			log.Printf("⚠️  Failed to update batch counts for %s: %v", *t.BatchID, err)
-			// Non-fatal — the batch status will self-heal on next read
+		}
+		// Check if batch completed
+		batch, batchErr := p.db.GetBatch(ctx, *t.BatchID)
+		if batchErr == nil && batch.Status == models.StatusCompleted {
+			p.notifyWebhook("batch.completed", batch)
 		}
 	}
 

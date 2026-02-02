@@ -3,7 +3,7 @@
 # Common commands for development
 # ═══════════════════════════════════════════════
 
-.PHONY: help build run test clean docker-up docker-down migrate frontend dev
+.PHONY: help build run test clean docker docker-up docker-down migrate lint fmt vet frontend dev
 
 # Default target — show help
 help: ## Show this help message
@@ -22,7 +22,31 @@ run: build ## Build and run the server locally
 dev: ## Run with live reload (requires air: go install github.com/air-verse/air@latest)
 	air
 
+# ── Testing ──
+
+test: ## Run all Go tests
+	go test -v ./...
+
+test-cover: ## Run tests with coverage report
+	go test -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report: coverage.html"
+
+# ── Code Quality ──
+
+lint: ## Run Go linter (requires golangci-lint)
+	golangci-lint run ./...
+
+fmt: ## Format Go code
+	go fmt ./...
+
+vet: ## Run Go vet (catch common mistakes)
+	go vet ./...
+
 # ── Docker ──
+
+docker: ## Build Docker image
+	docker build -t mta .
 
 docker-up: ## Start all services with Docker Compose
 	docker compose up --build -d
@@ -38,31 +62,23 @@ docker-db: ## Connect to the PostgreSQL database in Docker
 
 # ── Database ──
 
-migrate-up: ## Run all pending migrations
+migrate: ## Run all pending migrations
 	go run github.com/golang-migrate/migrate/v4/cmd/migrate@latest \
 		-path migrations \
-		-database "$(DATABASE_URL)" \
+		-database "$${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/media_tools?sslmode=disable}" \
 		up
+
+migrate-up: migrate ## Alias for migrate
 
 migrate-down: ## Rollback the last migration
 	go run github.com/golang-migrate/migrate/v4/cmd/migrate@latest \
 		-path migrations \
-		-database "$(DATABASE_URL)" \
+		-database "$${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/media_tools?sslmode=disable}" \
 		down 1
 
 migrate-create: ## Create a new migration (usage: make migrate-create NAME=add_users)
 	go run github.com/golang-migrate/migrate/v4/cmd/migrate@latest \
 		create -ext sql -dir migrations -seq $(NAME)
-
-# ── Testing ──
-
-test: ## Run all Go tests
-	go test -v ./...
-
-test-cover: ## Run tests with coverage report
-	go test -coverprofile=coverage.out ./...
-	go tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report: coverage.html"
 
 # ── Frontend ──
 
@@ -74,18 +90,6 @@ frontend-dev: ## Start frontend dev server
 
 frontend-build: ## Build frontend for production
 	cd frontend && npm run build
-
-# ── Code Quality ──
-
-lint: ## Run Go linter (requires golangci-lint)
-	golangci-lint run ./...
-
-fmt: ## Format Go code
-	go fmt ./...
-	goimports -w .
-
-vet: ## Run Go vet (catch common mistakes)
-	go vet ./...
 
 # ── Utility ──
 

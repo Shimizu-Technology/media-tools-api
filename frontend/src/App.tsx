@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 
 import { Header } from './components/Header';
@@ -7,23 +8,32 @@ import { HistoryPage } from './pages/HistoryPage';
 import { DocsPage } from './pages/DocsPage';
 import { AudioPage } from './pages/AudioPage';
 import { PdfPage } from './pages/PdfPage';
+import { AuthPage } from './pages/AuthPage';
+import { WebhooksPage } from './pages/WebhooksPage';
+import { WorkspacePage } from './pages/WorkspacePage';
+import { useAuthStore } from './stores/authStore';
 
 /**
  * Media Tools API — Main Application
  *
- * A clean, multi-page interface for extracting YouTube transcripts
- * and generating AI summaries. Built following the Shimizu Technology
- * frontend design guide.
- *
  * Routes:
- *   /         — Home: URL input + transcript display (MTA-11)
- *   /history  — History dashboard (MTA-13)
- *   /docs     — API documentation (MTA-15)
- *   /audio    — Audio transcription via Whisper (MTA-16)
- *   /pdf      — PDF text extraction (MTA-17)
+ *   /          — Home: URL input + transcript display (MTA-11)
+ *   /history   — History dashboard (MTA-13)
+ *   /docs      — API documentation (MTA-15)
+ *   /audio     — Audio transcription via Whisper (MTA-16)
+ *   /pdf       — PDF text extraction (MTA-17)
+ *   /webhooks  — Webhook management (MTA-18)
+ *   /auth      — Login / Register (MTA-20)
+ *   /workspace — Saved items workspace (MTA-20)
  */
 function App() {
   const { isDark, toggle: toggleTheme } = useTheme();
+  const initialize = useAuthStore((s) => s.initialize);
+
+  // Initialize auth state on mount (check for stored JWT)
+  useEffect(() => {
+    initialize();
+  }, [initialize]);
 
   return (
     <BrowserRouter>
@@ -49,6 +59,9 @@ function App() {
           <Route path="/audio" element={<AudioPage />} />
           <Route path="/pdf" element={<PdfPage />} />
           <Route path="/docs" element={<DocsPage />} />
+          <Route path="/auth" element={<AuthPage />} />
+          <Route path="/webhooks" element={<WebhooksPage />} />
+          <Route path="/workspace" element={<WorkspacePage />} />
         </Routes>
 
         {/* Footer */}

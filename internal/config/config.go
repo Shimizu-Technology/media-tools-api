@@ -33,6 +33,9 @@ type Config struct {
 	// OpenAI settings (for Whisper audio transcription)
 	OpenAIAPIKey string
 
+	// JWT Authentication (MTA-20)
+	JWTSecret string
+
 	// Worker settings
 	WorkerCount    int // Number of background worker goroutines
 	JobQueueSize   int // Size of the in-memory job queue buffer
@@ -67,6 +70,9 @@ func Load() (*Config, error) {
 
 		// OpenAI (Whisper API for audio transcription)
 		OpenAIAPIKey: getEnv("OPENAI_API_KEY", ""),
+
+		// JWT Authentication
+		JWTSecret: getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),
 
 		// Worker defaults
 		WorkerCount:  getEnvInt("WORKER_COUNT", 3),

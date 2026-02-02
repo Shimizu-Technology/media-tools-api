@@ -1,15 +1,4 @@
 // Package router sets up all HTTP routes for the API.
-//
-// Go Pattern: We separate route configuration from handlers.
-// This keeps main.go clean and makes it easy to see all routes at a glance.
-//
-// Framework choice: Gin
-// We chose Gin over Echo because:
-// - Larger community and more learning resources (important for Leon's first Go project)
-// - Similar to Express.js in feel (familiar to JavaScript developers)
-// - Excellent middleware ecosystem (CORS, logging, recovery)
-// - Great performance (one of the fastest Go HTTP frameworks)
-// - Well-documented with many examples
 package router
 
 import (
@@ -19,46 +8,43 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/handlers"
 	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
+	webhookservice "github.com/Shimizu-Technology/media-tools-api/internal/services/webhook"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
 // Setup creates and configures the Gin router with all routes.
-func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, allowedOrigins []string) *gin.Engine {
-	// Create the Gin router with default middleware:
-	// - Logger: logs every request (method, path, status, duration)
-	// - Recovery: catches panics and returns 500 instead of crashing
+func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhookservice.Service, jwtSecret string, allowedOrigins []string) *gin.Engine {
 	r := gin.Default()
-
-	// Add our custom middleware
 	r.Use(middleware.CORS(allowedOrigins))
 
-	// Create the handler with dependencies
-	h := handlers.NewHandler(db, wp, at)
-
-	// Create the rate limiter (shared across all routes)
+	h := handlers.NewHandler(db, wp, at, ws, jwtSecret)
 	rateLimiter := middleware.NewRateLimiter()
 
 	// --- Public Routes (no auth required) ---
-	// These are accessible without an API key.
-	// Health check is always public for monitoring tools.
 	r.GET("/api/v1/health", h.HealthCheck)
-
-	// API key creation is public (bootstrap: you need a key to use the API,
-	// but you need to be able to CREATE a key without one).
-	// In production, protect this with a master key or admin auth.
 	r.POST("/api/v1/keys", h.CreateAPIKey)
 
-	// --- API Documentation (MTA-10) ---
-	// Swagger UI and OpenAPI spec are public so anyone can read the docs.
-	// Go Pattern: Grouping related routes makes the router easier to scan.
+	// API Documentation (MTA-10)
 	r.GET("/api/docs", h.ServeSwaggerUI)
 	r.GET("/api/docs/openapi.yaml", h.ServeOpenAPISpec)
 
-	// --- Protected Routes (API key required) ---
-	// Go Pattern: Gin's Group() creates a route group that shares middleware.
-	// All routes inside this group require a valid API key.
+	// --- Auth Routes (MTA-20) — public ---
+	r.POST("/api/v1/auth/register", h.Register)
+	r.POST("/api/v1/auth/login", h.Login)
+
+	// --- JWT-protected routes (MTA-20) ---
+	jwtProtected := r.Group("/api/v1")
+	jwtProtected.Use(middleware.JWTAuth(db, jwtSecret))
+	{
+		jwtProtected.GET("/auth/me", h.GetMe)
+		jwtProtected.GET("/workspace", h.GetWorkspace)
+		jwtProtected.POST("/workspace", h.SaveToWorkspace)
+		jwtProtected.DELETE("/workspace/:type/:id", h.RemoveFromWorkspace)
+	}
+
+	// --- Protected Routes (API key OR JWT — backward compatible) ---
 	protected := r.Group("/api/v1")
-	protected.Use(middleware.APIKeyAuth(db))
+	protected.Use(middleware.DualAuth(db, jwtSecret))
 	protected.Use(rateLimiter.RateLimit())
 	{
 		// Transcript endpoints
@@ -66,14 +52,9 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, allowedOrigi
 		protected.GET("/transcripts", h.ListTranscripts)
 		protected.GET("/transcripts/:id", h.GetTranscript)
 		protected.GET("/transcripts/:id/summaries", h.GetSummariesByTranscript)
-
-		// Export endpoint (MTA-9)
-		// Go Pattern: This sits under transcripts because it's a sub-resource.
-		// The format query parameter (?format=txt|md|srt|json) keeps the URL clean.
 		protected.GET("/transcripts/:id/export", h.ExportTranscript)
 
 		// Batch processing (MTA-8)
-		// POST creates a batch, GET checks status
 		protected.POST("/transcripts/batch", h.CreateBatch)
 		protected.GET("/batches/:id", h.GetBatch)
 
@@ -93,6 +74,13 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, allowedOrigi
 		protected.POST("/pdf/extract", h.ExtractPDF)
 		protected.GET("/pdf/extractions/:id", h.GetPDFExtraction)
 		protected.GET("/pdf/extractions", h.ListPDFExtractions)
+
+		// Webhook management (MTA-18)
+		protected.POST("/webhooks", h.CreateWebhook)
+		protected.GET("/webhooks", h.ListWebhooks)
+		protected.GET("/webhooks/deliveries", h.ListWebhookDeliveries)
+		protected.PATCH("/webhooks/:id", h.UpdateWebhook)
+		protected.DELETE("/webhooks/:id", h.DeleteWebhook)
 	}
 
 	return r

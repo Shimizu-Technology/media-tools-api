@@ -17,6 +17,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
+	webhookservice "github.com/Shimizu-Technology/media-tools-api/internal/services/webhook"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
@@ -27,15 +28,19 @@ import (
 type Handler struct {
 	DB               *database.DB
 	Worker           *worker.Pool
-	AudioTranscriber *audio.Transcriber // MTA-16: Whisper API transcriber
+	AudioTranscriber *audio.Transcriber           // MTA-16: Whisper API transcriber
+	WebhookService   *webhookservice.Service       // MTA-18: Webhook notifications
+	JWTSecret        string                        // MTA-20: JWT signing secret
 }
 
 // NewHandler creates a new handler with all dependencies.
-func NewHandler(db *database.DB, wp *worker.Pool, at *audio.Transcriber) *Handler {
+func NewHandler(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhookservice.Service, jwtSecret string) *Handler {
 	return &Handler{
 		DB:               db,
 		Worker:           wp,
 		AudioTranscriber: at,
+		WebhookService:   ws,
+		JWTSecret:        jwtSecret,
 	}
 }
 

@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { useLocation, Link } from 'react-router-dom';
-import { Sun, Moon, FileText, Github, History, Book, Mic, FileType2 } from 'lucide-react';
+import { Sun, Moon, FileText, Github, History, Book, Mic, FileType2, Webhook } from 'lucide-react';
+import { UserDropdown } from './UserDropdown';
 
 interface HeaderProps {
   isDark: boolean;
@@ -8,7 +9,7 @@ interface HeaderProps {
 }
 
 /**
- * App header with branding, navigation, theme toggle, and GitHub link.
+ * App header with branding, navigation, theme toggle, user menu, and GitHub link.
  * NO emoji — using Lucide React icons only (Shimizu design guide).
  */
 export function Header({ isDark, onToggleTheme }: HeaderProps) {
@@ -19,6 +20,7 @@ export function Header({ isDark, onToggleTheme }: HeaderProps) {
     { to: '/audio', label: 'Audio', icon: Mic },
     { to: '/pdf', label: 'PDF', icon: FileType2 },
     { to: '/history', label: 'History', icon: History },
+    { to: '/webhooks', label: 'Webhooks', icon: Webhook },
     { to: '/docs', label: 'API Docs', icon: Book },
   ];
 
@@ -75,6 +77,7 @@ export function Header({ isDark, onToggleTheme }: HeaderProps) {
 
         {/* Actions */}
         <div className="flex items-center gap-2">
+          <UserDropdown />
           <a
             href="https://github.com/Shimizu-Technology/media-tools-api"
             target="_blank"
