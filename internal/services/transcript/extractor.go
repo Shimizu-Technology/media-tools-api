@@ -7,11 +7,14 @@
 package transcript
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -108,10 +111,23 @@ func (e *YtDlpExtractor) getMetadata(ctx context.Context, url string) (*ytDlpMet
 		url,
 	)
 
-	output, err := cmd.Output()
+	// Go Pattern: CombinedOutput() captures both stdout and stderr.
+	// cmd.Output() only captures stdout — if yt-dlp fails, we'd miss
+	// the error message. We separate them manually for better handling.
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
 	if err != nil {
-		return nil, fmt.Errorf("yt-dlp metadata failed: %w", err)
+		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg == "" {
+			errMsg = err.Error()
+		}
+		return nil, fmt.Errorf("yt-dlp metadata failed: %s", errMsg)
 	}
+
+	output := stdout.Bytes()
 
 	var meta ytDlpMetadata
 	if err := json.Unmarshal(output, &meta); err != nil {
@@ -124,10 +140,17 @@ func (e *YtDlpExtractor) getMetadata(ctx context.Context, url string) (*ytDlpMet
 // getTranscript extracts the subtitle text using yt-dlp.
 // Returns the transcript text and the language code.
 func (e *YtDlpExtractor) getTranscript(ctx context.Context, url string) (string, string, error) {
-	// Create a temp directory for subtitle files
-	// Go Pattern: We use a context with timeout to prevent hanging.
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	// Go Pattern: We use a context with timeout to prevent hanging processes.
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel() // Always call cancel to release resources
+
+	// Go Pattern: os.MkdirTemp creates a unique temporary directory.
+	// This is safer than writing to /tmp directly — no filename collisions.
+	tmpDir, err := os.MkdirTemp("", "mta-subs-*")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	defer os.RemoveAll(tmpDir) // Clean up when done, no matter what
 
 	// Try manual subtitles first (higher quality), then auto-generated
 	for _, subType := range []string{"--write-subs", "--write-auto-subs"} {
@@ -136,7 +159,7 @@ func (e *YtDlpExtractor) getTranscript(ctx context.Context, url string) (string,
 			subType,                  // Which subtitle type to get
 			"--sub-langs", "en.*,en", // Prefer English
 			"--sub-format", "vtt",    // WebVTT format (easiest to parse)
-			"--output", "/tmp/mta-%(id)s",
+			"--output", filepath.Join(tmpDir, "%(id)s"),
 			"--no-warnings",
 			url,
 		)
@@ -147,33 +170,32 @@ func (e *YtDlpExtractor) getTranscript(ctx context.Context, url string) (string,
 			continue
 		}
 
-		// Find the generated subtitle file
-		findCmd := exec.CommandContext(ctx, "find", "/tmp", "-name", "mta-*.vtt", "-newer", "/tmp", "-type", "f")
-		files, err := findCmd.Output()
-
-		// Alternative: use glob pattern
-		globCmd := exec.CommandContext(ctx, "bash", "-c", "ls -t /tmp/mta-*.vtt 2>/dev/null | head -1")
-		fileOutput, err := globCmd.Output()
-		if err != nil || len(strings.TrimSpace(string(fileOutput))) == 0 {
+		// Find the generated .vtt subtitle file in our temp directory
+		// Go Pattern: filepath.Glob is the safe way to find files by pattern.
+		matches, err := filepath.Glob(filepath.Join(tmpDir, "*.vtt"))
+		if err != nil || len(matches) == 0 {
+			// Also check for .srt files as fallback
+			matches, _ = filepath.Glob(filepath.Join(tmpDir, "*.srt"))
+		}
+		if len(matches) == 0 {
 			continue
 		}
 
-		subtitleFile := strings.TrimSpace(string(fileOutput))
-		_ = files // suppress unused warning
+		subtitleFile := matches[0]
 
-		// Read the subtitle file
-		catCmd := exec.CommandContext(ctx, "cat", subtitleFile)
-		content, err := catCmd.Output()
+		// Read the subtitle file content
+		// Go Pattern: os.ReadFile reads the entire file into memory.
+		// For subtitle files (typically < 1MB), this is fine.
+		content, err := os.ReadFile(subtitleFile)
 		if err != nil {
+			log.Printf("⚠️  Failed to read subtitle file: %v", err)
 			continue
 		}
 
-		// Clean up temp file
-		exec.CommandContext(ctx, "rm", "-f", subtitleFile).Run()
-
-		// Detect language from filename (e.g., mta-abc123.en.vtt)
+		// Detect language from filename (e.g., abc123.en.vtt)
 		lang := "en"
-		parts := strings.Split(subtitleFile, ".")
+		base := filepath.Base(subtitleFile)
+		parts := strings.Split(base, ".")
 		if len(parts) >= 3 {
 			lang = parts[len(parts)-2] // Get the language code part
 		}
@@ -236,14 +258,14 @@ func parseVTT(vtt string) string {
 
 // cleanTranscript normalizes whitespace and cleans up common transcript artifacts.
 func cleanTranscript(text string) string {
-	// Replace multiple spaces with single space
-	spaceRegex := regexp.MustCompile(`\s+`)
-	text = spaceRegex.ReplaceAllString(text, " ")
-
-	// Remove common artifacts
+	// Remove common auto-caption artifacts FIRST (before collapsing whitespace)
 	text = strings.ReplaceAll(text, "[Music]", "")
 	text = strings.ReplaceAll(text, "[Applause]", "")
 	text = strings.ReplaceAll(text, "[Laughter]", "")
+
+	// Then collapse multiple spaces into one
+	spaceRegex := regexp.MustCompile(`\s+`)
+	text = spaceRegex.ReplaceAllString(text, " ")
 
 	return strings.TrimSpace(text)
 }

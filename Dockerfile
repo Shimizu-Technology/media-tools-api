@@ -1,6 +1,6 @@
 # ── Stage 1: Build the Go binary ──
 # Multi-stage builds keep the final image small (no compiler, no source code).
-FROM golang:1.23-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 

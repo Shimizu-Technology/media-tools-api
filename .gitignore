@@ -34,5 +34,5 @@ Thumbs.db
 # Docker
 *.log
 
-# Build artifacts
-server
+# Build artifacts (the compiled binary, not the source directory)
+/server
