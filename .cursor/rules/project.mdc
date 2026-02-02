@@ -1,0 +1,32 @@
+---
+description: Project-wide rules for Media Tools API
+globs: ["**/*"]
+---
+
+# Media Tools API — Project Rules
+
+## Architecture
+- Go API backend in `cmd/` and `internal/`
+- React frontend in `frontend/`
+- PostgreSQL database with migrations in `migrations/`
+- Monorepo — both frontend and backend in one repo
+
+## Go Conventions
+- Use `internal/` for packages that shouldn't be imported by other projects
+- Use `cmd/server/` for the main entry point
+- Error handling: always return and check errors (`if err != nil { return err }`)
+- Use `context.Context` as the first parameter for functions that do I/O
+- Comments should explain Go patterns, especially ones that differ from JS/Ruby
+
+## API Design
+- All endpoints under `/api/v1/`
+- Authentication via `X-API-Key` header
+- Consistent error response: `{"error": "...", "message": "...", "code": N}`
+- Async jobs return 202 Accepted
+- Use UUIDs for all primary keys
+
+## Database
+- Use golang-migrate for schema changes
+- Migration files in `migrations/` with sequential numbering
+- Always write both up and down migrations
+- Use parameterized queries (never string concatenation for SQL)

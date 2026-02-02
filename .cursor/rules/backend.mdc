@@ -1,0 +1,37 @@
+---
+description: Go backend rules
+globs: ["cmd/**/*.go", "internal/**/*.go", "*.go"]
+---
+
+# Go Backend Rules
+
+## Framework
+- Using Gin web framework
+- Handlers receive `*gin.Context`
+- Use `c.ShouldBindJSON()` for request body parsing
+- Use `c.ShouldBindQuery()` for query parameter parsing
+- Return `c.JSON(statusCode, data)` for all responses
+
+## Error Handling
+- Always check errors: `if err != nil { return err }`
+- Wrap errors with context: `fmt.Errorf("failed to do X: %w", err)`
+- Use `models.ErrorResponse` for all API error responses
+- Log errors with `log.Printf()` before returning HTTP errors
+
+## Database
+- Use `sqlx` for database operations (not raw `database/sql`)
+- Use `db` struct tags for column mapping
+- Use `$1, $2` placeholders (PostgreSQL style), not `?`
+- Always pass `context.Context` to database methods
+
+## Concurrency
+- Worker pool in `internal/services/worker/`
+- Use buffered channels for job queues
+- Use `sync.WaitGroup` for graceful shutdown
+- Use `context.WithCancel` for cancellation
+
+## Code Style
+- Exported (capitalized) names have doc comments
+- Group imports: stdlib, external, internal
+- Use `defer` for cleanup (close files, cancel contexts)
+- Keep functions short — extract helpers

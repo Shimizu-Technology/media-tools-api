@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════
+   Media Tools API — Design Tokens
+   Following Shimizu Technology Frontend Guide:
+   - Brand tokens, not hardcoded colors
+   - CSS custom properties for theming
+   - Dark mode as first-class citizen
+   ═══════════════════════════════════════════════ */
+
+:root {
+  /* Brand Colors */
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-200: #bfdbfe;
+  --color-brand-300: #93c5fd;
+  --color-brand-400: #60a5fa;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+  --color-brand-800: #1e40af;
+  --color-brand-900: #1e3a8a;
+
+  /* Accent (warm amber for contrast) */
+  --color-accent-400: #fbbf24;
+  --color-accent-500: #f59e0b;
+  --color-accent-600: #d97706;
+
+  /* Surfaces — Light Mode */
+  --color-surface: #ffffff;
+  --color-surface-elevated: #f8fafc;
+  --color-surface-overlay: #ffffff;
+
+  /* Text — Light Mode */
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #64748b;
+  --color-text-muted: #94a3b8;
+
+  /* Border — Light Mode */
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+
+  /* Animation */
+  --ease-out-custom: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+  --duration-slow: 500ms;
+}
+
+/* Dark mode overrides */
+.dark {
+  --color-surface: #0a0a0f;
+  --color-surface-elevated: #12121a;
+  --color-surface-overlay: #1a1a24;
+
+  --color-text-primary: #e8eaed;
+  --color-text-secondary: #8b8fa3;
+  --color-text-muted: #5b5f73;
+
+  --color-border: #1e1e2a;
+  --color-border-strong: #2a2a38;
+}
+
+/* Base styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar for dark mode */
+.dark ::-webkit-scrollbar {
+  width: 8px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: var(--color-surface);
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 4px;
+}
+
+/* Shimmer animation for loading states */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}

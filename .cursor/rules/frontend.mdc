@@ -1,0 +1,45 @@
+---
+description: React frontend rules
+globs: ["frontend/**/*"]
+---
+
+# Frontend Rules (Shimizu Technology Design Guide)
+
+## HARD RULES (NON-NEGOTIABLE)
+- NO EMOJI in UI — use Lucide React icons ONLY
+- Brand tokens via CSS custom properties — no hardcoded colors
+- Mobile-first responsive design
+- 44px minimum touch targets for all interactive elements
+
+## Tech Stack
+- React 18 with TypeScript
+- Vite for bundling
+- Tailwind CSS v4 for styling
+- Framer Motion for animations
+- Lucide React for icons
+
+## Styling
+- Use CSS custom properties for all colors (defined in index.css)
+- Access via `style={{ color: 'var(--color-text-primary)' }}`
+- Dark mode uses `.dark` class on `<html>` element
+- Follow 8px grid for spacing
+- Max content width: `max-w-5xl` (1024px)
+
+## Animation
+- Use Framer Motion for all animations
+- Standard easing: `[0.22, 1, 0.36, 1]` (dramatic ease-out)
+- Duration: 200-300ms for micro-interactions, 500-800ms for reveals
+- Stagger children with 0.08s delay between items
+- Always wrap animated presence in `<AnimatePresence>`
+
+## Components
+- One component per file
+- Props interface defined above the component
+- JSDoc comments explaining purpose
+- Use custom hooks for shared logic (hooks/ directory)
+
+## API Integration
+- All API calls in `lib/api.ts`
+- Typed request/response interfaces
+- Handle loading, error, and success states
+- Use polling hook for async status checks
