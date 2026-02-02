@@ -47,6 +47,12 @@ func Setup(db *database.DB, wp *worker.Pool, allowedOrigins []string) *gin.Engin
 	// In production, protect this with a master key or admin auth.
 	r.POST("/api/v1/keys", h.CreateAPIKey)
 
+	// --- API Documentation (MTA-10) ---
+	// Swagger UI and OpenAPI spec are public so anyone can read the docs.
+	// Go Pattern: Grouping related routes makes the router easier to scan.
+	r.GET("/api/docs", h.ServeSwaggerUI)
+	r.GET("/api/docs/openapi.yaml", h.ServeOpenAPISpec)
+
 	// --- Protected Routes (API key required) ---
 	// Go Pattern: Gin's Group() creates a route group that shares middleware.
 	// All routes inside this group require a valid API key.
@@ -59,6 +65,16 @@ func Setup(db *database.DB, wp *worker.Pool, allowedOrigins []string) *gin.Engin
 		protected.GET("/transcripts", h.ListTranscripts)
 		protected.GET("/transcripts/:id", h.GetTranscript)
 		protected.GET("/transcripts/:id/summaries", h.GetSummariesByTranscript)
+
+		// Export endpoint (MTA-9)
+		// Go Pattern: This sits under transcripts because it's a sub-resource.
+		// The format query parameter (?format=txt|md|srt|json) keeps the URL clean.
+		protected.GET("/transcripts/:id/export", h.ExportTranscript)
+
+		// Batch processing (MTA-8)
+		// POST creates a batch, GET checks status
+		protected.POST("/transcripts/batch", h.CreateBatch)
+		protected.GET("/batches/:id", h.GetBatch)
 
 		// Summary endpoints
 		protected.POST("/summaries", h.CreateSummary)

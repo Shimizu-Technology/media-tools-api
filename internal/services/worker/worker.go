@@ -200,6 +200,12 @@ func (p *Pool) processTranscript(job Job) error {
 		t.Status = models.StatusFailed
 		t.ErrorMessage = err.Error()
 		p.db.UpdateTranscript(ctx, t)
+
+		// Update batch counts if this transcript belongs to a batch
+		if t.BatchID != nil {
+			p.db.UpdateBatchCounts(ctx, *t.BatchID)
+		}
+
 		return fmt.Errorf("extraction failed: %w", err)
 	}
 
@@ -214,6 +220,16 @@ func (p *Pool) processTranscript(job Job) error {
 
 	if err := p.db.UpdateTranscript(ctx, t); err != nil {
 		return fmt.Errorf("failed to save transcript: %w", err)
+	}
+
+	// If this transcript belongs to a batch, update the batch progress.
+	// Go Pattern: We update batch counts after each transcript completes
+	// so that GET /batches/:id always returns fresh progress data.
+	if t.BatchID != nil {
+		if err := p.db.UpdateBatchCounts(ctx, *t.BatchID); err != nil {
+			log.Printf("⚠️  Failed to update batch counts for %s: %v", *t.BatchID, err)
+			// Non-fatal — the batch status will self-heal on next read
+		}
 	}
 
 	return nil

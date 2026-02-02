@@ -38,6 +38,21 @@ type Transcript struct {
 	WordCount      int              `json:"word_count" db:"word_count"`
 	Status         TranscriptStatus `json:"status" db:"status"`
 	ErrorMessage   string           `json:"error_message,omitempty" db:"error_message"` // omitempty = skip if empty
+	BatchID        *string          `json:"batch_id,omitempty" db:"batch_id"`           // Pointer = nullable; links to batches table
+	CreatedAt      time.Time        `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time        `json:"updated_at" db:"updated_at"`
+}
+
+// Batch represents a group of transcript extraction requests (MTA-8).
+// Go Pattern: Using a separate table for batches lets us track aggregate
+// progress without querying every transcript. The counts are denormalized
+// for performance — updated as each transcript completes or fails.
+type Batch struct {
+	ID             string           `json:"id" db:"id"`
+	Status         TranscriptStatus `json:"status" db:"status"`
+	TotalCount     int              `json:"total_count" db:"total_count"`
+	CompletedCount int              `json:"completed_count" db:"completed_count"`
+	FailedCount    int              `json:"failed_count" db:"failed_count"`
 	CreatedAt      time.Time        `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time        `json:"updated_at" db:"updated_at"`
 }
@@ -97,6 +112,28 @@ type CreateAPIKeyRequest struct {
 type CreateAPIKeyResponse struct {
 	APIKey
 	RawKey string `json:"raw_key"` // The actual API key — save it! Only shown once.
+}
+
+// --- Batch DTOs (MTA-8) ---
+
+// CreateBatchRequest is the JSON body for POST /api/v1/transcripts/batch.
+// Go Pattern: The `binding:"required"` tag means Gin will reject requests
+// where this field is missing. The `max=10` validator enforces our limit.
+type CreateBatchRequest struct {
+	URLs []string `json:"urls" binding:"required,min=1,max=10"`
+}
+
+// BatchResponse is the API response for a batch operation.
+// It includes the batch metadata plus the individual transcript records.
+type BatchResponse struct {
+	Batch       Batch        `json:"batch"`
+	Transcripts []Transcript `json:"transcripts"`
+}
+
+// BatchStatusResponse shows aggregate progress for a batch.
+type BatchStatusResponse struct {
+	Batch       Batch        `json:"batch"`
+	Transcripts []Transcript `json:"transcripts"`
 }
 
 // TranscriptListParams holds query parameters for listing transcripts.

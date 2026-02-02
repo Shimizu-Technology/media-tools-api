@@ -59,10 +59,11 @@ func (db *DB) HealthCheck(ctx context.Context) error {
 
 // CreateTranscript inserts a new transcript record.
 // Returns the created transcript with its generated ID and timestamps.
+// Note: batch_id defaults to NULL for single transcript extractions.
 func (db *DB) CreateTranscript(ctx context.Context, t *models.Transcript) error {
 	query := `
-		INSERT INTO transcripts (youtube_url, youtube_id, title, channel_name, duration, language, transcript_text, word_count, status, error_message)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO transcripts (youtube_url, youtube_id, title, channel_name, duration, language, transcript_text, word_count, status, error_message, batch_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, created_at, updated_at`
 
 	// QueryRowContext executes a query that returns a single row.
@@ -70,7 +71,7 @@ func (db *DB) CreateTranscript(ctx context.Context, t *models.Transcript) error 
 	return db.QueryRowContext(ctx, query,
 		t.YouTubeURL, t.YouTubeID, t.Title, t.ChannelName,
 		t.Duration, t.Language, t.TranscriptText, t.WordCount,
-		t.Status, t.ErrorMessage,
+		t.Status, t.ErrorMessage, t.BatchID,
 	).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt)
 }
 

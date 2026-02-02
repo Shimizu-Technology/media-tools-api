@@ -1,0 +1,602 @@
+openapi: "3.0.3"
+info:
+  title: Media Tools API
+  description: |
+    A Go-powered API for extracting YouTube transcripts and generating AI summaries.
+
+    ## Authentication
+    All protected endpoints require an `X-API-Key` header. Create a key via `POST /api/v1/keys`.
+
+    ## Rate Limiting
+    Each API key has a per-hour rate limit (default: 100 requests/hour).
+    Check `X-RateLimit-Limit` and `X-RateLimit-Remaining` response headers.
+  version: "1.0.0"
+  contact:
+    name: Shimizu Technology
+    url: https://github.com/Shimizu-Technology/media-tools-api
+
+servers:
+  - url: /api/v1
+    description: API v1
+
+security:
+  - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication. Create one via POST /api/v1/keys.
+
+  schemas:
+    Transcript:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        youtube_url:
+          type: string
+          example: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        youtube_id:
+          type: string
+          example: "dQw4w9WgXcQ"
+        title:
+          type: string
+          example: "Never Gonna Give You Up"
+        channel_name:
+          type: string
+          example: "Rick Astley"
+        duration:
+          type: integer
+          description: Duration in seconds
+          example: 212
+        language:
+          type: string
+          example: "en"
+        transcript_text:
+          type: string
+          example: "We're no strangers to love..."
+        word_count:
+          type: integer
+          example: 1543
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+          example: "completed"
+        error_message:
+          type: string
+          example: ""
+        batch_id:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Summary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        transcript_id:
+          type: string
+          format: uuid
+        model_used:
+          type: string
+          example: "openai/gpt-4o-mini"
+        summary_text:
+          type: string
+        key_points:
+          type: array
+          items:
+            type: string
+        length:
+          type: string
+          enum: [short, medium, detailed]
+        style:
+          type: string
+          enum: [bullet, narrative, academic]
+        created_at:
+          type: string
+          format: date-time
+
+    Batch:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        total_count:
+          type: integer
+          example: 5
+        completed_count:
+          type: integer
+          example: 3
+        failed_count:
+          type: integer
+          example: 0
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    APIKey:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        key_prefix:
+          type: string
+          example: "mta_a1b2..."
+        name:
+          type: string
+          example: "my-app"
+        active:
+          type: boolean
+        rate_limit:
+          type: integer
+          example: 100
+        created_at:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        code:
+          type: integer
+
+    PaginatedTranscripts:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transcript"
+        page:
+          type: integer
+        per_page:
+          type: integer
+        total_items:
+          type: integer
+        total_pages:
+          type: integer
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "ok"
+        version:
+          type: string
+          example: "1.0.0"
+        database:
+          type: string
+          example: "healthy"
+        workers:
+          type: integer
+          example: 3
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Returns API health status including database connectivity and worker count.
+      security: []
+      responses:
+        "200":
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: "ok"
+                version: "1.0.0"
+                database: "healthy"
+                workers: 3
+
+  /keys:
+    post:
+      tags: [API Keys]
+      summary: Create a new API key
+      description: |
+        Generates a new API key. The raw key is only shown once in the response -- save it!
+        This endpoint is intentionally public (no auth required) for bootstrapping.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: "my-app"
+                rate_limit:
+                  type: integer
+                  example: 200
+                  description: Requests per hour (default 100)
+            example:
+              name: "my-app"
+              rate_limit: 200
+      responses:
+        "201":
+          description: API key created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/APIKey"
+                  - type: object
+                    properties:
+                      raw_key:
+                        type: string
+                        example: "mta_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+              example:
+                id: "uuid-here"
+                key_prefix: "mta_a1b2..."
+                name: "my-app"
+                active: true
+                rate_limit: 200
+                raw_key: "mta_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      tags: [API Keys]
+      summary: List all API keys
+      description: Returns all API keys (active and inactive). Raw key values are never returned.
+      responses:
+        "200":
+          description: List of API keys
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/APIKey"
+
+  /keys/{id}:
+    delete:
+      tags: [API Keys]
+      summary: Revoke an API key
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Key revoked
+          content:
+            application/json:
+              example:
+                message: "API key revoked"
+        "404":
+          description: Key not found
+
+  /transcripts:
+    post:
+      tags: [Transcripts]
+      summary: Extract a YouTube transcript
+      description: |
+        Submits a YouTube URL for transcript extraction. Returns immediately with a `pending` status.
+        Poll `GET /transcripts/{id}` to check progress.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                  example: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                video_id:
+                  type: string
+                  example: "dQw4w9WgXcQ"
+            examples:
+              url:
+                summary: Using full URL
+                value:
+                  url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+              video_id:
+                summary: Using video ID
+                value:
+                  video_id: "dQw4w9WgXcQ"
+      responses:
+        "202":
+          description: Extraction started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transcript"
+        "400":
+          description: Invalid URL
+        "200":
+          description: Transcript already exists (returned cached)
+    get:
+      tags: [Transcripts]
+      summary: List transcripts
+      description: Returns a paginated list of transcripts with optional filtering.
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, completed, failed]
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Search in title and channel name
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [created_at, title, word_count, duration]
+            default: created_at
+        - name: sort_dir
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        "200":
+          description: Paginated transcript list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedTranscripts"
+
+  /transcripts/{id}:
+    get:
+      tags: [Transcripts]
+      summary: Get a transcript
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Transcript found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transcript"
+        "404":
+          description: Not found
+
+  /transcripts/{id}/export:
+    get:
+      tags: [Transcripts]
+      summary: Export transcript in various formats
+      description: |
+        Downloads the transcript in the specified format.
+        Only works for completed transcripts.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [txt, md, srt, json]
+            default: txt
+          description: |
+            - `txt` -- Plain text
+            - `md` -- Markdown with metadata header
+            - `srt` -- SubRip subtitle format (approximate timestamps)
+            - `json` -- Full JSON with all metadata
+      responses:
+        "200":
+          description: File download
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              example: 'attachment; filename="Video Title.txt"'
+          content:
+            text/plain:
+              schema:
+                type: string
+            text/markdown:
+              schema:
+                type: string
+            text/srt:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Invalid format
+        "404":
+          description: Transcript not found or not completed
+
+  /transcripts/{id}/summaries:
+    get:
+      tags: [Summaries]
+      summary: Get summaries for a transcript
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: List of summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Summary"
+
+  /transcripts/batch:
+    post:
+      tags: [Batch Processing]
+      summary: Submit multiple URLs for batch processing
+      description: |
+        Accepts up to 10 YouTube URLs for parallel transcript extraction.
+        Returns a batch ID to track overall progress.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [urls]
+              properties:
+                urls:
+                  type: array
+                  maxItems: 10
+                  items:
+                    type: string
+                  example:
+                    - "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                    - "https://www.youtube.com/watch?v=9bZkp7q19f0"
+            example:
+              urls:
+                - "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                - "https://www.youtube.com/watch?v=9bZkp7q19f0"
+      responses:
+        "202":
+          description: Batch created and processing started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batch:
+                    $ref: "#/components/schemas/Batch"
+                  transcripts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Transcript"
+        "400":
+          description: Invalid request (bad URLs or too many)
+
+  /batches/{id}:
+    get:
+      tags: [Batch Processing]
+      summary: Get batch status
+      description: Returns the batch progress and all associated transcripts.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Batch status with transcripts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batch:
+                    $ref: "#/components/schemas/Batch"
+                  transcripts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Transcript"
+        "404":
+          description: Batch not found
+
+  /summaries:
+    post:
+      tags: [Summaries]
+      summary: Generate an AI summary
+      description: |
+        Generates an AI-powered summary for a completed transcript.
+        Processing happens asynchronously.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transcript_id]
+              properties:
+                transcript_id:
+                  type: string
+                  format: uuid
+                length:
+                  type: string
+                  enum: [short, medium, detailed]
+                  default: medium
+                style:
+                  type: string
+                  enum: [bullet, narrative, academic]
+                  default: bullet
+                model:
+                  type: string
+                  description: Override the default AI model
+                  example: "openai/gpt-4o"
+      responses:
+        "202":
+          description: Summary generation started
+          content:
+            application/json:
+              example:
+                message: "Summary generation started"
+                transcript_id: "uuid-here"
+                length: "medium"
+                style: "bullet"
+        "404":
+          description: Transcript not found
+        "409":
+          description: Transcript not yet completed

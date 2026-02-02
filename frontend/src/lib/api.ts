@@ -175,3 +175,58 @@ export async function getSummaries(transcriptId: string): Promise<Summary[]> {
   });
   return handleResponse<Summary[]>(res);
 }
+
+// ── Batch Processing (MTA-8) ──
+
+export interface Batch {
+  id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  total_count: number;
+  completed_count: number;
+  failed_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BatchResponse {
+  batch: Batch;
+  transcripts: Transcript[];
+}
+
+/** Submit multiple URLs for batch processing */
+export async function createBatch(urls: string[]): Promise<BatchResponse> {
+  const res = await fetch(`${API_BASE}/transcripts/batch`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ urls }),
+  });
+  return handleResponse<BatchResponse>(res);
+}
+
+/** Get batch status */
+export async function getBatch(batchId: string): Promise<BatchResponse> {
+  const res = await fetch(`${API_BASE}/batches/${batchId}`, {
+    headers: getHeaders(),
+  });
+  return handleResponse<BatchResponse>(res);
+}
+
+// ── Export (MTA-9) ──
+
+export type ExportFormat = 'txt' | 'md' | 'srt' | 'json';
+
+/** Get the export download URL for a transcript */
+export function getExportUrl(transcriptId: string, format: ExportFormat): string {
+  return `${API_BASE}/transcripts/${transcriptId}/export?format=${format}`;
+}
+
+/** Download a transcript export as a blob */
+export async function downloadExport(transcriptId: string, format: ExportFormat): Promise<Blob> {
+  const res = await fetch(getExportUrl(transcriptId, format), {
+    headers: getHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(`Export failed: ${res.statusText}`);
+  }
+  return res.blob();
+}
