@@ -152,7 +152,7 @@ func (e *YtDlpExtractor) extractWithWhisper(ctx context.Context, url, videoID st
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, e.ytDlpPath,
-		"--js-runtimes", "nodejs", // Required for YouTube extraction
+		"--js-runtimes", "node", // Required for YouTube extraction
 		"--extract-audio",
 		"--audio-format", "mp3",
 		"--audio-quality", "0",
@@ -227,7 +227,7 @@ func (e *YtDlpExtractor) getMetadata(ctx context.Context, url string) (*ytDlpMet
 	// exec.CommandContext cancels the command if the context is cancelled.
 	// This prevents runaway processes — important for a web server!
 	cmd := exec.CommandContext(ctx, e.ytDlpPath,
-		"--js-runtimes", "nodejs", // Required for YouTube extraction
+		"--js-runtimes", "node", // Required for YouTube extraction
 		"--dump-json",             // Output video info as JSON
 		"--no-download",           // Don't download the video itself
 		"--no-warnings",           // Suppress warning messages
@@ -278,7 +278,7 @@ func (e *YtDlpExtractor) getTranscript(ctx context.Context, url string) (string,
 	// Try manual subtitles first (higher quality), then auto-generated
 	for _, subType := range []string{"--write-subs", "--write-auto-subs"} {
 		cmd := exec.CommandContext(ctx, e.ytDlpPath,
-			"--js-runtimes", "nodejs", // Required for YouTube extraction
+			"--js-runtimes", "node", // Required for YouTube extraction
 			"--skip-download",         // Don't download video
 			subType,                   // Which subtitle type to get
 			"--sub-langs", "en.*,en",  // Prefer English
