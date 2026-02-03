@@ -58,8 +58,9 @@ type WhisperTranscriber interface {
 // YtDlpExtractor uses the yt-dlp CLI tool to extract transcripts.
 // Go Pattern: This struct implements the Extractor interface (implicitly).
 type YtDlpExtractor struct {
-	ytDlpPath  string
-	whisper    WhisperTranscriber // Optional: fallback to Whisper if subtitles fail
+	ytDlpPath string
+	proxyURL  string             // Optional: residential proxy for YouTube
+	whisper   WhisperTranscriber // Optional: fallback to Whisper if subtitles fail
 }
 
 // NewExtractor creates a new yt-dlp based extractor.
@@ -68,10 +69,28 @@ func NewExtractor(ytDlpPath string) *YtDlpExtractor {
 	return &YtDlpExtractor{ytDlpPath: ytDlpPath}
 }
 
+// SetProxy configures a proxy for yt-dlp requests.
+// Use a residential proxy to bypass YouTube's datacenter IP blocks.
+// Format: http://user:pass@host:port
+func (e *YtDlpExtractor) SetProxy(proxyURL string) {
+	e.proxyURL = proxyURL
+}
+
 // SetWhisperFallback enables Whisper-based transcription as a fallback
 // when subtitle extraction fails (e.g., due to YouTube bot detection).
 func (e *YtDlpExtractor) SetWhisperFallback(w WhisperTranscriber) {
 	e.whisper = w
+}
+
+// buildBaseArgs returns the common yt-dlp arguments including proxy if configured.
+func (e *YtDlpExtractor) buildBaseArgs() []string {
+	args := []string{
+		"--js-runtimes", "node", // Required for YouTube extraction
+	}
+	if e.proxyURL != "" {
+		args = append(args, "--proxy", e.proxyURL)
+	}
+	return args
 }
 
 // ytDlpMetadata represents the JSON output from yt-dlp --dump-json.
@@ -151,9 +170,9 @@ func (e *YtDlpExtractor) extractWithWhisper(ctx context.Context, url, videoID st
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, e.ytDlpPath,
-		"--js-runtimes", "node", // Required for YouTube extraction
-		"--extractor-args", "youtube:player_client=tv", // Use TV client to avoid PO token requirement
+	// Build command with base args (includes proxy if configured)
+	args := e.buildBaseArgs()
+	args = append(args,
 		"--extract-audio",
 		"--audio-format", "mp3",
 		"--audio-quality", "0",
@@ -162,6 +181,7 @@ func (e *YtDlpExtractor) extractWithWhisper(ctx context.Context, url, videoID st
 		"--quiet",
 		url,
 	)
+	cmd := exec.CommandContext(ctx, e.ytDlpPath, args...)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -225,16 +245,18 @@ func (e *YtDlpExtractor) extractWithWhisper(ctx context.Context, url, videoID st
 
 // getMetadata fetches video info using yt-dlp --dump-json.
 func (e *YtDlpExtractor) getMetadata(ctx context.Context, url string) (*ytDlpMetadata, error) {
-	// exec.CommandContext cancels the command if the context is cancelled.
-	// This prevents runaway processes — important for a web server!
-	cmd := exec.CommandContext(ctx, e.ytDlpPath,
-		"--js-runtimes", "node", // Required for YouTube extraction
-		"--extractor-args", "youtube:player_client=tv", // Use TV client to avoid PO token requirement
-		"--dump-json",             // Output video info as JSON
-		"--no-download",           // Don't download the video itself
-		"--no-warnings",           // Suppress warning messages
+	// Build command with base args (includes proxy if configured)
+	args := e.buildBaseArgs()
+	args = append(args,
+		"--dump-json",    // Output video info as JSON
+		"--no-download",  // Don't download the video itself
+		"--no-warnings",  // Suppress warning messages
 		url,
 	)
+
+	// exec.CommandContext cancels the command if the context is cancelled.
+	// This prevents runaway processes — important for a web server!
+	cmd := exec.CommandContext(ctx, e.ytDlpPath, args...)
 
 	// Go Pattern: CombinedOutput() captures both stdout and stderr.
 	// cmd.Output() only captures stdout — if yt-dlp fails, we'd miss
@@ -279,17 +301,18 @@ func (e *YtDlpExtractor) getTranscript(ctx context.Context, url string) (string,
 
 	// Try manual subtitles first (higher quality), then auto-generated
 	for _, subType := range []string{"--write-subs", "--write-auto-subs"} {
-		cmd := exec.CommandContext(ctx, e.ytDlpPath,
-			"--js-runtimes", "node", // Required for YouTube extraction
-			"--extractor-args", "youtube:player_client=tv", // Use TV client to avoid PO token requirement
-			"--skip-download",         // Don't download video
-			subType,                   // Which subtitle type to get
-			"--sub-langs", "en.*,en",  // Prefer English
-			"--sub-format", "vtt",     // WebVTT format (easiest to parse)
+		// Build command with base args (includes proxy if configured)
+		args := e.buildBaseArgs()
+		args = append(args,
+			"--skip-download",        // Don't download video
+			subType,                  // Which subtitle type to get
+			"--sub-langs", "en.*,en", // Prefer English
+			"--sub-format", "vtt",    // WebVTT format (easiest to parse)
 			"--output", filepath.Join(tmpDir, "%(id)s"),
 			"--no-warnings",
 			url,
 		)
+		cmd := exec.CommandContext(ctx, e.ytDlpPath, args...)
 
 		output, err := cmd.CombinedOutput()
 		if err != nil {

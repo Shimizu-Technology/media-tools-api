@@ -56,6 +56,14 @@ func main() {
 	extractor := transcript.NewExtractor(cfg.YtDlpPath)
 	summarizer := summary.New(cfg.OpenRouterAPIKey, cfg.OpenRouterModel)
 
+	// Configure YouTube proxy if provided (residential proxy to bypass IP blocks)
+	if cfg.YouTubeProxy != "" {
+		extractor.SetProxy(cfg.YouTubeProxy)
+		log.Println("✅ YouTube proxy configured (residential proxy for yt-dlp)")
+	} else {
+		log.Println("⚠️  No YouTube proxy configured (set YOUTUBE_PROXY for reliable YouTube access)")
+	}
+
 	audioTranscriber := audio.NewTranscriber(cfg.OpenAIAPIKey)
 	if audioTranscriber.IsConfigured() {
 		log.Println("✅ Audio transcription enabled (Whisper API)")

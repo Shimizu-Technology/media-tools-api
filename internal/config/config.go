@@ -24,7 +24,8 @@ type Config struct {
 	DatabaseURL string
 
 	// External tools
-	YtDlpPath string // Path to yt-dlp binary
+	YtDlpPath    string // Path to yt-dlp binary
+	YouTubeProxy string // Optional: Residential proxy for YouTube (format: http://user:pass@host:port)
 
 	// OpenRouter AI settings
 	OpenRouterAPIKey string
@@ -66,7 +67,8 @@ func Load() (*Config, error) {
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/media_tools?sslmode=disable"),
 
 		// yt-dlp — try common locations
-		YtDlpPath: getEnv("YT_DLP_PATH", findYtDlp()),
+		YtDlpPath:    getEnv("YT_DLP_PATH", findYtDlp()),
+		YouTubeProxy: getEnv("YOUTUBE_PROXY", ""), // Optional: residential proxy for YouTube
 
 		// OpenRouter AI
 		OpenRouterAPIKey: getEnv("OPENROUTER_API_KEY", ""),
