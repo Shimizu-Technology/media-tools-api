@@ -216,8 +216,8 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
           {transcript.title || 'Untitled Video'}
         </h2>
 
-        {/* Metadata Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        {/* Metadata Grid - responsive: 2 cols mobile, 3 cols tablet, 3 cols desktop */}
+        <div className="grid grid-cols-2 gap-3 sm:gap-4">
           <MetadataItem
             icon={<User className="w-4 h-4" />}
             label="Channel"
@@ -251,74 +251,76 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
         </div>
       </motion.div>
 
-      {/* Action Bar */}
+      {/* Action Bar - Mobile-first layout */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="flex flex-wrap items-center gap-2 mb-4"
+        className="space-y-3 mb-4"
       >
-        {/* Copy button */}
-        <ActionButton
-          icon={copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-          label={copied ? 'Copied' : 'Copy'}
-          onClick={handleCopy}
-          active={copied}
-        />
-
-        {/* Share link */}
-        <ActionButton
-          icon={linkCopied ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
-          label={linkCopied ? 'Link Copied' : 'Share'}
-          onClick={handleShareLink}
-          active={linkCopied}
-        />
-
-        {/* Toggle timestamps */}
-        {transcript.duration > 0 && (
+        {/* Primary actions row */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Copy button */}
           <ActionButton
-            icon={showTimestamps ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            label={showTimestamps ? 'Hide Timestamps' : 'Show Timestamps'}
-            onClick={() => setShowTimestamps(!showTimestamps)}
-            active={showTimestamps}
+            icon={copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+            label={copied ? 'Copied' : 'Copy'}
+            onClick={handleCopy}
+            active={copied}
           />
-        )}
 
-        {/* Save to workspace (MTA-20) */}
-        <SaveToWorkspace itemType="transcript" itemId={transcript.id} />
+          {/* Share link */}
+          <ActionButton
+            icon={linkCopied ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+            label={linkCopied ? 'Link Copied' : 'Share'}
+            onClick={handleShareLink}
+            active={linkCopied}
+          />
 
-        {/* Spacer */}
-        <div className="flex-1" />
+          {/* Toggle timestamps */}
+          {transcript.duration > 0 && (
+            <ActionButton
+              icon={showTimestamps ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              label={showTimestamps ? 'Hide Timestamps' : 'Show Timestamps'}
+              onClick={() => setShowTimestamps(!showTimestamps)}
+              active={showTimestamps}
+            />
+          )}
 
-        {/* Download buttons */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-medium mr-1" style={{ color: 'var(--color-text-muted)' }}>
-            <FileDown className="w-3.5 h-3.5 inline mr-0.5" />
+          {/* Save to workspace (MTA-20) */}
+          <SaveToWorkspace itemType="transcript" itemId={transcript.id} />
+        </div>
+
+        {/* Export row - separate line for cleaner mobile layout */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+            <FileDown className="w-3.5 h-3.5" />
             Export:
           </span>
-          {(['txt', 'md', 'srt', 'json'] as ExportFormat[]).map((format) => (
-            <motion.button
-              key={format}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => handleDownload(format)}
-              disabled={downloading === format}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-medium uppercase transition-colors duration-200 disabled:opacity-50"
-              style={{
-                backgroundColor: 'var(--color-surface-overlay)',
-                color: 'var(--color-text-secondary)',
-                border: '1px solid var(--color-border)',
-                minHeight: '32px',
-              }}
-              title={`Download as ${format.toUpperCase()}`}
-            >
-              {downloading === format ? (
-                <Loader2 className="w-3 h-3 animate-spin" />
-              ) : (
-                format
-              )}
-            </motion.button>
-          ))}
+          <div className="flex items-center gap-1.5">
+            {(['txt', 'md', 'srt', 'json'] as ExportFormat[]).map((format) => (
+              <motion.button
+                key={format}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => handleDownload(format)}
+                disabled={downloading === format}
+                className="px-3 py-2 rounded-lg text-xs font-medium uppercase transition-colors duration-200 disabled:opacity-50"
+                style={{
+                  backgroundColor: 'var(--color-surface-overlay)',
+                  color: 'var(--color-text-secondary)',
+                  border: '1px solid var(--color-border)',
+                  minHeight: '36px',
+                }}
+                title={`Download as ${format.toUpperCase()}`}
+              >
+                {downloading === format ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  format
+                )}
+              </motion.button>
+            ))}
+          </div>
         </div>
       </motion.div>
 

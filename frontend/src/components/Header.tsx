@@ -40,8 +40,8 @@ export function Header() {
           </div>
         </Link>
 
-        {/* Navigation */}
-        <nav className="flex items-center gap-1">
+        {/* Navigation - icons on mobile, labels on desktop */}
+        <nav className="flex items-center gap-0.5 sm:gap-1">
           {navLinks.map((link) => {
             const isActive = location.pathname === link.to
             const Icon = link.icon
@@ -49,10 +49,14 @@ export function Header() {
               <Link
                 key={link.to}
                 to={link.to}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+                className="flex items-center justify-center gap-1.5 px-2 sm:px-3 py-2.5 rounded-lg text-sm font-medium transition-colors hover:opacity-80"
                 style={{
                   color: isActive ? 'var(--color-brand-500)' : 'var(--color-text-secondary)',
+                  backgroundColor: isActive ? 'var(--color-brand-50)' : 'transparent',
+                  minWidth: '44px',
+                  minHeight: '44px',
                 }}
+                title={link.label}
               >
                 <Icon className="w-4 h-4" />
                 <span className="hidden md:inline">{link.label}</span>

@@ -332,7 +332,7 @@ export function AudioPage() {
   const hasSubmittable = (activeTab === 'upload' && file) || (activeTab === 'record' && recordedBlob);
 
   return (
-    <main className="relative pt-28 pb-16 px-6">
+    <main className="relative pt-20 sm:pt-28 pb-12 sm:pb-16 px-4 sm:px-6">
       {/* Hero */}
       {!result && !isProcessing && (
         <div className="text-center mb-8">

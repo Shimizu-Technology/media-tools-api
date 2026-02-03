@@ -72,7 +72,7 @@ export function HomePage() {
   }
 
   return (
-    <main className="max-w-4xl mx-auto px-4 py-12">
+    <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
       {/* Hero Section */}
       {!transcript && (
         <div className="text-center mb-12">

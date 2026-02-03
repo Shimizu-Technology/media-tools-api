@@ -2,25 +2,78 @@
 
 /* Design tokens */
 :root {
+  /* Brand colors */
+  --color-brand-50: rgba(59, 130, 246, 0.1);
   --color-brand-400: #60a5fa;
   --color-brand-500: #3b82f6;
   --color-brand-600: #2563eb;
   
+  /* Surfaces */
   --color-surface: #0a0a0f;
   --color-surface-elevated: #141419;
   --color-surface-card: #1a1a22;
+  --color-surface-overlay: #1f1f26;
   
+  /* Text */
   --color-text-primary: #f0f0f5;
   --color-text-secondary: #9ca3af;
   --color-text-muted: #6b7280;
   
+  /* Border */
   --color-border: #27272a;
+  --color-border-subtle: #1f1f26;
+  
+  /* Success/Error */
+  --color-success: #10b981;
+  --color-error: #ef4444;
 }
 
+/* Base styles */
 body {
   margin: 0;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background-color: var(--color-surface);
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Improve text rendering */
+* {
+  text-rendering: optimizeLegibility;
+}
+
+/* Scrollbar styling for dark mode */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Better focus states for accessibility */
+:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Prevent horizontal overflow */
+body {
+  overflow-x: hidden;
 }
