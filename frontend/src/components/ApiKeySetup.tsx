@@ -16,6 +16,7 @@ interface ApiKeySetupProps {
 export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
   const [mode, setMode] = useState<'create' | 'existing'>('create');
   const [name, setName] = useState('web-app');
+  const [adminKey, setAdminKey] = useState('');
   const [existingKey, setExistingKey] = useState('');
   const [createdKey, setCreatedKey] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -23,10 +24,14 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCreate = async () => {
+    if (!adminKey.trim()) {
+      setError('Admin key is required to create API keys');
+      return;
+    }
     setIsLoading(true);
     setError('');
     try {
-      const result = await createAPIKey(name);
+      const result = await createAPIKey(name, { adminKey: adminKey.trim() });
       if (result.raw_key) {
         setCreatedKey(result.raw_key);
         localStorage.setItem('mta_api_key', result.raw_key);
@@ -34,7 +39,7 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
       }
     } catch (err: unknown) {
       const apiErr = err as { message?: string };
-      setError(apiErr.message || 'Failed to create API key. Is the API server running?');
+      setError(apiErr.message || 'Failed to create API key. Check your admin key.');
     }
     setIsLoading(false);
   };
@@ -108,11 +113,24 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
               {!createdKey ? (
                 <>
                   <input
+                    type="password"
+                    value={adminKey}
+                    onChange={(e) => setAdminKey(e.target.value)}
+                    placeholder="Admin key (from environment)"
+                    className="w-full px-4 py-3 rounded-xl border text-sm outline-none transition-colors duration-200"
+                    style={{
+                      backgroundColor: 'var(--color-surface)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-primary)',
+                      minHeight: '44px',
+                    }}
+                  />
+                  <input
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Key name (e.g., my-app)"
-                    className="w-full px-4 py-3 rounded-xl border text-sm outline-none transition-colors duration-200"
+                    className="w-full mt-2 px-4 py-3 rounded-xl border text-sm outline-none transition-colors duration-200"
                     style={{
                       backgroundColor: 'var(--color-surface)',
                       borderColor: 'var(--color-border)',
@@ -122,12 +140,15 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
                   />
                   <button
                     onClick={handleCreate}
-                    disabled={isLoading || !name.trim()}
+                    disabled={isLoading || !name.trim() || !adminKey.trim()}
                     className="w-full mt-3 py-3 rounded-xl text-white font-medium text-sm transition-opacity duration-200 disabled:opacity-50"
                     style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
                   >
                     {isLoading ? 'Creating...' : 'Create API Key'}
                   </button>
+                  <p className="text-xs mt-2 text-center" style={{ color: 'var(--color-text-muted)' }}>
+                    Admin key is set in your Render environment variables
+                  </p>
                 </>
               ) : (
                 <div>

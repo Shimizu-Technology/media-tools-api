@@ -36,3 +36,6 @@ Thumbs.db
 
 # Build artifacts (the compiled binary, not the source directory)
 /server
+
+# Reference folder (not part of this project)
+starter-app/

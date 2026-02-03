@@ -248,11 +248,15 @@ export async function getHealth(): Promise<HealthResponse> {
 
 // ── API Keys ──
 
-export async function createAPIKey(name: string, rateLimit?: number): Promise<APIKey> {
+export async function createAPIKey(name: string, options?: { rateLimit?: number; adminKey?: string }): Promise<APIKey> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (options?.adminKey) {
+    headers['X-Admin-Key'] = options.adminKey;
+  }
   const res = await fetch(`${API_BASE}/keys`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, rate_limit: rateLimit }),
+    headers,
+    body: JSON.stringify({ name, rate_limit: options?.rateLimit }),
   });
   return handleResponse<APIKey>(res);
 }
