@@ -20,7 +20,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 
 # ── Stage 3: Minimal runtime image ──
 FROM alpine:3.19
-RUN apk add --no-cache ca-certificates python3 py3-pip ffmpeg curl && \
+RUN apk add --no-cache ca-certificates python3 py3-pip ffmpeg curl nodejs && \
     pip3 install --break-system-packages yt-dlp
 WORKDIR /app
 COPY --from=builder /app/server .
