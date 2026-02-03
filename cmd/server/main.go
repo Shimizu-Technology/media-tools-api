@@ -59,6 +59,10 @@ func main() {
 	audioTranscriber := audio.NewTranscriber(cfg.OpenAIAPIKey)
 	if audioTranscriber.IsConfigured() {
 		log.Println("✅ Audio transcription enabled (Whisper API)")
+		// Enable Whisper as fallback for YouTube transcripts when subtitles fail
+		whisperAdapter := audio.NewWhisperAdapter(audioTranscriber)
+		extractor.SetWhisperFallback(whisperAdapter)
+		log.Println("✅ YouTube Whisper fallback enabled (will transcribe audio if subtitles unavailable)")
 	} else {
 		log.Println("⚠️  Audio transcription disabled (set OPENAI_API_KEY to enable)")
 	}

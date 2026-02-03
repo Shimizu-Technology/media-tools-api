@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
 )
 
 // TranscriptionResult holds the output from a Whisper API call.
@@ -139,4 +141,29 @@ func (t *Transcriber) Transcribe(ctx context.Context, audioData io.Reader, filen
 func CountWords(text string) int {
 	words := strings.Fields(text)
 	return len(words)
+}
+
+// WhisperAdapter wraps Transcriber to implement the transcript.WhisperTranscriber interface.
+// This enables Whisper as a fallback when YouTube subtitle extraction fails.
+type WhisperAdapter struct {
+	*Transcriber
+}
+
+// TranscribeForYouTube implements the transcript.WhisperTranscriber interface.
+// It transcribes audio and returns a result compatible with the transcript package.
+func (a *WhisperAdapter) TranscribeForYouTube(ctx context.Context, audioData io.Reader, filename string) (*transcript.WhisperResult, error) {
+	result, err := a.Transcriber.Transcribe(ctx, audioData, filename)
+	if err != nil {
+		return nil, err
+	}
+	return &transcript.WhisperResult{
+		Text:     result.Text,
+		Language: result.Language,
+		Duration: result.Duration,
+	}, nil
+}
+
+// NewWhisperAdapter creates an adapter for use with the transcript package.
+func NewWhisperAdapter(t *Transcriber) *WhisperAdapter {
+	return &WhisperAdapter{Transcriber: t}
 }

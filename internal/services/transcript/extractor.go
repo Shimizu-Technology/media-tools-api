@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -39,16 +40,38 @@ type Result struct {
 	WordCount    int
 }
 
+// WhisperResult holds the output from a Whisper API call.
+type WhisperResult struct {
+	Text     string
+	Language string
+	Duration float64
+}
+
+// WhisperTranscriber is an interface for audio transcription (used as fallback).
+// This allows the transcript package to use Whisper without importing the audio package.
+// The TranscribeForYouTube method is specifically for YouTube fallback and returns our WhisperResult.
+type WhisperTranscriber interface {
+	TranscribeForYouTube(ctx context.Context, audioData io.Reader, filename string) (*WhisperResult, error)
+	IsConfigured() bool
+}
+
 // YtDlpExtractor uses the yt-dlp CLI tool to extract transcripts.
 // Go Pattern: This struct implements the Extractor interface (implicitly).
 type YtDlpExtractor struct {
-	ytDlpPath string
+	ytDlpPath  string
+	whisper    WhisperTranscriber // Optional: fallback to Whisper if subtitles fail
 }
 
 // NewExtractor creates a new yt-dlp based extractor.
 // Go Pattern: Constructor functions are named New<Type> or New<Package>.
 func NewExtractor(ytDlpPath string) *YtDlpExtractor {
 	return &YtDlpExtractor{ytDlpPath: ytDlpPath}
+}
+
+// SetWhisperFallback enables Whisper-based transcription as a fallback
+// when subtitle extraction fails (e.g., due to YouTube bot detection).
+func (e *YtDlpExtractor) SetWhisperFallback(w WhisperTranscriber) {
+	e.whisper = w
 }
 
 // ytDlpMetadata represents the JSON output from yt-dlp --dump-json.
@@ -67,34 +90,132 @@ type subtitle struct {
 }
 
 // Extract downloads the transcript for a YouTube video.
-// It first tries manual subtitles, then falls back to auto-generated captions.
+// It first tries manual subtitles, then auto-generated captions.
+// If both fail and Whisper is configured, it downloads audio and transcribes with Whisper.
 func (e *YtDlpExtractor) Extract(ctx context.Context, videoID string) (*Result, error) {
 	url := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
 
 	// Step 1: Get video metadata (title, channel, duration, available subtitles)
 	log.Printf("🎬 Extracting metadata for video: %s", videoID)
-	metadata, err := e.getMetadata(ctx, url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get video metadata: %w", err)
+	metadata, metadataErr := e.getMetadata(ctx, url)
+
+	// Step 2: Try subtitle extraction first
+	if metadataErr == nil {
+		log.Printf("📝 Extracting transcript for: %s", metadata.Title)
+		transcript, lang, err := e.getTranscript(ctx, url)
+		if err == nil {
+			// Success! Clean up and return
+			cleaned := cleanTranscript(transcript)
+			wordCount := countWords(cleaned)
+			return &Result{
+				VideoID:     videoID,
+				Title:       metadata.Title,
+				ChannelName: metadata.Channel,
+				Duration:    int(metadata.Duration),
+				Language:    lang,
+				Transcript:  cleaned,
+				WordCount:   wordCount,
+			}, nil
+		}
+		log.Printf("⚠️  Subtitle extraction failed: %v", err)
+	} else {
+		log.Printf("⚠️  Metadata extraction failed: %v", metadataErr)
 	}
 
-	// Step 2: Extract subtitle text
-	log.Printf("📝 Extracting transcript for: %s", metadata.Title)
-	transcript, lang, err := e.getTranscript(ctx, url)
-	if err != nil {
-		return nil, fmt.Errorf("no transcript available: %w", err)
+	// Step 3: Fallback to Whisper if configured
+	if e.whisper != nil && e.whisper.IsConfigured() {
+		log.Printf("🎤 Falling back to Whisper transcription for video: %s", videoID)
+		return e.extractWithWhisper(ctx, url, videoID, metadata)
 	}
 
-	// Step 3: Clean up the transcript text
-	cleaned := cleanTranscript(transcript)
+	// No Whisper fallback available
+	if metadataErr != nil {
+		return nil, fmt.Errorf("failed to get video metadata: %w", metadataErr)
+	}
+	return nil, fmt.Errorf("no transcript available and Whisper fallback not configured")
+}
+
+// extractWithWhisper downloads audio from YouTube and transcribes with Whisper.
+func (e *YtDlpExtractor) extractWithWhisper(ctx context.Context, url, videoID string, metadata *ytDlpMetadata) (*Result, error) {
+	// Create temp directory for audio
+	tmpDir, err := os.MkdirTemp("", "mta-audio-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	audioPath := filepath.Join(tmpDir, "audio.mp3")
+
+	// Download audio using yt-dlp
+	log.Printf("📥 Downloading audio for Whisper transcription...")
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, e.ytDlpPath,
+		"--extract-audio",
+		"--audio-format", "mp3",
+		"--audio-quality", "0",
+		"--output", audioPath,
+		"--no-playlist",
+		"--quiet",
+		url,
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to download audio: %s - %v", string(output), err)
+	}
+
+	// Check if audio file was created
+	if _, err := os.Stat(audioPath); os.IsNotExist(err) {
+		// yt-dlp might have added extension, check for any audio file
+		matches, _ := filepath.Glob(filepath.Join(tmpDir, "audio.*"))
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("no audio file found after download")
+		}
+		audioPath = matches[0]
+	}
+
+	log.Printf("✅ Audio downloaded: %s", audioPath)
+
+	// Open audio file for Whisper
+	audioFile, err := os.Open(audioPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open audio file: %w", err)
+	}
+	defer audioFile.Close()
+
+	// Transcribe with Whisper
+	log.Printf("🎤 Transcribing with Whisper...")
+	result, err := e.whisper.TranscribeForYouTube(ctx, audioFile, "audio.mp3")
+	if err != nil {
+		return nil, fmt.Errorf("Whisper transcription failed: %w", err)
+	}
+
+	log.Printf("✅ Whisper transcription complete: %d chars", len(result.Text))
+
+	// Build result
+	title := videoID
+	channel := ""
+	duration := int(result.Duration)
+
+	if metadata != nil {
+		title = metadata.Title
+		channel = metadata.Channel
+		if metadata.Duration > 0 {
+			duration = int(metadata.Duration)
+		}
+	}
+
+	cleaned := cleanTranscript(result.Text)
 	wordCount := countWords(cleaned)
 
 	return &Result{
 		VideoID:     videoID,
-		Title:       metadata.Title,
-		ChannelName: metadata.Channel,
-		Duration:    int(metadata.Duration),
-		Language:    lang,
+		Title:       title,
+		ChannelName: channel,
+		Duration:    duration,
+		Language:    result.Language,
 		Transcript:  cleaned,
 		WordCount:   wordCount,
 	}, nil
