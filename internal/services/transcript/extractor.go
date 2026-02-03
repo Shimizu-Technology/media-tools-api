@@ -90,8 +90,9 @@ func (e *YtDlpExtractor) buildBaseArgs() []string {
 	}
 	if e.proxyURL != "" {
 		args = append(args, "--proxy", e.proxyURL)
-		// Use ios client which doesn't require SABR and works better with proxies
-		args = append(args, "--extractor-args", "youtube:player_client=ios")
+		// Use android_vr client - doesn't require PO Token (unlike ios/web/mweb)
+		// See: https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide
+		args = append(args, "--extractor-args", "youtube:player_client=android_vr")
 	}
 	return args
 }
