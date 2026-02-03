@@ -28,6 +28,21 @@ Currently, API key creation requires an admin key. Consider these alternatives f
 
 ---
 
+## High Priority
+
+- [ ] **User Accounts + Personal Transcript History**
+  - Sign up / sign in flow (email + password)
+  - Associate each transcript with a user ID
+  - Filter History page to show only that user's transcripts
+  - Optional: password reset via email
+
+- [ ] **AI Chat About Transcripts**
+  - Simple version: "Ask a question about this transcript" single input
+  - Advanced version: Full chat interface with conversation history
+  - Consider token limits for very long transcripts
+
+---
+
 ## Other Ideas
 
 - [ ] **S3 Storage for Audio Files**
