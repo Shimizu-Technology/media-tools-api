@@ -89,6 +89,9 @@ func (e *YtDlpExtractor) buildBaseArgs() []string {
 	}
 	if e.proxyURL != "" {
 		args = append(args, "--proxy", e.proxyURL)
+		// When using proxy, use web client with specific format to avoid SABR streaming issues
+		args = append(args, "--extractor-args", "youtube:player_client=web")
+		args = append(args, "--format", "bestaudio[ext=m4a]/bestaudio/best")
 	}
 	return args
 }
