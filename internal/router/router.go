@@ -2,6 +2,11 @@
 package router
 
 import (
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
@@ -85,6 +90,29 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhooks
 		protected.GET("/webhooks/deliveries", h.ListWebhookDeliveries)
 		protected.PATCH("/webhooks/:id", h.UpdateWebhook)
 		protected.DELETE("/webhooks/:id", h.DeleteWebhook)
+	}
+
+	// --- Static Frontend Serving (SPA) ---
+	// In production/Docker, the Go server serves the React frontend.
+	// In development, Vite runs separately on :5173 and proxies API calls here.
+	//
+	// This is the Go equivalent of Rails' public/ directory — any request
+	// that doesn't match an API route gets the React app.
+	frontendDir := "frontend/dist"
+	if _, err := os.Stat(frontendDir); err == nil {
+		// Serve static assets (JS, CSS, images)
+		r.Static("/assets", filepath.Join(frontendDir, "assets"))
+
+		// Serve the SPA index.html for all non-API routes
+		// This lets React Router handle client-side routing (/audio, /history, etc.)
+		r.NoRoute(func(c *gin.Context) {
+			// Don't serve index.html for API routes — return proper 404
+			if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+				c.JSON(http.StatusNotFound, gin.H{"error": "not_found", "message": "API endpoint not found"})
+				return
+			}
+			c.File(filepath.Join(frontendDir, "index.html"))
+		})
 	}
 
 	return r
