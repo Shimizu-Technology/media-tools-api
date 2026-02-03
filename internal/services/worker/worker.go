@@ -19,11 +19,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
 	webhookservice "github.com/Shimizu-Technology/media-tools-api/internal/services/webhook"
@@ -33,8 +35,9 @@ import (
 type JobType string
 
 const (
-	JobTranscriptExtraction JobType = "transcript_extraction"
-	JobSummaryGeneration    JobType = "summary_generation"
+	JobTranscriptExtraction  JobType = "transcript_extraction"
+	JobSummaryGeneration     JobType = "summary_generation"
+	JobAudioTranscription    JobType = "audio_transcription"
 )
 
 // Job represents a unit of work to be processed by a worker.
@@ -54,22 +57,36 @@ type SummaryPayload struct {
 	SummaryID    string `json:"summary_id"`
 }
 
+// AudioPayload is the data needed for an audio transcription job.
+// We store the temp file path instead of file bytes to avoid memory issues with large files.
+type AudioPayload struct {
+	AudioID      string `json:"audio_id"`
+	TempFilePath string `json:"temp_file_path"`
+	OriginalName string `json:"original_name"`
+}
+
 // Pool manages a pool of worker goroutines.
 type Pool struct {
-	jobs       chan Job
-	workers    int
-	db         *database.DB
-	extractor  transcript.Extractor
-	summarizer *summary.Service
-	webhooks   *webhookservice.Service // MTA-18: webhook notifications
-	wg         sync.WaitGroup
-	ctx        context.Context
-	cancel     context.CancelFunc
+	jobs            chan Job
+	workers         int
+	db              *database.DB
+	extractor       transcript.Extractor
+	summarizer      *summary.Service
+	audioTranscriber *audio.Transcriber // Audio transcription via Whisper
+	webhooks        *webhookservice.Service // MTA-18: webhook notifications
+	wg              sync.WaitGroup
+	ctx             context.Context
+	cancel          context.CancelFunc
 }
 
 // SetWebhookService sets the webhook service for notifications (MTA-18).
 func (p *Pool) SetWebhookService(ws *webhookservice.Service) {
 	p.webhooks = ws
+}
+
+// SetAudioTranscriber sets the audio transcriber for Whisper jobs.
+func (p *Pool) SetAudioTranscriber(at *audio.Transcriber) {
+	p.audioTranscriber = at
 }
 
 // notifyWebhook fires a webhook event if the service is configured.
@@ -167,6 +184,8 @@ func (p *Pool) worker(id int) {
 			err = p.processTranscript(job)
 		case JobSummaryGeneration:
 			err = p.processSummary(job)
+		case JobAudioTranscription:
+			err = p.processAudioTranscription(job)
 		default:
 			log.Printf("❌ Worker %d: unknown job type: %s", id, job.Type)
 		}
@@ -291,4 +310,78 @@ func (p *Pool) processSummary(job Job) error {
 	}
 
 	return p.db.CreateSummary(ctx, s)
+}
+
+// processAudioTranscription handles audio transcription jobs via Whisper API.
+func (p *Pool) processAudioTranscription(job Job) error {
+	ctx := p.ctx
+
+	// Parse the job payload
+	var payload AudioPayload
+	if err := json.Unmarshal(job.Payload, &payload); err != nil {
+		return fmt.Errorf("invalid audio payload: %w", err)
+	}
+
+	// Get the audio transcription record from the database
+	at, err := p.db.GetAudioTranscription(ctx, payload.AudioID)
+	if err != nil {
+		return fmt.Errorf("failed to get audio transcription: %w", err)
+	}
+
+	// Update status to processing
+	at.Status = "processing"
+	if err := p.db.UpdateAudioTranscription(ctx, at); err != nil {
+		log.Printf("⚠️  Failed to update audio status to processing: %v", err)
+	}
+
+	// Open the temp file
+	file, err := os.Open(payload.TempFilePath)
+	if err != nil {
+		at.Status = "failed"
+		at.ErrorMessage = "Failed to read uploaded file: " + err.Error()
+		p.db.UpdateAudioTranscription(ctx, at)
+		return fmt.Errorf("failed to open temp file: %w", err)
+	}
+	defer func() {
+		file.Close()
+		// Clean up temp file after processing
+		os.Remove(payload.TempFilePath)
+	}()
+
+	// Check if transcriber is configured
+	if p.audioTranscriber == nil || !p.audioTranscriber.IsConfigured() {
+		at.Status = "failed"
+		at.ErrorMessage = "Audio transcription is not configured. Set OPENAI_API_KEY."
+		p.db.UpdateAudioTranscription(ctx, at)
+		return fmt.Errorf("audio transcriber not configured")
+	}
+
+	// Call the Whisper API
+	result, err := p.audioTranscriber.Transcribe(ctx, file, payload.OriginalName)
+	if err != nil {
+		log.Printf("❌ Whisper transcription failed for %s: %v", payload.OriginalName, err)
+		at.Status = "failed"
+		at.ErrorMessage = err.Error()
+		p.db.UpdateAudioTranscription(ctx, at)
+		p.notifyWebhook("audio.failed", at)
+		return fmt.Errorf("transcription failed: %w", err)
+	}
+
+	// Update the record with results
+	at.TranscriptText = result.Text
+	at.Language = result.Language
+	at.Duration = result.Duration
+	at.WordCount = audio.CountWords(result.Text)
+	at.Status = "completed"
+
+	if err := p.db.UpdateAudioTranscription(ctx, at); err != nil {
+		log.Printf("⚠️  Failed to save audio transcription result: %v", err)
+		return fmt.Errorf("failed to save transcription: %w", err)
+	}
+
+	p.notifyWebhook("audio.completed", at)
+	log.Printf("✅ Audio transcription completed: %s (%s, %.0fs, %d words)",
+		payload.OriginalName, result.Language, result.Duration, at.WordCount)
+
+	return nil
 }

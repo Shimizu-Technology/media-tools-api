@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import {
   transcribeAudio,
+  getAudioTranscription,
   summarizeAudio,
   downloadAudioExport,
   listAudioTranscriptions,
@@ -35,6 +36,7 @@ import {
   type AudioContentType,
   type APIError,
 } from '../lib/api';
+import { usePolling } from '../hooks/usePolling';
 
 /**
  * Audio transcription page (MTA-16, MTA-22, MTA-23, MTA-24, MTA-25, MTA-26).
@@ -183,6 +185,31 @@ export function AudioPage() {
     setIsRecording(false);
   };
 
+  // ── Polling for async transcription completion ──
+
+  const shouldPoll = result?.status === 'pending' || result?.status === 'processing';
+
+  usePolling(
+    useCallback(async () => {
+      if (!result?.id) throw new Error('No result');
+      const updated = await getAudioTranscription(result.id);
+      setResult(updated);
+      // Update processing state based on status
+      if (updated.status === 'completed' || updated.status === 'failed') {
+        setIsProcessing(false);
+        if (updated.status === 'failed' && updated.error_message) {
+          setError(updated.error_message);
+        }
+      }
+      return updated;
+    }, [result?.id]),
+    {
+      enabled: shouldPoll,
+      interval: 2000,
+      shouldStop: (data: AudioTranscription) => data.status === 'completed' || data.status === 'failed',
+    }
+  );
+
   // ── Submit (upload or recording) ──
 
   const handleSubmit = async () => {
@@ -201,14 +228,16 @@ export function AudioPage() {
     setError('');
 
     try {
+      // This now returns immediately with status "pending"
+      // The usePolling hook will poll for completion
       const transcription = await transcribeAudio(uploadFile);
       setResult(transcription);
+      // Don't set isProcessing to false here - polling will do that
     } catch (err: unknown) {
       const apiErr = err as APIError;
       setError(apiErr.message || 'Transcription failed. Please try again.');
+      setIsProcessing(false);
     }
-
-    setIsProcessing(false);
   };
 
   // ── Summarize (MTA-22) ──
@@ -641,8 +670,14 @@ export function AudioPage() {
           className="max-w-2xl mx-auto p-8 rounded-2xl border text-center"
           style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
           <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" style={{ color: 'var(--color-brand-500)' }} />
-          <p className="text-lg font-medium" style={{ color: 'var(--color-text-primary)' }}>Transcribing audio...</p>
-          <p className="text-sm mt-2" style={{ color: 'var(--color-text-secondary)' }}>This may take a minute for longer files</p>
+          <p className="text-lg font-medium" style={{ color: 'var(--color-text-primary)' }}>
+            {result?.status === 'pending' ? 'Uploading audio...' : 'Transcribing audio...'}
+          </p>
+          <p className="text-sm mt-2" style={{ color: 'var(--color-text-secondary)' }}>
+            {result?.status === 'processing' 
+              ? 'Processing in background — this may take a few minutes for longer files'
+              : 'This may take a moment'}
+          </p>
         </motion.div>
       )}
 

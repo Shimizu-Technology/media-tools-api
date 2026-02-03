@@ -8,11 +8,14 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -20,6 +23,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
 // allowedAudioTypes maps file extensions to MIME types for validation.
@@ -35,14 +39,15 @@ var allowedAudioTypes = map[string]bool{
 // maxAudioSize is the max upload size for audio files (25MB, Whisper API limit).
 const maxAudioSize = 25 << 20 // 25MB
 
-// TranscribeAudio handles audio file upload and transcription.
+// TranscribeAudio handles audio file upload and queues transcription job.
 // POST /api/v1/audio/transcribe
 //
 // Accepts multipart file upload with field name "file".
 // Supported formats: mp3, wav, m4a, ogg, flac, webm
 //
-// For configured Whisper API: processes synchronously and returns result.
-// If OPENAI_API_KEY is not set, returns a helpful error message.
+// Returns 202 Accepted immediately with the transcription record.
+// Frontend should poll GET /api/v1/audio/transcriptions/:id for completion.
+// This async pattern handles long audio files without timeout issues.
 func (h *Handler) TranscribeAudio(c *gin.Context) {
 	// Check if Whisper transcriber is configured
 	if h.AudioTranscriber == nil || !h.AudioTranscriber.IsConfigured() {
@@ -55,7 +60,6 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	}
 
 	// Get the uploaded file
-	// Note: Gin's MaxMultipartMemory handles size limits. We also check manually below.
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
@@ -88,17 +92,46 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		return
 	}
 
-	// Generate a unique filename for storage reference
+	// Generate unique identifiers
 	storedFilename := uuid.New().String() + ext
+
+	// Save the uploaded file to a temp location for async processing
+	tempDir := os.TempDir()
+	tempFilePath := filepath.Join(tempDir, storedFilename)
+
+	tempFile, err := os.Create(tempFilePath)
+	if err != nil {
+		log.Printf("Failed to create temp file: %v", err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "server_error",
+			Message: "Failed to process uploaded file",
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+
+	if _, err := io.Copy(tempFile, file); err != nil {
+		tempFile.Close()
+		os.Remove(tempFilePath)
+		log.Printf("Failed to save temp file: %v", err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "server_error",
+			Message: "Failed to save uploaded file",
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+	tempFile.Close()
 
 	// Create a pending record in the database
 	at := &models.AudioTranscription{
 		Filename:     storedFilename,
 		OriginalName: header.Filename,
-		Status:       "processing",
+		Status:       "pending",
 	}
 
 	if err := h.DB.CreateAudioTranscription(c.Request.Context(), at); err != nil {
+		os.Remove(tempFilePath) // Clean up temp file on error
 		log.Printf("Failed to create audio transcription record: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
@@ -108,36 +141,52 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		return
 	}
 
-	// Call the Whisper API
-	result, err := h.AudioTranscriber.Transcribe(c.Request.Context(), file, header.Filename)
-	if err != nil {
-		log.Printf("Whisper transcription failed for %s: %v", header.Filename, err)
-		// Update record as failed
-		at.Status = "failed"
-		at.ErrorMessage = err.Error()
-		h.DB.UpdateAudioTranscription(c.Request.Context(), at)
+	// Create the job payload
+	payload := worker.AudioPayload{
+		AudioID:      at.ID,
+		TempFilePath: tempFilePath,
+		OriginalName: header.Filename,
+	}
 
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		os.Remove(tempFilePath)
+		log.Printf("Failed to marshal audio payload: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "transcription_failed",
-			Message: "Audio transcription failed: " + err.Error(),
+			Error:   "server_error",
+			Message: "Failed to queue transcription job",
 			Code:    http.StatusInternalServerError,
 		})
 		return
 	}
 
-	// Update the record with results
-	at.TranscriptText = result.Text
-	at.Language = result.Language
-	at.Duration = result.Duration
-	at.WordCount = audio.CountWords(result.Text)
-	at.Status = "completed"
-
-	if err := h.DB.UpdateAudioTranscription(c.Request.Context(), at); err != nil {
-		log.Printf("Failed to update audio transcription record: %v", err)
-		// Still return the result even if DB update fails
+	// Submit the job to the worker pool
+	job := worker.Job{
+		ID:        at.ID,
+		Type:      worker.JobAudioTranscription,
+		Payload:   payloadJSON,
+		CreatedAt: time.Now(),
 	}
 
-	c.JSON(http.StatusOK, at)
+	if err := h.Worker.Submit(job); err != nil {
+		os.Remove(tempFilePath)
+		at.Status = "failed"
+		at.ErrorMessage = "Job queue is full, please try again later"
+		h.DB.UpdateAudioTranscription(c.Request.Context(), at)
+
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
+			Error:   "queue_full",
+			Message: "Server is busy. Please try again in a moment.",
+			Code:    http.StatusServiceUnavailable,
+		})
+		return
+	}
+
+	log.Printf("📤 Audio transcription job queued: %s (%s, %.1f MB)",
+		at.ID, header.Filename, float64(header.Size)/(1024*1024))
+
+	// Return 202 Accepted — frontend should poll for completion
+	c.JSON(http.StatusAccepted, at)
 }
 
 // GetAudioTranscription retrieves a single audio transcription by ID.
