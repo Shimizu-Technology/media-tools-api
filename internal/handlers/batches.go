@@ -95,17 +95,37 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 
 	for _, p := range parsed {
 		// Check for existing completed transcript for this video
+		// If found, we create a new record pre-populated with the existing data
+		// so it completes immediately without re-extraction.
 		existing, _ := h.DB.GetTranscriptByYouTubeID(c.Request.Context(), p.videoID)
-		if existing != nil && existing.Status == models.StatusCompleted {
-			// Link the existing transcript to this batch by creating a new record
-			// that references the same video (we don't modify the original)
-		}
 
-		t := &models.Transcript{
-			YouTubeURL: p.fullURL,
-			YouTubeID:  p.videoID,
-			Status:     models.StatusPending,
-			BatchID:    &batch.ID,
+		var t *models.Transcript
+		var needsExtraction bool
+
+		if existing != nil && existing.Status == models.StatusCompleted {
+			// Reuse existing transcript data — skip re-extraction
+			t = &models.Transcript{
+				YouTubeURL:     p.fullURL,
+				YouTubeID:      p.videoID,
+				Status:         models.StatusCompleted,
+				BatchID:        &batch.ID,
+				Title:          existing.Title,
+				ChannelName:    existing.ChannelName,
+				Duration:       existing.Duration,
+				TranscriptText: existing.TranscriptText,
+				WordCount:      existing.WordCount,
+			}
+			needsExtraction = false
+			log.Printf("Reusing existing transcript for %s (already extracted)", p.videoID)
+		} else {
+			// Create a pending transcript that needs extraction
+			t = &models.Transcript{
+				YouTubeURL: p.fullURL,
+				YouTubeID:  p.videoID,
+				Status:     models.StatusPending,
+				BatchID:    &batch.ID,
+			}
+			needsExtraction = true
 		}
 
 		if err := h.DB.CreateTranscriptWithBatch(c.Request.Context(), t); err != nil {
@@ -114,15 +134,17 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 			continue
 		}
 
-		// Submit extraction job to the worker pool
-		job := worker.Job{
-			ID:        t.ID,
-			Type:      worker.JobTranscriptExtraction,
-			CreatedAt: time.Now(),
-		}
+		// Only submit extraction job if this is a new transcript
+		if needsExtraction {
+			job := worker.Job{
+				ID:        t.ID,
+				Type:      worker.JobTranscriptExtraction,
+				CreatedAt: time.Now(),
+			}
 
-		if err := h.Worker.Submit(job); err != nil {
-			log.Printf("Failed to queue extraction job for %s: %v", t.ID, err)
+			if err := h.Worker.Submit(job); err != nil {
+				log.Printf("Failed to queue extraction job for %s: %v", t.ID, err)
+			}
 		}
 
 		transcripts = append(transcripts, *t)

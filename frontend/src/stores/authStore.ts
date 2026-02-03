@@ -1,6 +1,7 @@
 /**
  * Auth store using Zustand (MTA-20).
  * Manages JWT token, user state, and auth persistence via localStorage.
+ * Includes automatic token refresh to maintain sessions.
  */
 import { create } from 'zustand';
 
@@ -20,11 +21,17 @@ interface AuthState {
   logout: () => void;
   setLoading: (loading: boolean) => void;
   initialize: () => Promise<void>;
+  refreshToken: () => Promise<boolean>;
+  startTokenRefresh: () => void;
+  stopTokenRefresh: () => void;
 }
 
 const TOKEN_KEY = 'mta_jwt_token';
+const REFRESH_INTERVAL_MS = 60 * 60 * 1000; // Refresh every hour
 
-export const useAuthStore = create<AuthState>((set, _get) => ({
+let refreshIntervalId: ReturnType<typeof setInterval> | null = null;
+
+export const useAuthStore = create<AuthState>((set, get) => ({
   token: null,
   user: null,
   isAuthenticated: false,
@@ -33,9 +40,12 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
   login: (token: string, user: User) => {
     localStorage.setItem(TOKEN_KEY, token);
     set({ token, user, isAuthenticated: true });
+    // Start token refresh when logging in
+    get().startTokenRefresh();
   },
 
   logout: () => {
+    get().stopTokenRefresh();
     localStorage.removeItem(TOKEN_KEY);
     set({ token: null, user: null, isAuthenticated: false });
   },
@@ -57,6 +67,8 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
       if (res.ok) {
         const user: User = await res.json();
         set({ token, user, isAuthenticated: true, isLoading: false });
+        // Start token refresh for existing sessions
+        get().startTokenRefresh();
       } else {
         // Token expired or invalid
         localStorage.removeItem(TOKEN_KEY);
@@ -64,6 +76,53 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
       }
     } catch {
       set({ isLoading: false });
+    }
+  },
+
+  refreshToken: async () => {
+    const currentToken = get().token || localStorage.getItem(TOKEN_KEY);
+    if (!currentToken) return false;
+
+    try {
+      const res = await fetch('/api/v1/auth/refresh', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${currentToken}`,
+        },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem(TOKEN_KEY, data.token);
+        set({ token: data.token, user: data.user });
+        return true;
+      } else {
+        // Token invalid or expired — logout
+        get().logout();
+        return false;
+      }
+    } catch {
+      // Network error — don't logout, just return false
+      return false;
+    }
+  },
+
+  startTokenRefresh: () => {
+    // Clear any existing interval
+    if (refreshIntervalId) {
+      clearInterval(refreshIntervalId);
+    }
+    // Set up periodic refresh
+    refreshIntervalId = setInterval(() => {
+      get().refreshToken();
+    }, REFRESH_INTERVAL_MS);
+  },
+
+  stopTokenRefresh: () => {
+    if (refreshIntervalId) {
+      clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
     }
   },
 }));

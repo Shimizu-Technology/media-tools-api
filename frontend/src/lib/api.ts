@@ -1,9 +1,13 @@
 /**
  * API client for the Media Tools API.
- * During development, Vite proxies /api requests to localhost:8080.
+ * 
+ * In development, Vite proxies /api requests to localhost:8080.
+ * In production, VITE_API_URL points to the Render backend.
  */
 
-const API_BASE = '/api/v1';
+const API_BASE = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api/v1`
+  : '/api/v1';
 
 // ── Types ──
 
@@ -61,11 +65,64 @@ export interface HealthResponse {
   workers: number;
 }
 
+/**
+ * Standard API error response from the backend.
+ * All API endpoints return this format on error.
+ */
 export interface APIError {
+  /** Error type identifier (e.g., "not_found", "invalid_request") */
   error: string;
+  /** Human-readable error message */
   message: string;
+  /** HTTP status code */
   code: number;
 }
+
+/**
+ * Type guard to check if an error is an APIError.
+ */
+export function isAPIError(err: unknown): err is APIError {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'error' in err &&
+    'message' in err &&
+    'code' in err
+  );
+}
+
+/**
+ * Safely extract error message from any error type.
+ */
+export function getErrorMessage(err: unknown): string {
+  if (isAPIError(err)) {
+    return err.message;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (typeof err === 'string') {
+    return err;
+  }
+  return 'An unexpected error occurred';
+}
+
+/**
+ * Common error codes returned by the API.
+ */
+export const ErrorCodes = {
+  INVALID_REQUEST: 'invalid_request',
+  UNAUTHORIZED: 'unauthorized',
+  FORBIDDEN: 'forbidden',
+  NOT_FOUND: 'not_found',
+  CONFLICT: 'conflict',
+  RATE_LIMIT_EXCEEDED: 'rate_limit_exceeded',
+  SERVER_ERROR: 'server_error',
+  DATABASE_ERROR: 'database_error',
+  SERVICE_UNAVAILABLE: 'service_unavailable',
+} as const;
+
+export type ErrorCode = typeof ErrorCodes[keyof typeof ErrorCodes];
 
 export interface Batch {
   id: string;
@@ -412,6 +469,14 @@ export async function login(email: string, password: string): Promise<AuthRespon
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
+  });
+  return handleResponse<AuthResponse>(res);
+}
+
+export async function refreshToken(): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/refresh`, {
+    method: 'POST',
+    headers: getHeaders(),
   });
   return handleResponse<AuthResponse>(res);
 }

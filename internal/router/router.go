@@ -19,11 +19,11 @@ import (
 )
 
 // Setup creates and configures the Gin router with all routes.
-func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhookservice.Service, sum *summary.Service, jwtSecret string, allowedOrigins []string) *gin.Engine {
+func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhookservice.Service, sum *summary.Service, jwtSecret, adminAPIKey string, allowedOrigins []string) *gin.Engine {
 	r := gin.Default()
 	r.Use(middleware.CORS(allowedOrigins))
 
-	h := handlers.NewHandler(db, wp, at, ws, sum, jwtSecret)
+	h := handlers.NewHandler(db, wp, at, ws, sum, jwtSecret, adminAPIKey)
 	rateLimiter := middleware.NewRateLimiter()
 
 	// --- Public Routes (no auth required) ---
@@ -43,6 +43,7 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhooks
 	jwtProtected.Use(middleware.JWTAuth(db, jwtSecret))
 	{
 		jwtProtected.GET("/auth/me", h.GetMe)
+		jwtProtected.POST("/auth/refresh", h.RefreshToken)
 		jwtProtected.GET("/workspace", h.GetWorkspace)
 		jwtProtected.POST("/workspace", h.SaveToWorkspace)
 		jwtProtected.DELETE("/workspace/:type/:id", h.RemoveFromWorkspace)

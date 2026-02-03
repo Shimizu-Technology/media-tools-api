@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Webhook as WebhookIcon, Plus, Trash2, ToggleLeft, ToggleRight,
-  CheckCircle, XCircle, Clock, Send,
+  CheckCircle, XCircle, Clock, Send, AlertCircle,
 } from 'lucide-react';
 import {
   listWebhooks, createWebhook, updateWebhook, deleteWebhook,
@@ -34,12 +34,14 @@ export function WebhooksPage() {
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
+    setError('');
     try {
       const [wh, del] = await Promise.all([listWebhooks(), listWebhookDeliveries()]);
       setWebhooks(wh);
       setDeliveries(del);
-    } catch {
-      // Error loading
+    } catch (err: unknown) {
+      const apiErr = err as { message?: string };
+      setError(apiErr.message || 'Failed to load webhooks');
     }
     setLoading(false);
   };
@@ -65,17 +67,25 @@ export function WebhooksPage() {
   };
 
   const handleToggle = async (id: string, currentActive: boolean) => {
+    setError('');
     try {
       await updateWebhook(id, !currentActive);
       await loadData();
-    } catch { /* ignore */ }
+    } catch (err: unknown) {
+      const apiErr = err as { message?: string };
+      setError(apiErr.message || 'Failed to update webhook');
+    }
   };
 
   const handleDelete = async (id: string) => {
+    setError('');
     try {
       await deleteWebhook(id);
       await loadData();
-    } catch { /* ignore */ }
+    } catch (err: unknown) {
+      const apiErr = err as { message?: string };
+      setError(apiErr.message || 'Failed to delete webhook');
+    }
   };
 
   const toggleEvent = (event: string) => {
@@ -120,6 +130,22 @@ export function WebhooksPage() {
             <span className="hidden sm:inline">Add Webhook</span>
           </button>
         </motion.div>
+
+        {/* Error display */}
+        {error && !showForm && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-3 rounded-xl border flex items-center gap-2"
+            style={{
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              borderColor: 'rgba(239, 68, 68, 0.3)',
+            }}
+          >
+            <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+            <span className="text-sm text-red-500">{error}</span>
+          </motion.div>
+        )}
 
         {/* Secret display */}
         {createdSecret && (

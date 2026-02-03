@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Layout, FileText, Mic, FileType2, Trash2, ExternalLink, Clock } from 'lucide-react';
+import { Layout, FileText, Mic, FileType2, Trash2, ExternalLink, Clock, AlertCircle } from 'lucide-react';
 import { getWorkspace, removeFromWorkspace } from '../lib/api';
-import type { WorkspaceResponse } from '../lib/api';
+import type { WorkspaceResponse, APIError } from '../lib/api';
 
 /**
  * Workspace page — Shows user's saved transcripts, audio, and PDFs (MTA-20).
@@ -10,6 +10,8 @@ import type { WorkspaceResponse } from '../lib/api';
 export function WorkspacePage() {
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'transcript' | 'audio' | 'pdf'>('transcript');
 
   useEffect(() => {
@@ -17,21 +19,30 @@ export function WorkspacePage() {
   }, []);
 
   const loadWorkspace = async () => {
+    setError(null);
     try {
       const data = await getWorkspace();
       setWorkspace(data);
-    } catch {
-      // Not logged in or error
+    } catch (err: unknown) {
+      const apiErr = err as APIError;
+      // 401 means not logged in — not an error to display
+      if (apiErr.code !== 401) {
+        setError(apiErr.message || 'Failed to load workspace');
+      }
     }
     setLoading(false);
   };
 
   const handleRemove = async (itemType: string, itemId: string) => {
+    setActionError(null);
     try {
       await removeFromWorkspace(itemType, itemId);
       await loadWorkspace();
-    } catch {
-      // Silently fail
+    } catch (err: unknown) {
+      const apiErr = err as APIError;
+      setActionError(apiErr.message || 'Failed to remove item');
+      // Auto-clear after 3 seconds
+      setTimeout(() => setActionError(null), 3000);
     }
   };
 
@@ -95,6 +106,22 @@ export function WorkspacePage() {
             </button>
           ))}
         </div>
+
+        {/* Error display */}
+        {(error || actionError) && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-4 p-3 rounded-xl border flex items-center gap-2"
+            style={{
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              borderColor: 'rgba(239, 68, 68, 0.3)',
+            }}
+          >
+            <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+            <span className="text-sm text-red-500">{error || actionError}</span>
+          </motion.div>
+        )}
 
         {/* Content */}
         {loading ? (

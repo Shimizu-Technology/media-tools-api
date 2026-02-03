@@ -1,60 +1,30 @@
-import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { useEffect } from 'react'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { Header } from './components/Header'
+import { HomePage } from './pages/HomePage'
+import { HistoryPage } from './pages/HistoryPage'
+import { AudioPage } from './pages/AudioPage'
+import { PdfPage } from './pages/PdfPage'
+import { DocsPage } from './pages/DocsPage'
+import { AuthPage } from './pages/AuthPage'
+import { WebhooksPage } from './pages/WebhooksPage'
+import { WorkspacePage } from './pages/WorkspacePage'
+import { useAuthStore } from './stores/authStore'
 
-import { Header } from './components/Header';
-import { useTheme } from './hooks/useTheme';
-import { HomePage } from './pages/HomePage';
-import { HistoryPage } from './pages/HistoryPage';
-import { DocsPage } from './pages/DocsPage';
-import { AudioPage } from './pages/AudioPage';
-import { PdfPage } from './pages/PdfPage';
-import { AuthPage } from './pages/AuthPage';
-import { WebhooksPage } from './pages/WebhooksPage';
-import { WorkspacePage } from './pages/WorkspacePage';
-import { useAuthStore } from './stores/authStore';
-
-/**
- * Media Tools API — Main Application
- *
- * Routes:
- *   /          — Home: URL input + transcript display (MTA-11)
- *   /history   — History dashboard (MTA-13)
- *   /docs      — API documentation (MTA-15)
- *   /audio     — Audio transcription via Whisper (MTA-16)
- *   /pdf       — PDF text extraction (MTA-17)
- *   /webhooks  — Webhook management (MTA-18)
- *   /auth      — Login / Register (MTA-20)
- *   /workspace — Saved items workspace (MTA-20)
- */
 function App() {
-  const { isDark, toggle: toggleTheme } = useTheme();
-  const initialize = useAuthStore((s) => s.initialize);
+  const initialize = useAuthStore((s) => s.initialize)
 
-  // Initialize auth state on mount (check for stored JWT)
   useEffect(() => {
-    initialize();
-  }, [initialize]);
+    initialize()
+  }, [initialize])
 
   return (
     <BrowserRouter>
       <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
-        <Header isDark={isDark} onToggleTheme={toggleTheme} />
-
-        {/* Background effects */}
-        <div className="fixed inset-0 pointer-events-none overflow-hidden">
-          <div
-            className="absolute top-1/4 -left-1/4 w-96 h-96 rounded-full blur-3xl opacity-20 animate-pulse"
-            style={{ backgroundColor: 'var(--color-brand-500)' }}
-          />
-          <div
-            className="absolute top-1/3 -right-1/4 w-96 h-96 rounded-full blur-3xl opacity-10 animate-pulse"
-            style={{ backgroundColor: 'var(--color-brand-400)', animationDelay: '1s' }}
-          />
-        </div>
-
-        {/* Routes */}
+        <Header />
+        
         <Routes>
-          <Route path="/" element={<HomePage isDark={isDark} />} />
+          <Route path="/" element={<HomePage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/audio" element={<AudioPage />} />
           <Route path="/pdf" element={<PdfPage />} />
@@ -64,30 +34,20 @@ function App() {
           <Route path="/workspace" element={<WorkspacePage />} />
         </Routes>
 
-        {/* Footer */}
-        <footer
-          className="border-t py-8 text-center text-sm"
-          style={{
-            borderColor: 'var(--color-border)',
-            color: 'var(--color-text-muted)',
-          }}
-        >
-          <p>
-            Built with Go + React by{' '}
-            <a
-              href="https://github.com/Shimizu-Technology"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium transition-colors duration-200"
-              style={{ color: 'var(--color-brand-500)' }}
-            >
-              Shimizu Technology
-            </a>
-          </p>
+        <footer className="py-8 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
+          Built with Go + React by{' '}
+          <a
+            href="https://github.com/Shimizu-Technology"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: 'var(--color-brand-500)' }}
+          >
+            Shimizu Technology
+          </a>
         </footer>
       </div>
     </BrowserRouter>
-  );
+  )
 }
 
-export default App;
+export default App

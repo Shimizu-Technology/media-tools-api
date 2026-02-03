@@ -38,6 +38,14 @@ type bucket struct {
 	lastRefill time.Time
 }
 
+// allowResult contains the result of a rate limit check,
+// including header information for the response.
+type allowResult struct {
+	allowed   bool
+	remaining float64
+	limit     float64
+}
+
 // NewRateLimiter creates a new rate limiter.
 func NewRateLimiter() *RateLimiter {
 	rl := &RateLimiter{
@@ -61,9 +69,12 @@ func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 			return
 		}
 
-		// Check rate limit
-		allowed := rl.allow(apiKey.ID, apiKey.RateLimit)
-		if !allowed {
+		// Check rate limit — this returns all info atomically to avoid race conditions
+		result := rl.allow(apiKey.ID, apiKey.RateLimit)
+		if !result.allowed {
+			// Add headers even for rejected requests so clients know their limits
+			c.Header("X-RateLimit-Limit", formatFloat(result.limit))
+			c.Header("X-RateLimit-Remaining", "0")
 			c.JSON(http.StatusTooManyRequests, models.ErrorResponse{
 				Error:   "rate_limit_exceeded",
 				Message: "Rate limit exceeded. Try again later.",
@@ -75,18 +86,17 @@ func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 
 		// Add rate limit headers so clients know their limits
 		// Go Pattern: These headers follow the standard draft RFC for rate limiting.
-		b := rl.getBucket(apiKey.ID)
-		if b != nil {
-			c.Header("X-RateLimit-Limit", formatFloat(b.maxTokens))
-			c.Header("X-RateLimit-Remaining", formatFloat(b.tokens))
-		}
+		c.Header("X-RateLimit-Limit", formatFloat(result.limit))
+		c.Header("X-RateLimit-Remaining", formatFloat(result.remaining))
 
 		c.Next()
 	}
 }
 
 // allow checks if a request should be allowed, consuming a token if so.
-func (rl *RateLimiter) allow(keyID string, rateLimit int) bool {
+// Returns the result atomically to avoid race conditions between checking
+// the limit and reading the bucket for headers.
+func (rl *RateLimiter) allow(keyID string, rateLimit int) allowResult {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
@@ -113,19 +123,20 @@ func (rl *RateLimiter) allow(keyID string, rateLimit int) bool {
 
 	// Check if we have a token available
 	if b.tokens < 1.0 {
-		return false
+		return allowResult{
+			allowed:   false,
+			remaining: 0,
+			limit:     b.maxTokens,
+		}
 	}
 
 	// Consume a token
 	b.tokens--
-	return true
-}
-
-// getBucket returns the bucket for a key (read-only, for headers).
-func (rl *RateLimiter) getBucket(keyID string) *bucket {
-	rl.mu.RLock()
-	defer rl.mu.RUnlock()
-	return rl.buckets[keyID]
+	return allowResult{
+		allowed:   true,
+		remaining: b.tokens,
+		limit:     b.maxTokens,
+	}
 }
 
 // cleanup periodically removes stale buckets to prevent memory leaks.

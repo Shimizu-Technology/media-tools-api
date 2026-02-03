@@ -1,0 +1,7 @@
+# SEO files - serve directly
+/robots.txt    /robots.txt    200
+/sitemap.xml   /sitemap.xml   200
+/manifest.json /manifest.json 200
+
+# SPA fallback - all other routes go to index.html
+/*    /index.html   200

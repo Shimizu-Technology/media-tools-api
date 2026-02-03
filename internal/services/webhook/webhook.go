@@ -20,8 +20,9 @@ import (
 
 // Service handles webhook notification delivery.
 type Service struct {
-	db     *database.DB
-	client *http.Client
+	db         *database.DB
+	client     *http.Client
+	shutdownCh chan struct{} // Signals pending deliveries to stop
 }
 
 // New creates a new webhook service.
@@ -31,7 +32,14 @@ func New(db *database.DB) *Service {
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		shutdownCh: make(chan struct{}),
 	}
+}
+
+// Shutdown signals all pending webhook deliveries to stop.
+// Call this during graceful server shutdown.
+func (s *Service) Shutdown() {
+	close(s.shutdownCh)
 }
 
 // GenerateSecret creates a random HMAC secret for a webhook.
@@ -83,8 +91,12 @@ func (s *Service) NotifyEvent(ctx context.Context, event string, data interface{
 
 // deliverWithRetry attempts to deliver a webhook with exponential backoff.
 // Retries: 3 attempts with delays of 1s, 5s, 30s.
+// Delivery respects shutdown signals for graceful termination.
 func (s *Service) deliverWithRetry(wh models.Webhook, event string, payloadJSON []byte) {
-	ctx := context.Background()
+	// Create a context with a generous timeout for the entire retry sequence
+	// (up to ~40 seconds of retries + delivery time)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
 
 	// Create delivery record
 	delivery := &models.WebhookDelivery{
@@ -103,11 +115,27 @@ func (s *Service) deliverWithRetry(wh models.Webhook, event string, payloadJSON 
 
 	for attempt := 0; attempt < len(retryDelays); attempt++ {
 		if attempt > 0 {
-			time.Sleep(retryDelays[attempt])
+			// Wait for the retry delay, but respect shutdown signals
+			select {
+			case <-s.shutdownCh:
+				log.Printf("⚠️  Webhook delivery aborted due to shutdown: %s → %s", event, wh.URL)
+				delivery.Status = "failed"
+				delivery.LastError = "shutdown during delivery"
+				s.db.UpdateWebhookDelivery(ctx, delivery)
+				return
+			case <-ctx.Done():
+				log.Printf("⚠️  Webhook delivery timed out: %s → %s", event, wh.URL)
+				delivery.Status = "failed"
+				delivery.LastError = "delivery timeout"
+				s.db.UpdateWebhookDelivery(ctx, delivery)
+				return
+			case <-time.After(retryDelays[attempt]):
+				// Continue with next attempt
+			}
 		}
 
 		delivery.Attempts = attempt + 1
-		statusCode, err := s.deliver(wh, payloadJSON)
+		statusCode, err := s.deliver(ctx, wh, payloadJSON)
 		delivery.ResponseCode = statusCode
 
 		if err == nil && statusCode >= 200 && statusCode < 300 {
@@ -146,9 +174,9 @@ func (s *Service) deliverWithRetry(wh models.Webhook, event string, payloadJSON 
 	log.Printf("❌ Webhook delivery failed permanently: %s → %s", event, wh.URL)
 }
 
-// deliver sends a single webhook HTTP request.
-func (s *Service) deliver(wh models.Webhook, payloadJSON []byte) (int, error) {
-	req, err := http.NewRequest("POST", wh.URL, bytes.NewReader(payloadJSON))
+// deliver sends a single webhook HTTP request with context support.
+func (s *Service) deliver(ctx context.Context, wh models.Webhook, payloadJSON []byte) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", wh.URL, bytes.NewReader(payloadJSON))
 	if err != nil {
 		return 0, fmt.Errorf("failed to create request: %w", err)
 	}

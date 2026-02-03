@@ -268,9 +268,21 @@ func (h *Handler) SummarizeAudio(c *gin.Context) {
 	}
 
 	// Marshal arrays to JSON
-	keyPointsJSON, _ := json.Marshal(result.KeyPoints)
-	actionItemsJSON, _ := json.Marshal(result.ActionItems)
-	decisionsJSON, _ := json.Marshal(result.Decisions)
+	keyPointsJSON, err := json.Marshal(result.KeyPoints)
+	if err != nil {
+		log.Printf("Failed to marshal key points for %s: %v", id, err)
+		keyPointsJSON = []byte("[]")
+	}
+	actionItemsJSON, err := json.Marshal(result.ActionItems)
+	if err != nil {
+		log.Printf("Failed to marshal action items for %s: %v", id, err)
+		actionItemsJSON = []byte("[]")
+	}
+	decisionsJSON, err := json.Marshal(result.Decisions)
+	if err != nil {
+		log.Printf("Failed to marshal decisions for %s: %v", id, err)
+		decisionsJSON = []byte("[]")
+	}
 
 	// Update record
 	at.SummaryText = result.Summary

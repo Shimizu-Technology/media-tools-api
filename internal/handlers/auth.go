@@ -149,3 +149,38 @@ func (h *Handler) GetMe(c *gin.Context) {
 
 	c.JSON(http.StatusOK, user)
 }
+
+// RefreshToken issues a new JWT token for an authenticated user.
+// POST /api/v1/auth/refresh
+//
+// This endpoint allows clients to obtain a fresh token before the current
+// one expires. Call this periodically (e.g., every hour) to maintain
+// the session without requiring re-login.
+func (h *Handler) RefreshToken(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Not authenticated",
+			Code:    http.StatusUnauthorized,
+		})
+		return
+	}
+
+	// Generate a fresh JWT
+	token, err := middleware.GenerateJWT(user, h.JWTSecret)
+	if err != nil {
+		log.Printf("❌ Failed to refresh token: %v", err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "token_error",
+			Message: "Failed to refresh token",
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, models.AuthResponse{
+		Token: token,
+		User:  *user,
+	})
+}

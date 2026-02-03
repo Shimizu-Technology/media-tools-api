@@ -36,6 +36,10 @@ type Config struct {
 	// JWT Authentication (MTA-20)
 	JWTSecret string
 
+	// Admin API key for bootstrap operations (creating first API keys)
+	// This protects the API key creation endpoint in production.
+	AdminAPIKey string
+
 	// Worker settings
 	WorkerCount    int // Number of background worker goroutines
 	JobQueueSize   int // Size of the in-memory job queue buffer
@@ -74,6 +78,9 @@ func Load() (*Config, error) {
 		// JWT Authentication
 		JWTSecret: getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),
 
+		// Admin API key for bootstrap — optional in dev, required in production
+		AdminAPIKey: getEnv("ADMIN_API_KEY", ""),
+
 		// Worker defaults
 		WorkerCount:  getEnvInt("WORKER_COUNT", 3),
 		JobQueueSize: getEnvInt("JOB_QUEUE_SIZE", 100),
@@ -90,6 +97,18 @@ func Load() (*Config, error) {
 	// Validate required configuration
 	if cfg.YtDlpPath == "" {
 		return nil, fmt.Errorf("yt-dlp not found; set YT_DLP_PATH environment variable")
+	}
+
+	// Security: JWT secret MUST be set in production mode
+	// In release mode, we refuse to start with the default secret.
+	if cfg.GinMode == "release" && cfg.JWTSecret == "dev-jwt-secret-change-in-production" {
+		return nil, fmt.Errorf("JWT_SECRET must be set in production; refusing to start with default secret")
+	}
+
+	// Security: Admin API key MUST be set in production mode
+	// This protects the API key creation endpoint from unauthorized access.
+	if cfg.GinMode == "release" && cfg.AdminAPIKey == "" {
+		return nil, fmt.Errorf("ADMIN_API_KEY must be set in production; this protects API key creation")
 	}
 
 	return cfg, nil

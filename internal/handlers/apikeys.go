@@ -16,8 +16,8 @@ import (
 // CreateAPIKey generates a new API key.
 // POST /api/v1/keys
 //
-// This endpoint is intentionally NOT protected by API key auth (bootstrap problem).
-// In production, you'd protect it with a master/admin key or a separate auth system.
+// Security: This endpoint requires the X-Admin-Key header in production.
+// In development (when ADMIN_API_KEY is not set), the endpoint is open for bootstrapping.
 //
 // Request body:
 //
@@ -25,6 +25,27 @@ import (
 //
 // Response includes the raw key — SAVE IT! It's only shown once.
 func (h *Handler) CreateAPIKey(c *gin.Context) {
+	// Security: Require admin key if one is configured
+	if h.AdminAPIKey != "" {
+		providedKey := c.GetHeader("X-Admin-Key")
+		if providedKey == "" {
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+				Error:   "unauthorized",
+				Message: "X-Admin-Key header is required to create API keys",
+				Code:    http.StatusUnauthorized,
+			})
+			return
+		}
+		if providedKey != h.AdminAPIKey {
+			c.JSON(http.StatusForbidden, models.ErrorResponse{
+				Error:   "forbidden",
+				Message: "Invalid admin key",
+				Code:    http.StatusForbidden,
+			})
+			return
+		}
+	}
+
 	var req models.CreateAPIKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{

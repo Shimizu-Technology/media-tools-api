@@ -73,8 +73,15 @@ func main() {
 	wp.Start()
 	defer wp.Stop()
 
+	// Log admin API key status
+	if cfg.AdminAPIKey != "" {
+		log.Println("✅ Admin API key configured (API key creation protected)")
+	} else {
+		log.Println("⚠️  No admin API key set (API key creation is open — set ADMIN_API_KEY in production)")
+	}
+
 	// Step 5: Setup HTTP Router
-	r := router.Setup(db, wp, audioTranscriber, webhookService, summarizer, cfg.JWTSecret, cfg.AllowedOrigins)
+	r := router.Setup(db, wp, audioTranscriber, webhookService, summarizer, cfg.JWTSecret, cfg.AdminAPIKey, cfg.AllowedOrigins)
 
 	// Step 6: Start the HTTP Server
 	srv := &http.Server{
@@ -100,6 +107,10 @@ func main() {
 
 	sig := <-quit
 	log.Printf("🛑 Received signal %v, shutting down gracefully...", sig)
+
+	// Signal webhook service to stop pending deliveries
+	webhookService.Shutdown()
+	log.Println("⏳ Webhook deliveries signaled to stop")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
