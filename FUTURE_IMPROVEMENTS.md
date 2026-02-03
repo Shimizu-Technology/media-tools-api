@@ -30,8 +30,13 @@ Currently, API key creation requires an admin key. Consider these alternatives f
 
 ## Other Ideas
 
+- [ ] **S3 Storage for Audio Files**
+  - Store original audio files in S3/R2 instead of temp directory
+  - Enables: re-processing, download original, multi-server scaling
+  - Required for: load balancers, horizontal scaling
+  - Consider: Cloudflare R2 (no egress fees) or AWS S3
 - [ ] Batch audio uploads
-- [ ] Longer audio file support (chunked uploads)
+- [ ] Longer audio file support (chunked uploads for files > 25MB)
 - [ ] Speaker diarization (who said what)
 - [ ] Real-time transcription via WebSocket
 - [ ] Export to Google Docs / Notion

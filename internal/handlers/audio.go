@@ -21,7 +21,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
-	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
