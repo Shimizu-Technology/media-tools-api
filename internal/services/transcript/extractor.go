@@ -85,13 +85,13 @@ func (e *YtDlpExtractor) SetWhisperFallback(w WhisperTranscriber) {
 // buildBaseArgs returns the common yt-dlp arguments including proxy if configured.
 func (e *YtDlpExtractor) buildBaseArgs() []string {
 	args := []string{
-		"--js-runtimes", "node", // Required for YouTube extraction
+		"--js-runtimes", "node",              // Required for YouTube extraction
+		"--remote-components", "ejs:github",  // Download JS challenge solver from GitHub
 	}
 	if e.proxyURL != "" {
 		args = append(args, "--proxy", e.proxyURL)
-		// When using proxy, use web client with specific format to avoid SABR streaming issues
-		args = append(args, "--extractor-args", "youtube:player_client=web")
-		args = append(args, "--format", "bestaudio[ext=m4a]/bestaudio/best")
+		// Use ios client which doesn't require SABR and works better with proxies
+		args = append(args, "--extractor-args", "youtube:player_client=ios")
 	}
 	return args
 }
