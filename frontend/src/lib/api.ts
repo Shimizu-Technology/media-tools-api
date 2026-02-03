@@ -82,6 +82,8 @@ export interface BatchResponse {
   transcripts: Transcript[];
 }
 
+export type AudioContentType = 'general' | 'phone_call' | 'meeting' | 'voice_memo' | 'interview' | 'lecture';
+
 export interface AudioTranscription {
   id: string;
   filename: string;
@@ -92,6 +94,13 @@ export interface AudioTranscription {
   word_count: number;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   error_message?: string;
+  content_type: AudioContentType;
+  summary_text?: string;
+  key_points: string[];
+  action_items: string[];
+  decisions: string[];
+  summary_model?: string;
+  summary_status: 'none' | 'processing' | 'completed' | 'failed';
   created_at: string;
 }
 
@@ -324,6 +333,46 @@ export async function getAudioTranscription(id: string): Promise<AudioTranscript
 export async function listAudioTranscriptions(): Promise<AudioTranscription[]> {
   const res = await fetch(`${API_BASE}/audio/transcriptions`, { headers: getHeaders() });
   return handleResponse<AudioTranscription[]>(res);
+}
+
+// MTA-22: Summarize an audio transcription
+export async function summarizeAudio(
+  id: string,
+  options?: { content_type?: AudioContentType; model?: string; length?: string }
+): Promise<AudioTranscription> {
+  const res = await fetch(`${API_BASE}/audio/transcriptions/${id}/summarize`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(options || {}),
+  });
+  return handleResponse<AudioTranscription>(res);
+}
+
+// MTA-25: Search audio transcriptions
+export async function searchAudioTranscriptions(params?: {
+  q?: string;
+  content_type?: string;
+  page?: number;
+  per_page?: number;
+}): Promise<PaginatedResponse<AudioTranscription>> {
+  const searchParams = new URLSearchParams();
+  if (params?.q) searchParams.set('q', params.q);
+  if (params?.content_type) searchParams.set('content_type', params.content_type);
+  if (params?.page) searchParams.set('page', String(params.page));
+  if (params?.per_page) searchParams.set('per_page', String(params.per_page));
+  const res = await fetch(`${API_BASE}/audio/transcriptions/search?${searchParams}`, { headers: getHeaders() });
+  return handleResponse<PaginatedResponse<AudioTranscription>>(res);
+}
+
+// MTA-26: Export audio transcription
+export function getAudioExportUrl(id: string, format: 'txt' | 'md' | 'json'): string {
+  return `${API_BASE}/audio/transcriptions/${id}/export?format=${format}`;
+}
+
+export async function downloadAudioExport(id: string, format: 'txt' | 'md' | 'json'): Promise<Blob> {
+  const res = await fetch(getAudioExportUrl(id, format), { headers: getHeaders() });
+  if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);
+  return res.blob();
 }
 
 // ── PDF Extraction (MTA-17) ──

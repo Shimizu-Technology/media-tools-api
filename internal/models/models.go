@@ -131,32 +131,64 @@ type PaginatedResponse[T any] struct {
 	TotalPages int `json:"total_pages"`
 }
 
-// --- Audio Transcription Models (MTA-16) ---
+// --- Audio Transcription Models (MTA-16, MTA-22/24/25/26) ---
 
-type AudioTranscription struct {
-	ID             string    `json:"id" db:"id"`
-	Filename       string    `json:"filename" db:"filename"`
-	OriginalName   string    `json:"original_name" db:"original_name"`
-	Duration       float64   `json:"duration" db:"duration"`
-	Language       string    `json:"language" db:"language"`
-	TranscriptText string    `json:"transcript_text" db:"transcript_text"`
-	WordCount      int       `json:"word_count" db:"word_count"`
-	Status         string    `json:"status" db:"status"`
-	ErrorMessage   string    `json:"error_message,omitempty" db:"error_message"`
-	UserID         *string   `json:"user_id,omitempty" db:"user_id"`
-	CreatedAt      time.Time `json:"created_at" db:"created_at"`
+// AudioContentType defines the type of audio content for tailored summarization.
+type AudioContentType string
+
+const (
+	ContentGeneral      AudioContentType = "general"
+	ContentPhoneCall    AudioContentType = "phone_call"
+	ContentMeeting      AudioContentType = "meeting"
+	ContentVoiceMemo    AudioContentType = "voice_memo"
+	ContentInterview    AudioContentType = "interview"
+	ContentLecture      AudioContentType = "lecture"
+)
+
+// ValidContentTypes for validation.
+var ValidContentTypes = map[AudioContentType]bool{
+	ContentGeneral:   true,
+	ContentPhoneCall: true,
+	ContentMeeting:   true,
+	ContentVoiceMemo: true,
+	ContentInterview: true,
+	ContentLecture:   true,
 }
 
-type AudioTranscriptionResponse struct {
-	ID             string  `json:"id"`
-	OriginalName   string  `json:"original_name"`
-	Duration       float64 `json:"duration"`
-	Language       string  `json:"language"`
-	TranscriptText string  `json:"transcript_text"`
-	WordCount      int     `json:"word_count"`
-	Status         string  `json:"status"`
-	ErrorMessage   string  `json:"error_message,omitempty"`
-	CreatedAt      string  `json:"created_at"`
+type AudioTranscription struct {
+	ID             string           `json:"id" db:"id"`
+	Filename       string           `json:"filename" db:"filename"`
+	OriginalName   string           `json:"original_name" db:"original_name"`
+	Duration       float64          `json:"duration" db:"duration"`
+	Language       string           `json:"language" db:"language"`
+	TranscriptText string           `json:"transcript_text" db:"transcript_text"`
+	WordCount      int              `json:"word_count" db:"word_count"`
+	Status         string           `json:"status" db:"status"`
+	ErrorMessage   string           `json:"error_message,omitempty" db:"error_message"`
+	ContentType    AudioContentType `json:"content_type" db:"content_type"`
+	SummaryText    string           `json:"summary_text,omitempty" db:"summary_text"`
+	KeyPoints      json.RawMessage  `json:"key_points" db:"key_points"`
+	ActionItems    json.RawMessage  `json:"action_items" db:"action_items"`
+	Decisions      json.RawMessage  `json:"decisions" db:"decisions"`
+	SummaryModel   string           `json:"summary_model,omitempty" db:"summary_model"`
+	SummaryStatus  string           `json:"summary_status" db:"summary_status"`
+	UserID         *string          `json:"user_id,omitempty" db:"user_id"`
+	CreatedAt      time.Time        `json:"created_at" db:"created_at"`
+}
+
+// SummarizeAudioRequest is the request body for POST /api/v1/audio/transcriptions/:id/summarize
+type SummarizeAudioRequest struct {
+	ContentType string `json:"content_type,omitempty"` // phone_call, meeting, voice_memo, etc.
+	Model       string `json:"model,omitempty"`        // Override AI model
+	Length      string `json:"length,omitempty"`       // short, medium, detailed
+}
+
+// AudioSearchParams for searching audio transcriptions (MTA-25).
+type AudioSearchParams struct {
+	Query       string `form:"q"`
+	ContentType string `form:"content_type"`
+	Page        int    `form:"page"`
+	PerPage     int    `form:"per_page"`
 }
 
 // --- PDF Extraction Models (MTA-17) ---

@@ -74,7 +74,7 @@ func main() {
 	defer wp.Stop()
 
 	// Step 5: Setup HTTP Router
-	r := router.Setup(db, wp, audioTranscriber, webhookService, cfg.JWTSecret, cfg.AllowedOrigins)
+	r := router.Setup(db, wp, audioTranscriber, webhookService, summarizer, cfg.JWTSecret, cfg.AllowedOrigins)
 
 	// Step 6: Start the HTTP Server
 	srv := &http.Server{

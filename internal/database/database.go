@@ -297,13 +297,18 @@ func (db *DB) RevokeAPIKey(ctx context.Context, id string) error {
 // CreateAudioTranscription inserts a new audio transcription record.
 func (db *DB) CreateAudioTranscription(ctx context.Context, at *models.AudioTranscription) error {
 	query := `
-		INSERT INTO audio_transcriptions (filename, original_name, duration, language, transcript_text, word_count, status, error_message)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO audio_transcriptions (filename, original_name, duration, language, transcript_text, word_count, status, error_message, content_type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, created_at`
+
+	if at.ContentType == "" {
+		at.ContentType = models.ContentGeneral
+	}
 
 	return db.QueryRowContext(ctx, query,
 		at.Filename, at.OriginalName, at.Duration, at.Language,
 		at.TranscriptText, at.WordCount, at.Status, at.ErrorMessage,
+		at.ContentType,
 	).Scan(&at.ID, &at.CreatedAt)
 }
 
@@ -332,6 +337,21 @@ func (db *DB) UpdateAudioTranscription(ctx context.Context, at *models.AudioTran
 	return err
 }
 
+// UpdateAudioSummary updates the summary fields of an audio transcription (MTA-22).
+func (db *DB) UpdateAudioSummary(ctx context.Context, at *models.AudioTranscription) error {
+	query := `
+		UPDATE audio_transcriptions
+		SET content_type = $2, summary_text = $3, key_points = $4, action_items = $5,
+			decisions = $6, summary_model = $7, summary_status = $8
+		WHERE id = $1`
+
+	_, err := db.ExecContext(ctx, query,
+		at.ID, at.ContentType, at.SummaryText, at.KeyPoints,
+		at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryStatus,
+	)
+	return err
+}
+
 // ListAudioTranscriptions returns recent audio transcriptions.
 func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int) ([]models.AudioTranscription, error) {
 	if limit <= 0 || limit > 100 {
@@ -344,6 +364,59 @@ func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int) ([]models.
 		return nil, fmt.Errorf("failed to list audio transcriptions: %w", err)
 	}
 	return transcriptions, nil
+}
+
+// SearchAudioTranscriptions performs full-text search across transcripts and summaries (MTA-25).
+func (db *DB) SearchAudioTranscriptions(ctx context.Context, params models.AudioSearchParams) ([]models.AudioTranscription, int, error) {
+	if params.Page < 1 {
+		params.Page = 1
+	}
+	if params.PerPage < 1 || params.PerPage > 100 {
+		params.PerPage = 20
+	}
+
+	var conditions []string
+	var args []interface{}
+	argNum := 1
+
+	if params.Query != "" {
+		conditions = append(conditions, fmt.Sprintf(
+			"to_tsvector('english', transcript_text || ' ' || summary_text) @@ plainto_tsquery('english', $%d)", argNum))
+		args = append(args, params.Query)
+		argNum++
+	}
+
+	if params.ContentType != "" {
+		conditions = append(conditions, fmt.Sprintf("content_type = $%d", argNum))
+		args = append(args, params.ContentType)
+		argNum++
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// Count total
+	var total int
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM audio_transcriptions %s", whereClause)
+	if err := db.GetContext(ctx, &total, countQuery, args...); err != nil {
+		return nil, 0, fmt.Errorf("count query failed: %w", err)
+	}
+
+	// Fetch page
+	offset := (params.Page - 1) * params.PerPage
+	selectQuery := fmt.Sprintf(
+		"SELECT * FROM audio_transcriptions %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d",
+		whereClause, argNum, argNum+1)
+	args = append(args, params.PerPage, offset)
+
+	var results []models.AudioTranscription
+	if err := db.SelectContext(ctx, &results, selectQuery, args...); err != nil {
+		return nil, 0, fmt.Errorf("search query failed: %w", err)
+	}
+
+	return results, total, nil
 }
 
 // --- PDF Extraction Operations (MTA-17) ---

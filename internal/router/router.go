@@ -8,16 +8,17 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/handlers"
 	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	webhookservice "github.com/Shimizu-Technology/media-tools-api/internal/services/webhook"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
 // Setup creates and configures the Gin router with all routes.
-func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhookservice.Service, jwtSecret string, allowedOrigins []string) *gin.Engine {
+func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhookservice.Service, sum *summary.Service, jwtSecret string, allowedOrigins []string) *gin.Engine {
 	r := gin.Default()
 	r.Use(middleware.CORS(allowedOrigins))
 
-	h := handlers.NewHandler(db, wp, at, ws, jwtSecret)
+	h := handlers.NewHandler(db, wp, at, ws, sum, jwtSecret)
 	rateLimiter := middleware.NewRateLimiter()
 
 	// --- Public Routes (no auth required) ---
@@ -65,9 +66,12 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhooks
 		protected.GET("/keys", h.ListAPIKeys)
 		protected.DELETE("/keys/:id", h.RevokeAPIKey)
 
-		// Audio transcription endpoints (MTA-16)
+		// Audio transcription endpoints (MTA-16, MTA-22, MTA-25, MTA-26)
 		protected.POST("/audio/transcribe", h.TranscribeAudio)
+		protected.GET("/audio/transcriptions/search", h.SearchAudioTranscriptions) // MTA-25: must be before :id
 		protected.GET("/audio/transcriptions/:id", h.GetAudioTranscription)
+		protected.GET("/audio/transcriptions/:id/export", h.ExportAudioTranscription) // MTA-26
+		protected.POST("/audio/transcriptions/:id/summarize", h.SummarizeAudio)       // MTA-22
 		protected.GET("/audio/transcriptions", h.ListAudioTranscriptions)
 
 		// PDF extraction endpoints (MTA-17)
