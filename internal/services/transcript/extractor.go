@@ -153,6 +153,7 @@ func (e *YtDlpExtractor) extractWithWhisper(ctx context.Context, url, videoID st
 
 	cmd := exec.CommandContext(ctx, e.ytDlpPath,
 		"--js-runtimes", "node", // Required for YouTube extraction
+		"--extractor-args", "youtube:player_client=tv", // Use TV client to avoid PO token requirement
 		"--extract-audio",
 		"--audio-format", "mp3",
 		"--audio-quality", "0",
@@ -228,6 +229,7 @@ func (e *YtDlpExtractor) getMetadata(ctx context.Context, url string) (*ytDlpMet
 	// This prevents runaway processes — important for a web server!
 	cmd := exec.CommandContext(ctx, e.ytDlpPath,
 		"--js-runtimes", "node", // Required for YouTube extraction
+		"--extractor-args", "youtube:player_client=tv", // Use TV client to avoid PO token requirement
 		"--dump-json",             // Output video info as JSON
 		"--no-download",           // Don't download the video itself
 		"--no-warnings",           // Suppress warning messages
@@ -279,6 +281,7 @@ func (e *YtDlpExtractor) getTranscript(ctx context.Context, url string) (string,
 	for _, subType := range []string{"--write-subs", "--write-auto-subs"} {
 		cmd := exec.CommandContext(ctx, e.ytDlpPath,
 			"--js-runtimes", "node", // Required for YouTube extraction
+			"--extractor-args", "youtube:player_client=tv", // Use TV client to avoid PO token requirement
 			"--skip-download",         // Don't download video
 			subType,                   // Which subtitle type to get
 			"--sub-langs", "en.*,en",  // Prefer English
