@@ -299,10 +299,11 @@ Same pattern: intercept request → do something → pass along (or reject).
 
 ## Common Commands
 
+### Manual (like running `rails s`)
+
 ```bash
-make help             # Show all available commands
-make run              # Build and start the API server
-make frontend-dev     # Start React dev server
+make run              # Build and start the API server (foreground, see all logs)
+make frontend-dev     # Start React dev server (separate terminal)
 make frontend-build   # Build frontend for production
 make test             # Run all Go tests
 make health           # Quick health check (server must be running)
@@ -311,9 +312,66 @@ make migrate          # Run pending migrations (also runs on server start)
 make migrate-down     # Rollback last migration
 make fmt              # Format Go code
 make vet              # Catch common mistakes
-make docker-up        # Start everything via Docker Compose
+make help             # Show all available commands
 make clean            # Remove build artifacts
 ```
+
+### Docker (self-contained — no local Go/Postgres needed)
+
+```bash
+# First time (builds images + starts everything):
+docker compose up --build -d
+
+# After that:
+docker compose up -d          # Start everything (background)
+docker compose down           # Stop everything
+docker compose ps             # What's running?
+docker compose restart api    # Restart just the API
+```
+
+### Docker vs Manual — What's the Difference?
+
+| | Manual (`make run`) | Docker (`docker compose up`) |
+|---|---|---|
+| **Requires** | Go, PostgreSQL, Node.js installed | Only Docker |
+| **Database** | Your local PostgreSQL | Its own PostgreSQL container |
+| **Frontend** | Separate terminal (`make frontend-dev`) | Built into the container |
+| **Logs** | Right in your terminal (foreground) | Background — use `docker compose logs` |
+| **Best for** | Editing Go code, fast iteration | Quick testing, demos, deployment |
+| **URL** | API `:8080`, Frontend `:5173` | Everything on `:8080` |
+
+**Rule of thumb:** Use Docker when you want to test or demo. Use Manual when you're actively writing Go code (faster rebuild cycle).
+
+---
+
+## Where Are My Logs? (Docker)
+
+If you're coming from Rails, you're used to seeing every request scroll by in your terminal. Docker runs in the background by default (the `-d` flag = "detached"), so you won't see logs unless you ask for them.
+
+```bash
+# Watch server logs in real time (like rails s)
+docker compose logs -f api
+
+# Watch database logs
+docker compose logs -f db
+
+# Watch everything
+docker compose logs -f
+
+# See last 50 lines
+docker compose logs --tail 50 api
+
+# Without -f (just dump recent logs, don't follow)
+docker compose logs api
+```
+
+**Tip:** If you prefer seeing logs in real time (like `rails s`), run without `-d`:
+```bash
+docker compose up        # Foreground — logs stream in your terminal
+                         # Ctrl+C to stop everything
+```
+
+The `-d` flag just means "don't take over my terminal." Without it, Docker behaves exactly like `rails s` — logs scroll by and Ctrl+C stops the server.
 
 ---
 
