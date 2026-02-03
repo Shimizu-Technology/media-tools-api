@@ -20,6 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
@@ -122,11 +123,18 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	}
 	tempFile.Close()
 
+	// Get the API key from context (set by auth middleware)
+	var apiKeyID *string
+	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
+		apiKeyID = &apiKey.ID
+	}
+
 	// Create a pending record in the database
 	at := &models.AudioTranscription{
 		Filename:     storedFilename,
 		OriginalName: header.Filename,
 		Status:       "pending",
+		APIKeyID:     apiKeyID,
 	}
 
 	if err := h.DB.CreateAudioTranscription(c.Request.Context(), at); err != nil {
@@ -206,10 +214,16 @@ func (h *Handler) GetAudioTranscription(c *gin.Context) {
 	c.JSON(http.StatusOK, at)
 }
 
-// ListAudioTranscriptions returns recent audio transcriptions.
+// ListAudioTranscriptions returns recent audio transcriptions for the authenticated API key.
 // GET /api/v1/audio/transcriptions
 func (h *Handler) ListAudioTranscriptions(c *gin.Context) {
-	transcriptions, err := h.DB.ListAudioTranscriptions(c.Request.Context(), 50)
+	// Get the API key from context to filter by owner
+	var apiKeyID *string
+	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
+		apiKeyID = &apiKey.ID
+	}
+
+	transcriptions, err := h.DB.ListAudioTranscriptions(c.Request.Context(), 50, apiKeyID)
 	if err != nil {
 		log.Printf("Failed to list audio transcriptions: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{

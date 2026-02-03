@@ -31,6 +31,7 @@ type Transcript struct {
 	ErrorMessage   string           `json:"error_message,omitempty" db:"error_message"`
 	BatchID        *string          `json:"batch_id,omitempty" db:"batch_id"`
 	UserID         *string          `json:"user_id,omitempty" db:"user_id"`
+	APIKeyID       *string          `json:"api_key_id,omitempty" db:"api_key_id"`
 	CreatedAt      time.Time        `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time        `json:"updated_at" db:"updated_at"`
 }
@@ -121,6 +122,7 @@ type TranscriptListParams struct {
 	SortDir  string           `form:"sort_dir"`
 	DateFrom string           `form:"date_from"`
 	DateTo   string           `form:"date_to"`
+	APIKeyID *string          // Filter by owning API key (set internally, not from form)
 }
 
 type PaginatedResponse[T any] struct {
@@ -173,6 +175,7 @@ type AudioTranscription struct {
 	SummaryModel   string           `json:"summary_model,omitempty" db:"summary_model"`
 	SummaryStatus  string           `json:"summary_status" db:"summary_status"`
 	UserID         *string          `json:"user_id,omitempty" db:"user_id"`
+	APIKeyID       *string          `json:"api_key_id,omitempty" db:"api_key_id"`
 	CreatedAt      time.Time        `json:"created_at" db:"created_at"`
 }
 
@@ -203,6 +206,7 @@ type PDFExtraction struct {
 	Status       string    `json:"status" db:"status"`
 	ErrorMessage string    `json:"error_message,omitempty" db:"error_message"`
 	UserID       *string   `json:"user_id,omitempty" db:"user_id"`
+	APIKeyID     *string   `json:"api_key_id,omitempty" db:"api_key_id"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 }
 

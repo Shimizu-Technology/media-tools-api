@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
@@ -68,11 +69,18 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 		return
 	}
 
+	// Get the API key from context (set by auth middleware)
+	var apiKeyID *string
+	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
+		apiKeyID = &apiKey.ID
+	}
+
 	// Create a new transcript record with "pending" status
 	t := &models.Transcript{
 		YouTubeURL: youtubeURL,
 		YouTubeID:  videoID,
 		Status:     models.StatusPending,
+		APIKeyID:   apiKeyID,
 	}
 
 	if err := h.DB.CreateTranscript(c.Request.Context(), t); err != nil {
@@ -136,6 +144,11 @@ func (h *Handler) ListTranscripts(c *gin.Context) {
 			Code:    http.StatusBadRequest,
 		})
 		return
+	}
+
+	// Filter by the authenticated API key
+	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
+		params.APIKeyID = &apiKey.ID
 	}
 
 	transcripts, total, err := h.DB.ListTranscripts(c.Request.Context(), params)

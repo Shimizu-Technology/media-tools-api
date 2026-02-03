@@ -62,8 +62,8 @@ func (db *DB) HealthCheck(ctx context.Context) error {
 // Note: batch_id defaults to NULL for single transcript extractions.
 func (db *DB) CreateTranscript(ctx context.Context, t *models.Transcript) error {
 	query := `
-		INSERT INTO transcripts (youtube_url, youtube_id, title, channel_name, duration, language, transcript_text, word_count, status, error_message, batch_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO transcripts (youtube_url, youtube_id, title, channel_name, duration, language, transcript_text, word_count, status, error_message, batch_id, api_key_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, created_at, updated_at`
 
 	// QueryRowContext executes a query that returns a single row.
@@ -71,7 +71,7 @@ func (db *DB) CreateTranscript(ctx context.Context, t *models.Transcript) error 
 	return db.QueryRowContext(ctx, query,
 		t.YouTubeURL, t.YouTubeID, t.Title, t.ChannelName,
 		t.Duration, t.Language, t.TranscriptText, t.WordCount,
-		t.Status, t.ErrorMessage, t.BatchID,
+		t.Status, t.ErrorMessage, t.BatchID, t.APIKeyID,
 	).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt)
 }
 
@@ -158,6 +158,12 @@ func (db *DB) ListTranscripts(ctx context.Context, params models.TranscriptListP
 	if params.DateTo != "" {
 		conditions = append(conditions, fmt.Sprintf("created_at <= $%d", argNum))
 		args = append(args, params.DateTo)
+		argNum++
+	}
+
+	if params.APIKeyID != nil {
+		conditions = append(conditions, fmt.Sprintf("api_key_id = $%d", argNum))
+		args = append(args, *params.APIKeyID)
 		argNum++
 	}
 
@@ -297,8 +303,8 @@ func (db *DB) RevokeAPIKey(ctx context.Context, id string) error {
 // CreateAudioTranscription inserts a new audio transcription record.
 func (db *DB) CreateAudioTranscription(ctx context.Context, at *models.AudioTranscription) error {
 	query := `
-		INSERT INTO audio_transcriptions (filename, original_name, duration, language, transcript_text, word_count, status, error_message, content_type)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO audio_transcriptions (filename, original_name, duration, language, transcript_text, word_count, status, error_message, content_type, api_key_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, created_at`
 
 	if at.ContentType == "" {
@@ -308,7 +314,7 @@ func (db *DB) CreateAudioTranscription(ctx context.Context, at *models.AudioTran
 	return db.QueryRowContext(ctx, query,
 		at.Filename, at.OriginalName, at.Duration, at.Language,
 		at.TranscriptText, at.WordCount, at.Status, at.ErrorMessage,
-		at.ContentType,
+		at.ContentType, at.APIKeyID,
 	).Scan(&at.ID, &at.CreatedAt)
 }
 
@@ -353,13 +359,24 @@ func (db *DB) UpdateAudioSummary(ctx context.Context, at *models.AudioTranscript
 }
 
 // ListAudioTranscriptions returns recent audio transcriptions.
-func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int) ([]models.AudioTranscription, error) {
+func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int, apiKeyID *string) ([]models.AudioTranscription, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 	var transcriptions []models.AudioTranscription
-	err := db.SelectContext(ctx, &transcriptions,
-		`SELECT * FROM audio_transcriptions ORDER BY created_at DESC LIMIT $1`, limit)
+	var err error
+
+	if apiKeyID != nil {
+		// Filter by API key owner
+		err = db.SelectContext(ctx, &transcriptions,
+			`SELECT * FROM audio_transcriptions WHERE api_key_id = $1 ORDER BY created_at DESC LIMIT $2`,
+			*apiKeyID, limit)
+	} else {
+		// No filtering (for admin or when API key is not available)
+		err = db.SelectContext(ctx, &transcriptions,
+			`SELECT * FROM audio_transcriptions ORDER BY created_at DESC LIMIT $1`, limit)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to list audio transcriptions: %w", err)
 	}
@@ -424,13 +441,13 @@ func (db *DB) SearchAudioTranscriptions(ctx context.Context, params models.Audio
 // CreatePDFExtraction inserts a new PDF extraction record.
 func (db *DB) CreatePDFExtraction(ctx context.Context, pe *models.PDFExtraction) error {
 	query := `
-		INSERT INTO pdf_extractions (filename, original_name, page_count, text_content, word_count, status, error_message)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO pdf_extractions (filename, original_name, page_count, text_content, word_count, status, error_message, api_key_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, created_at`
 
 	return db.QueryRowContext(ctx, query,
 		pe.Filename, pe.OriginalName, pe.PageCount, pe.TextContent,
-		pe.WordCount, pe.Status, pe.ErrorMessage,
+		pe.WordCount, pe.Status, pe.ErrorMessage, pe.APIKeyID,
 	).Scan(&pe.ID, &pe.CreatedAt)
 }
 
@@ -445,13 +462,22 @@ func (db *DB) GetPDFExtraction(ctx context.Context, id string) (*models.PDFExtra
 }
 
 // ListPDFExtractions returns recent PDF extractions.
-func (db *DB) ListPDFExtractions(ctx context.Context, limit int) ([]models.PDFExtraction, error) {
+func (db *DB) ListPDFExtractions(ctx context.Context, limit int, apiKeyID *string) ([]models.PDFExtraction, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 	var extractions []models.PDFExtraction
-	err := db.SelectContext(ctx, &extractions,
-		`SELECT * FROM pdf_extractions ORDER BY created_at DESC LIMIT $1`, limit)
+	var err error
+
+	if apiKeyID != nil {
+		err = db.SelectContext(ctx, &extractions,
+			`SELECT * FROM pdf_extractions WHERE api_key_id = $1 ORDER BY created_at DESC LIMIT $2`,
+			*apiKeyID, limit)
+	} else {
+		err = db.SelectContext(ctx, &extractions,
+			`SELECT * FROM pdf_extractions ORDER BY created_at DESC LIMIT $1`, limit)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pdf extractions: %w", err)
 	}

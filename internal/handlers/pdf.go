@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	pdfservice "github.com/Shimizu-Technology/media-tools-api/internal/services/pdf"
 )
@@ -81,6 +82,12 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 	// Generate a unique filename for storage reference
 	storedFilename := uuid.New().String() + ".pdf"
 
+	// Get the API key from context (set by auth middleware)
+	var apiKeyID *string
+	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
+		apiKeyID = &apiKey.ID
+	}
+
 	// Extract text from the PDF (synchronous — PDFs process fast)
 	result, err := pdfservice.Extract(data)
 	if err != nil {
@@ -92,6 +99,7 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 			OriginalName: header.Filename,
 			Status:       "failed",
 			ErrorMessage: err.Error(),
+			APIKeyID:     apiKeyID,
 		}
 		h.DB.CreatePDFExtraction(c.Request.Context(), pe)
 
@@ -111,6 +119,7 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 		TextContent:  result.Text,
 		WordCount:    result.WordCount,
 		Status:       "completed",
+		APIKeyID:     apiKeyID,
 	}
 
 	if err := h.DB.CreatePDFExtraction(c.Request.Context(), pe); err != nil {
@@ -139,10 +148,16 @@ func (h *Handler) GetPDFExtraction(c *gin.Context) {
 	c.JSON(http.StatusOK, pe)
 }
 
-// ListPDFExtractions returns recent PDF extractions.
+// ListPDFExtractions returns recent PDF extractions for the authenticated API key.
 // GET /api/v1/pdf/extractions
 func (h *Handler) ListPDFExtractions(c *gin.Context) {
-	extractions, err := h.DB.ListPDFExtractions(c.Request.Context(), 50)
+	// Get the API key from context to filter by owner
+	var apiKeyID *string
+	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
+		apiKeyID = &apiKey.ID
+	}
+
+	extractions, err := h.DB.ListPDFExtractions(c.Request.Context(), 50, apiKeyID)
 	if err != nil {
 		log.Printf("Failed to list PDF extractions: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
