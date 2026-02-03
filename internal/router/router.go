@@ -21,6 +21,10 @@ import (
 // Setup creates and configures the Gin router with all routes.
 func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhookservice.Service, sum *summary.Service, jwtSecret, adminAPIKey string, allowedOrigins []string) *gin.Engine {
 	r := gin.Default()
+
+	// Set max multipart form size to 30MB (slightly above our 25MB limit for headers/overhead)
+	r.MaxMultipartMemory = 30 << 20 // 30MB
+
 	r.Use(middleware.CORS(allowedOrigins))
 
 	h := handlers.NewHandler(db, wp, at, ws, sum, jwtSecret, adminAPIKey)

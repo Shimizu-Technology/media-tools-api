@@ -54,10 +54,8 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		return
 	}
 
-	// Limit request body size
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAudioSize)
-
 	// Get the uploaded file
+	// Note: Gin's MaxMultipartMemory handles size limits. We also check manually below.
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
@@ -68,6 +66,16 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		return
 	}
 	defer file.Close()
+
+	// Check file size (25MB limit for Whisper API)
+	if header.Size > maxAudioSize {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "file_too_large",
+			Message: fmt.Sprintf("File size (%.1f MB) exceeds maximum (25 MB).", float64(header.Size)/(1024*1024)),
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
 
 	// Validate file extension
 	ext := strings.ToLower(filepath.Ext(header.Filename))
