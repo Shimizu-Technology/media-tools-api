@@ -30,11 +30,15 @@ Currently, API key creation requires an admin key. Consider these alternatives f
 
 ## High Priority
 
-- [ ] **User Accounts + Personal Transcript History**
+- [x] **API Key Ownership** (DONE)
+  - Each transcript is linked to the API key that created it
+  - History page shows only your own transcripts
+  - No user accounts needed for personal use
+
+- [ ] **User Accounts** (if sharing with others)
   - Sign up / sign in flow (email + password)
   - Associate each transcript with a user ID
-  - Filter History page to show only that user's transcripts
-  - Optional: password reset via email
+  - Password reset via email
 
 - [ ] **AI Chat About Transcripts**
   - Simple version: "Ask a question about this transcript" single input

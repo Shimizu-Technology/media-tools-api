@@ -1,13 +1,18 @@
 # Media Tools API
 
-A media processing API for YouTube transcript extraction and AI-powered summaries. Built with Go and React.
+A media processing API for YouTube transcripts, audio transcription, PDF extraction, and AI-powered summaries. Built with Go and React.
 
-## What It Does
+**Live Demo:** [media-tools-gu.netlify.app](https://media-tools-gu.netlify.app)
 
-1. **Extract Transcripts** — Paste a YouTube URL, get the full transcript with metadata (title, channel, duration, word count)
-2. **AI Summaries** — Generate summaries using any LLM via OpenRouter (GPT-4o, Claude, Gemini, etc.)
-3. **Background Processing** — Jobs are processed asynchronously using a Go worker pool with goroutines
-4. **API Key Auth** — Secure access with API keys and per-key rate limiting
+## Features
+
+- **YouTube Transcripts** — Paste a URL, get the full transcript with metadata
+- **Audio Transcription** — Upload audio files (MP3, M4A, WAV, etc.) for Whisper transcription
+- **PDF Text Extraction** — Extract text from PDF documents
+- **AI Summaries** — Generate summaries with key points, action items, and decisions
+- **Background Processing** — Long-running jobs processed asynchronously
+- **API Key Auth** — Secure access with per-key rate limiting
+- **Ownership** — Each transcript is linked to the API key that created it
 
 ## Architecture
 
@@ -21,39 +26,43 @@ A media processing API for YouTube transcript extraction and AI-powered summarie
                     │   Worker Pool        │
                     │   (goroutines)       │
                     │                      │
-                    │  ┌───────────────┐   │
-                    │  │   yt-dlp      │   │     ┌──────────────┐
-                    │  │  (transcripts)│   │────>│  OpenRouter   │
-                    │  └───────────────┘   │     │  (AI models)  │
-                    └──────────────────────┘     └──────────────┘
+                    │  ┌───────────────┐   │     ┌──────────────┐
+                    │  │   yt-dlp      │   │────>│  OpenRouter   │
+                    │  │  (transcripts)│   │     │  (AI models)  │
+                    │  └───────────────┘   │     └──────────────┘
+                    │                      │
+                    │  ┌───────────────┐   │     ┌──────────────┐
+                    │  │   Whisper     │   │────>│  OpenAI API   │
+                    │  │  (audio)      │   │     │  (Whisper)    │
+                    │  └───────────────┘   │     └──────────────┘
+                    └──────────────────────┘
 ```
 
 **Tech Stack:**
 - **Backend:** Go 1.21+ with Gin framework
-- **Frontend:** React 18 + Vite + TypeScript + Tailwind CSS + Framer Motion
+- **Frontend:** React 18 + Vite + TypeScript + Tailwind CSS v4 + Framer Motion
 - **Database:** PostgreSQL 16
-- **AI:** OpenRouter API (unified access to multiple LLM providers)
-- **Transcripts:** yt-dlp (command-line YouTube downloader)
+- **AI Summaries:** OpenRouter API (GPT-4o, Claude, Gemini, etc.)
+- **Audio Transcription:** OpenAI Whisper API
+- **YouTube Transcripts:** yt-dlp CLI tool
 
-## Quick Start (Docker Compose)
-
-The fastest way to run everything locally:
+## Quick Start (Docker)
 
 ```bash
-# Clone the repo
+# Clone and setup
 git clone https://github.com/Shimizu-Technology/media-tools-api.git
 cd media-tools-api
-
-# Copy environment file
 cp .env.example .env
-# Edit .env and add your OPENROUTER_API_KEY (optional — needed for summaries only)
 
-# Start PostgreSQL + API server
+# Add your API keys to .env:
+# - OPENROUTER_API_KEY (for AI summaries)
+# - OPENAI_API_KEY (for audio transcription)
+
+# Start everything
 docker compose up --build -d
 
-# The API is now running at http://localhost:8080
-# Check health:
-curl http://localhost:8080/api/v1/health | jq
+# API running at http://localhost:8080
+# Frontend at http://localhost:5173
 ```
 
 ## Quick Start (Manual)
@@ -66,155 +75,187 @@ git clone https://github.com/Shimizu-Technology/media-tools-api.git
 cd media-tools-api
 cp .env.example .env
 
-# 2. Start PostgreSQL (if not running)
-# Make sure DATABASE_URL in .env points to your PostgreSQL instance
+# 2. Configure .env with your DATABASE_URL and API keys
 
 # 3. Run the API server
 make run
-# Server starts at http://localhost:8080
+# Server at http://localhost:8080
 
 # 4. Start the frontend (in another terminal)
 make frontend-install
 make frontend-dev
-# Frontend starts at http://localhost:5173
+# Frontend at http://localhost:5173
 ```
 
 ## API Documentation
 
-### Health Check
+### Authentication
+
+All endpoints require an API key via the `X-API-Key` header:
+
 ```bash
-GET /api/v1/health
-curl http://localhost:8080/api/v1/health
+curl -H "X-API-Key: mta_your_key_here" http://localhost:8080/api/v1/transcripts
 ```
 
 ### Create an API Key
+
+In production, API key creation requires an admin key:
+
 ```bash
-POST /api/v1/keys
 curl -X POST http://localhost:8080/api/v1/keys \
   -H "Content-Type: application/json" \
-  -d '{"name": "my-app", "rate_limit": 200}'
+  -H "X-Admin-Key: your_admin_key" \
+  -d '{"name": "my-app", "rate_limit": 1000}'
 ```
+
 Response includes `raw_key` — **save it! Only shown once.**
 
-### Extract a Transcript
+### YouTube Transcripts
+
 ```bash
+# Extract transcript (returns immediately, processes in background)
 POST /api/v1/transcripts
 curl -X POST http://localhost:8080/api/v1/transcripts \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: mta_your_key_here" \
-  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
-```
-Returns 202 Accepted with a transcript record (status: "pending").
-Poll `GET /api/v1/transcripts/:id` to check when it's ready.
+  -H "X-API-Key: mta_your_key" \
+  -d '{"url": "https://www.youtube.com/watch?v=VIDEO_ID"}'
 
-### Get a Transcript
-```bash
+# Get transcript (poll until status is "completed")
 GET /api/v1/transcripts/:id
-curl http://localhost:8080/api/v1/transcripts/UUID_HERE \
-  -H "X-API-Key: mta_your_key_here"
+
+# List your transcripts
+GET /api/v1/transcripts?page=1&per_page=20&status=completed
 ```
 
-### List Transcripts
+### Audio Transcription
+
 ```bash
-GET /api/v1/transcripts?page=1&per_page=20&status=completed&search=golang
-curl "http://localhost:8080/api/v1/transcripts?page=1&status=completed" \
-  -H "X-API-Key: mta_your_key_here"
+# Upload audio file (returns immediately, processes in background)
+POST /api/v1/audio/transcribe
+curl -X POST http://localhost:8080/api/v1/audio/transcribe \
+  -H "X-API-Key: mta_your_key" \
+  -F "file=@recording.m4a"
+
+# Get transcription (poll until status is "completed")
+GET /api/v1/audio/transcriptions/:id
+
+# Generate AI summary for audio
+POST /api/v1/audio/transcriptions/:id/summarize
+curl -X POST http://localhost:8080/api/v1/audio/transcriptions/:id/summarize \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: mta_your_key" \
+  -d '{"content_type": "phone_call"}'
+
+# Content types: general, phone_call, meeting, voice_memo, interview, lecture
 ```
 
-### Generate AI Summary
+Supported formats: MP3, WAV, M4A, OGG, FLAC, WebM (max 25MB)
+
+### PDF Extraction
+
 ```bash
+# Extract text from PDF
+POST /api/v1/pdf/extract
+curl -X POST http://localhost:8080/api/v1/pdf/extract \
+  -H "X-API-Key: mta_your_key" \
+  -F "file=@document.pdf"
+
+# List your PDF extractions
+GET /api/v1/pdf/extractions
+```
+
+### AI Summaries
+
+```bash
+# Generate summary for a YouTube transcript
 POST /api/v1/summaries
 curl -X POST http://localhost:8080/api/v1/summaries \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: mta_your_key_here" \
+  -H "X-API-Key: mta_your_key" \
   -d '{
-    "transcript_id": "UUID_HERE",
+    "transcript_id": "UUID",
     "length": "medium",
     "style": "bullet",
-    "model": "openai/gpt-4o-mini"
+    "model": "google/gemini-2.5-flash"
   }'
 ```
+
 Options:
-- `length`: "short", "medium", "detailed"
-- `style`: "bullet", "narrative", "academic"
-- `model`: Any OpenRouter model (default: openai/gpt-4o-mini)
+- `length`: short, medium, detailed
+- `style`: bullet, narrative, academic
+- `model`: Any OpenRouter model
 
-### Get Summaries for a Transcript
+## Production Deployment
+
+### Recommended Stack
+
+- **Backend:** Render (Docker support, auto-deploy from GitHub)
+- **Frontend:** Netlify (CDN, auto-deploy, SPA redirects)
+- **Database:** Neon (serverless PostgreSQL)
+
+### Environment Variables (Production)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `JWT_SECRET` | Yes | 32+ char random string |
+| `ADMIN_API_KEY` | Yes | Secret key for creating API keys |
+| `OPENROUTER_API_KEY` | For summaries | OpenRouter API key |
+| `OPENAI_API_KEY` | For audio | OpenAI API key (Whisper) |
+| `CORS_ORIGIN` | Yes | Frontend URL (e.g., https://your-app.netlify.app) |
+| `GIN_MODE` | Recommended | Set to `release` |
+
+### Generate Secrets
+
 ```bash
-GET /api/v1/transcripts/:id/summaries
-curl http://localhost:8080/api/v1/transcripts/UUID_HERE/summaries \
-  -H "X-API-Key: mta_your_key_here"
+# JWT_SECRET
+openssl rand -base64 32
+
+# ADMIN_API_KEY
+openssl rand -hex 32
 ```
-
-### List / Revoke API Keys
-```bash
-GET /api/v1/keys
-DELETE /api/v1/keys/:id
-```
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `8080` | API server port |
-| `GIN_MODE` | `debug` | Gin mode (debug/release/test) |
-| `DATABASE_URL` | `postgres://postgres:postgres@localhost:5432/media_tools?sslmode=disable` | PostgreSQL connection string |
-| `YT_DLP_PATH` | Auto-detected | Path to yt-dlp binary |
-| `OPENROUTER_API_KEY` | (none) | OpenRouter API key for AI summaries |
-| `OPENROUTER_MODEL` | `openai/gpt-4o-mini` | Default AI model |
-| `WORKER_COUNT` | `3` | Background worker goroutines |
-| `JOB_QUEUE_SIZE` | `100` | Max pending jobs in queue |
-| `DEFAULT_RATE_LIMIT` | `100` | Requests per hour per API key |
-| `CORS_ORIGIN` | `http://localhost:5173` | Allowed CORS origin |
 
 ## Project Structure
 
 ```
 media-tools-api/
-├── cmd/server/main.go          # Entry point — wires everything together
+├── cmd/server/main.go          # Entry point
 ├── internal/
-│   ├── config/                 # Environment variable configuration
-│   ├── database/               # PostgreSQL connection + queries
-│   ├── handlers/               # HTTP request handlers
-│   ├── middleware/              # Auth, rate limiting, CORS
-│   ├── models/                 # Data structures (Transcript, Summary, APIKey)
-│   ├── services/
-│   │   ├── transcript/         # YouTube transcript extraction via yt-dlp
-│   │   ├── summary/            # AI summary generation via OpenRouter
-│   │   └── worker/             # Background job processing (goroutines)
-│   └── router/                 # Route configuration
-├── migrations/                 # PostgreSQL migration SQL files
-├── frontend/                   # React app (Vite + TypeScript + Tailwind)
-├── docker-compose.yml          # Local development setup
+│   ├── config/                 # Environment configuration
+│   ├── database/               # PostgreSQL queries
+│   ├── handlers/               # HTTP handlers
+│   ├── middleware/             # Auth, rate limiting, CORS
+│   ├── models/                 # Data structures
+│   └── services/
+│       ├── transcript/         # yt-dlp integration
+│       ├── audio/              # Whisper integration
+│       ├── summary/            # OpenRouter integration
+│       └── worker/             # Background job processing
+├── migrations/                 # SQL migrations
+├── frontend/                   # React app
 ├── Dockerfile                  # Production container
-└── Makefile                    # Common dev commands
+└── docker-compose.yml          # Local development
 ```
 
-## Key Go Patterns Used
+## Key Go Patterns
 
-This project demonstrates several important Go patterns:
+This codebase demonstrates:
 
-1. **Explicit error handling** — `result, err := fn()` instead of try/catch
-2. **Interfaces for composition** — `Extractor` interface in the transcript package
-3. **Goroutines + channels** — Worker pool for background processing
-4. **Context propagation** — `context.Context` for timeouts and cancellation
-5. **Dependency injection** — Handler struct with DB and Worker dependencies
-6. **Middleware chain** — Auth → Rate Limit → Handler
-7. **Graceful shutdown** — Signal handling for clean process termination
+1. **Explicit error handling** — `result, err := fn()` pattern
+2. **Goroutines + channels** — Worker pool for async jobs
+3. **Context propagation** — Timeouts and cancellation
+4. **Dependency injection** — Handler struct with dependencies
+5. **Middleware chain** — Auth → Rate Limit → Handler
+6. **Graceful shutdown** — Signal handling for clean termination
 
 ## Makefile Commands
 
 ```bash
-make help              # Show all available commands
-make run               # Build and run the server
-make build             # Build the binary only
-make docker-up         # Start Docker Compose stack
-make docker-down       # Stop Docker Compose
-make test              # Run all tests
-make create-key        # Create a dev API key (server must be running)
-make health            # Check API health
+make run               # Run the server
+make docker-up         # Start Docker stack
 make frontend-dev      # Start frontend dev server
-make frontend-build    # Build frontend for production
+make test              # Run tests
+make health            # Check API health
 ```
 
 ## License

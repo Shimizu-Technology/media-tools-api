@@ -6,9 +6,7 @@ import { HistoryPage } from './pages/HistoryPage'
 import { AudioPage } from './pages/AudioPage'
 import { PdfPage } from './pages/PdfPage'
 import { DocsPage } from './pages/DocsPage'
-import { AuthPage } from './pages/AuthPage'
 import { WebhooksPage } from './pages/WebhooksPage'
-import { WorkspacePage } from './pages/WorkspacePage'
 import { useAuthStore } from './stores/authStore'
 
 function App() {
@@ -29,9 +27,7 @@ function App() {
           <Route path="/audio" element={<AudioPage />} />
           <Route path="/pdf" element={<PdfPage />} />
           <Route path="/docs" element={<DocsPage />} />
-          <Route path="/auth" element={<AuthPage />} />
           <Route path="/webhooks" element={<WebhooksPage />} />
-          <Route path="/workspace" element={<WorkspacePage />} />
         </Routes>
 
         <footer className="py-8 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>

@@ -2,15 +2,19 @@
 
 ## Project Overview
 
-Media Tools API is a Go + React monorepo for YouTube transcript extraction and AI summarization. This is Leon's first Go project — the codebase is intentionally well-commented and educational.
+Media Tools API is a Go + React monorepo for YouTube transcripts, audio transcription (Whisper), PDF extraction, and AI summarization. This is Leon's first Go project — the codebase is intentionally well-commented and educational.
+
+**Live:** [media-tools-gu.netlify.app](https://media-tools-gu.netlify.app)
 
 ## Tech Stack
 
 - **Backend:** Go 1.21+ with Gin framework
 - **Frontend:** React 18 + Vite + TypeScript + Tailwind CSS v4 + Framer Motion
-- **Database:** PostgreSQL 16 with golang-migrate
-- **AI:** OpenRouter API (multi-model LLM access)
-- **Transcripts:** yt-dlp CLI tool
+- **Database:** PostgreSQL 16 with golang-migrate (hosted on Neon)
+- **AI Summaries:** OpenRouter API (multi-model LLM access)
+- **Audio Transcription:** OpenAI Whisper API
+- **YouTube Transcripts:** yt-dlp CLI tool
+- **Hosting:** Render (backend), Netlify (frontend), Neon (database)
 
 ## Project Structure
 
@@ -19,10 +23,11 @@ cmd/server/main.go       → Entry point (DI wiring, server startup, shutdown)
 internal/config/         → Environment variable loading
 internal/database/       → PostgreSQL connection, queries, migrations
 internal/handlers/       → HTTP request handlers (Gin)
-internal/middleware/      → Auth, rate limiting, CORS
+internal/middleware/     → Auth, rate limiting, CORS
 internal/models/         → Data structures + DTOs
 internal/services/       → Business logic
   transcript/            → YouTube extraction via yt-dlp
+  audio/                 → Audio transcription via Whisper API
   summary/               → AI summary via OpenRouter
   worker/                → Background job processing (goroutines)
 internal/router/         → Route configuration

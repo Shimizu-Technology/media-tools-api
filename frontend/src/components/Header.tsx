@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { FileText, Mic, FileType2, History, Webhook, Book, LogIn, Github } from 'lucide-react'
+import { FileText, Mic, FileType2, History, Webhook, Book, Github } from 'lucide-react'
 
 const navLinks = [
   { to: '/', label: 'Extract', icon: FileText },
@@ -63,14 +63,6 @@ export function Header() {
 
         {/* Actions */}
         <div className="flex items-center gap-2">
-          <Link
-            to="/auth"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
-            <LogIn className="w-4 h-4" />
-            <span className="hidden sm:inline">Sign In</span>
-          </Link>
           <a
             href="https://github.com/Shimizu-Technology/media-tools-api"
             target="_blank"
