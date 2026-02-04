@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { useSearchParams, Link } from 'react-router-dom'
+import { useSearchParams, Link, useNavigate } from 'react-router-dom'
 import { Sparkles, ArrowLeft, History } from 'lucide-react'
 import { ApiKeySetup } from '../components/ApiKeySetup'
 import { TranscriptInput } from '../components/TranscriptInput'
@@ -14,21 +14,24 @@ import {
 } from '../lib/api'
 
 export function HomePage() {
-  const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('mta_api_key') || '')
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
 
   // Load transcript from URL param
+  const urlId = searchParams.get('id')
   useEffect(() => {
-    const id = searchParams.get('id')
-    if (id && !transcript) {
-      getTranscript(id)
+    if (urlId && !transcript) {
+      getTranscript(urlId)
         .then((t) => setTranscript(t))
         .catch(() => setError('Transcript not found'))
     }
-  }, [searchParams, transcript])
+    // If URL has no id but we have a transcript from submission, keep it
+    // If URL has no id and no transcript, show the input form (normal state)
+  }, [urlId]) // Only depend on urlId, not transcript
 
   // Poll for updates
   const shouldPoll = transcript?.status === 'pending' || transcript?.status === 'processing'
@@ -68,7 +71,9 @@ export function HomePage() {
   const handleReset = () => {
     setTranscript(null)
     setError('')
-    setSearchParams({})
+    // Use navigate instead of setSearchParams to ensure a clean reset
+    // This prevents the useEffect from re-loading the old transcript
+    navigate('/', { replace: true })
   }
 
   return (

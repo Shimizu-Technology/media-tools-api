@@ -396,6 +396,16 @@ export async function listAudioTranscriptions(): Promise<AudioTranscription[]> {
   return handleResponse<AudioTranscription[]>(res);
 }
 
+export async function deleteAudioTranscription(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/audio/transcriptions/${id}`, { method: 'DELETE', headers: getHeaders() });
+  if (!res.ok && res.status !== 404) {
+    const error: APIError = await res.json().catch(() => ({
+      error: 'unknown', message: `HTTP ${res.status}: ${res.statusText}`, code: res.status,
+    }));
+    throw error;
+  }
+}
+
 // MTA-22: Summarize an audio transcription
 export async function summarizeAudio(
   id: string,
@@ -455,6 +465,16 @@ export async function getPDFExtraction(id: string): Promise<PDFExtraction> {
 export async function listPDFExtractions(): Promise<PDFExtraction[]> {
   const res = await fetch(`${API_BASE}/pdf/extractions`, { headers: getHeaders() });
   return handleResponse<PDFExtraction[]>(res);
+}
+
+export async function deletePDFExtraction(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/pdf/extractions/${id}`, { method: 'DELETE', headers: getHeaders() });
+  if (!res.ok && res.status !== 404) {
+    const error: APIError = await res.json().catch(() => ({
+      error: 'unknown', message: `HTTP ${res.status}: ${res.statusText}`, code: res.status,
+    }));
+    throw error;
+  }
 }
 
 // ── Auth (MTA-20) ──

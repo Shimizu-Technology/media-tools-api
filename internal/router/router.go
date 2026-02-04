@@ -62,6 +62,7 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhooks
 		protected.POST("/transcripts", h.CreateTranscript)
 		protected.GET("/transcripts", h.ListTranscripts)
 		protected.GET("/transcripts/:id", h.GetTranscript)
+		protected.DELETE("/transcripts/:id", h.DeleteTranscript)
 		protected.GET("/transcripts/:id/summaries", h.GetSummariesByTranscript)
 		protected.GET("/transcripts/:id/export", h.ExportTranscript)
 
@@ -80,6 +81,7 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhooks
 		protected.POST("/audio/transcribe", h.TranscribeAudio)
 		protected.GET("/audio/transcriptions/search", h.SearchAudioTranscriptions) // MTA-25: must be before :id
 		protected.GET("/audio/transcriptions/:id", h.GetAudioTranscription)
+		protected.DELETE("/audio/transcriptions/:id", h.DeleteAudioTranscription)
 		protected.GET("/audio/transcriptions/:id/export", h.ExportAudioTranscription) // MTA-26
 		protected.POST("/audio/transcriptions/:id/summarize", h.SummarizeAudio)       // MTA-22
 		protected.GET("/audio/transcriptions", h.ListAudioTranscriptions)
@@ -87,6 +89,7 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhooks
 		// PDF extraction endpoints (MTA-17)
 		protected.POST("/pdf/extract", h.ExtractPDF)
 		protected.GET("/pdf/extractions/:id", h.GetPDFExtraction)
+		protected.DELETE("/pdf/extractions/:id", h.DeletePDFExtraction)
 		protected.GET("/pdf/extractions", h.ListPDFExtractions)
 
 		// Webhook management (MTA-18)

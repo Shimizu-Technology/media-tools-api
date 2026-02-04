@@ -174,3 +174,43 @@ func (h *Handler) ListPDFExtractions(c *gin.Context) {
 
 	c.JSON(http.StatusOK, extractions)
 }
+
+// DeletePDFExtraction removes a PDF extraction by ID.
+// DELETE /api/v1/pdf/extractions/:id
+func (h *Handler) DeletePDFExtraction(c *gin.Context) {
+	id := c.Param("id")
+
+	// Verify ownership: only delete if it belongs to the authenticated API key
+	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
+		pe, err := h.DB.GetPDFExtraction(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, models.ErrorResponse{
+				Error:   "not_found",
+				Message: "PDF extraction not found",
+				Code:    http.StatusNotFound,
+			})
+			return
+		}
+
+		// Check ownership
+		if pe.APIKeyID != nil && *pe.APIKeyID != apiKey.ID {
+			c.JSON(http.StatusForbidden, models.ErrorResponse{
+				Error:   "forbidden",
+				Message: "You can only delete your own extractions",
+				Code:    http.StatusForbidden,
+			})
+			return
+		}
+	}
+
+	if err := h.DB.DeletePDFExtraction(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error:   "not_found",
+			Message: "PDF extraction not found",
+			Code:    http.StatusNotFound,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "PDF extraction deleted"})
+}

@@ -509,3 +509,43 @@ func buildMarkdownExport(at *models.AudioTranscription) string {
 
 	return sb.String()
 }
+
+// DeleteAudioTranscription removes an audio transcription by ID.
+// DELETE /api/v1/audio/transcriptions/:id
+func (h *Handler) DeleteAudioTranscription(c *gin.Context) {
+	id := c.Param("id")
+
+	// Verify ownership: only delete if it belongs to the authenticated API key
+	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
+		at, err := h.DB.GetAudioTranscription(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, models.ErrorResponse{
+				Error:   "not_found",
+				Message: "Audio transcription not found",
+				Code:    http.StatusNotFound,
+			})
+			return
+		}
+
+		// Check ownership
+		if at.APIKeyID != nil && *at.APIKeyID != apiKey.ID {
+			c.JSON(http.StatusForbidden, models.ErrorResponse{
+				Error:   "forbidden",
+				Message: "You can only delete your own transcriptions",
+				Code:    http.StatusForbidden,
+			})
+			return
+		}
+	}
+
+	if err := h.DB.DeleteAudioTranscription(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error:   "not_found",
+			Message: "Audio transcription not found",
+			Code:    http.StatusNotFound,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Audio transcription deleted"})
+}

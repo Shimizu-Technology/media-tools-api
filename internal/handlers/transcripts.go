@@ -288,3 +288,43 @@ func (h *Handler) GetSummariesByTranscript(c *gin.Context) {
 
 	c.JSON(http.StatusOK, summaries)
 }
+
+// DeleteTranscript removes a transcript by ID.
+// DELETE /api/v1/transcripts/:id
+func (h *Handler) DeleteTranscript(c *gin.Context) {
+	id := c.Param("id")
+
+	// Verify ownership: only delete if it belongs to the authenticated API key
+	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
+		t, err := h.DB.GetTranscript(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, models.ErrorResponse{
+				Error:   "not_found",
+				Message: "Transcript not found",
+				Code:    http.StatusNotFound,
+			})
+			return
+		}
+
+		// Check ownership - only allow deletion if the API key owns this transcript
+		if t.APIKeyID != nil && *t.APIKeyID != apiKey.ID {
+			c.JSON(http.StatusForbidden, models.ErrorResponse{
+				Error:   "forbidden",
+				Message: "You can only delete your own transcripts",
+				Code:    http.StatusForbidden,
+			})
+			return
+		}
+	}
+
+	if err := h.DB.DeleteTranscript(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error:   "not_found",
+			Message: "Transcript not found",
+			Code:    http.StatusNotFound,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Transcript deleted"})
+}

@@ -208,6 +208,19 @@ func (db *DB) ListTranscripts(ctx context.Context, params models.TranscriptListP
 	return transcripts, total, nil
 }
 
+// DeleteTranscript removes a transcript by ID.
+func (db *DB) DeleteTranscript(ctx context.Context, id string) error {
+	result, err := db.ExecContext(ctx, `DELETE FROM transcripts WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete transcript: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("transcript not found")
+	}
+	return nil
+}
+
 // --- Summary Operations ---
 
 // CreateSummary inserts a new summary record.
@@ -436,6 +449,19 @@ func (db *DB) SearchAudioTranscriptions(ctx context.Context, params models.Audio
 	return results, total, nil
 }
 
+// DeleteAudioTranscription removes an audio transcription by ID.
+func (db *DB) DeleteAudioTranscription(ctx context.Context, id string) error {
+	result, err := db.ExecContext(ctx, `DELETE FROM audio_transcriptions WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete audio transcription: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("audio transcription not found")
+	}
+	return nil
+}
+
 // --- PDF Extraction Operations (MTA-17) ---
 
 // CreatePDFExtraction inserts a new PDF extraction record.
@@ -482,4 +508,17 @@ func (db *DB) ListPDFExtractions(ctx context.Context, limit int, apiKeyID *strin
 		return nil, fmt.Errorf("failed to list pdf extractions: %w", err)
 	}
 	return extractions, nil
+}
+
+// DeletePDFExtraction removes a PDF extraction by ID.
+func (db *DB) DeletePDFExtraction(ctx context.Context, id string) error {
+	result, err := db.ExecContext(ctx, `DELETE FROM pdf_extractions WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete PDF extraction: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("PDF extraction not found")
+	}
+	return nil
 }

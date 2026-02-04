@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Mic,
@@ -62,6 +63,8 @@ const CONTENT_TYPES: { value: AudioContentType; label: string; icon: React.React
 ];
 
 export function AudioPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  
   // Upload state
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<AudioTranscription | null>(null);
@@ -104,6 +107,16 @@ export function AudioPage() {
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     };
   }, []);
+
+  // Load transcription from URL param (when coming from My Library)
+  useEffect(() => {
+    const id = searchParams.get('id');
+    if (id && !result) {
+      getAudioTranscription(id)
+        .then((t) => setResult(t))
+        .catch(() => setError('Transcription not found'));
+    }
+  }, [searchParams, result]);
 
   const validateFile = (f: File): string | null => {
     const ext = '.' + f.name.split('.').pop()?.toLowerCase();
@@ -321,6 +334,7 @@ export function AudioPage() {
     setRecordingTime(0);
     setContentType('general');
     setShowExportMenu(false);
+    setSearchParams({});
   };
 
   const formatDuration = (seconds: number): string => {

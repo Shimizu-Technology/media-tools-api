@@ -17,11 +17,17 @@ import {
   Sparkles,
   Loader2,
   Library,
+  Trash2,
+  CheckCircle2,
+  Circle,
 } from 'lucide-react';
 import {
   listTranscripts,
   listAudioTranscriptions,
   listPDFExtractions,
+  deleteTranscript,
+  deleteAudioTranscription,
+  deletePDFExtraction,
   type Transcript,
   type PaginatedResponse,
 } from '../lib/api';
@@ -64,6 +70,10 @@ export function MyLibraryPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const perPage = 20;
+
+  // Selection state for bulk delete
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Update URL when tab changes
   const handleTabChange = (tab: ContentType) => {
@@ -188,6 +198,11 @@ export function MyLibraryPage() {
   }, [items, searchInput, activeTab, sortDir]);
 
   const handleItemClick = (item: UnifiedItem) => {
+    // Don't navigate if in selection mode
+    if (selectedItems.size > 0) {
+      toggleSelection(item);
+      return;
+    }
     switch (item.type) {
       case 'youtube':
         navigate(`/?id=${item.id}`);
@@ -199,6 +214,79 @@ export function MyLibraryPage() {
         navigate(`/pdf?id=${item.id}`);
         break;
     }
+  };
+
+  const toggleSelection = (item: UnifiedItem) => {
+    const key = `${item.type}-${item.id}`;
+    setSelectedItems((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(key)) {
+        newSet.delete(key);
+      } else {
+        newSet.add(key);
+      }
+      return newSet;
+    });
+  };
+
+  const handleDelete = async (item: UnifiedItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm(`Delete "${item.title}"?`)) return;
+    
+    setIsDeleting(true);
+    try {
+      switch (item.type) {
+        case 'youtube':
+          await deleteTranscript(item.id);
+          break;
+        case 'audio':
+          await deleteAudioTranscription(item.id);
+          break;
+        case 'pdf':
+          await deletePDFExtraction(item.id);
+          break;
+      }
+      // Remove from local state
+      setItems((prev) => prev.filter((i) => !(i.type === item.type && i.id === item.id)));
+    } catch (err) {
+      setError('Failed to delete item');
+    }
+    setIsDeleting(false);
+  };
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Delete ${selectedItems.size} item(s)?`)) return;
+    
+    setIsDeleting(true);
+    const toDelete = Array.from(selectedItems);
+    
+    for (const key of toDelete) {
+      const [type, id] = key.split('-');
+      try {
+        switch (type) {
+          case 'youtube':
+            await deleteTranscript(id);
+            break;
+          case 'audio':
+            await deleteAudioTranscription(id);
+            break;
+          case 'pdf':
+            await deletePDFExtraction(id);
+            break;
+        }
+      } catch (err) {
+        console.error(`Failed to delete ${key}:`, err);
+      }
+    }
+    
+    // Remove deleted items from local state
+    setItems((prev) => prev.filter((item) => !selectedItems.has(`${item.type}-${item.id}`)));
+    setSelectedItems(new Set());
+    setIsDeleting(false);
+  };
+
+  const clearSelection = () => {
+    setSelectedItems(new Set());
   };
 
   const formatDate = (dateStr: string): string => {
@@ -260,6 +348,38 @@ export function MyLibraryPage() {
           All your transcripts, recordings, and documents in one place
         </motion.p>
       </div>
+
+      {/* Selection Bar - shown when items are selected */}
+      {selectedItems.size > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center justify-between gap-4 p-4 rounded-xl mb-6"
+          style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)' }}
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium" style={{ color: '#ef4444' }}>
+              {selectedItems.size} selected
+            </span>
+            <button
+              onClick={clearSelection}
+              className="text-sm transition-colors"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              Clear
+            </button>
+          </div>
+          <button
+            onClick={handleBulkDelete}
+            disabled={isDeleting}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
+            style={{ backgroundColor: '#ef4444', minHeight: '44px' }}
+          >
+            {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+            Delete Selected
+          </button>
+        </motion.div>
+      )}
 
       {/* Tabs */}
       <motion.div
@@ -430,6 +550,7 @@ export function MyLibraryPage() {
         >
           {filteredItems.map((item) => {
             const colors = statusColors[item.status] || statusColors.pending;
+            const isSelected = selectedItems.has(`${item.type}-${item.id}`);
 
             return (
               <motion.div
@@ -441,29 +562,49 @@ export function MyLibraryPage() {
                 onClick={() => handleItemClick(item)}
                 className="group relative p-5 rounded-2xl border cursor-pointer transition-all duration-200 hover:scale-[1.01]"
                 style={{
-                  backgroundColor: 'var(--color-surface-elevated)',
-                  borderColor: 'var(--color-border)',
+                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.05)' : 'var(--color-surface-elevated)',
+                  borderColor: isSelected ? 'var(--color-brand-500)' : 'var(--color-border)',
                 }}
               >
-                {/* Type indicator */}
-                <div
-                  className="absolute top-4 right-4 p-1.5 rounded-lg"
-                  style={{ backgroundColor: `${typeColors[item.type]}15`, color: typeColors[item.type] }}
-                  title={item.type.charAt(0).toUpperCase() + item.type.slice(1)}
+                {/* Selection checkbox - shown on hover or when items are selected */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); toggleSelection(item); }}
+                  className={`absolute top-4 left-4 p-1 rounded-md transition-opacity ${selectedItems.size > 0 ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                  style={{ color: isSelected ? 'var(--color-brand-500)' : 'var(--color-text-muted)' }}
                 >
-                  {typeIcons[item.type]}
+                  {isSelected ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
+                </button>
+
+                {/* Type indicator + Delete button */}
+                <div className="absolute top-4 right-4 flex items-center gap-1">
+                  {/* Delete button - shown on hover */}
+                  <button
+                    onClick={(e) => handleDelete(item, e)}
+                    className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ color: 'var(--color-text-muted)' }}
+                    title="Delete"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                  <div
+                    className="p-1.5 rounded-lg"
+                    style={{ backgroundColor: `${typeColors[item.type]}15`, color: typeColors[item.type] }}
+                    title={item.type.charAt(0).toUpperCase() + item.type.slice(1)}
+                  >
+                    {typeIcons[item.type]}
+                  </div>
                 </div>
 
                 {/* Title */}
                 <h3
-                  className="text-sm font-semibold mb-1.5 pr-10 line-clamp-2 leading-snug"
+                  className="text-sm font-semibold mb-1.5 pr-16 pl-6 line-clamp-2 leading-snug"
                   style={{ color: 'var(--color-text-primary)' }}
                 >
                   {item.title}
                 </h3>
 
                 {/* Subtitle */}
-                <div className="flex items-center gap-1.5 mb-3">
+                <div className="flex items-center gap-1.5 mb-3 pl-6">
                   {item.type === 'youtube' && <User className="w-3.5 h-3.5" style={{ color: 'var(--color-text-muted)' }} />}
                   <span className="text-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>
                     {item.subtitle}
@@ -471,7 +612,7 @@ export function MyLibraryPage() {
                 </div>
 
                 {/* Metadata row */}
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap pl-6">
                   {/* Status badge */}
                   <span
                     className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium"

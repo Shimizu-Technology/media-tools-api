@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText,
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import {
   extractPDF,
+  getPDFExtraction,
   type PDFExtraction,
   type APIError,
 } from '../lib/api';
@@ -33,6 +34,8 @@ import {
  * - Dark mode support
  */
 export function PdfPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<PDFExtraction | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -42,6 +45,16 @@ export function PdfPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const maxSizeMB = 50;
+
+  // Load extraction from URL param (when coming from My Library)
+  useEffect(() => {
+    const id = searchParams.get('id');
+    if (id && !result) {
+      getPDFExtraction(id)
+        .then((t) => setResult(t))
+        .catch(() => setError('PDF extraction not found'));
+    }
+  }, [searchParams, result]);
 
   const validateFile = (f: File): string | null => {
     const ext = '.' + f.name.split('.').pop()?.toLowerCase();
@@ -124,6 +137,7 @@ export function PdfPage() {
     setResult(null);
     setError('');
     setCopied(false);
+    setSearchParams({});
   };
 
   // Split text by page break markers for display
