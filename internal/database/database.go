@@ -37,12 +37,14 @@ func New(databaseURL string) (*DB, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Configure connection pool
+	// Configure connection pool for serverless PostgreSQL (Neon)
 	// Go Pattern: The connection pool is managed by database/sql internally.
-	// These settings prevent resource exhaustion under load.
-	db.SetMaxOpenConns(25)              // Max simultaneous connections
-	db.SetMaxIdleConns(5)               // Keep some connections ready
-	db.SetConnMaxLifetime(5 * time.Minute) // Recycle connections periodically
+	// These settings prevent resource exhaustion and handle Neon's aggressive
+	// connection timeouts (serverless PG closes idle connections quickly).
+	db.SetMaxOpenConns(10)                 // Fewer connections for serverless
+	db.SetMaxIdleConns(2)                  // Keep minimal idle connections
+	db.SetConnMaxLifetime(2 * time.Minute) // Recycle connections frequently
+	db.SetConnMaxIdleTime(30 * time.Second) // Close idle connections before Neon does
 
 	return &DB{db}, nil
 }
