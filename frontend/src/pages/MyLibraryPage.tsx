@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   Search,
   ArrowUpDown,
-  Trash2,
   FileText,
   Clock,
   User,
@@ -23,10 +22,7 @@ import {
   listTranscripts,
   listAudioTranscriptions,
   listPDFExtractions,
-  deleteTranscript,
   type Transcript,
-  type AudioTranscription,
-  type PDFExtraction,
   type PaginatedResponse,
 } from '../lib/api';
 
