@@ -1,8 +1,8 @@
 import { useEffect } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Header } from './components/Header'
 import { HomePage } from './pages/HomePage'
-import { HistoryPage } from './pages/HistoryPage'
+import { MyLibraryPage } from './pages/MyLibraryPage'
 import { AudioPage } from './pages/AudioPage'
 import { PdfPage } from './pages/PdfPage'
 import { DocsPage } from './pages/DocsPage'
@@ -23,11 +23,13 @@ function App() {
         
         <Routes>
           <Route path="/" element={<HomePage />} />
-          <Route path="/history" element={<HistoryPage />} />
+          <Route path="/library" element={<MyLibraryPage />} />
           <Route path="/audio" element={<AudioPage />} />
           <Route path="/pdf" element={<PdfPage />} />
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/webhooks" element={<WebhooksPage />} />
+          {/* Redirect old history route to new library */}
+          <Route path="/history" element={<Navigate to="/library?type=youtube" replace />} />
         </Routes>
 
         <footer className="py-8 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>

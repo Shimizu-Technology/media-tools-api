@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { Sparkles, ArrowLeft } from 'lucide-react'
+import { useSearchParams, Link } from 'react-router-dom'
+import { Sparkles, ArrowLeft, History } from 'lucide-react'
 import { ApiKeySetup } from '../components/ApiKeySetup'
 import { TranscriptInput } from '../components/TranscriptInput'
 import { TranscriptDisplay } from '../components/TranscriptDisplay'
@@ -96,12 +96,21 @@ export function HomePage() {
           </h1>
 
           <p
-            className="text-lg max-w-xl mx-auto"
+            className="text-lg max-w-xl mx-auto mb-4"
             style={{ color: 'var(--color-text-secondary)' }}
           >
             Paste any YouTube URL to extract the full transcript.
             Then generate AI-powered summaries with key points.
           </p>
+
+          <Link
+            to="/library?type=youtube"
+            className="inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
+            style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
+          >
+            <History className="w-4 h-4" />
+            View past transcripts
+          </Link>
         </div>
       )}
 

@@ -372,17 +372,21 @@ export function AudioPage() {
           </motion.p>
 
           {/* History toggle */}
-          <motion.button
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3 }}
-            onClick={toggleHistory}
-            className="inline-flex items-center gap-1.5 text-sm font-medium mt-2 transition-colors"
-            style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
+            className="flex items-center gap-4 mt-2"
           >
-            <History className="w-4 h-4" />
-            {showHistory ? 'Hide history' : 'View past transcriptions'}
-          </motion.button>
+            <button
+              onClick={toggleHistory}
+              className="inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
+              style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
+            >
+              <History className="w-4 h-4" />
+              {showHistory ? 'Hide history' : 'View recent'}
+            </button>
+          </motion.div>
         </div>
       )}
 

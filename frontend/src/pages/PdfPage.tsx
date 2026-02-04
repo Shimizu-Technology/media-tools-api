@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText,
@@ -12,6 +13,7 @@ import {
   Type,
   Layers,
   X,
+  History,
 } from 'lucide-react';
 import {
   extractPDF,
@@ -130,7 +132,7 @@ export function PdfPage() {
     : [];
 
   return (
-    <main className="relative pt-28 pb-16 px-6">
+    <main className="relative pt-20 sm:pt-28 pb-12 sm:pb-16 px-4 sm:px-6">
       {/* Hero */}
       {!result && (
         <div className="text-center mb-12">
@@ -170,12 +172,27 @@ export function PdfPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            className="text-lg max-w-xl mx-auto"
+            className="text-lg max-w-xl mx-auto mb-4"
             style={{ color: 'var(--color-text-secondary)' }}
           >
             Upload a PDF to extract all text content.
             Page breaks are preserved for easy navigation.
           </motion.p>
+
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+          >
+            <Link
+              to="/library?type=pdf"
+              className="inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
+              style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
+            >
+              <History className="w-4 h-4" />
+              View past extractions
+            </Link>
+          </motion.div>
         </div>
       )}
 
