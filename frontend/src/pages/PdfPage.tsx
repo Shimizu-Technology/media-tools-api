@@ -417,13 +417,28 @@ export function PdfPage() {
                 borderColor: 'var(--color-border)',
               }}
             >
-              <h3
-                className="text-base font-semibold flex items-center gap-2 mb-4"
-                style={{ color: 'var(--color-text-primary)' }}
-              >
-                <BookOpen className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
-                Extracted Text
-              </h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3
+                  className="text-base font-semibold flex items-center gap-2"
+                  style={{ color: 'var(--color-text-primary)' }}
+                >
+                  <BookOpen className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
+                  Extracted Text
+                </h3>
+                <button
+                  onClick={handleCopy}
+                  className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+                  style={{
+                    backgroundColor: copied ? '#10b981' : 'var(--color-surface-overlay)',
+                    color: copied ? 'white' : 'var(--color-text-secondary)',
+                    borderColor: copied ? '#10b981' : 'var(--color-border)',
+                    minHeight: '32px',
+                  }}
+                >
+                  {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                  <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
 
               {pageSegments.length > 1 ? (
                 <div className="space-y-6">

@@ -343,7 +343,21 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
             <FileText className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
             Transcript
           </h3>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Copy button */}
+            <button
+              onClick={handleCopy}
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+              style={{
+                backgroundColor: copied ? '#10b981' : 'var(--color-surface-overlay)',
+                color: copied ? 'white' : 'var(--color-text-secondary)',
+                borderColor: copied ? '#10b981' : 'var(--color-border)',
+                minHeight: '32px',
+              }}
+            >
+              {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+              <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy'}</span>
+            </button>
             {/* Expand/Collapse button at top (only when expanded) */}
             {!showTimestamps && isLong && expanded && (
               <button
@@ -352,10 +366,10 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
                 style={{ color: 'var(--color-brand-500)', minHeight: '32px' }}
               >
                 <ChevronUp className="w-3.5 h-3.5" />
-                Collapse
+                <span className="hidden sm:inline">Collapse</span>
               </button>
             )}
-            <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            <span className="text-xs hidden sm:inline" style={{ color: 'var(--color-text-muted)' }}>
               {transcript.word_count.toLocaleString()} words
             </span>
           </div>
