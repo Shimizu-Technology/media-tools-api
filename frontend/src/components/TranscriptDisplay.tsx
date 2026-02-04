@@ -343,9 +343,22 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
             <FileText className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
             Transcript
           </h3>
-          <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            {transcript.word_count.toLocaleString()} words
-          </span>
+          <div className="flex items-center gap-3">
+            {/* Expand/Collapse button at top (only when expanded) */}
+            {!showTimestamps && isLong && expanded && (
+              <button
+                onClick={() => setExpanded(false)}
+                className="flex items-center gap-1 text-xs font-medium transition-colors"
+                style={{ color: 'var(--color-brand-500)', minHeight: '32px' }}
+              >
+                <ChevronUp className="w-3.5 h-3.5" />
+                Collapse
+              </button>
+            )}
+            <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              {transcript.word_count.toLocaleString()} words
+            </span>
+          </div>
         </div>
 
         {/* Timestamps mode */}
