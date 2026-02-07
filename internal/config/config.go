@@ -22,6 +22,8 @@ type Config struct {
 
 	// Database settings
 	DatabaseURL string
+	// Optional direct (non-pooled) connection string for PgBouncer compatibility
+	DatabaseURLDirect string
 
 	// External tools
 	YtDlpPath    string // Path to yt-dlp binary
@@ -68,7 +70,8 @@ func Load() (*Config, error) {
 		GinMode: getEnv("GIN_MODE", "debug"),
 
 		// Database — required in production, has a default for local dev
-		DatabaseURL: getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/media_tools?sslmode=disable"),
+		DatabaseURL:       getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/media_tools?sslmode=disable"),
+		DatabaseURLDirect: getEnv("DATABASE_URL_DIRECT", ""),
 
 		// yt-dlp — try common locations
 		YtDlpPath:    getEnv("YT_DLP_PATH", findYtDlp()),

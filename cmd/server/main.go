@@ -40,7 +40,12 @@ func main() {
 	os.Setenv("GIN_MODE", cfg.GinMode)
 
 	// Step 2: Connect to Database
-	db, err := database.New(cfg.DatabaseURL)
+	dbURL := cfg.DatabaseURL
+	if cfg.DatabaseURLDirect != "" {
+		dbURL = cfg.DatabaseURLDirect
+		log.Println("✅ Using direct database connection (no pooler)")
+	}
+	db, err := database.New(dbURL)
 	if err != nil {
 		log.Fatalf("❌ Failed to connect to database: %v", err)
 	}
