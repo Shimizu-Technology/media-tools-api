@@ -2,6 +2,9 @@
 package handlers
 
 import (
+	"database/sql"
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -24,6 +27,14 @@ func (h *Handler) loadTranscriptChatTarget(c *gin.Context) (*chatTarget, *models
 	transcriptID := c.Param("id")
 	t, err := h.DB.GetTranscript(c.Request.Context(), transcriptID)
 	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			log.Printf("Failed to load transcript %s: %v", transcriptID, err)
+			return nil, &models.ErrorResponse{
+				Error:   "database_error",
+				Message: "Failed to load transcript",
+				Code:    http.StatusInternalServerError,
+			}, http.StatusInternalServerError
+		}
 		return nil, &models.ErrorResponse{
 			Error:   "not_found",
 			Message: "Transcript not found",
@@ -63,6 +74,14 @@ func (h *Handler) loadAudioChatTarget(c *gin.Context) (*chatTarget, *models.Erro
 	audioID := c.Param("id")
 	at, err := h.DB.GetAudioTranscription(c.Request.Context(), audioID)
 	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			log.Printf("Failed to load audio transcription %s: %v", audioID, err)
+			return nil, &models.ErrorResponse{
+				Error:   "database_error",
+				Message: "Failed to load audio transcription",
+				Code:    http.StatusInternalServerError,
+			}, http.StatusInternalServerError
+		}
 		return nil, &models.ErrorResponse{
 			Error:   "not_found",
 			Message: "Audio transcription not found",
@@ -102,6 +121,14 @@ func (h *Handler) loadPDFChatTarget(c *gin.Context) (*chatTarget, *models.ErrorR
 	pdfID := c.Param("id")
 	pe, err := h.DB.GetPDFExtraction(c.Request.Context(), pdfID)
 	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			log.Printf("Failed to load PDF extraction %s: %v", pdfID, err)
+			return nil, &models.ErrorResponse{
+				Error:   "database_error",
+				Message: "Failed to load PDF extraction",
+				Code:    http.StatusInternalServerError,
+			}, http.StatusInternalServerError
+		}
 		return nil, &models.ErrorResponse{
 			Error:   "not_found",
 			Message: "PDF extraction not found",
