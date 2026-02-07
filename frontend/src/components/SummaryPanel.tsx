@@ -184,13 +184,43 @@ export function SummaryPanel({ transcriptId, transcriptText }: SummaryPanelProps
   const hasSummary = !!summary;
 
   return (
-    <div className="w-full max-w-2xl mx-auto mt-4">
-      {/* Generate Summary Button + Length Picker */}
+    <div className="w-full">
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="flex items-center gap-3 mb-4"
+        className="flex items-center justify-between gap-3 mb-4"
+      >
+        <div className="flex items-center gap-2">
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ backgroundColor: 'var(--color-surface-overlay)', color: 'var(--color-brand-500)' }}
+          >
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+              AI Summary
+            </h3>
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              Key points, decisions, and a concise recap.
+            </p>
+          </div>
+        </div>
+        <span
+          className="hidden sm:inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide"
+          style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
+        >
+          Auto-structured
+        </span>
+      </motion.div>
+
+      {/* Generate Summary Button + Length Picker */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.25 }}
+        className="flex flex-wrap items-center gap-3 mb-4"
       >
         <button
           onClick={handleGenerateSummary}
@@ -280,6 +310,7 @@ export function SummaryPanel({ transcriptId, transcriptText }: SummaryPanelProps
           borderColor: 'var(--color-border)',
         }}
       >
+        <div className="h-1" style={{ backgroundColor: 'var(--color-brand-500)' }} />
         {/* Tab Bar */}
         <div
           className="flex border-b"
@@ -372,7 +403,7 @@ export function SummaryPanel({ transcriptId, transcriptText }: SummaryPanelProps
                         className="flex items-start gap-3 text-sm"
                       >
                         <span
-                          className="flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-xs font-semibold mt-0.5"
+                          className="shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-xs font-semibold mt-0.5"
                           style={{
                             backgroundColor: 'var(--color-brand-500)',
                             color: 'white',
@@ -460,9 +491,9 @@ export function SummaryPanel({ transcriptId, transcriptText }: SummaryPanelProps
               animate={{ opacity: 1, y: 0 }}
               className="flex items-center gap-2 mt-4 p-3 rounded-lg text-sm"
               style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                border: '1px solid rgba(239, 68, 68, 0.2)',
-                color: '#ef4444',
+                backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                border: '1px solid rgba(239, 68, 68, 0.24)',
+                color: 'var(--color-error)',
               }}
             >
               <AlertCircle className="w-4 h-4 shrink-0" />

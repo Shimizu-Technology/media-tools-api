@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useSearchParams, Link, useNavigate } from 'react-router-dom'
-import { Sparkles, ArrowLeft, History } from 'lucide-react'
+import { Sparkles, ArrowLeft, History, MessageCircle, Wand2, PlayCircle } from 'lucide-react'
 import { ApiKeySetup } from '../components/ApiKeySetup'
 import { TranscriptInput } from '../components/TranscriptInput'
 import { TranscriptDisplay } from '../components/TranscriptDisplay'
@@ -78,45 +78,96 @@ export function HomePage() {
   }
 
   return (
-    <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+    <main className="max-w-5xl mx-auto px-4 sm:px-6 py-10 sm:py-14">
       {/* Hero Section */}
       {!transcript && (
-        <div className="text-center mb-12">
-          <div
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-6"
-            style={{
-              backgroundColor: 'rgba(59, 130, 246, 0.1)',
-              color: 'var(--color-brand-400)',
-            }}
-          >
-            <Sparkles className="w-4 h-4" />
-            Powered by yt-dlp & OpenRouter AI
+        <div className="grid gap-10 lg:grid-cols-[1.2fr_0.8fr] items-start mb-12">
+          <div>
+            <div
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-6"
+              style={{
+                backgroundColor: 'var(--color-brand-50)',
+                color: 'var(--color-brand-500)',
+              }}
+            >
+              <Sparkles className="w-4 h-4" />
+              Powered by yt-dlp & OpenRouter AI
+            </div>
+
+            <h1
+              className="text-4xl md:text-5xl font-semibold tracking-tight mb-4"
+              style={{ color: 'var(--color-text-primary)' }}
+            >
+              Extract YouTube transcripts and chat with the content.
+            </h1>
+
+            <p
+              className="text-lg max-w-2xl mb-6"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
+              Paste any YouTube URL to capture the full transcript, generate concise summaries,
+              and ask follow-up questions without leaving the page.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                to="/library?type=youtube"
+                className="inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
+                style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
+              >
+                <History className="w-4 h-4" />
+                View past transcripts
+              </Link>
+            </div>
           </div>
 
-          <h1
-            className="text-4xl md:text-5xl font-bold mb-4"
-            style={{ color: 'var(--color-text-primary)' }}
+          <div
+            className="rounded-2xl border p-6"
+            style={{
+              backgroundColor: 'var(--color-surface-elevated)',
+              borderColor: 'var(--color-border)',
+            }}
           >
-            Extract YouTube{' '}
-            <span style={{ color: 'var(--color-brand-500)' }}>Transcripts</span>
-          </h1>
-
-          <p
-            className="text-lg max-w-xl mx-auto mb-4"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
-            Paste any YouTube URL to extract the full transcript.
-            Then generate AI-powered summaries with key points.
-          </p>
-
-          <Link
-            to="/library?type=youtube"
-            className="inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
-            style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
-          >
-            <History className="w-4 h-4" />
-            View past transcripts
-          </Link>
+            <h2 className="text-sm font-semibold uppercase tracking-[0.2em] mb-4" style={{ color: 'var(--color-text-muted)' }}>
+              Flow
+            </h2>
+            <div className="space-y-4">
+              {[
+                {
+                  icon: <PlayCircle className="w-4 h-4" />,
+                  title: 'Paste a link',
+                  detail: 'Works with youtube.com, youtu.be, and video IDs.',
+                },
+                {
+                  icon: <Wand2 className="w-4 h-4" />,
+                  title: 'Generate insights',
+                  detail: 'Summaries, key points, and decisions in one click.',
+                },
+                {
+                  icon: <MessageCircle className="w-4 h-4" />,
+                  title: 'Chat with context',
+                  detail: 'Ask questions against the transcript and summary.',
+                },
+              ].map((item) => (
+                <div key={item.title} className="flex items-start gap-3">
+                  <div
+                    className="w-9 h-9 rounded-xl flex items-center justify-center"
+                    style={{ backgroundColor: 'var(--color-surface-overlay)', color: 'var(--color-brand-500)' }}
+                  >
+                    {item.icon}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+                      {item.title}
+                    </p>
+                    <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                      {item.detail}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
@@ -149,8 +200,8 @@ export function HomePage() {
         <div
           className="max-w-2xl mx-auto mt-6 p-4 rounded-lg text-sm text-center"
           style={{
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            color: '#f87171',
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            color: 'var(--color-error)',
           }}
         >
           {error}
@@ -162,13 +213,14 @@ export function HomePage() {
         <div className="mt-6">
           <TranscriptDisplay transcript={transcript} />
           {transcript.status === 'completed' && transcript.transcript_text && (
-            <>
+            <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_0.9fr]">
+              <div className="lg:col-span-2 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
               <SummaryPanel
                 transcriptId={transcript.id}
                 transcriptText={transcript.transcript_text}
               />
               <TranscriptChatPanel itemType="transcript" itemId={transcript.id} />
-            </>
+            </div>
           )}
         </div>
       )}

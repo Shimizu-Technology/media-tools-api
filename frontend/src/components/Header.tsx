@@ -46,9 +46,9 @@ export function Header() {
   return (
     <>
       <header
-        className="sticky top-0 z-50 border-b"
+        className="sticky top-0 z-50 border-b backdrop-blur"
         style={{
-          backgroundColor: 'var(--color-surface)',
+          backgroundColor: 'rgba(11, 13, 16, 0.86)',
           borderColor: 'var(--color-border)',
         }}
       >
@@ -134,7 +134,7 @@ export function Header() {
                       backgroundColor: 'transparent',
                     }}
                   >
-                    <Key className="w-4 h-4" style={{ color: hasApiKey ? '#10b981' : 'var(--color-text-muted)' }} />
+                    <Key className="w-4 h-4" style={{ color: hasApiKey ? 'var(--color-success)' : 'var(--color-text-muted)' }} />
                     <div className="flex-1">
                       <p className="font-medium">API Key</p>
                       <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>

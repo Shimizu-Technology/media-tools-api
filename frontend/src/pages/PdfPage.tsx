@@ -350,9 +350,9 @@ export function PdfPage() {
           animate={{ opacity: 1, y: 0 }}
           className="max-w-2xl mx-auto mt-6 p-4 rounded-xl text-sm flex items-center gap-3"
           style={{
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid rgba(239, 68, 68, 0.2)',
-            color: '#ef4444',
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid rgba(239, 68, 68, 0.24)',
+            color: 'var(--color-error)',
           }}
         >
           <AlertCircle className="w-5 h-5 shrink-0" />
@@ -368,7 +368,7 @@ export function PdfPage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-            className="max-w-3xl mx-auto"
+            className="max-w-5xl mx-auto"
           >
             {/* Back / New button */}
             <motion.button
@@ -424,83 +424,88 @@ export function PdfPage() {
               />
             </div>
 
-            {/* Extracted text with page breaks */}
-            <div
-              className="p-6 rounded-2xl border"
-              style={{
-                backgroundColor: 'var(--color-surface-elevated)',
-                borderColor: 'var(--color-border)',
-              }}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h3
-                  className="text-base font-semibold flex items-center gap-2"
-                  style={{ color: 'var(--color-text-primary)' }}
-                >
-                  <BookOpen className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
-                  Extracted Text
-                </h3>
-                <button
-                  onClick={handleCopy}
-                  className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors"
-                  style={{
-                    backgroundColor: copied ? '#10b981' : 'var(--color-surface-overlay)',
-                    color: copied ? 'white' : 'var(--color-text-secondary)',
-                    borderColor: copied ? '#10b981' : 'var(--color-border)',
-                    minHeight: '32px',
-                  }}
-                >
-                  {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy'}</span>
-                </button>
+            <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_0.9fr]">
+              <div className="lg:col-span-2 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
+              {/* Extracted text with page breaks */}
+              <div
+                className="p-6 rounded-2xl border"
+                style={{
+                  backgroundColor: 'var(--color-surface-elevated)',
+                  borderColor: 'var(--color-border)',
+                }}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h3
+                    className="text-base font-semibold flex items-center gap-2"
+                    style={{ color: 'var(--color-text-primary)' }}
+                  >
+                    <BookOpen className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
+                    Extracted Text
+                  </h3>
+                  <button
+                    onClick={handleCopy}
+                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+                    style={{
+                      backgroundColor: copied ? 'var(--color-success)' : 'var(--color-surface-overlay)',
+                      color: copied ? 'white' : 'var(--color-text-secondary)',
+                      borderColor: copied ? 'var(--color-success)' : 'var(--color-border)',
+                      minHeight: '32px',
+                    }}
+                  >
+                    {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy'}</span>
+                  </button>
+                </div>
+
+                {pageSegments.length > 1 ? (
+                  <div className="space-y-6">
+                    {pageSegments.map((pageText, i) => (
+                      <motion.div
+                        key={i}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.05, duration: 0.3 }}
+                      >
+                        {i > 0 && (
+                          <div className="flex items-center gap-3 mb-3">
+                            <div className="flex-1 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
+                            <span
+                              className="text-xs font-medium px-2 py-1 rounded-full"
+                              style={{
+                                backgroundColor: 'var(--color-surface)',
+                                color: 'var(--color-text-muted)',
+                                border: '1px solid var(--color-border)',
+                              }}
+                            >
+                              Page {i + 1}
+                            </span>
+                            <div className="flex-1 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
+                          </div>
+                        )}
+                        <div
+                          className="text-sm leading-relaxed whitespace-pre-wrap"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          {pageText.trim()}
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                ) : (
+                  <div
+                    className="text-sm leading-relaxed whitespace-pre-wrap"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    {result.text_content}
+                  </div>
+                )}
               </div>
 
-              {pageSegments.length > 1 ? (
-                <div className="space-y-6">
-                  {pageSegments.map((pageText, i) => (
-                    <motion.div
-                      key={i}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: i * 0.05, duration: 0.3 }}
-                    >
-                      {i > 0 && (
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className="flex-1 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
-                          <span
-                            className="text-xs font-medium px-2 py-1 rounded-full"
-                            style={{
-                              backgroundColor: 'var(--color-surface)',
-                              color: 'var(--color-text-muted)',
-                              border: '1px solid var(--color-border)',
-                            }}
-                          >
-                            Page {i + 1}
-                          </span>
-                          <div className="flex-1 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
-                        </div>
-                      )}
-                      <div
-                        className="text-sm leading-relaxed whitespace-pre-wrap"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                      >
-                        {pageText.trim()}
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              ) : (
-                <div
-                  className="text-sm leading-relaxed whitespace-pre-wrap"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  {result.text_content}
-                </div>
-              )}
+              {/* AI Chat */}
+              <div>
+                <TranscriptChatPanel itemType="pdf" itemId={result.id} />
+              </div>
             </div>
-
-            {/* AI Chat */}
-            <TranscriptChatPanel itemType="pdf" itemId={result.id} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -514,7 +519,7 @@ export function PdfPage() {
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ duration: 0.2 }}
             className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg"
-            style={{ backgroundColor: '#10b981', color: 'white' }}
+            style={{ backgroundColor: 'var(--color-success)', color: 'white' }}
           >
             <Check className="w-4 h-4" />
             <span className="text-sm font-medium">Text copied to clipboard</span>
@@ -555,9 +560,9 @@ function ActionBtn({
       onClick={onClick}
       className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200"
       style={{
-        backgroundColor: active ? '#10b981' : 'var(--color-surface-overlay)',
+        backgroundColor: active ? 'var(--color-success)' : 'var(--color-surface-overlay)',
         color: active ? 'white' : 'var(--color-text-secondary)',
-        border: `1px solid ${active ? '#10b981' : 'var(--color-border)'}`,
+        border: `1px solid ${active ? 'var(--color-success)' : 'var(--color-border)'}`,
         minHeight: '44px',
       }}
     >

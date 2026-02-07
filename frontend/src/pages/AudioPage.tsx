@@ -559,7 +559,7 @@ export function AudioPage() {
                     whileTap={{ scale: 0.95 }}
                     onClick={startRecording}
                     className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 transition-colors"
-                    style={{ backgroundColor: '#ef4444', color: 'white' }}
+                    style={{ backgroundColor: 'var(--color-error)', color: 'white' }}
                   >
                     <Mic className="w-8 h-8" />
                   </motion.button>
@@ -574,11 +574,11 @@ export function AudioPage() {
                     animate={{ scale: [1, 1.1, 1] }}
                     transition={{ repeat: Infinity, duration: 1.5 }}
                     className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4"
-                    style={{ backgroundColor: '#ef4444', color: 'white' }}
+                    style={{ backgroundColor: 'var(--color-error)', color: 'white' }}
                   >
                     <Mic className="w-8 h-8" />
                   </motion.div>
-                  <p className="text-2xl font-mono font-bold mb-2" style={{ color: '#ef4444' }}>
+                  <p className="text-2xl font-mono font-bold mb-2" style={{ color: 'var(--color-error)' }}>
                     {formatDuration(recordingTime)}
                   </p>
                   <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>Recording...</p>
@@ -587,7 +587,7 @@ export function AudioPage() {
                     whileTap={{ scale: 0.97 }}
                     onClick={stopRecording}
                     className="px-6 py-3 rounded-xl font-medium text-white"
-                    style={{ backgroundColor: '#ef4444', minHeight: '48px' }}
+                    style={{ backgroundColor: 'var(--color-error)', minHeight: '48px' }}
                   >
                     <span className="flex items-center gap-2">
                       <Square className="w-4 h-4" /> Stop Recording
@@ -598,7 +598,7 @@ export function AudioPage() {
 
               {recordedBlob && !isRecording && (
                 <>
-                  <CheckCircle2 className="w-12 h-12 mx-auto mb-3" style={{ color: '#10b981' }} />
+                  <CheckCircle2 className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--color-success)' }} />
                   <p className="text-base font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>Recording complete</p>
                   <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>
                     {formatDuration(recordingTime)} — {(recordedBlob.size / 1024 / 1024).toFixed(2)} MB
@@ -704,7 +704,7 @@ export function AudioPage() {
       {error && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
           className="max-w-2xl mx-auto mt-6 p-4 rounded-xl text-sm flex items-center gap-3"
-          style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', color: '#ef4444' }}>
+          style={{ backgroundColor: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.24)', color: 'var(--color-error)' }}>
           <AlertCircle className="w-5 h-5 shrink-0" />
           {error}
         </motion.div>
@@ -715,7 +715,7 @@ export function AudioPage() {
         {result && result.status === 'completed' && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
             transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-            className="max-w-3xl mx-auto">
+            className="max-w-5xl mx-auto">
 
             {/* Top actions */}
             <div className="flex items-center justify-between mb-6">
@@ -870,36 +870,41 @@ export function AudioPage() {
               </motion.div>
             )}
 
-            {/* Full Transcript */}
-            <div className="p-6 rounded-2xl border"
-              style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base font-semibold flex items-center gap-2"
-                  style={{ color: 'var(--color-text-primary)' }}>
-                  <Mic className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
-                  Full Transcript
-                </h3>
-                <button
-                  onClick={() => handleCopy(result.transcript_text, 'transcript')}
-                  className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors"
-                  style={{
-                    backgroundColor: copied === 'transcript' ? '#10b981' : 'var(--color-surface-overlay)',
-                    color: copied === 'transcript' ? 'white' : 'var(--color-text-secondary)',
-                    borderColor: copied === 'transcript' ? '#10b981' : 'var(--color-border)',
-                    minHeight: '36px',
-                  }}>
-                  {copied === 'transcript' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  {copied === 'transcript' ? 'Copied' : 'Copy'}
-                </button>
+            <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_0.9fr]">
+              <div className="lg:col-span-2 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
+              {/* Full Transcript */}
+              <div className="p-6 rounded-2xl border"
+                style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-base font-semibold flex items-center gap-2"
+                    style={{ color: 'var(--color-text-primary)' }}>
+                    <Mic className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
+                    Full Transcript
+                  </h3>
+                  <button
+                    onClick={() => handleCopy(result.transcript_text, 'transcript')}
+                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+                    style={{
+                      backgroundColor: copied === 'transcript' ? 'var(--color-success)' : 'var(--color-surface-overlay)',
+                      color: copied === 'transcript' ? 'white' : 'var(--color-text-secondary)',
+                      borderColor: copied === 'transcript' ? 'var(--color-success)' : 'var(--color-border)',
+                      minHeight: '36px',
+                    }}>
+                    {copied === 'transcript' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    {copied === 'transcript' ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                <div className="text-sm leading-relaxed whitespace-pre-wrap max-h-96 overflow-y-auto"
+                  style={{ color: 'var(--color-text-secondary)' }}>
+                  {result.transcript_text}
+                </div>
               </div>
-              <div className="text-sm leading-relaxed whitespace-pre-wrap max-h-96 overflow-y-auto"
-                style={{ color: 'var(--color-text-secondary)' }}>
-                {result.transcript_text}
+
+              {/* AI Chat */}
+              <div>
+                <TranscriptChatPanel itemType="audio" itemId={result.id} />
               </div>
             </div>
-
-            {/* AI Chat */}
-            <TranscriptChatPanel itemType="audio" itemId={result.id} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -912,7 +917,7 @@ export function AudioPage() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg"
-            style={{ backgroundColor: '#10b981', color: 'white' }}>
+            style={{ backgroundColor: 'var(--color-success)', color: 'white' }}>
             <Check className="w-4 h-4" />
             <span className="text-sm font-medium">Copied to clipboard</span>
           </motion.div>
@@ -960,9 +965,9 @@ function SectionCard({
         <button onClick={onCopy}
           className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors"
           style={{
-            backgroundColor: copied === copyLabel ? '#10b981' : 'var(--color-surface-overlay)',
+            backgroundColor: copied === copyLabel ? 'var(--color-success)' : 'var(--color-surface-overlay)',
             color: copied === copyLabel ? 'white' : 'var(--color-text-secondary)',
-            borderColor: copied === copyLabel ? '#10b981' : 'var(--color-border)',
+            borderColor: copied === copyLabel ? 'var(--color-success)' : 'var(--color-border)',
             minHeight: '36px',
           }}>
           {copied === copyLabel ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}

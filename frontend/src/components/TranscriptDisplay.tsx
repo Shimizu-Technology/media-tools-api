@@ -149,7 +149,7 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-3xl mx-auto p-8 rounded-2xl border text-center"
+        className="w-full max-w-5xl mx-auto p-8 rounded-2xl border text-center"
         style={{
           backgroundColor: 'var(--color-surface-elevated)',
           borderColor: 'var(--color-border)',
@@ -171,14 +171,14 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-3xl mx-auto p-8 rounded-2xl border"
+        className="w-full max-w-5xl mx-auto p-8 rounded-2xl border"
         style={{
           backgroundColor: 'var(--color-surface-elevated)',
-          borderColor: '#ef4444',
+          borderColor: 'var(--color-error)',
         }}
       >
         <div className="flex items-center gap-3 mb-3">
-          <AlertCircle className="w-6 h-6 text-red-500 shrink-0" />
+          <AlertCircle className="w-6 h-6 shrink-0" style={{ color: 'var(--color-error)' }} />
           <p className="text-lg font-medium" style={{ color: 'var(--color-text-primary)' }}>
             Extraction failed
           </p>
@@ -203,7 +203,7 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-      className="w-full max-w-3xl mx-auto"
+      className="w-full max-w-5xl mx-auto"
     >
       {/* Video Info Card */}
       <motion.div
@@ -365,9 +365,9 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
               onClick={handleCopy}
               className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors"
               style={{
-                backgroundColor: copied ? '#10b981' : 'var(--color-surface-overlay)',
+                backgroundColor: copied ? 'var(--color-success)' : 'var(--color-surface-overlay)',
                 color: copied ? 'white' : 'var(--color-text-secondary)',
-                borderColor: copied ? '#10b981' : 'var(--color-border)',
+                borderColor: copied ? 'var(--color-success)' : 'var(--color-border)',
                 minHeight: '32px',
               }}
             >
@@ -476,7 +476,7 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
             transition={{ duration: 0.2 }}
             className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg"
             style={{
-              backgroundColor: '#10b981',
+              backgroundColor: 'var(--color-success)',
               color: 'white',
             }}
           >
@@ -546,9 +546,9 @@ function ActionButton({
       onClick={onClick}
       className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200"
       style={{
-        backgroundColor: active ? '#10b981' : 'var(--color-surface-overlay)',
+        backgroundColor: active ? 'var(--color-success)' : 'var(--color-surface-overlay)',
         color: active ? 'white' : 'var(--color-text-secondary)',
-        border: `1px solid ${active ? '#10b981' : 'var(--color-border)'}`,
+        border: `1px solid ${active ? 'var(--color-success)' : 'var(--color-border)'}`,
         minHeight: '44px', // Touch target
       }}
     >

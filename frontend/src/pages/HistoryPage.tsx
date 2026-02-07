@@ -150,14 +150,14 @@ export function HistoryPage() {
 
   const statusColors: Record<string, { bg: string; text: string; border: string }> = {
     completed: {
-      bg: 'rgba(16, 185, 129, 0.1)',
-      text: '#10b981',
-      border: 'rgba(16, 185, 129, 0.2)',
+      bg: 'rgba(24, 185, 133, 0.12)',
+      text: 'var(--color-success)',
+      border: 'rgba(24, 185, 133, 0.24)',
     },
     processing: {
-      bg: 'rgba(59, 130, 246, 0.1)',
-      text: '#3b82f6',
-      border: 'rgba(59, 130, 246, 0.2)',
+      bg: 'var(--color-brand-50)',
+      text: 'var(--color-brand-500)',
+      border: 'rgba(47, 158, 143, 0.24)',
     },
     pending: {
       bg: 'rgba(245, 158, 11, 0.1)',
@@ -165,9 +165,9 @@ export function HistoryPage() {
       border: 'rgba(245, 158, 11, 0.2)',
     },
     failed: {
-      bg: 'rgba(239, 68, 68, 0.1)',
-      text: '#ef4444',
-      border: 'rgba(239, 68, 68, 0.2)',
+      bg: 'rgba(239, 68, 68, 0.12)',
+      text: 'var(--color-error)',
+      border: 'rgba(239, 68, 68, 0.24)',
     },
   };
 
@@ -190,15 +190,22 @@ export function HistoryPage() {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.3 }}
-      className="max-w-6xl mx-auto px-6 pt-28 pb-16"
+      className="max-w-5xl mx-auto px-4 sm:px-6 pt-24 pb-16"
     >
       {/* Page Header */}
       <div className="mb-8">
+        <div
+          className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium mb-3"
+          style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
+        >
+          <FileText className="w-3.5 h-3.5" />
+          Archive
+        </div>
         <motion.h1
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-          className="text-3xl sm:text-4xl font-bold tracking-tight mb-2"
+          className="text-3xl sm:text-4xl font-semibold tracking-tight mb-2"
           style={{ color: 'var(--color-text-primary)' }}
         >
           Transcript History
@@ -211,7 +218,7 @@ export function HistoryPage() {
         >
           {totalItems > 0
             ? `${totalItems} transcript${totalItems !== 1 ? 's' : ''} found`
-            : 'Browse and manage your extracted transcripts'}
+            : 'Browse and manage your extracted transcripts.'}
         </motion.p>
       </div>
 
@@ -388,9 +395,9 @@ export function HistoryPage() {
                   disabled={isDeleting}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors duration-200"
                   style={{
-                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                    border: '1px solid rgba(239, 68, 68, 0.2)',
-                    color: '#ef4444',
+                    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                    border: '1px solid rgba(239, 68, 68, 0.24)',
+                    color: 'var(--color-error)',
                     minHeight: '36px',
                   }}
                 >
@@ -438,13 +445,13 @@ export function HistoryPage() {
                   className="h-5 rounded-lg relative overflow-hidden"
                   style={{ backgroundColor: 'var(--color-border)', width: '75%' }}
                 >
-                  <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                  <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-linear-to-r from-transparent via-white/10 to-transparent" />
                 </div>
                 <div
                   className="h-4 rounded-lg relative overflow-hidden"
                   style={{ backgroundColor: 'var(--color-border)', width: '50%' }}
                 >
-                  <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                  <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-linear-to-r from-transparent via-white/10 to-transparent" />
                 </div>
                 <div className="flex gap-3 pt-2">
                   <div
@@ -469,12 +476,12 @@ export function HistoryPage() {
           animate={{ opacity: 1, y: 0 }}
           className="flex items-center gap-3 p-6 rounded-2xl border text-center"
           style={{
-            backgroundColor: 'rgba(239, 68, 68, 0.05)',
-            borderColor: 'rgba(239, 68, 68, 0.2)',
+            backgroundColor: 'rgba(239, 68, 68, 0.08)',
+            borderColor: 'rgba(239, 68, 68, 0.24)',
           }}
         >
-          <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
-          <p className="text-sm text-red-500">{error}</p>
+          <AlertCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--color-error)' }} />
+          <p className="text-sm" style={{ color: 'var(--color-error)' }}>{error}</p>
         </motion.div>
       )}
 

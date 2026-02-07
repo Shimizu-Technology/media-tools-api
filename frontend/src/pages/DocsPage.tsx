@@ -30,7 +30,7 @@ export function DocsPage() {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.3 }}
-      className="max-w-4xl mx-auto px-6 pt-28 pb-16"
+      className="max-w-5xl mx-auto px-4 sm:px-6 pt-24 pb-16"
     >
       {/* Hero */}
       <motion.div
@@ -50,7 +50,7 @@ export function DocsPage() {
           API Reference
         </div>
         <h1
-          className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight mb-4"
+          className="text-3xl sm:text-4xl lg:text-5xl font-semibold tracking-tight mb-4"
           style={{ color: 'var(--color-text-primary)' }}
         >
           Media Tools API
@@ -60,13 +60,14 @@ export function DocsPage() {
           Simple REST API with API key authentication.
         </p>
       </motion.div>
+      <div className="h-px mb-10" style={{ backgroundColor: 'var(--color-border)' }} />
 
       {/* Quick Start Features */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-        className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-12"
+        className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-12"
       >
         {[
           { icon: Zap, title: 'Fast extraction', desc: 'Transcripts in 10-30 seconds' },
@@ -380,7 +381,7 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
         <button
           onClick={handleCopy}
           className="flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors duration-200 hover:opacity-80"
-          style={{ color: copied ? '#10b981' : 'var(--color-text-muted)' }}
+          style={{ color: copied ? 'var(--color-success)' : 'var(--color-text-muted)' }}
         >
           {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
           {copied ? 'Copied' : 'Copy'}
@@ -411,9 +412,9 @@ function EndpointCard({
   const [expanded, setExpanded] = useState(false);
 
   const methodColors: Record<string, { bg: string; text: string }> = {
-    GET: { bg: 'rgba(16, 185, 129, 0.1)', text: '#10b981' },
-    POST: { bg: 'rgba(59, 130, 246, 0.1)', text: '#3b82f6' },
-    DELETE: { bg: 'rgba(239, 68, 68, 0.1)', text: '#ef4444' },
+    GET: { bg: 'rgba(24, 185, 133, 0.12)', text: 'var(--color-success)' },
+    POST: { bg: 'var(--color-brand-50)', text: 'var(--color-brand-500)' },
+    DELETE: { bg: 'rgba(239, 68, 68, 0.12)', text: 'var(--color-error)' },
     PUT: { bg: 'rgba(245, 158, 11, 0.1)', text: '#f59e0b' },
     PATCH: { bg: 'rgba(168, 85, 247, 0.1)', text: '#a855f7' },
   };
@@ -872,9 +873,9 @@ function TryItSection() {
           animate={{ opacity: 1, y: 0 }}
           className="flex items-center gap-2 mt-4 p-3 rounded-lg text-sm"
           style={{
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid rgba(239, 68, 68, 0.2)',
-            color: '#ef4444',
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid rgba(239, 68, 68, 0.24)',
+            color: 'var(--color-error)',
           }}
         >
           <AlertCircle className="w-4 h-4 shrink-0" />

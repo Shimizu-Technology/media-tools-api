@@ -101,19 +101,26 @@ export function WebhooksPage() {
   };
 
   return (
-    <main className="relative pt-28 pb-16 px-6">
-      <div className="max-w-4xl mx-auto">
+    <main className="relative pt-24 pb-16 px-4 sm:px-6">
+      <div className="max-w-5xl mx-auto">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="flex items-center justify-between mb-8"
+          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8"
         >
           <div>
+            <div
+              className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium mb-3"
+              style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
+            >
+              <WebhookIcon className="w-3.5 h-3.5" />
+              Integrations
+            </div>
             <div className="flex items-center gap-3 mb-2">
               <WebhookIcon className="w-6 h-6" style={{ color: 'var(--color-brand-500)' }} />
-              <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text-primary)' }}>
+              <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>
                 Webhooks
               </h1>
             </div>
@@ -138,12 +145,12 @@ export function WebhooksPage() {
             animate={{ opacity: 1, y: 0 }}
             className="mb-6 p-3 rounded-xl border flex items-center gap-2"
             style={{
-              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              backgroundColor: 'rgba(239, 68, 68, 0.12)',
               borderColor: 'rgba(239, 68, 68, 0.3)',
             }}
           >
-            <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-            <span className="text-sm text-red-500">{error}</span>
+            <AlertCircle className="w-4 h-4 shrink-0" style={{ color: 'var(--color-error)' }} />
+            <span className="text-sm" style={{ color: 'var(--color-error)' }}>{error}</span>
           </motion.div>
         )}
 
@@ -154,8 +161,8 @@ export function WebhooksPage() {
             animate={{ opacity: 1, y: 0 }}
             className="mb-6 p-4 rounded-xl border"
             style={{
-              backgroundColor: 'rgba(34, 197, 94, 0.05)',
-              borderColor: 'rgba(34, 197, 94, 0.2)',
+              backgroundColor: 'rgba(24, 185, 133, 0.08)',
+              borderColor: 'rgba(24, 185, 133, 0.24)',
             }}
           >
             <p className="text-sm font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>

@@ -305,10 +305,10 @@ export function MyLibraryPage() {
   ];
 
   const statusColors: Record<string, { bg: string; text: string }> = {
-    completed: { bg: 'rgba(16, 185, 129, 0.1)', text: '#10b981' },
-    processing: { bg: 'rgba(59, 130, 246, 0.1)', text: '#3b82f6' },
+    completed: { bg: 'rgba(24, 185, 133, 0.12)', text: 'var(--color-success)' },
+    processing: { bg: 'var(--color-brand-50)', text: 'var(--color-brand-500)' },
     pending: { bg: 'rgba(245, 158, 11, 0.1)', text: '#f59e0b' },
-    failed: { bg: 'rgba(239, 68, 68, 0.1)', text: '#ef4444' },
+    failed: { bg: 'rgba(239, 68, 68, 0.12)', text: 'var(--color-error)' },
   };
 
   const typeIcons: Record<string, React.ReactNode> = {
@@ -319,7 +319,7 @@ export function MyLibraryPage() {
 
   const typeColors: Record<string, string> = {
     youtube: '#ef4444',
-    audio: '#3b82f6',
+    audio: 'var(--color-brand-500)',
     pdf: '#f59e0b',
   };
 
@@ -331,10 +331,17 @@ export function MyLibraryPage() {
     >
       {/* Header */}
       <div className="mb-8">
+        <div
+          className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium mb-3"
+          style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
+        >
+          <Library className="w-3.5 h-3.5" />
+          Workspace
+        </div>
         <motion.h1
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-3xl sm:text-4xl font-bold tracking-tight mb-2"
+          className="text-3xl sm:text-4xl font-semibold tracking-tight mb-2"
           style={{ color: 'var(--color-text-primary)' }}
         >
           My Library
@@ -345,7 +352,7 @@ export function MyLibraryPage() {
           transition={{ delay: 0.1 }}
           style={{ color: 'var(--color-text-secondary)' }}
         >
-          All your transcripts, recordings, and documents in one place
+          All your transcripts, recordings, and documents in one place.
         </motion.p>
       </div>
 
@@ -355,10 +362,10 @@ export function MyLibraryPage() {
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           className="flex items-center justify-between gap-4 p-4 rounded-xl mb-6"
-          style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)' }}
+          style={{ backgroundColor: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.24)' }}
         >
           <div className="flex items-center gap-3">
-            <span className="text-sm font-medium" style={{ color: '#ef4444' }}>
+            <span className="text-sm font-medium" style={{ color: 'var(--color-error)' }}>
               {selectedItems.size} selected
             </span>
             <button
@@ -373,7 +380,7 @@ export function MyLibraryPage() {
             onClick={handleBulkDelete}
             disabled={isDeleting}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
-            style={{ backgroundColor: '#ef4444', minHeight: '44px' }}
+            style={{ backgroundColor: 'var(--color-error)', minHeight: '44px' }}
           >
             {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
             Delete Selected
@@ -480,12 +487,12 @@ export function MyLibraryPage() {
           animate={{ opacity: 1, y: 0 }}
           className="flex items-center gap-3 p-6 rounded-2xl border"
           style={{
-            backgroundColor: 'rgba(239, 68, 68, 0.05)',
-            borderColor: 'rgba(239, 68, 68, 0.2)',
+            backgroundColor: 'rgba(239, 68, 68, 0.08)',
+            borderColor: 'rgba(239, 68, 68, 0.24)',
           }}
         >
-          <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
-          <p className="text-sm text-red-500">{error}</p>
+          <AlertCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--color-error)' }} />
+          <p className="text-sm" style={{ color: 'var(--color-error)' }}>{error}</p>
         </motion.div>
       )}
 

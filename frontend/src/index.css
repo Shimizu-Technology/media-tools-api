@@ -1,37 +1,38 @@
 @import "tailwindcss";
+@import url("https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap");
 
 /* Design tokens */
 :root {
   /* Brand colors */
-  --color-brand-50: rgba(59, 130, 246, 0.1);
-  --color-brand-400: #60a5fa;
-  --color-brand-500: #3b82f6;
-  --color-brand-600: #2563eb;
+  --color-brand-50: rgba(47, 158, 143, 0.12);
+  --color-brand-400: #67d7c7;
+  --color-brand-500: #2f9e8f;
+  --color-brand-600: #1f7b70;
   
   /* Surfaces */
-  --color-surface: #0a0a0f;
-  --color-surface-elevated: #141419;
-  --color-surface-card: #1a1a22;
-  --color-surface-overlay: #1f1f26;
+  --color-surface: #0b0d10;
+  --color-surface-elevated: #15181c;
+  --color-surface-card: #1b1f24;
+  --color-surface-overlay: #20252b;
   
   /* Text */
-  --color-text-primary: #f0f0f5;
-  --color-text-secondary: #9ca3af;
-  --color-text-muted: #6b7280;
+  --color-text-primary: #e7e9ee;
+  --color-text-secondary: #a6adb8;
+  --color-text-muted: #7a8391;
   
   /* Border */
-  --color-border: #27272a;
-  --color-border-subtle: #1f1f26;
+  --color-border: #2a3038;
+  --color-border-subtle: #1f232a;
   
   /* Success/Error */
-  --color-success: #10b981;
+  --color-success: #18b985;
   --color-error: #ef4444;
 }
 
 /* Base styles */
 body {
   margin: 0;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Satoshi', 'Geist', 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background-color: var(--color-surface);
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
