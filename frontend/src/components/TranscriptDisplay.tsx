@@ -18,6 +18,7 @@ import {
   EyeOff,
   FileDown,
   Type,
+  ExternalLink,
 } from 'lucide-react';
 import type { Transcript, ExportFormat } from '../lib/api';
 import { downloadExport } from '../lib/api';
@@ -50,6 +51,12 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
     const minutes = Math.ceil(transcript.word_count / 200);
     return minutes <= 1 ? '1 min read' : `${minutes} min read`;
   }, [transcript.word_count]);
+
+  const youtubeLink = useMemo(() => {
+    if (transcript.youtube_url) return transcript.youtube_url;
+    if (transcript.youtube_id) return `https://www.youtube.com/watch?v=${transcript.youtube_id}`;
+    return '';
+  }, [transcript.youtube_url, transcript.youtube_id]);
 
   // Process transcript text: detect code blocks and optionally add timestamps
   const processedText = useMemo(() => {
@@ -275,6 +282,15 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
             onClick={handleShareLink}
             active={linkCopied}
           />
+
+          {/* Open on YouTube */}
+          {youtubeLink && (
+            <ActionLink
+              href={youtubeLink}
+              icon={<ExternalLink className="w-4 h-4" />}
+              label="Open YouTube"
+            />
+          )}
 
           {/* Toggle timestamps */}
           {transcript.duration > 0 && (
@@ -539,6 +555,37 @@ function ActionButton({
       {icon}
       <span className="hidden sm:inline">{label}</span>
     </motion.button>
+  );
+}
+
+/** Action link styled like toolbar button */
+function ActionLink({
+  href,
+  icon,
+  label,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <motion.a
+      whileHover={{ scale: 1.03 }}
+      whileTap={{ scale: 0.97 }}
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200"
+      style={{
+        backgroundColor: 'var(--color-surface-overlay)',
+        color: 'var(--color-text-secondary)',
+        border: '1px solid var(--color-border)',
+        minHeight: '44px', // Touch target
+      }}
+    >
+      {icon}
+      <span className="hidden sm:inline">{label}</span>
+    </motion.a>
   );
 }
 

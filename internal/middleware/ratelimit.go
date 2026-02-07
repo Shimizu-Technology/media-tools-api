@@ -28,6 +28,9 @@ type RateLimiter struct {
 	// reads vastly outnumber writes (which is true for rate limiting).
 	mu      sync.RWMutex
 	buckets map[string]*bucket
+	// Owner override (optional)
+	ownerKeyID     string
+	ownerKeyPrefix string
 }
 
 // bucket tracks the token state for a single API key.
@@ -47,9 +50,11 @@ type allowResult struct {
 }
 
 // NewRateLimiter creates a new rate limiter.
-func NewRateLimiter() *RateLimiter {
+func NewRateLimiter(ownerKeyID, ownerKeyPrefix string) *RateLimiter {
 	rl := &RateLimiter{
-		buckets: make(map[string]*bucket),
+		buckets:        make(map[string]*bucket),
+		ownerKeyID:     ownerKeyID,
+		ownerKeyPrefix: ownerKeyPrefix,
 	}
 
 	// Start background cleanup goroutine
@@ -65,6 +70,12 @@ func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 		apiKey := GetAPIKey(c)
 		if apiKey == nil {
 			// No API key = no rate limiting (auth middleware handles rejection)
+			c.Next()
+			return
+		}
+
+		// Owner override: bypass limits for personal key
+		if IsOwnerAPIKey(apiKey, rl.ownerKeyID, rl.ownerKeyPrefix) {
 			c.Next()
 			return
 		}

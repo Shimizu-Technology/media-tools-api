@@ -41,6 +41,10 @@ type Config struct {
 	// This protects the API key creation endpoint in production.
 	AdminAPIKey string
 
+	// Owner override (bypass rate limits/queue caps for personal use)
+	OwnerAPIKeyID     string
+	OwnerAPIKeyPrefix string
+
 	// Worker settings
 	WorkerCount    int // Number of background worker goroutines
 	JobQueueSize   int // Size of the in-memory job queue buffer
@@ -82,6 +86,10 @@ func Load() (*Config, error) {
 
 		// Admin API key for bootstrap — optional in dev, required in production
 		AdminAPIKey: getEnv("ADMIN_API_KEY", ""),
+
+		// Owner override (optional)
+		OwnerAPIKeyID:     getEnv("OWNER_API_KEY_ID", ""),
+		OwnerAPIKeyPrefix: getEnv("OWNER_API_KEY_PREFIX", ""),
 
 		// Worker defaults
 		WorkerCount:  getEnvInt("WORKER_COUNT", 3),

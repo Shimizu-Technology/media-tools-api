@@ -34,10 +34,12 @@ type Handler struct {
 	Summarizer       *summary.Service              // MTA-22: AI summary service
 	JWTSecret        string                        // MTA-20: JWT signing secret
 	AdminAPIKey      string                        // Admin key for protected bootstrap operations
+	OwnerAPIKeyID     string                       // Optional owner key ID override
+	OwnerAPIKeyPrefix string                       // Optional owner key prefix override
 }
 
 // NewHandler creates a new handler with all dependencies.
-func NewHandler(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhookservice.Service, sum *summary.Service, jwtSecret, adminAPIKey string) *Handler {
+func NewHandler(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhookservice.Service, sum *summary.Service, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix string) *Handler {
 	return &Handler{
 		DB:               db,
 		Worker:           wp,
@@ -46,6 +48,8 @@ func NewHandler(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *web
 		Summarizer:       sum,
 		JWTSecret:        jwtSecret,
 		AdminAPIKey:      adminAPIKey,
+		OwnerAPIKeyID:     ownerKeyID,
+		OwnerAPIKeyPrefix: ownerKeyPrefix,
 	}
 }
 

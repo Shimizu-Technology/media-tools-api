@@ -145,6 +145,18 @@ func (p *Pool) Submit(job Job) error {
 	}
 }
 
+// SubmitBlocking adds a job to the queue and blocks until it can be queued
+// or the provided context is canceled.
+func (p *Pool) SubmitBlocking(ctx context.Context, job Job) error {
+	select {
+	case p.jobs <- job:
+		log.Printf("📥 Job queued (blocking): %s (type: %s)", job.ID, job.Type)
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // QueueSize returns the current number of jobs in the queue.
 func (p *Pool) QueueSize() int {
 	return len(p.jobs)

@@ -6,6 +6,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -176,6 +177,17 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	}
 
 	if err := h.Worker.Submit(job); err != nil {
+		if h.isOwnerRequest(c) {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+			defer cancel()
+			if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
+				log.Printf("📤 Audio transcription job queued (blocking): %s (%s, %.1f MB)",
+					at.ID, header.Filename, float64(header.Size)/(1024*1024))
+				c.JSON(http.StatusAccepted, at)
+				return
+			}
+		}
+
 		os.Remove(tempFilePath)
 		at.Status = "failed"
 		at.ErrorMessage = "Job queue is full, please try again later"

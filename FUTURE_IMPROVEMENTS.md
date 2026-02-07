@@ -26,6 +26,12 @@ Currently, API key creation requires an admin key. Consider these alternatives f
 - Requires: Email verification, password reset flow
 - More infrastructure but better accountability
 
+### Option D: Hosted Auth (Clerk / WorkOS)
+- Replace or augment API keys with a hosted auth provider
+- Clerk: fast setup + UI components + social login
+- WorkOS: enterprise SSO (SAML/SCIM) for future B2B
+- Could keep API keys for server-to-server use
+
 ---
 
 ## High Priority
@@ -44,6 +50,15 @@ Currently, API key creation requires an admin key. Consider these alternatives f
   - Simple version: "Ask a question about this transcript" single input
   - Advanced version: Full chat interface with conversation history
   - Consider token limits for very long transcripts
+
+- [ ] **Unlimited Usage for Admin/Owner**
+  - Allowlist the owner account or API key
+  - Bypass rate limits and queue caps for that account
+  - Keep limits for everyone else to control cost
+
+- [ ] **YouTube "Open Video" Button**
+  - Store original video URL or ID
+  - Add a button/link on transcript cards and detail view
 
 ---
 

@@ -6,6 +6,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -143,6 +144,15 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 			}
 
 			if err := h.Worker.Submit(job); err != nil {
+				if h.isOwnerRequest(c) {
+					ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+					defer cancel()
+					if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
+						// queued successfully for owner; continue
+						transcripts = append(transcripts, *t)
+						continue
+					}
+				}
 				log.Printf("Failed to queue extraction job for %s: %v", t.ID, err)
 			}
 		}

@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"math"
@@ -104,6 +105,14 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 	}
 
 	if err := h.Worker.Submit(job); err != nil {
+		if h.isOwnerRequest(c) {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+			defer cancel()
+			if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
+				c.JSON(http.StatusAccepted, t)
+				return
+			}
+		}
 		log.Printf("⚠️  Failed to queue extraction job: %v", err)
 		// The transcript record exists but extraction didn't start.
 		// The client can retry or the transcript will stay "pending".
@@ -251,6 +260,19 @@ func (h *Handler) CreateSummary(c *gin.Context) {
 	}
 
 	if err := h.Worker.Submit(job); err != nil {
+		if h.isOwnerRequest(c) {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+			defer cancel()
+			if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
+				c.JSON(http.StatusAccepted, gin.H{
+					"message":       "Summary generation started",
+					"transcript_id": req.TranscriptID,
+					"length":        req.Length,
+					"style":         req.Style,
+				})
+				return
+			}
+		}
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
 			Error:   "queue_full",
 			Message: "Job queue is full, try again later",
