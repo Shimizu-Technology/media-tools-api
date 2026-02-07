@@ -335,9 +335,12 @@ func (db *DB) ListChatMessages(ctx context.Context, sessionID string, limit int)
 		limit = 50
 	}
 	var messages []models.TranscriptChatMessage
-	err := db.SelectContext(ctx, &messages,
-		`SELECT * FROM transcript_chat_messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT $2`,
-		sessionID, limit)
+	sessionIDLit := pq.QuoteLiteral(sessionID)
+	selectQuery := fmt.Sprintf(
+		`SELECT * FROM transcript_chat_messages WHERE session_id = %s ORDER BY created_at ASC LIMIT %d`,
+		sessionIDLit, limit,
+	)
+	err := db.SelectContext(ctx, &messages, selectQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list chat messages: %w", err)
 	}
