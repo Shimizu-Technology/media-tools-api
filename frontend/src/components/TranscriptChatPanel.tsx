@@ -246,30 +246,18 @@ function MarkdownMessage({ content, isUser }: { content: string; isUser: boolean
             {children}
           </a>
         ),
-        code: ({ inline, children }) => {
-          if (inline) {
-            return (
-              <code
-                className="px-1.5 py-0.5 rounded text-xs font-mono"
-                style={{
-                  backgroundColor: isUser ? 'rgba(255,255,255,0.18)' : 'var(--color-surface)',
-                  color: isUser ? 'white' : 'var(--color-brand-400)',
-                  border: isUser ? 'none' : '1px solid var(--color-border)',
-                }}
-              >
-                {children}
-              </code>
-            );
-          }
-          return (
-            <code
-              className="text-xs font-mono"
-              style={{ color: isUser ? 'white' : 'var(--color-text-secondary)' }}
-            >
-              {children}
-            </code>
-          );
-        },
+        code: ({ children }) => (
+          <code
+            className="px-1.5 py-0.5 rounded text-xs font-mono"
+            style={{
+              backgroundColor: isUser ? 'rgba(255,255,255,0.18)' : 'var(--color-surface)',
+              color: isUser ? 'white' : 'var(--color-brand-400)',
+              border: isUser ? 'none' : '1px solid var(--color-border)',
+            }}
+          >
+            {children}
+          </code>
+        ),
         pre: ({ children }) => (
           <pre
             className="p-3 rounded-lg text-xs overflow-x-auto mb-2 last:mb-0"
