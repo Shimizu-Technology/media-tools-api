@@ -21,6 +21,7 @@ import {
   type PDFExtraction,
   type APIError,
 } from '../lib/api';
+import { TranscriptChatPanel } from '../components/TranscriptChatPanel';
 
 /**
  * PDF text extraction page (MTA-17).
@@ -497,6 +498,9 @@ export function PdfPage() {
                 </div>
               )}
             </div>
+
+            {/* AI Chat */}
+            <TranscriptChatPanel itemType="pdf" itemId={result.id} />
           </motion.div>
         )}
       </AnimatePresence>

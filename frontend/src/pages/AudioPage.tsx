@@ -38,6 +38,7 @@ import {
   type APIError,
 } from '../lib/api';
 import { usePolling } from '../hooks/usePolling';
+import { TranscriptChatPanel } from '../components/TranscriptChatPanel';
 
 /**
  * Audio transcription page (MTA-16, MTA-22, MTA-23, MTA-24, MTA-25, MTA-26).
@@ -896,6 +897,9 @@ export function AudioPage() {
                 {result.transcript_text}
               </div>
             </div>
+
+            {/* AI Chat */}
+            <TranscriptChatPanel itemType="audio" itemId={result.id} />
           </motion.div>
         )}
       </AnimatePresence>

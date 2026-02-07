@@ -5,6 +5,7 @@ import { ApiKeySetup } from '../components/ApiKeySetup'
 import { TranscriptInput } from '../components/TranscriptInput'
 import { TranscriptDisplay } from '../components/TranscriptDisplay'
 import { SummaryPanel } from '../components/SummaryPanel'
+import { TranscriptChatPanel } from '../components/TranscriptChatPanel'
 import { usePolling } from '../hooks/usePolling'
 import {
   createTranscript,
@@ -161,10 +162,13 @@ export function HomePage() {
         <div className="mt-6">
           <TranscriptDisplay transcript={transcript} />
           {transcript.status === 'completed' && transcript.transcript_text && (
-            <SummaryPanel
-              transcriptId={transcript.id}
-              transcriptText={transcript.transcript_text}
-            />
+            <>
+              <SummaryPanel
+                transcriptId={transcript.id}
+                transcriptText={transcript.transcript_text}
+              />
+              <TranscriptChatPanel itemType="transcript" itemId={transcript.id} />
+            </>
           )}
         </div>
       )}

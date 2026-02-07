@@ -109,6 +109,64 @@ components:
           type: string
           format: date-time
 
+    ChatSession:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        transcript_id:
+          type: string
+          format: uuid
+          nullable: true
+        item_type:
+          type: string
+          enum: [transcript, audio, pdf]
+        item_id:
+          type: string
+          format: uuid
+        api_key_id:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        model_used:
+          type: string
+          example: "openai/gpt-4o-mini"
+        created_at:
+          type: string
+          format: date-time
+
+    ChatResponse:
+      type: object
+      properties:
+        session:
+          $ref: "#/components/schemas/ChatSession"
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+
     Batch:
       type: object
       properties:
@@ -482,6 +540,165 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Summary"
+
+  /transcripts/{id}/chat:
+    get:
+      tags: [Transcripts]
+      summary: Get chat history for a transcript
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Chat session and messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "404":
+          description: Transcript not found
+        "409":
+          description: Transcript not ready
+
+    post:
+      tags: [Transcripts]
+      summary: Send a chat message about a transcript
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                  example: "What are the main takeaways?"
+                model:
+                  type: string
+                  description: Optional model override
+                  example: "openai/gpt-4o-mini"
+      responses:
+        "200":
+          description: User + assistant messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "404":
+          description: Transcript not found
+        "409":
+          description: Transcript not ready
+
+  /audio/transcriptions/{id}/chat:
+    get:
+      tags: [Audio]
+      summary: Get chat history for an audio transcription
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Chat session and messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "404":
+          description: Audio transcription not found
+        "409":
+          description: Audio transcription not ready
+
+    post:
+      tags: [Audio]
+      summary: Send a chat message about an audio transcription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                  example: "Summarize the key takeaways."
+                model:
+                  type: string
+                  description: Optional model override
+                  example: "anthropic/claude-4.5-opus-20251124"
+      responses:
+        "200":
+          description: User + assistant messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "404":
+          description: Audio transcription not found
+        "409":
+          description: Audio transcription not ready
+
+  /pdf/extractions/{id}/chat:
+    get:
+      tags: [PDF]
+      summary: Get chat history for a PDF extraction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Chat session and messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "404":
+          description: PDF extraction not found
+        "409":
+          description: PDF extraction not ready
+
+    post:
+      tags: [PDF]
+      summary: Send a chat message about a PDF extraction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                  example: "What are the main points in this document?"
+                model:
+                  type: string
+                  description: Optional model override
+                  example: "anthropic/claude-4.5-opus-20251124"
+      responses:
+        "200":
+          description: User + assistant messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "404":
+          description: PDF extraction not found
+        "409":
+          description: PDF extraction not ready
 
   /transcripts/batch:
     post:

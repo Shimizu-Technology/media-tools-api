@@ -60,6 +60,26 @@ type Summary struct {
 	CreatedAt    time.Time       `json:"created_at" db:"created_at"`
 }
 
+// Transcript chat models for AI Q&A (MTA-27)
+type TranscriptChatSession struct {
+	ID           string    `json:"id" db:"id"`
+	TranscriptID *string   `json:"transcript_id,omitempty" db:"transcript_id"`
+	ItemType     string    `json:"item_type" db:"item_type"` // transcript, audio, pdf
+	ItemID       string    `json:"item_id" db:"item_id"`
+	APIKeyID     *string   `json:"api_key_id,omitempty" db:"api_key_id"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+}
+
+type TranscriptChatMessage struct {
+	ID        string    `json:"id" db:"id"`
+	SessionID string    `json:"session_id" db:"session_id"`
+	Role      string    `json:"role" db:"role"` // "user" or "assistant"
+	Content   string    `json:"content" db:"content"`
+	ModelUsed string    `json:"model_used,omitempty" db:"model_used"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+}
+
 // APIKey represents an API key for authentication.
 type APIKey struct {
 	ID         string     `json:"id" db:"id"`
@@ -85,6 +105,16 @@ type CreateSummaryRequest struct {
 	Model        string `json:"model,omitempty"`
 	Length       string `json:"length,omitempty"`
 	Style        string `json:"style,omitempty"`
+}
+
+type CreateChatMessageRequest struct {
+	Message string `json:"message" binding:"required"`
+	Model   string `json:"model,omitempty"`
+}
+
+type ChatResponse struct {
+	Session  TranscriptChatSession  `json:"session"`
+	Messages []TranscriptChatMessage `json:"messages"`
 }
 
 type CreateAPIKeyRequest struct {

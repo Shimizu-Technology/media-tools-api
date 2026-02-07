@@ -39,6 +39,32 @@ export interface Summary {
   created_at: string;
 }
 
+export type ChatItemType = 'transcript' | 'audio' | 'pdf';
+
+export interface ChatSession {
+  id: string;
+  transcript_id?: string;
+  item_type: ChatItemType;
+  item_id: string;
+  api_key_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  session_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  model_used?: string;
+  created_at: string;
+}
+
+export interface ChatResponse {
+  session: ChatSession;
+  messages: ChatMessage[];
+}
+
 export interface APIKey {
   id: string;
   key_prefix: string;
@@ -290,6 +316,39 @@ export async function listTranscripts(params?: {
   if (params?.search) searchParams.set('search', params.search);
   const res = await fetch(`${API_BASE}/transcripts?${searchParams}`, { headers: getHeaders() });
   return handleResponse<PaginatedResponse<Transcript>>(res);
+}
+
+// ── Chat (MTA-27) ──
+
+function getChatPath(itemType: ChatItemType, itemId: string): string {
+  switch (itemType) {
+    case 'audio':
+      return `${API_BASE}/audio/transcriptions/${itemId}/chat`;
+    case 'pdf':
+      return `${API_BASE}/pdf/extractions/${itemId}/chat`;
+    case 'transcript':
+    default:
+      return `${API_BASE}/transcripts/${itemId}/chat`;
+  }
+}
+
+export async function getChat(itemType: ChatItemType, itemId: string): Promise<ChatResponse> {
+  const res = await fetch(getChatPath(itemType, itemId), { headers: getHeaders() });
+  return handleResponse<ChatResponse>(res);
+}
+
+export async function sendChatMessage(
+  itemType: ChatItemType,
+  itemId: string,
+  message: string,
+  options?: { model?: string }
+): Promise<ChatResponse> {
+  const res = await fetch(getChatPath(itemType, itemId), {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ message, model: options?.model }),
+  });
+  return handleResponse<ChatResponse>(res);
 }
 
 export async function deleteTranscript(id: string): Promise<void> {

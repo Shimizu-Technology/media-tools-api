@@ -76,7 +76,7 @@ func Load() (*Config, error) {
 
 		// OpenRouter AI
 		OpenRouterAPIKey: getEnv("OPENROUTER_API_KEY", ""),
-		OpenRouterModel:  getEnv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
+		OpenRouterModel:  getEnv("OPENROUTER_MODEL", "anthropic/claude-4.5-sonnet-20250929"),
 
 		// OpenAI (Whisper API for audio transcription)
 		OpenAIAPIKey: getEnv("OPENAI_API_KEY", ""),

@@ -12,6 +12,8 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -257,6 +259,93 @@ func (db *DB) GetSummariesByTranscript(ctx context.Context, transcriptID string)
 		return nil, fmt.Errorf("failed to list summaries: %w", err)
 	}
 	return summaries, nil
+}
+
+// --- Chat Operations (MTA-27) ---
+
+// GetOrCreateChatSession finds or creates a chat session for an item.
+func (db *DB) GetOrCreateChatSession(ctx context.Context, itemType, itemID string, apiKeyID *string) (*models.TranscriptChatSession, error) {
+	var session models.TranscriptChatSession
+	var err error
+
+	if apiKeyID != nil {
+		err = db.GetContext(ctx, &session,
+			`SELECT * FROM transcript_chat_sessions WHERE item_type = $1 AND item_id = $2 AND api_key_id = $3`,
+			itemType, itemID, *apiKeyID)
+	} else {
+		err = db.GetContext(ctx, &session,
+			`SELECT * FROM transcript_chat_sessions WHERE item_type = $1 AND item_id = $2 AND api_key_id IS NULL`,
+			itemType, itemID)
+	}
+
+	if err == nil {
+		return &session, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("failed to fetch chat session: %w", err)
+	}
+
+	// Create a new session
+	var transcriptID *string
+	if itemType == "transcript" {
+		transcriptID = &itemID
+	}
+
+	query := `
+		INSERT INTO transcript_chat_sessions (item_type, item_id, transcript_id, api_key_id)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, created_at, updated_at`
+	if apiKeyID != nil {
+		err = db.QueryRowContext(ctx, query, itemType, itemID, transcriptID, *apiKeyID).
+			Scan(&session.ID, &session.CreatedAt, &session.UpdatedAt)
+		session.APIKeyID = apiKeyID
+	} else {
+		err = db.QueryRowContext(ctx, query, itemType, itemID, transcriptID, nil).
+			Scan(&session.ID, &session.CreatedAt, &session.UpdatedAt)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to create chat session: %w", err)
+	}
+	session.ItemType = itemType
+	session.ItemID = itemID
+	if itemType == "transcript" {
+		session.TranscriptID = &itemID
+	}
+
+	return &session, nil
+}
+
+// ListChatMessages returns chat messages for a session.
+func (db *DB) ListChatMessages(ctx context.Context, sessionID string, limit int) ([]models.TranscriptChatMessage, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var messages []models.TranscriptChatMessage
+	err := db.SelectContext(ctx, &messages,
+		`SELECT * FROM transcript_chat_messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT $2`,
+		sessionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list chat messages: %w", err)
+	}
+	return messages, nil
+}
+
+// CreateChatMessage inserts a chat message.
+func (db *DB) CreateChatMessage(ctx context.Context, msg *models.TranscriptChatMessage) error {
+	query := `
+		INSERT INTO transcript_chat_messages (session_id, role, content, model_used)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, created_at`
+	if err := db.QueryRowContext(ctx, query,
+		msg.SessionID, msg.Role, msg.Content, msg.ModelUsed,
+	).Scan(&msg.ID, &msg.CreatedAt); err != nil {
+		return fmt.Errorf("failed to create chat message: %w", err)
+	}
+
+	_, _ = db.ExecContext(ctx,
+		`UPDATE transcript_chat_sessions SET updated_at = NOW() WHERE id = $1`,
+		msg.SessionID)
+	return nil
 }
 
 // --- API Key Operations ---

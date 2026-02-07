@@ -87,6 +87,12 @@ type chatResponse struct {
 	} `json:"error"`
 }
 
+// ChatMessage represents a chat message used for transcript Q&A.
+type ChatMessage struct {
+	Role    string
+	Content string
+}
+
 // Summarize generates an AI summary of the given transcript text.
 func (s *Service) Summarize(ctx context.Context, transcriptText string, opts Options) (*Result, error) {
 	if s.apiKey == "" {
@@ -184,6 +190,88 @@ func (s *Service) Summarize(ctx context.Context, transcriptText string, opts Opt
 	result.Prompt = prompt
 
 	return result, nil
+}
+
+// ChatTranscript answers a user question using transcript context.
+func (s *Service) ChatTranscript(ctx context.Context, contextLabel, transcriptText string, messages []ChatMessage, modelOverride string) (string, string, error) {
+	if s.apiKey == "" {
+		return "", "", fmt.Errorf("OpenRouter API key not configured; set OPENROUTER_API_KEY")
+	}
+
+	model := s.model
+	if modelOverride != "" {
+		model = modelOverride
+	}
+
+	systemPrompt := "You are a helpful assistant that answers questions about a " + contextLabel + ". " +
+		"Only use information from the content. If the answer is not in the content, say you don't know."
+	transcriptContext := buildTranscriptContext(transcriptText)
+
+	reqMessages := []chatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "system", Content: transcriptContext},
+	}
+	for _, msg := range messages {
+		if msg.Content == "" {
+			continue
+		}
+		if msg.Role != "user" && msg.Role != "assistant" {
+			continue
+		}
+		reqMessages = append(reqMessages, chatMessage{Role: msg.Role, Content: msg.Content})
+	}
+
+	reqBody := chatRequest{
+		Model:    model,
+		Messages: reqMessages,
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		"https://openrouter.ai/api/v1/chat/completions",
+		bytes.NewReader(jsonBody),
+	)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+s.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("HTTP-Referer", "https://github.com/Shimizu-Technology/media-tools-api")
+	req.Header.Set("X-Title", "Media Tools API")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("OpenRouter request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("OpenRouter returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var chatResp chatResponse
+	if err := json.Unmarshal(body, &chatResp); err != nil {
+		return "", "", fmt.Errorf("failed to parse response: %w", err)
+	}
+	if chatResp.Error != nil {
+		return "", "", fmt.Errorf("OpenRouter error: %s", chatResp.Error.Message)
+	}
+	if len(chatResp.Choices) == 0 {
+		return "", "", fmt.Errorf("no response from model")
+	}
+
+	content := chatResp.Choices[0].Message.Content
+	return content, model, nil
 }
 
 // SummarizeAudio generates a structured summary of audio transcription text (MTA-22).
@@ -443,6 +531,15 @@ func buildPrompt(transcript string, opts Options) string {
 {
   "summary": "Your summary text here",
   "key_points": ["Point 1", "Point 2", "Point 3"]
+}
+
+func buildTranscriptContext(transcript string) string {
+	maxLen := 15000
+	truncated := transcript
+	if len(transcript) > maxLen {
+		truncated = transcript[:maxLen] + "\n\n[Transcript truncated due to length...]"
+	}
+	return fmt.Sprintf("Transcript context:\n%s", truncated)
 }
 
 **Transcript:**
