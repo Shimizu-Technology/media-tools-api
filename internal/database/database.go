@@ -192,7 +192,11 @@ func (db *DB) ListTranscripts(ctx context.Context, params models.TranscriptListP
 	var total int
 	err := db.GetContext(ctx, &total, countQuery, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("count query failed: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			total = 0
+		} else {
+			return nil, 0, fmt.Errorf("count query failed: %w", err)
+		}
 	}
 
 	// Fetch page of results
@@ -469,17 +473,16 @@ func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int, apiKeyID *
 	}
 	var transcriptions []models.AudioTranscription
 	var err error
-
+	var apiKeyValue interface{} = nil
 	if apiKeyID != nil {
-		// Filter by API key owner
-		err = db.SelectContext(ctx, &transcriptions,
-			`SELECT * FROM audio_transcriptions WHERE api_key_id = $1 ORDER BY created_at DESC LIMIT $2`,
-			*apiKeyID, limit)
-	} else {
-		// No filtering (for admin or when API key is not available)
-		err = db.SelectContext(ctx, &transcriptions,
-			`SELECT * FROM audio_transcriptions ORDER BY created_at DESC LIMIT $1`, limit)
+		apiKeyValue = *apiKeyID
 	}
+	err = db.SelectContext(ctx, &transcriptions,
+		`SELECT * FROM audio_transcriptions
+		 WHERE ($1::uuid IS NULL OR api_key_id = $1)
+		 ORDER BY created_at DESC
+		 LIMIT $2`,
+		apiKeyValue, limit)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list audio transcriptions: %w", err)
@@ -585,15 +588,16 @@ func (db *DB) ListPDFExtractions(ctx context.Context, limit int, apiKeyID *strin
 	}
 	var extractions []models.PDFExtraction
 	var err error
-
+	var apiKeyValue interface{} = nil
 	if apiKeyID != nil {
-		err = db.SelectContext(ctx, &extractions,
-			`SELECT * FROM pdf_extractions WHERE api_key_id = $1 ORDER BY created_at DESC LIMIT $2`,
-			*apiKeyID, limit)
-	} else {
-		err = db.SelectContext(ctx, &extractions,
-			`SELECT * FROM pdf_extractions ORDER BY created_at DESC LIMIT $1`, limit)
+		apiKeyValue = *apiKeyID
 	}
+	err = db.SelectContext(ctx, &extractions,
+		`SELECT * FROM pdf_extractions
+		 WHERE ($1::uuid IS NULL OR api_key_id = $1)
+		 ORDER BY created_at DESC
+		 LIMIT $2`,
+		apiKeyValue, limit)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pdf extractions: %w", err)
