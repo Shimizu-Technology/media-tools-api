@@ -533,6 +533,10 @@ func buildPrompt(transcript string, opts Options) string {
   "key_points": ["Point 1", "Point 2", "Point 3"]
 }
 
+**Transcript:**
+%s`, length, style, truncated)
+}
+
 func buildTranscriptContext(transcript string) string {
 	maxLen := 15000
 	truncated := transcript
@@ -540,10 +544,6 @@ func buildTranscriptContext(transcript string) string {
 		truncated = transcript[:maxLen] + "\n\n[Transcript truncated due to length...]"
 	}
 	return fmt.Sprintf("Transcript context:\n%s", truncated)
-}
-
-**Transcript:**
-%s`, length, style, truncated)
 }
 
 // parseStructuredOutput tries to extract JSON from the AI response.
