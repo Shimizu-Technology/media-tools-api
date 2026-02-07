@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq" // PostgreSQL driver — the underscore import runs its init()
+	"github.com/lib/pq" // PostgreSQL driver + helpers
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
@@ -271,16 +271,17 @@ func (db *DB) GetSummariesByTranscript(ctx context.Context, transcriptID string)
 func (db *DB) GetOrCreateChatSession(ctx context.Context, itemType, itemID string, apiKeyID *string) (*models.TranscriptChatSession, error) {
 	var session models.TranscriptChatSession
 	var err error
-
+	itemTypeLit := pq.QuoteLiteral(itemType)
+	itemIDLit := pq.QuoteLiteral(itemID)
+	apiKeyClause := "api_key_id IS NULL"
 	if apiKeyID != nil {
-		err = db.GetContext(ctx, &session,
-			`SELECT * FROM transcript_chat_sessions WHERE item_type = $1 AND item_id = $2 AND api_key_id = $3`,
-			itemType, itemID, *apiKeyID)
-	} else {
-		err = db.GetContext(ctx, &session,
-			`SELECT * FROM transcript_chat_sessions WHERE item_type = $1 AND item_id = $2 AND api_key_id IS NULL`,
-			itemType, itemID)
+		apiKeyClause = "api_key_id = " + pq.QuoteLiteral(*apiKeyID)
 	}
+	selectQuery := fmt.Sprintf(
+		`SELECT * FROM transcript_chat_sessions WHERE item_type = %s AND item_id = %s AND %s`,
+		itemTypeLit, itemIDLit, apiKeyClause,
+	)
+	err = db.GetContext(ctx, &session, selectQuery)
 
 	if err == nil {
 		return &session, nil
@@ -295,17 +296,26 @@ func (db *DB) GetOrCreateChatSession(ctx context.Context, itemType, itemID strin
 		transcriptID = &itemID
 	}
 
-	query := `
-		INSERT INTO transcript_chat_sessions (item_type, item_id, transcript_id, api_key_id)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, created_at, updated_at`
+	itemTypeLit = pq.QuoteLiteral(itemType)
+	itemIDLit = pq.QuoteLiteral(itemID)
+	transcriptIDLit := "NULL"
+	if transcriptID != nil {
+		transcriptIDLit = pq.QuoteLiteral(*transcriptID)
+	}
+	apiKeyLit := "NULL"
 	if apiKeyID != nil {
-		err = db.QueryRowContext(ctx, query, itemType, itemID, transcriptID, *apiKeyID).
-			Scan(&session.ID, &session.CreatedAt, &session.UpdatedAt)
+		apiKeyLit = pq.QuoteLiteral(*apiKeyID)
+	}
+	insertQuery := fmt.Sprintf(
+		`INSERT INTO transcript_chat_sessions (item_type, item_id, transcript_id, api_key_id)
+		 VALUES (%s, %s, %s, %s)
+		 RETURNING id, created_at, updated_at`,
+		itemTypeLit, itemIDLit, transcriptIDLit, apiKeyLit,
+	)
+	err = db.QueryRowContext(ctx, insertQuery).
+		Scan(&session.ID, &session.CreatedAt, &session.UpdatedAt)
+	if apiKeyID != nil {
 		session.APIKeyID = apiKeyID
-	} else {
-		err = db.QueryRowContext(ctx, query, itemType, itemID, transcriptID, nil).
-			Scan(&session.ID, &session.CreatedAt, &session.UpdatedAt)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to create chat session: %w", err)
@@ -473,16 +483,14 @@ func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int, apiKeyID *
 	}
 	var transcriptions []models.AudioTranscription
 	var err error
-	var apiKeyValue interface{} = nil
-	if apiKeyID != nil {
-		apiKeyValue = *apiKeyID
-	}
-	err = db.SelectContext(ctx, &transcriptions,
+	query := fmt.Sprintf(
 		`SELECT * FROM audio_transcriptions
-		 WHERE ($1::uuid IS NULL OR api_key_id = $1)
+		 %s
 		 ORDER BY created_at DESC
-		 LIMIT $2`,
-		apiKeyValue, limit)
+		 LIMIT %d`,
+		buildAPIKeyWhereClause(apiKeyID), limit,
+	)
+	err = db.SelectContext(ctx, &transcriptions, query)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list audio transcriptions: %w", err)
@@ -588,21 +596,26 @@ func (db *DB) ListPDFExtractions(ctx context.Context, limit int, apiKeyID *strin
 	}
 	var extractions []models.PDFExtraction
 	var err error
-	var apiKeyValue interface{} = nil
-	if apiKeyID != nil {
-		apiKeyValue = *apiKeyID
-	}
-	err = db.SelectContext(ctx, &extractions,
+	query := fmt.Sprintf(
 		`SELECT * FROM pdf_extractions
-		 WHERE ($1::uuid IS NULL OR api_key_id = $1)
+		 %s
 		 ORDER BY created_at DESC
-		 LIMIT $2`,
-		apiKeyValue, limit)
+		 LIMIT %d`,
+		buildAPIKeyWhereClause(apiKeyID), limit,
+	)
+	err = db.SelectContext(ctx, &extractions, query)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pdf extractions: %w", err)
 	}
 	return extractions, nil
+}
+
+func buildAPIKeyWhereClause(apiKeyID *string) string {
+	if apiKeyID == nil {
+		return ""
+	}
+	return "WHERE api_key_id = " + pq.QuoteLiteral(*apiKeyID)
 }
 
 // DeletePDFExtraction removes a PDF extraction by ID.
