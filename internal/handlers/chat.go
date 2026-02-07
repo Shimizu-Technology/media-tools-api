@@ -167,6 +167,7 @@ func (h *Handler) loadPDFChatTarget(c *gin.Context) (*chatTarget, *models.ErrorR
 func (h *Handler) getChatResponse(c *gin.Context, target *chatTarget) {
 	session, err := h.DB.GetOrCreateChatSession(c.Request.Context(), target.ItemType, target.ItemID, target.APIKeyID)
 	if err != nil {
+		log.Printf("Chat session load failed (%s:%s): %v", target.ItemType, target.ItemID, err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
 			Message: "Failed to load chat session",
@@ -177,6 +178,7 @@ func (h *Handler) getChatResponse(c *gin.Context, target *chatTarget) {
 
 	messages, err := h.DB.ListChatMessages(c.Request.Context(), session.ID, 100)
 	if err != nil {
+		log.Printf("Chat messages load failed (session %s): %v", session.ID, err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
 			Message: "Failed to load chat messages",
@@ -217,6 +219,7 @@ func (h *Handler) postChatResponse(c *gin.Context, target *chatTarget, req model
 
 	session, err := h.DB.GetOrCreateChatSession(c.Request.Context(), target.ItemType, target.ItemID, target.APIKeyID)
 	if err != nil {
+		log.Printf("Chat session load failed (%s:%s): %v", target.ItemType, target.ItemID, err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
 			Message: "Failed to load chat session",
@@ -227,6 +230,7 @@ func (h *Handler) postChatResponse(c *gin.Context, target *chatTarget, req model
 
 	history, err := h.DB.ListChatMessages(c.Request.Context(), session.ID, 40)
 	if err != nil {
+		log.Printf("Chat history load failed (session %s): %v", session.ID, err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
 			Message: "Failed to load chat history",
@@ -242,6 +246,7 @@ func (h *Handler) postChatResponse(c *gin.Context, target *chatTarget, req model
 		ModelUsed: "",
 	}
 	if err := h.DB.CreateChatMessage(c.Request.Context(), userMsg); err != nil {
+		log.Printf("Chat message save failed (session %s): %v", session.ID, err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
 			Message: "Failed to save message",
@@ -285,6 +290,7 @@ func (h *Handler) postChatResponse(c *gin.Context, target *chatTarget, req model
 		ModelUsed: modelUsed,
 	}
 	if err := h.DB.CreateChatMessage(c.Request.Context(), assistantMsg); err != nil {
+		log.Printf("Assistant message save failed (session %s): %v", session.ID, err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
 			Message: "Failed to save assistant response",
