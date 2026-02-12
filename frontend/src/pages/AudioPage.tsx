@@ -10,6 +10,8 @@ import {
   Loader2,
   AlertCircle,
   Download,
+  RefreshCw,
+  Headphones,
   Clock,
   Globe,
   Type,
@@ -33,6 +35,8 @@ import {
   summarizeAudio,
   downloadAudioExport,
   listAudioTranscriptions,
+  getAudioPlaybackUrl,
+  getErrorMessage,
   type AudioTranscription,
   type AudioContentType,
   type APIError,
@@ -94,12 +98,16 @@ export function AudioPage() {
 
   // Export state (MTA-26)
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [playbackUrl, setPlaybackUrl] = useState('');
+  const [playbackExpiresAt, setPlaybackExpiresAt] = useState('');
+  const [playbackLoading, setPlaybackLoading] = useState(false);
+  const [playbackError, setPlaybackError] = useState('');
 
   // Tab state: 'upload' | 'record'
   const [activeTab, setActiveTab] = useState<'upload' | 'record'>('upload');
 
   const allowedExtensions = ['.mp3', '.wav', '.m4a', '.ogg', '.flac', '.webm'];
-  const maxSizeMB = 25;
+  const maxSizeMB = 100;
 
   // Cleanup on unmount
   useEffect(() => {
@@ -319,6 +327,23 @@ export function AudioPage() {
     setShowHistory(!showHistory);
   };
 
+  const loadPlaybackUrl = useCallback(async () => {
+    if (!result?.id) return;
+    setPlaybackLoading(true);
+    setPlaybackError('');
+    try {
+      const res = await getAudioPlaybackUrl(result.id);
+      setPlaybackUrl(res.url);
+      setPlaybackExpiresAt(res.expires_at);
+    } catch (err: unknown) {
+      setPlaybackUrl('');
+      setPlaybackExpiresAt('');
+      setPlaybackError(getErrorMessage(err));
+    } finally {
+      setPlaybackLoading(false);
+    }
+  }, [result?.id]);
+
   const loadFromHistory = (item: AudioTranscription) => {
     setResult(item);
     setShowHistory(false);
@@ -336,6 +361,9 @@ export function AudioPage() {
     setContentType('general');
     setShowExportMenu(false);
     setSearchParams({});
+    setPlaybackUrl('');
+    setPlaybackExpiresAt('');
+    setPlaybackError('');
   };
 
   const formatDuration = (seconds: number): string => {
@@ -345,6 +373,15 @@ export function AudioPage() {
   };
 
   const hasSubmittable = (activeTab === 'upload' && file) || (activeTab === 'record' && recordedBlob);
+
+  useEffect(() => {
+    if (!result || result.status !== 'completed') {
+      setPlaybackUrl('');
+      setPlaybackExpiresAt('');
+      return;
+    }
+    loadPlaybackUrl();
+  }, [result?.id, result?.status, loadPlaybackUrl]);
 
   return (
     <main className="relative pt-20 sm:pt-28 pb-12 sm:pb-16 px-4 sm:px-6">
@@ -770,6 +807,56 @@ export function AudioPage() {
                 <MetaItem icon={<Globe className="w-4 h-4" />} label="Language" value={result.language?.toUpperCase() || 'Unknown'} />
                 <MetaItem icon={<Clock className="w-4 h-4" />} label="Processed" value={new Date(result.created_at).toLocaleDateString()} />
               </div>
+            </div>
+
+            {/* Audio playback */}
+            <div className="p-5 rounded-2xl border mb-4"
+              style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold flex items-center gap-2"
+                  style={{ color: 'var(--color-text-primary)' }}>
+                  <Headphones className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
+                  Listen to audio
+                </h3>
+                <button
+                  onClick={loadPlaybackUrl}
+                  disabled={playbackLoading}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+                  style={{
+                    backgroundColor: 'var(--color-surface-overlay)',
+                    color: 'var(--color-text-secondary)',
+                    borderColor: 'var(--color-border)',
+                    minHeight: '32px',
+                  }}
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Refresh link
+                </button>
+              </div>
+
+              {playbackLoading && (
+                <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Generating playback link...
+                </div>
+              )}
+
+              {!playbackLoading && playbackUrl && (
+                <div className="space-y-2">
+                  <audio controls preload="none" src={playbackUrl} className="w-full" />
+                  {playbackExpiresAt && (
+                    <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                      Link expires at {new Date(playbackExpiresAt).toLocaleTimeString()}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {!playbackLoading && playbackError && (
+                <p className="text-sm" style={{ color: 'var(--color-error)' }}>
+                  {playbackError}
+                </p>
+              )}
             </div>
 
             {/* Summarize button or Summary display (MTA-22) */}
