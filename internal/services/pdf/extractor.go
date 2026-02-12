@@ -15,9 +15,11 @@ import (
 
 // ExtractionResult holds the output from a PDF text extraction.
 type ExtractionResult struct {
-	Text      string // Extracted text content
-	PageCount int    // Number of pages
-	WordCount int    // Word count
+	Text           string // Extracted text content
+	PageCount      int    // Number of pages
+	WordCount      int    // Word count
+	TextPages      int    // Pages with extracted text
+	OCRRecommended bool   // True when doc looks image/scanned-heavy
 }
 
 // Extract reads a PDF from the given reader and extracts all text content.
@@ -46,6 +48,7 @@ func Extract(data []byte) (*ExtractionResult, error) {
 
 	// Extract text from each page
 	var allText strings.Builder
+	textPages := 0
 	for i := 1; i <= pageCount; i++ {
 		page := pdfReader.Page(i)
 		if page.V.IsNull() {
@@ -62,17 +65,24 @@ func Extract(data []byte) (*ExtractionResult, error) {
 		if i > 1 {
 			allText.WriteString(fmt.Sprintf("\n--- Page %d ---\n", i))
 		}
-		allText.WriteString(strings.TrimSpace(text))
+		trimmed := strings.TrimSpace(text)
+		if trimmed != "" {
+			textPages++
+		}
+		allText.WriteString(trimmed)
 	}
 
 	extractedText := strings.TrimSpace(allText.String())
 	extractedText = normalizeExtractedText(extractedText)
 	wordCount := countWords(extractedText)
+	ocrRecommended := pageCount >= 3 && (textPages*100/pageCount) < 40
 
 	return &ExtractionResult{
-		Text:      extractedText,
-		PageCount: pageCount,
-		WordCount: wordCount,
+		Text:           extractedText,
+		PageCount:      pageCount,
+		WordCount:      wordCount,
+		TextPages:      textPages,
+		OCRRecommended: ocrRecommended,
 	}, nil
 }
 

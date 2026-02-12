@@ -111,6 +111,35 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 		return
 	}
 
+	// If most pages have no extractable text layer, this is likely a scanned/image PDF.
+	// Return a clear action message instead of a misleading mostly-empty extraction.
+	if result.OCRRecommended {
+		msg := fmt.Sprintf(
+			"This PDF appears to be image/scanned-based (text found on %d of %d pages). OCR extraction is not enabled yet for scanned PDFs.",
+			result.TextPages, result.PageCount,
+		)
+		log.Printf("PDF extraction requires OCR for %s: %s", header.Filename, msg)
+
+		pe := &models.PDFExtraction{
+			Filename:     storedFilename,
+			OriginalName: header.Filename,
+			PageCount:    result.PageCount,
+			TextContent:  "",
+			WordCount:    0,
+			Status:       "failed",
+			ErrorMessage: msg,
+			APIKeyID:     apiKeyID,
+		}
+		_ = h.DB.CreatePDFExtraction(c.Request.Context(), pe)
+
+		c.JSON(http.StatusUnprocessableEntity, models.ErrorResponse{
+			Error:   "ocr_required",
+			Message: msg,
+			Code:    http.StatusUnprocessableEntity,
+		})
+		return
+	}
+
 	// Save the successful extraction
 	pe := &models.PDFExtraction{
 		Filename:     storedFilename,
