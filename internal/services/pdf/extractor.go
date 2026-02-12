@@ -66,6 +66,7 @@ func Extract(data []byte) (*ExtractionResult, error) {
 	}
 
 	extractedText := strings.TrimSpace(allText.String())
+	extractedText = normalizeExtractedText(extractedText)
 	wordCount := countWords(extractedText)
 
 	return &ExtractionResult{
@@ -79,6 +80,118 @@ func Extract(data []byte) (*ExtractionResult, error) {
 func countWords(text string) int {
 	words := strings.Fields(text)
 	return len(words)
+}
+
+// normalizeExtractedText reflows overly-fragmented PDF text into readable paragraphs.
+// Some PDFs extract as one word per line; this converts those blocks into normal text
+// while preserving explicit page separators and simple list formatting.
+func normalizeExtractedText(text string) string {
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(lines))
+	block := make([]string, 0, 32)
+
+	flushBlock := func() {
+		if len(block) == 0 {
+			return
+		}
+		shortLines := 0
+		for _, line := range block {
+			if wordCountInLine(line) <= 3 {
+				shortLines++
+			}
+		}
+
+		// If most lines are very short, the extractor likely wrapped each phrase/word.
+		// Reflow the block into a single paragraph.
+		if shortLines*100/len(block) >= 70 {
+			out = append(out, joinBlockAsParagraph(block))
+		} else {
+			out = append(out, block...)
+		}
+		block = block[:0]
+	}
+
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+
+		if line == "" {
+			flushBlock()
+			if len(out) == 0 || out[len(out)-1] != "" {
+				out = append(out, "")
+			}
+			continue
+		}
+
+		if isPageDivider(line) {
+			flushBlock()
+			if len(out) > 0 && out[len(out)-1] != "" {
+				out = append(out, "")
+			}
+			out = append(out, line, "")
+			continue
+		}
+
+		block = append(block, line)
+	}
+	flushBlock()
+
+	// Collapse excessive blank lines.
+	clean := make([]string, 0, len(out))
+	prevBlank := false
+	for _, line := range out {
+		blank := strings.TrimSpace(line) == ""
+		if blank && prevBlank {
+			continue
+		}
+		clean = append(clean, line)
+		prevBlank = blank
+	}
+
+	return strings.TrimSpace(strings.Join(clean, "\n"))
+}
+
+func isPageDivider(line string) bool {
+	return strings.HasPrefix(line, "--- Page ") && strings.HasSuffix(line, " ---")
+}
+
+func wordCountInLine(line string) int {
+	return len(strings.Fields(line))
+}
+
+func joinBlockAsParagraph(lines []string) string {
+	var b strings.Builder
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		if b.Len() == 0 {
+			b.WriteString(line)
+			continue
+		}
+
+		// Preserve simple list markers as new lines.
+		if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") || strings.HasPrefix(line, "• ") {
+			b.WriteString("\n")
+			b.WriteString(line)
+			continue
+		}
+
+		current := b.String()
+		if strings.HasSuffix(current, "-") {
+			// Handle word breaks split with trailing hyphen.
+			b.Reset()
+			b.WriteString(strings.TrimSuffix(current, "-"))
+			b.WriteString(line)
+			continue
+		}
+
+		b.WriteString(" ")
+		b.WriteString(line)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // ValidatePDF checks if the data looks like a valid PDF by checking the magic bytes.
