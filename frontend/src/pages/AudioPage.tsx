@@ -345,6 +345,7 @@ export function AudioPage() {
   };
 
   const hasSubmittable = (activeTab === 'upload' && file) || (activeTab === 'record' && recordedBlob);
+  const canEditInput = (!result || result.status === 'failed') && !isProcessing;
 
   return (
     <main className="relative pt-20 sm:pt-28 pb-12 sm:pb-16 px-4 sm:px-6">
@@ -465,7 +466,7 @@ export function AudioPage() {
       </AnimatePresence>
 
       {/* Input Tabs: Upload / Record */}
-      {!result && !isProcessing && (
+      {canEditInput && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -680,6 +681,34 @@ export function AudioPage() {
               </motion.button>
             </motion.div>
           )}
+        </motion.div>
+      )}
+
+      {/* Failed state helper actions */}
+      {result?.status === 'failed' && !isProcessing && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-2xl mx-auto mt-4 p-3 rounded-xl border flex items-center justify-between gap-3"
+          style={{
+            backgroundColor: 'var(--color-surface-elevated)',
+            borderColor: 'var(--color-border)',
+          }}
+        >
+          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            Transcription failed. You can retry with the same recording.
+          </p>
+          <button
+            onClick={handleReset}
+            className="px-3 py-2 rounded-lg text-sm font-medium border"
+            style={{
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)',
+              minHeight: '40px',
+            }}
+          >
+            Start over
+          </button>
         </motion.div>
       )}
 
