@@ -21,6 +21,9 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,6 +45,7 @@ const (
 )
 
 const whisperTargetBytes = 24 << 20 // Keep below 25MB hard limit to account for multipart overhead
+const whisperInitialSegmentSeconds = 1800
 
 // Job represents a unit of work to be processed by a worker.
 type Job struct {
@@ -376,8 +380,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		return fmt.Errorf("failed to stat temp file: %w", err)
 	}
 
-	// Whisper endpoint enforces 25MB. For larger recordings, transcode to
-	// compact mono Opus so we can still process long meetings.
+	var transcriptionParts []string
 	if fileInfo.Size() > whisperTargetBytes {
 		compressedPath := payload.TempFilePath + ".whisper.ogg"
 		if err := transcodeForWhisper(ctx, payload.TempFilePath, compressedPath); err != nil {
@@ -396,37 +399,105 @@ func (p *Pool) processAudioTranscription(job Job) error {
 			return fmt.Errorf("failed to stat compressed audio: %w", err)
 		}
 
-		if compressedInfo.Size() > whisperTargetBytes {
-			at.Status = "failed"
-			at.ErrorMessage = "Audio is too large for Whisper even after compression. Please split into shorter parts."
-			p.db.UpdateAudioTranscription(ctx, at)
-			return fmt.Errorf("compressed audio still above whisper limit: %d bytes", compressedInfo.Size())
-		}
-
 		log.Printf("🎚️  Transcoded large audio for Whisper: %s %.1fMB -> %.1fMB",
 			payload.OriginalName,
 			float64(fileInfo.Size())/(1024*1024),
 			float64(compressedInfo.Size())/(1024*1024),
 		)
-		transcriptionPath = compressedPath
+
+		if compressedInfo.Size() > whisperTargetBytes {
+			segmentSeconds := whisperInitialSegmentSeconds
+			for {
+				segmentPaths, err := splitAudioForWhisper(ctx, compressedPath, segmentSeconds)
+				if err != nil {
+					at.Status = "failed"
+					at.ErrorMessage = "Failed to split long audio for transcription: " + err.Error()
+					p.db.UpdateAudioTranscription(ctx, at)
+					return fmt.Errorf("failed to split compressed audio: %w", err)
+				}
+				cleanupPaths = append(cleanupPaths, segmentPaths...)
+
+				oversized := false
+				for _, segmentPath := range segmentPaths {
+					info, err := os.Stat(segmentPath)
+					if err != nil {
+						at.Status = "failed"
+						at.ErrorMessage = "Failed to inspect audio segment: " + err.Error()
+						p.db.UpdateAudioTranscription(ctx, at)
+						return fmt.Errorf("failed to stat segment %s: %w", segmentPath, err)
+					}
+					if info.Size() > whisperTargetBytes {
+						oversized = true
+						break
+					}
+				}
+
+				if !oversized {
+					transcriptionParts = segmentPaths
+					log.Printf("🧩 Split long audio into %d segment(s) at %ds each for Whisper", len(segmentPaths), segmentSeconds)
+					break
+				}
+
+				segmentSeconds /= 2
+				if segmentSeconds < 120 {
+					at.Status = "failed"
+					at.ErrorMessage = "Audio is too large to process safely even after chunking."
+					p.db.UpdateAudioTranscription(ctx, at)
+					return fmt.Errorf("chunked segments still exceed whisper size limits")
+				}
+			}
+		} else {
+			transcriptionPath = compressedPath
+		}
 	}
 
-	// Call the Whisper API
-	result, err := p.transcribeFile(ctx, transcriptionPath, payload.OriginalName)
-	if err != nil {
-		log.Printf("❌ Whisper transcription failed for %s: %v", payload.OriginalName, err)
-		at.Status = "failed"
-		at.ErrorMessage = err.Error()
-		p.db.UpdateAudioTranscription(ctx, at)
-		p.notifyWebhook("audio.failed", at)
-		return fmt.Errorf("transcription failed: %w", err)
+	var transcriptText string
+	var language string
+	var duration float64
+
+	if len(transcriptionParts) == 0 {
+		// Single-file transcription
+		result, err := p.transcribeFile(ctx, transcriptionPath, payload.OriginalName)
+		if err != nil {
+			log.Printf("❌ Whisper transcription failed for %s: %v", payload.OriginalName, err)
+			at.Status = "failed"
+			at.ErrorMessage = err.Error()
+			p.db.UpdateAudioTranscription(ctx, at)
+			p.notifyWebhook("audio.failed", at)
+			return fmt.Errorf("transcription failed: %w", err)
+		}
+		transcriptText = result.Text
+		language = result.Language
+		duration = result.Duration
+	} else {
+		partTexts := make([]string, 0, len(transcriptionParts))
+		languageCounts := map[string]int{}
+		for idx, partPath := range transcriptionParts {
+			partName := fmt.Sprintf("%s.part.%03d", payload.OriginalName, idx+1)
+			result, err := p.transcribeFile(ctx, partPath, partName)
+			if err != nil {
+				log.Printf("❌ Whisper chunk transcription failed (%s): %v", partName, err)
+				at.Status = "failed"
+				at.ErrorMessage = err.Error()
+				p.db.UpdateAudioTranscription(ctx, at)
+				p.notifyWebhook("audio.failed", at)
+				return fmt.Errorf("chunk transcription failed (%s): %w", partName, err)
+			}
+			partTexts = append(partTexts, strings.TrimSpace(result.Text))
+			duration += result.Duration
+			if result.Language != "" {
+				languageCounts[result.Language]++
+			}
+		}
+		transcriptText = strings.TrimSpace(strings.Join(partTexts, "\n\n"))
+		language = pickDominantLanguage(languageCounts)
 	}
 
 	// Update the record with results
-	at.TranscriptText = result.Text
-	at.Language = result.Language
-	at.Duration = result.Duration
-	at.WordCount = audio.CountWords(result.Text)
+	at.TranscriptText = transcriptText
+	at.Language = language
+	at.Duration = duration
+	at.WordCount = audio.CountWords(transcriptText)
 	at.Status = "completed"
 
 	if err := p.db.UpdateAudioTranscription(ctx, at); err != nil {
@@ -450,6 +521,57 @@ func (p *Pool) transcribeFile(ctx context.Context, path, originalName string) (*
 	return p.audioTranscriber.Transcribe(ctx, file, originalName)
 }
 
+func pickDominantLanguage(counts map[string]int) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	bestLang := ""
+	bestCount := 0
+	for lang, count := range counts {
+		if count > bestCount {
+			bestLang = lang
+			bestCount = count
+		}
+	}
+	return bestLang
+}
+
+func splitAudioForWhisper(ctx context.Context, inputPath string, segmentSeconds int) ([]string, error) {
+	baseDir := filepath.Dir(inputPath)
+	baseName := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
+	pattern := filepath.Join(baseDir, fmt.Sprintf("%s.part-%%04d.ogg", baseName))
+
+	cmd := exec.CommandContext(
+		ctx,
+		"ffmpeg",
+		"-y",
+		"-i", inputPath,
+		"-ac", "1",
+		"-ar", "16000",
+		"-c:a", "libopus",
+		"-b:a", "24k",
+		"-f", "segment",
+		"-segment_time", fmt.Sprintf("%d", segmentSeconds),
+		"-reset_timestamps", "1",
+		pattern,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("ffmpeg segment failed: %v (%s)", err, string(out))
+	}
+
+	globPattern := filepath.Join(baseDir, fmt.Sprintf("%s.part-*.ogg", baseName))
+	parts, err := filepath.Glob(globPattern)
+	if err != nil {
+		return nil, fmt.Errorf("glob segment outputs failed: %w", err)
+	}
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("no segment outputs created")
+	}
+	sort.Strings(parts)
+	return parts, nil
+}
+
 func transcodeForWhisper(ctx context.Context, inputPath, outputPath string) error {
 	cmd := exec.CommandContext(
 		ctx,
@@ -459,7 +581,7 @@ func transcodeForWhisper(ctx context.Context, inputPath, outputPath string) erro
 		"-ac", "1",
 		"-ar", "16000",
 		"-c:a", "libopus",
-		"-b:a", "48k",
+		"-b:a", "24k",
 		outputPath,
 	)
 	out, err := cmd.CombinedOutput()

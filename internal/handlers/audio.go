@@ -38,7 +38,8 @@ var allowedAudioTypes = map[string]bool{
 }
 
 // maxAudioSize is the max upload size for audio files.
-const maxAudioSize = 100 << 20 // 100MB
+// 2GB keeps room for very long recordings while chunking handles Whisper limits.
+const maxAudioSize = 2 << 30
 
 // TranscribeAudio handles audio file upload and queues transcription job.
 // POST /api/v1/audio/transcribe
@@ -65,7 +66,7 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "invalid_request",
-			Message: "No audio file provided. Upload a file with the field name 'file'. Max size: 100MB.",
+			Message: "No audio file provided. Upload a file with the field name 'file'. Max size: 2GB.",
 			Code:    http.StatusBadRequest,
 		})
 		return
@@ -76,7 +77,7 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	if header.Size > maxAudioSize {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "file_too_large",
-			Message: fmt.Sprintf("File size (%.1f MB) exceeds maximum (100 MB).", float64(header.Size)/(1024*1024)),
+			Message: fmt.Sprintf("File size (%.1f MB) exceeds maximum (2048 MB).", float64(header.Size)/(1024*1024)),
 			Code:    http.StatusBadRequest,
 		})
 		return
@@ -124,6 +125,27 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	}
 	tempFile.Close()
 
+	audioS3Status := "not_configured"
+	audioS3Key := ""
+	audioS3Size := int64(0)
+	if h.AudioStorage != nil && h.AudioStorage.IsConfigured() {
+		audioS3Key = h.AudioStorage.BuildKey(storedFilename)
+		uploadCtx, cancel := context.WithTimeout(c.Request.Context(), 90*time.Second)
+		defer cancel()
+		if err := h.AudioStorage.UploadFile(uploadCtx, tempFilePath, audioS3Key, header.Header.Get("Content-Type")); err != nil {
+			os.Remove(tempFilePath)
+			log.Printf("Failed to persist audio to S3: %v", err)
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error:   "storage_error",
+				Message: "Failed to persist recording before transcription",
+				Code:    http.StatusInternalServerError,
+			})
+			return
+		}
+		audioS3Status = "uploaded"
+		audioS3Size = header.Size
+	}
+
 	// Get the API key from context (set by auth middleware)
 	var apiKeyID *string
 	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
@@ -135,6 +157,9 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		Filename:     storedFilename,
 		OriginalName: header.Filename,
 		Status:       "pending",
+		AudioS3Key:   audioS3Key,
+		AudioS3Status: audioS3Status,
+		AudioS3Size:  audioS3Size,
 		APIKeyID:     apiKeyID,
 	}
 
@@ -224,6 +249,166 @@ func (h *Handler) GetAudioTranscription(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, at)
+}
+
+// RetryAudioTranscription re-queues a failed transcription from durable S3 audio.
+// POST /api/v1/audio/transcriptions/:id/retry
+func (h *Handler) RetryAudioTranscription(c *gin.Context) {
+	id := c.Param("id")
+
+	at, err := h.DB.GetAudioTranscription(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error:   "not_found",
+			Message: "Audio transcription not found",
+			Code:    http.StatusNotFound,
+		})
+		return
+	}
+
+	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
+		if at.APIKeyID != nil && *at.APIKeyID != apiKey.ID {
+			c.JSON(http.StatusForbidden, models.ErrorResponse{
+				Error:   "forbidden",
+				Message: "You can only retry your own transcriptions",
+				Code:    http.StatusForbidden,
+			})
+			return
+		}
+	}
+
+	if h.AudioStorage == nil || !h.AudioStorage.IsConfigured() || at.AudioS3Key == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "storage_unavailable",
+			Message: "Durable audio storage is not available for this transcription",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	ext := filepath.Ext(at.Filename)
+	if ext == "" {
+		ext = ".webm"
+	}
+	tempFilePath := filepath.Join(os.TempDir(), uuid.New().String()+ext)
+	downloadCtx, cancel := context.WithTimeout(c.Request.Context(), 90*time.Second)
+	defer cancel()
+	if err := h.AudioStorage.DownloadFile(downloadCtx, at.AudioS3Key, tempFilePath); err != nil {
+		log.Printf("Failed to download audio from S3 for retry: %v", err)
+		c.JSON(http.StatusBadGateway, models.ErrorResponse{
+			Error:   "storage_error",
+			Message: "Failed to fetch stored audio for retry",
+			Code:    http.StatusBadGateway,
+		})
+		return
+	}
+
+	at.Status = "pending"
+	at.ErrorMessage = ""
+	if err := h.DB.UpdateAudioTranscription(c.Request.Context(), at); err != nil {
+		os.Remove(tempFilePath)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "database_error",
+			Message: "Failed to prepare retry",
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+
+	payload := worker.AudioPayload{
+		AudioID:      at.ID,
+		TempFilePath: tempFilePath,
+		OriginalName: at.OriginalName,
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		os.Remove(tempFilePath)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "server_error",
+			Message: "Failed to queue retry job",
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+	job := worker.Job{
+		ID:        at.ID,
+		Type:      worker.JobAudioTranscription,
+		Payload:   payloadJSON,
+		CreatedAt: time.Now(),
+	}
+	if err := h.Worker.Submit(job); err != nil {
+		if h.isOwnerRequest(c) {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+			defer cancel()
+			if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
+				c.JSON(http.StatusAccepted, at)
+				return
+			}
+		}
+		os.Remove(tempFilePath)
+		at.Status = "failed"
+		at.ErrorMessage = "Retry queue is full, please try again later"
+		_ = h.DB.UpdateAudioTranscription(c.Request.Context(), at)
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
+			Error:   "queue_full",
+			Message: "Server is busy. Please try again in a moment.",
+			Code:    http.StatusServiceUnavailable,
+		})
+		return
+	}
+
+	c.JSON(http.StatusAccepted, at)
+}
+
+// GetAudioPlaybackURL returns a short-lived URL for replaying the stored recording.
+// GET /api/v1/audio/transcriptions/:id/audio
+func (h *Handler) GetAudioPlaybackURL(c *gin.Context) {
+	id := c.Param("id")
+
+	at, err := h.DB.GetAudioTranscription(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error:   "not_found",
+			Message: "Audio transcription not found",
+			Code:    http.StatusNotFound,
+		})
+		return
+	}
+
+	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
+		if at.APIKeyID != nil && *at.APIKeyID != apiKey.ID {
+			c.JSON(http.StatusForbidden, models.ErrorResponse{
+				Error:   "forbidden",
+				Message: "You can only access your own transcriptions",
+				Code:    http.StatusForbidden,
+			})
+			return
+		}
+	}
+
+	if h.AudioStorage == nil || !h.AudioStorage.IsConfigured() || at.AudioS3Key == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "storage_unavailable",
+			Message: "Audio file is not available for playback",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	url, err := h.AudioStorage.PresignedGetURL(at.AudioS3Key)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse{
+			Error:   "storage_error",
+			Message: "Failed to create playback URL",
+			Code:    http.StatusBadGateway,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"url":        url,
+		"expires_in": "60m",
+	})
 }
 
 // ListAudioTranscriptions returns recent audio transcriptions for the authenticated API key.
@@ -527,19 +712,18 @@ func buildMarkdownExport(at *models.AudioTranscription) string {
 func (h *Handler) DeleteAudioTranscription(c *gin.Context) {
 	id := c.Param("id")
 
+	at, err := h.DB.GetAudioTranscription(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error:   "not_found",
+			Message: "Audio transcription not found",
+			Code:    http.StatusNotFound,
+		})
+		return
+	}
+
 	// Verify ownership: only delete if it belongs to the authenticated API key
 	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		at, err := h.DB.GetAudioTranscription(c.Request.Context(), id)
-		if err != nil {
-			c.JSON(http.StatusNotFound, models.ErrorResponse{
-				Error:   "not_found",
-				Message: "Audio transcription not found",
-				Code:    http.StatusNotFound,
-			})
-			return
-		}
-
-		// Check ownership
 		if at.APIKeyID != nil && *at.APIKeyID != apiKey.ID {
 			c.JSON(http.StatusForbidden, models.ErrorResponse{
 				Error:   "forbidden",
@@ -547,6 +731,14 @@ func (h *Handler) DeleteAudioTranscription(c *gin.Context) {
 				Code:    http.StatusForbidden,
 			})
 			return
+		}
+	}
+
+	if h.AudioStorage != nil && h.AudioStorage.IsConfigured() && at.AudioS3Key != "" {
+		if err := h.AudioStorage.DeleteObject(c.Request.Context(), at.AudioS3Key); err != nil {
+			log.Printf("Warning: failed to delete S3 audio object %s: %v", at.AudioS3Key, err)
+		} else {
+			log.Printf("Deleted S3 audio object: %s", at.AudioS3Key)
 		}
 	}
 

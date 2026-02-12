@@ -30,9 +30,11 @@ import {
 import {
   transcribeAudio,
   getAudioTranscription,
+  retryAudioTranscription,
   summarizeAudio,
   downloadAudioExport,
   listAudioTranscriptions,
+  getAudioPlaybackUrl,
   type AudioTranscription,
   type AudioContentType,
   type APIError,
@@ -63,6 +65,61 @@ const CONTENT_TYPES: { value: AudioContentType; label: string; icon: React.React
   { value: 'lecture', label: 'Lecture', icon: <GraduationCap className="w-4 h-4" />, desc: 'Key concepts, definitions, takeaways' },
 ];
 
+const PENDING_AUDIO_DB = 'media-tools-audio';
+const PENDING_AUDIO_STORE = 'pending-recordings';
+const PENDING_AUDIO_KEY = 'latest';
+
+interface PendingRecording {
+  blob: Blob;
+  mimeType: string;
+  durationSeconds: number;
+  createdAt: number;
+}
+
+function openPendingAudioDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(PENDING_AUDIO_DB, 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore(PENDING_AUDIO_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function savePendingRecording(recording: PendingRecording): Promise<void> {
+  if (typeof indexedDB === 'undefined') return;
+  const db = await openPendingAudioDB();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(PENDING_AUDIO_STORE, 'readwrite');
+    tx.objectStore(PENDING_AUDIO_STORE).put(recording, PENDING_AUDIO_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function loadPendingRecording(): Promise<PendingRecording | null> {
+  if (typeof indexedDB === 'undefined') return null;
+  const db = await openPendingAudioDB();
+  return await new Promise<PendingRecording | null>((resolve, reject) => {
+    const tx = db.transaction(PENDING_AUDIO_STORE, 'readonly');
+    const req = tx.objectStore(PENDING_AUDIO_STORE).get(PENDING_AUDIO_KEY);
+    req.onsuccess = () => resolve((req.result as PendingRecording) || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function clearPendingRecording(): Promise<void> {
+  if (typeof indexedDB === 'undefined') return;
+  const db = await openPendingAudioDB();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(PENDING_AUDIO_STORE, 'readwrite');
+    tx.objectStore(PENDING_AUDIO_STORE).delete(PENDING_AUDIO_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 export function AudioPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   
@@ -81,6 +138,7 @@ export function AudioPage() {
   // Recording state (MTA-23)
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  const recordingTimeRef = useRef(0);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -94,12 +152,14 @@ export function AudioPage() {
 
   // Export state (MTA-26)
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [playbackUrl, setPlaybackUrl] = useState('');
+  const [isRetrying, setIsRetrying] = useState(false);
 
   // Tab state: 'upload' | 'record'
   const [activeTab, setActiveTab] = useState<'upload' | 'record'>('upload');
 
   const allowedExtensions = ['.mp3', '.wav', '.m4a', '.ogg', '.flac', '.webm'];
-  const maxSizeMB = 100;
+  const maxSizeMB = 2048;
 
   // Cleanup on unmount
   useEffect(() => {
@@ -108,6 +168,23 @@ export function AudioPage() {
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadPendingRecording()
+      .then((saved) => {
+        if (cancelled || !saved || result) return;
+        setActiveTab('record');
+        setRecordedBlob(saved.blob);
+        setRecordingTime(saved.durationSeconds);
+      })
+      .catch(() => {
+        // Best-effort recovery only.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [result]);
 
   // Load transcription from URL param (when coming from My Library)
   useEffect(() => {
@@ -173,15 +250,28 @@ export function AudioPage() {
         setRecordedBlob(blob);
         stream.getTracks().forEach(t => t.stop());
         streamRef.current = null;
+        savePendingRecording({
+          blob,
+          mimeType,
+          durationSeconds: recordingTimeRef.current,
+          createdAt: Date.now(),
+        }).catch(() => {
+          // Local durability is best-effort; upload durability handles backend path.
+        });
       };
 
       recorder.start(1000); // Collect data every second
       setIsRecording(true);
       setRecordingTime(0);
+      recordingTimeRef.current = 0;
       setError('');
 
       timerRef.current = setInterval(() => {
-        setRecordingTime(prev => prev + 1);
+        setRecordingTime(prev => {
+          const next = prev + 1;
+          recordingTimeRef.current = next;
+          return next;
+        });
       }, 1000);
     } catch (err) {
       setError('Microphone access denied. Please allow microphone access and try again.');
@@ -246,6 +336,9 @@ export function AudioPage() {
       // The usePolling hook will poll for completion
       const transcription = await transcribeAudio(uploadFile);
       setResult(transcription);
+      if (activeTab === 'record') {
+        clearPendingRecording().catch(() => {});
+      }
       // Don't set isProcessing to false here - polling will do that
     } catch (err: unknown) {
       const apiErr = err as APIError;
@@ -335,7 +428,35 @@ export function AudioPage() {
     setRecordingTime(0);
     setContentType('general');
     setShowExportMenu(false);
+    setPlaybackUrl('');
     setSearchParams({});
+    clearPendingRecording().catch(() => {});
+  };
+
+  const handleRetryStoredAudio = async () => {
+    if (!result) return;
+    setIsRetrying(true);
+    setError('');
+    try {
+      const updated = await retryAudioTranscription(result.id);
+      setResult(updated);
+      setIsProcessing(true);
+    } catch (err: unknown) {
+      const apiErr = err as APIError;
+      setError(apiErr.message || 'Retry failed. Please try again.');
+    } finally {
+      setIsRetrying(false);
+    }
+  };
+
+  const handleLoadPlayback = async () => {
+    if (!result) return;
+    try {
+      const res = await getAudioPlaybackUrl(result.id);
+      setPlaybackUrl(res.url);
+    } catch {
+      setError('Playback URL could not be generated for this transcription.');
+    }
   };
 
   const formatDuration = (seconds: number): string => {
@@ -604,7 +725,7 @@ export function AudioPage() {
                   <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>
                     {formatDuration(recordingTime)} — {(recordedBlob.size / 1024 / 1024).toFixed(2)} MB
                   </p>
-                  <button onClick={() => { setRecordedBlob(null); setRecordingTime(0); }}
+                  <button onClick={() => { setRecordedBlob(null); setRecordingTime(0); clearPendingRecording().catch(() => {}); }}
                     className="text-sm font-medium transition-colors" style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}>
                     Discard and re-record
                   </button>
@@ -698,17 +819,33 @@ export function AudioPage() {
           <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             Transcription failed. You can retry with the same recording.
           </p>
-          <button
-            onClick={handleReset}
-            className="px-3 py-2 rounded-lg text-sm font-medium border"
-            style={{
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-secondary)',
-              minHeight: '40px',
-            }}
-          >
-            Start over
-          </button>
+          <div className="flex items-center gap-2">
+            {result.audio_s3_key && (
+              <button
+                onClick={handleRetryStoredAudio}
+                disabled={isRetrying}
+                className="px-3 py-2 rounded-lg text-sm font-medium border"
+                style={{
+                  borderColor: 'var(--color-brand-300)',
+                  color: 'var(--color-brand-500)',
+                  minHeight: '40px',
+                }}
+              >
+                {isRetrying ? 'Retrying...' : 'Retry from saved audio'}
+              </button>
+            )}
+            <button
+              onClick={handleReset}
+              className="px-3 py-2 rounded-lg text-sm font-medium border"
+              style={{
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-secondary)',
+                minHeight: '40px',
+              }}
+            >
+              Start over
+            </button>
+          </div>
         </motion.div>
       )}
 
@@ -755,6 +892,14 @@ export function AudioPage() {
                 <Mic className="w-4 h-4" /> New transcription
               </motion.button>
 
+              <button
+                onClick={handleLoadPlayback}
+                className="flex items-center gap-1.5 text-sm font-medium transition-colors"
+                style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
+              >
+                <FileAudio className="w-4 h-4" /> Replay recording
+              </button>
+
               {/* Export dropdown (MTA-26) */}
               <div className="relative">
                 <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -784,6 +929,12 @@ export function AudioPage() {
                 </AnimatePresence>
               </div>
             </div>
+
+            {playbackUrl && (
+              <div className="mb-4 rounded-xl border p-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-elevated)' }}>
+                <audio controls src={playbackUrl} className="w-full" />
+              </div>
+            )}
 
             {/* Metadata card */}
             <div className="p-6 rounded-2xl border mb-4"

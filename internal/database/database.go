@@ -424,8 +424,11 @@ func (db *DB) RevokeAPIKey(ctx context.Context, id string) error {
 // CreateAudioTranscription inserts a new audio transcription record.
 func (db *DB) CreateAudioTranscription(ctx context.Context, at *models.AudioTranscription) error {
 	query := `
-		INSERT INTO audio_transcriptions (filename, original_name, duration, language, transcript_text, word_count, status, error_message, content_type, api_key_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO audio_transcriptions (
+			filename, original_name, audio_s3_key, audio_s3_status, audio_s3_size,
+			duration, language, transcript_text, word_count, status, error_message, content_type, api_key_id
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, created_at`
 
 	if at.ContentType == "" {
@@ -433,8 +436,8 @@ func (db *DB) CreateAudioTranscription(ctx context.Context, at *models.AudioTran
 	}
 
 	return db.QueryRowContext(ctx, query,
-		at.Filename, at.OriginalName, at.Duration, at.Language,
-		at.TranscriptText, at.WordCount, at.Status, at.ErrorMessage,
+		at.Filename, at.OriginalName, at.AudioS3Key, at.AudioS3Status, at.AudioS3Size,
+		at.Duration, at.Language, at.TranscriptText, at.WordCount, at.Status, at.ErrorMessage,
 		at.ContentType, at.APIKeyID,
 	).Scan(&at.ID, &at.CreatedAt)
 }

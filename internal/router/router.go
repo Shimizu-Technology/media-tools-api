@@ -13,21 +13,22 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/handlers"
 	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	webhookservice "github.com/Shimizu-Technology/media-tools-api/internal/services/webhook"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
 // Setup creates and configures the Gin router with all routes.
-func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhookservice.Service, sum *summary.Service, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix string, allowedOrigins []string) *gin.Engine {
+func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.S3, ws *webhookservice.Service, sum *summary.Service, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix string, allowedOrigins []string) *gin.Engine {
 	r := gin.Default()
 
-	// Set max multipart form size to 30MB (slightly above our 25MB limit for headers/overhead)
-	r.MaxMultipartMemory = 30 << 20 // 30MB
+	// Allow up to 100MB audio uploads plus multipart overhead.
+	r.MaxMultipartMemory = 120 << 20
 
 	r.Use(middleware.CORS(allowedOrigins))
 
-	h := handlers.NewHandler(db, wp, at, ws, sum, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix)
+	h := handlers.NewHandler(db, wp, at, as, ws, sum, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix)
 	rateLimiter := middleware.NewRateLimiter(ownerKeyID, ownerKeyPrefix)
 
 	// --- Public Routes (no auth required) ---
@@ -83,6 +84,8 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ws *webhooks
 		protected.POST("/audio/transcribe", h.TranscribeAudio)
 		protected.GET("/audio/transcriptions/search", h.SearchAudioTranscriptions) // MTA-25: must be before :id
 		protected.GET("/audio/transcriptions/:id", h.GetAudioTranscription)
+		protected.POST("/audio/transcriptions/:id/retry", h.RetryAudioTranscription)
+		protected.GET("/audio/transcriptions/:id/audio", h.GetAudioPlaybackURL)
 		protected.DELETE("/audio/transcriptions/:id", h.DeleteAudioTranscription)
 		protected.GET("/audio/transcriptions/:id/export", h.ExportAudioTranscription) // MTA-26
 		protected.POST("/audio/transcriptions/:id/summarize", h.SummarizeAudio)       // MTA-22

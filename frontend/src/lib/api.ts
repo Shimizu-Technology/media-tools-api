@@ -171,6 +171,9 @@ export interface AudioTranscription {
   id: string;
   filename: string;
   original_name: string;
+  audio_s3_key?: string;
+  audio_s3_status?: string;
+  audio_s3_size?: number;
   duration: number;
   language: string;
   transcript_text: string;
@@ -185,6 +188,11 @@ export interface AudioTranscription {
   summary_model?: string;
   summary_status: 'none' | 'processing' | 'completed' | 'failed';
   created_at: string;
+}
+
+export interface AudioPlaybackResponse {
+  url: string;
+  expires_in: string;
 }
 
 export interface PDFExtraction {
@@ -448,6 +456,19 @@ export async function transcribeAudio(file: File): Promise<AudioTranscription> {
 export async function getAudioTranscription(id: string): Promise<AudioTranscription> {
   const res = await fetch(`${API_BASE}/audio/transcriptions/${id}`, { headers: getHeaders() });
   return handleResponse<AudioTranscription>(res);
+}
+
+export async function retryAudioTranscription(id: string): Promise<AudioTranscription> {
+  const res = await fetch(`${API_BASE}/audio/transcriptions/${id}/retry`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+  return handleResponse<AudioTranscription>(res);
+}
+
+export async function getAudioPlaybackUrl(id: string): Promise<AudioPlaybackResponse> {
+  const res = await fetch(`${API_BASE}/audio/transcriptions/${id}/audio`, { headers: getHeaders() });
+  return handleResponse<AudioPlaybackResponse>(res);
 }
 
 export async function listAudioTranscriptions(): Promise<AudioTranscription[]> {

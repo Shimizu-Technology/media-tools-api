@@ -191,6 +191,9 @@ type AudioTranscription struct {
 	ID             string           `json:"id" db:"id"`
 	Filename       string           `json:"filename" db:"filename"`
 	OriginalName   string           `json:"original_name" db:"original_name"`
+	AudioS3Key     string           `json:"audio_s3_key,omitempty" db:"audio_s3_key"`
+	AudioS3Status  string           `json:"audio_s3_status,omitempty" db:"audio_s3_status"`
+	AudioS3Size    int64            `json:"audio_s3_size,omitempty" db:"audio_s3_size"`
 	Duration       float64          `json:"duration" db:"duration"`
 	Language       string           `json:"language" db:"language"`
 	TranscriptText string           `json:"transcript_text" db:"transcript_text"`

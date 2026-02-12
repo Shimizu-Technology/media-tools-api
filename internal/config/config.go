@@ -29,6 +29,15 @@ type Config struct {
 	YtDlpPath    string // Path to yt-dlp binary
 	YouTubeProxy string // Optional: Residential proxy for YouTube (format: http://user:pass@host:port)
 
+	// AWS S3 (raw audio persistence)
+	AWSAccessKeyID               string
+	AWSSecretAccessKey           string
+	AWSSessionToken              string
+	AWSRegion                    string
+	AWSS3Bucket                  string
+	AWSS3Prefix                  string
+	AudioPlaybackURLExpiryMinutes int
+
 	// OpenRouter AI settings
 	OpenRouterAPIKey string
 	OpenRouterModel  string // Default model for summaries
@@ -76,6 +85,15 @@ func Load() (*Config, error) {
 		// yt-dlp — try common locations
 		YtDlpPath:    getEnv("YT_DLP_PATH", findYtDlp()),
 		YouTubeProxy: getEnv("YOUTUBE_PROXY", ""), // Optional: residential proxy for YouTube
+
+		// AWS S3 (raw audio persistence)
+		AWSAccessKeyID:               getEnv("AWS_ACCESS_KEY_ID", ""),
+		AWSSecretAccessKey:           getEnv("AWS_SECRET_ACCESS_KEY", ""),
+		AWSSessionToken:              getEnv("AWS_SESSION_TOKEN", ""),
+		AWSRegion:                    getEnv("AWS_REGION", ""),
+		AWSS3Bucket:                  getEnv("AWS_S3_BUCKET", ""),
+		AWSS3Prefix:                  getEnv("AWS_S3_PREFIX", "audio"),
+		AudioPlaybackURLExpiryMinutes: getEnvInt("AUDIO_PLAYBACK_URL_EXPIRY_MINUTES", 60),
 
 		// OpenRouter AI
 		OpenRouterAPIKey: getEnv("OPENROUTER_API_KEY", ""),

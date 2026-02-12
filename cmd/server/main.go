@@ -15,6 +15,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/router"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/webhook"
@@ -84,6 +85,22 @@ func main() {
 	webhookService := webhook.New(db)
 	log.Println("✅ Webhook notification service initialized")
 
+	// Raw audio storage service (S3)
+	audioStorage := storage.NewS3(
+		cfg.AWSAccessKeyID,
+		cfg.AWSSecretAccessKey,
+		cfg.AWSSessionToken,
+		cfg.AWSRegion,
+		cfg.AWSS3Bucket,
+		cfg.AWSS3Prefix,
+		cfg.AudioPlaybackURLExpiryMinutes,
+	)
+	if audioStorage.IsConfigured() {
+		log.Printf("✅ Audio S3 storage enabled (bucket=%s, prefix=%s)", cfg.AWSS3Bucket, cfg.AWSS3Prefix)
+	} else {
+		log.Println("⚠️  Audio S3 storage not configured (raw recordings will not be durable across retries)")
+	}
+
 	// Step 4: Create and Start Worker Pool
 	wp := worker.NewPool(cfg.WorkerCount, cfg.JobQueueSize, db, extractor, summarizer)
 	wp.SetWebhookService(webhookService) // MTA-18: wire webhooks into worker for job notifications
@@ -103,6 +120,7 @@ func main() {
 		db,
 		wp,
 		audioTranscriber,
+		audioStorage,
 		webhookService,
 		summarizer,
 		cfg.JWTSecret,
