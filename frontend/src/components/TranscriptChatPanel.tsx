@@ -164,7 +164,11 @@ export function TranscriptChatPanel({ itemId, itemType }: TranscriptChatPanelPro
         {/* Input */}
         <div
           className="border-t p-3 sm:p-4"
-          style={{ borderColor: 'var(--color-border)' }}
+          style={{
+            borderColor: 'var(--color-border)',
+            // Keep composer above iOS bottom safe area when keyboard opens.
+            paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+          }}
         >
           <div className="flex items-end gap-2">
             <textarea
@@ -178,12 +182,13 @@ export function TranscriptChatPanel({ itemId, itemType }: TranscriptChatPanelPro
               }}
               placeholder="Ask a question about this content…"
               rows={3}
-              className="flex-1 resize-none px-4 py-3 rounded-xl border text-sm outline-none transition-colors duration-200"
+              className="flex-1 resize-none px-4 py-3 rounded-xl border text-base sm:text-sm outline-none transition-colors duration-200"
               style={{
                 backgroundColor: 'var(--color-surface-elevated)',
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-text-primary)',
                 minHeight: '44px',
+                lineHeight: 1.4,
               }}
             />
             <button
