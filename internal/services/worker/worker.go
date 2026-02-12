@@ -592,7 +592,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 
 	p.notifyWebhook("audio.completed", at)
 	log.Printf("✅ Audio transcription completed: %s (%s, %.0fs, %d words)",
-		payload.OriginalName, result.Language, result.Duration, at.WordCount)
+		payload.OriginalName, language, duration, at.WordCount)
 
 	return nil
 }
