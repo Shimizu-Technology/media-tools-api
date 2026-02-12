@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -39,6 +40,8 @@ const (
 	JobSummaryGeneration     JobType = "summary_generation"
 	JobAudioTranscription    JobType = "audio_transcription"
 )
+
+const whisperTargetBytes = 24 << 20 // Keep below 25MB hard limit to account for multipart overhead
 
 // Job represents a unit of work to be processed by a worker.
 type Job struct {
@@ -346,19 +349,8 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		log.Printf("⚠️  Failed to update audio status to processing: %v", err)
 	}
 
-	// Open the temp file
-	file, err := os.Open(payload.TempFilePath)
-	if err != nil {
-		at.Status = "failed"
-		at.ErrorMessage = "Failed to read uploaded file: " + err.Error()
-		p.db.UpdateAudioTranscription(ctx, at)
-		return fmt.Errorf("failed to open temp file: %w", err)
-	}
-	defer func() {
-		file.Close()
-		// Clean up temp file after processing
-		os.Remove(payload.TempFilePath)
-	}()
+	// Ensure temp file is always cleaned up
+	defer os.Remove(payload.TempFilePath)
 
 	// Check if transcriber is configured
 	if p.audioTranscriber == nil || !p.audioTranscriber.IsConfigured() {
@@ -368,8 +360,59 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		return fmt.Errorf("audio transcriber not configured")
 	}
 
+	transcriptionPath := payload.TempFilePath
+	var cleanupPaths []string
+	defer func() {
+		for _, p := range cleanupPaths {
+			_ = os.Remove(p)
+		}
+	}()
+
+	fileInfo, err := os.Stat(payload.TempFilePath)
+	if err != nil {
+		at.Status = "failed"
+		at.ErrorMessage = "Failed to read uploaded file info: " + err.Error()
+		p.db.UpdateAudioTranscription(ctx, at)
+		return fmt.Errorf("failed to stat temp file: %w", err)
+	}
+
+	// Whisper endpoint enforces 25MB. For larger recordings, transcode to
+	// compact mono Opus so we can still process long meetings.
+	if fileInfo.Size() > whisperTargetBytes {
+		compressedPath := payload.TempFilePath + ".whisper.ogg"
+		if err := transcodeForWhisper(ctx, payload.TempFilePath, compressedPath); err != nil {
+			at.Status = "failed"
+			at.ErrorMessage = "Failed to compress audio for transcription: " + err.Error()
+			p.db.UpdateAudioTranscription(ctx, at)
+			return fmt.Errorf("failed to transcode large audio: %w", err)
+		}
+		cleanupPaths = append(cleanupPaths, compressedPath)
+
+		compressedInfo, err := os.Stat(compressedPath)
+		if err != nil {
+			at.Status = "failed"
+			at.ErrorMessage = "Failed to prepare compressed audio: " + err.Error()
+			p.db.UpdateAudioTranscription(ctx, at)
+			return fmt.Errorf("failed to stat compressed audio: %w", err)
+		}
+
+		if compressedInfo.Size() > whisperTargetBytes {
+			at.Status = "failed"
+			at.ErrorMessage = "Audio is too large for Whisper even after compression. Please split into shorter parts."
+			p.db.UpdateAudioTranscription(ctx, at)
+			return fmt.Errorf("compressed audio still above whisper limit: %d bytes", compressedInfo.Size())
+		}
+
+		log.Printf("🎚️  Transcoded large audio for Whisper: %s %.1fMB -> %.1fMB",
+			payload.OriginalName,
+			float64(fileInfo.Size())/(1024*1024),
+			float64(compressedInfo.Size())/(1024*1024),
+		)
+		transcriptionPath = compressedPath
+	}
+
 	// Call the Whisper API
-	result, err := p.audioTranscriber.Transcribe(ctx, file, payload.OriginalName)
+	result, err := p.transcribeFile(ctx, transcriptionPath, payload.OriginalName)
 	if err != nil {
 		log.Printf("❌ Whisper transcription failed for %s: %v", payload.OriginalName, err)
 		at.Status = "failed"
@@ -395,5 +438,33 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	log.Printf("✅ Audio transcription completed: %s (%s, %.0fs, %d words)",
 		payload.OriginalName, result.Language, result.Duration, at.WordCount)
 
+	return nil
+}
+
+func (p *Pool) transcribeFile(ctx context.Context, path, originalName string) (*audio.TranscriptionResult, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open audio file: %w", err)
+	}
+	defer file.Close()
+	return p.audioTranscriber.Transcribe(ctx, file, originalName)
+}
+
+func transcodeForWhisper(ctx context.Context, inputPath, outputPath string) error {
+	cmd := exec.CommandContext(
+		ctx,
+		"ffmpeg",
+		"-y",
+		"-i", inputPath,
+		"-ac", "1",
+		"-ar", "16000",
+		"-c:a", "libopus",
+		"-b:a", "48k",
+		outputPath,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ffmpeg transcode failed: %v (%s)", err, string(out))
+	}
 	return nil
 }
