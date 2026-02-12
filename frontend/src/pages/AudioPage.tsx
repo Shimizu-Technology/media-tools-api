@@ -79,6 +79,48 @@ interface PendingRecording {
   createdAt: number;
 }
 
+function pickRecordingMimeType(): string {
+  const candidates = [
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/mp4',
+    'audio/webm;codecs=opus',
+    'audio/webm',
+  ];
+  for (const candidate of candidates) {
+    if (MediaRecorder.isTypeSupported(candidate)) return candidate;
+  }
+  return '';
+}
+
+function extensionForMimeType(mimeType: string): string {
+  const normalized = mimeType.toLowerCase();
+  if (normalized.includes('mp4') || normalized.includes('m4a')) return 'm4a';
+  if (normalized.includes('ogg')) return 'ogg';
+  return 'webm';
+}
+
+async function measureBlobDurationSeconds(blob: Blob): Promise<number | null> {
+  if (typeof Audio === 'undefined') return null;
+  return await new Promise<number | null>((resolve) => {
+    const audio = new Audio();
+    const url = URL.createObjectURL(blob);
+    let settled = false;
+    const done = (value: number | null) => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+    audio.preload = 'metadata';
+    audio.onloadedmetadata = () => {
+      const duration = Number.isFinite(audio.duration) ? audio.duration : NaN;
+      done(Number.isFinite(duration) && duration > 0 ? duration : null);
+    };
+    audio.onerror = () => done(null);
+    audio.src = url;
+  });
+}
+
 function openPendingAudioDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(PENDING_AUDIO_DB, 1);
@@ -143,6 +185,8 @@ export function AudioPage() {
   const [recordingTime, setRecordingTime] = useState(0);
   const recordingTimeRef = useRef(0);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [recordedMimeType, setRecordedMimeType] = useState('audio/webm');
+  const [recordingCaptureWarning, setRecordingCaptureWarning] = useState('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -182,6 +226,7 @@ export function AudioPage() {
         if (cancelled || !saved || result) return;
         setActiveTab('record');
         setRecordedBlob(saved.blob);
+        setRecordedMimeType(saved.mimeType || 'audio/webm');
         setRecordingTime(saved.durationSeconds);
         setRecoveredDraft(true);
         setDraftAudioUrl(URL.createObjectURL(saved.blob));
@@ -233,6 +278,7 @@ export function AudioPage() {
     setError('');
     setResult(null);
     setRecordedBlob(null);
+    setRecordingCaptureWarning('');
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -249,31 +295,53 @@ export function AudioPage() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : 'audio/webm';
-
-      const recorder = new MediaRecorder(stream, { mimeType });
+      const preferredMimeType = pickRecordingMimeType();
+      const recorder = preferredMimeType
+        ? new MediaRecorder(stream, { mimeType: preferredMimeType })
+        : new MediaRecorder(stream);
+      const effectiveMimeType = recorder.mimeType || preferredMimeType || 'audio/webm';
+      setRecordedMimeType(effectiveMimeType);
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
+      setRecordingCaptureWarning('');
 
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: mimeType });
-        setRecordedBlob(blob);
-        stream.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
-        savePendingRecording({
-          blob,
-          mimeType,
-          durationSeconds: recordingTimeRef.current,
-          createdAt: Date.now(),
-        }).catch(() => {
-          // Local durability is best-effort; upload durability handles backend path.
-        });
+        void (async () => {
+          const blob = new Blob(chunksRef.current, { type: effectiveMimeType });
+          const measuredDuration = await measureBlobDurationSeconds(blob);
+          const displayDuration = measuredDuration ? Math.max(1, Math.round(measuredDuration)) : recordingTimeRef.current;
+
+          setRecordedBlob(blob);
+          setRecordingTime(displayDuration);
+          setRecordedMimeType(effectiveMimeType);
+
+          if (recordingTimeRef.current >= 120 && blob.size < 1024 * 1024) {
+            setRecordingCaptureWarning(
+              'This recording file looks incomplete for its shown length. Please re-record and keep the app in foreground.'
+            );
+          } else if (measuredDuration !== null && recordingTimeRef.current >= 120 && measuredDuration < 10) {
+            setRecordingCaptureWarning(
+              'Recording appears truncated on this device. Please retry and keep the screen/app active while recording.'
+            );
+          } else {
+            setRecordingCaptureWarning('');
+          }
+
+          stream.getTracks().forEach(t => t.stop());
+          streamRef.current = null;
+          savePendingRecording({
+            blob,
+            mimeType: effectiveMimeType,
+            durationSeconds: displayDuration,
+            createdAt: Date.now(),
+          }).catch(() => {
+            // Local durability is best-effort; upload durability handles backend path.
+          });
+        })();
       };
 
       recorder.start(1000); // Collect data every second
@@ -336,8 +404,15 @@ export function AudioPage() {
     let uploadFile: File;
 
     if (activeTab === 'record' && recordedBlob) {
+      if (recordingCaptureWarning) {
+        setError('Recording looks incomplete. Please re-record before transcribing.');
+        return;
+      }
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
-      uploadFile = new File([recordedBlob], `recording-${timestamp}.webm`, { type: recordedBlob.type });
+      const ext = extensionForMimeType(recordedBlob.type || recordedMimeType);
+      uploadFile = new File([recordedBlob], `recording-${timestamp}.${ext}`, {
+        type: recordedBlob.type || recordedMimeType,
+      });
     } else if (file) {
       uploadFile = file;
     } else {
@@ -460,6 +535,8 @@ export function AudioPage() {
     setError('');
     setCopied('');
     setRecordedBlob(null);
+    setRecordedMimeType('audio/webm');
+    setRecordingCaptureWarning('');
     setRecordingTime(0);
     setContentType('general');
     setShowExportMenu(false);
@@ -816,7 +893,18 @@ export function AudioPage() {
                   <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>
                     {formatDuration(recordingTime)} — {(recordedBlob.size / 1024 / 1024).toFixed(2)} MB
                   </p>
-                  <button onClick={() => { setRecordedBlob(null); setRecordingTime(0); clearPendingRecording().catch(() => {}); }}
+                  {recordingCaptureWarning && (
+                    <p className="text-sm mb-3" style={{ color: 'var(--color-error)' }}>
+                      {recordingCaptureWarning}
+                    </p>
+                  )}
+                  <button onClick={() => {
+                    setRecordedBlob(null);
+                    setRecordingTime(0);
+                    setRecordedMimeType('audio/webm');
+                    setRecordingCaptureWarning('');
+                    clearPendingRecording().catch(() => {});
+                  }}
                     className="text-sm font-medium transition-colors" style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}>
                     Discard and re-record
                   </button>
