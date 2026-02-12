@@ -421,6 +421,34 @@ func (db *DB) RevokeAPIKey(ctx context.Context, id string) error {
 
 // --- Audio Transcription Operations (MTA-16) ---
 
+const audioTranscriptionSelectColumns = `
+	id,
+	filename,
+	original_name,
+	COALESCE(audio_s3_key, '') AS audio_s3_key,
+	COALESCE(audio_s3_status, 'pending') AS audio_s3_status,
+	COALESCE(audio_s3_size, 0) AS audio_s3_size,
+	COALESCE(processing_stage, 'queued') AS processing_stage,
+	COALESCE(processing_progress, 0) AS processing_progress,
+	COALESCE(retry_count, 0) AS retry_count,
+	duration,
+	language,
+	transcript_text,
+	word_count,
+	status,
+	error_message,
+	content_type,
+	summary_text,
+	key_points,
+	action_items,
+	decisions,
+	summary_model,
+	summary_status,
+	user_id,
+	api_key_id,
+	created_at
+`
+
 // CreateAudioTranscription inserts a new audio transcription record.
 func (db *DB) CreateAudioTranscription(ctx context.Context, at *models.AudioTranscription) error {
 	query := `
@@ -450,7 +478,8 @@ func (db *DB) CreateAudioTranscription(ctx context.Context, at *models.AudioTran
 // GetAudioTranscription retrieves a single audio transcription by ID.
 func (db *DB) GetAudioTranscription(ctx context.Context, id string) (*models.AudioTranscription, error) {
 	var at models.AudioTranscription
-	err := db.GetContext(ctx, &at, `SELECT * FROM audio_transcriptions WHERE id = $1`, id)
+	query := fmt.Sprintf(`SELECT %s FROM audio_transcriptions WHERE id = $1`, audioTranscriptionSelectColumns)
+	err := db.GetContext(ctx, &at, query, id)
 	if err != nil {
 		return nil, fmt.Errorf("audio transcription not found: %w", err)
 	}
@@ -508,7 +537,7 @@ func (db *DB) ListRecoverableAudioTranscriptions(ctx context.Context, limit int)
 	}
 	var rows []models.AudioTranscription
 	err := db.SelectContext(ctx, &rows, `
-		SELECT * FROM audio_transcriptions
+		SELECT `+audioTranscriptionSelectColumns+` FROM audio_transcriptions
 		WHERE status IN ('pending', 'processing')
 		ORDER BY created_at ASC
 		LIMIT $1
@@ -542,11 +571,11 @@ func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int, apiKeyID *
 	var transcriptions []models.AudioTranscription
 	var err error
 	query := fmt.Sprintf(
-		`SELECT * FROM audio_transcriptions
+		`SELECT %s FROM audio_transcriptions
 		 %s
 		 ORDER BY created_at DESC
 		 LIMIT %d`,
-		buildAPIKeyWhereClause(apiKeyID), limit,
+		audioTranscriptionSelectColumns, buildAPIKeyWhereClause(apiKeyID), limit,
 	)
 	err = db.SelectContext(ctx, &transcriptions, query)
 
@@ -597,8 +626,8 @@ func (db *DB) SearchAudioTranscriptions(ctx context.Context, params models.Audio
 	// Fetch page
 	offset := (params.Page - 1) * params.PerPage
 	selectQuery := fmt.Sprintf(
-		"SELECT * FROM audio_transcriptions %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d",
-		whereClause, argNum, argNum+1)
+		"SELECT %s FROM audio_transcriptions %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d",
+		audioTranscriptionSelectColumns, whereClause, argNum, argNum+1)
 	args = append(args, params.PerPage, offset)
 
 	var results []models.AudioTranscription
