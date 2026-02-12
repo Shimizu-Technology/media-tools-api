@@ -581,6 +581,21 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	at.Language = language
 	at.Duration = duration
 	at.WordCount = audio.CountWords(transcriptText)
+
+	// Treat empty transcripts as a processing failure so users can retry immediately
+	// instead of seeing a misleading "completed" state that cannot be chatted with.
+	if strings.TrimSpace(at.TranscriptText) == "" || at.WordCount == 0 {
+		at.Status = "failed"
+		at.ErrorMessage = "No speech was detected in this audio. Please re-record or upload a clearer recording and try again."
+		at.ProcessingStage = "failed"
+		at.ProcessingProgress = 100
+		if err := p.db.UpdateAudioTranscription(ctx, at); err != nil {
+			return fmt.Errorf("failed to save empty-transcript failure status: %w", err)
+		}
+		p.notifyWebhook("audio.failed", at)
+		return fmt.Errorf("empty transcription result for %s", payload.OriginalName)
+	}
+
 	at.Status = "completed"
 	at.ProcessingStage = "completed"
 	at.ProcessingProgress = 100
