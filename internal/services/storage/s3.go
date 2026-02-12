@@ -197,6 +197,60 @@ func (s *S3) PresignedGetURL(key string) (string, error) {
 	return fmt.Sprintf("https://%s%s?%s", host, path, query.Encode()), nil
 }
 
+func (s *S3) PresignedPutURL(key, contentType string) (string, error) {
+	if key == "" {
+		return "", fmt.Errorf("empty key")
+	}
+	now := time.Now().UTC()
+	expires := int(s.expiry.Seconds())
+	if expires < 60 {
+		expires = 60
+	}
+	if expires > 604800 {
+		expires = 604800
+	}
+
+	escapedKey := strings.ReplaceAll(url.PathEscape(key), "+", "%20")
+	host := s.host()
+	path := "/" + escapedKey
+	amzDate := now.Format("20060102T150405Z")
+	shortDate := now.Format("20060102")
+	scope := fmt.Sprintf("%s/%s/%s/aws4_request", shortDate, s.region, s3Service)
+
+	query := url.Values{}
+	query.Set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
+	query.Set("X-Amz-Credential", fmt.Sprintf("%s/%s", s.accessKey, scope))
+	query.Set("X-Amz-Date", amzDate)
+	query.Set("X-Amz-Expires", fmt.Sprintf("%d", expires))
+	query.Set("X-Amz-SignedHeaders", "content-type;host")
+	if s.sessionTok != "" {
+		query.Set("X-Amz-Security-Token", s.sessionTok)
+	}
+
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	canonicalQuery := query.Encode()
+	canonicalRequest := strings.Join([]string{
+		http.MethodPut,
+		path,
+		canonicalQuery,
+		"content-type:" + contentType + "\n" + "host:" + host + "\n",
+		"content-type;host",
+		"UNSIGNED-PAYLOAD",
+	}, "\n")
+
+	stringToSign := strings.Join([]string{
+		"AWS4-HMAC-SHA256",
+		amzDate,
+		scope,
+		hexSHA256(canonicalRequest),
+	}, "\n")
+	signature := hex.EncodeToString(signV4(s.secretKey, shortDate, s.region, s3Service, stringToSign))
+	query.Set("X-Amz-Signature", signature)
+	return fmt.Sprintf("https://%s%s?%s", host, path, query.Encode()), nil
+}
+
 func (s *S3) signRequest(req *http.Request, key, payloadHash string) error {
 	if !s.IsConfigured() {
 		return fmt.Errorf("s3 not configured")

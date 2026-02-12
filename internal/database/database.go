@@ -426,17 +426,22 @@ func (db *DB) CreateAudioTranscription(ctx context.Context, at *models.AudioTran
 	query := `
 		INSERT INTO audio_transcriptions (
 			filename, original_name, audio_s3_key, audio_s3_status, audio_s3_size,
+			processing_stage, processing_progress, retry_count,
 			duration, language, transcript_text, word_count, status, error_message, content_type, api_key_id
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		RETURNING id, created_at`
 
 	if at.ContentType == "" {
 		at.ContentType = models.ContentGeneral
 	}
+	if at.ProcessingStage == "" {
+		at.ProcessingStage = "queued"
+	}
 
 	return db.QueryRowContext(ctx, query,
 		at.Filename, at.OriginalName, at.AudioS3Key, at.AudioS3Status, at.AudioS3Size,
+		at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
 		at.Duration, at.Language, at.TranscriptText, at.WordCount, at.Status, at.ErrorMessage,
 		at.ContentType, at.APIKeyID,
 	).Scan(&at.ID, &at.CreatedAt)
@@ -457,14 +462,61 @@ func (db *DB) UpdateAudioTranscription(ctx context.Context, at *models.AudioTran
 	query := `
 		UPDATE audio_transcriptions
 		SET duration = $2, language = $3, transcript_text = $4, word_count = $5,
-			status = $6, error_message = $7
+			status = $6, error_message = $7,
+			processing_stage = $8, processing_progress = $9, retry_count = $10
 		WHERE id = $1`
 
 	_, err := db.ExecContext(ctx, query,
 		at.ID, at.Duration, at.Language, at.TranscriptText,
-		at.WordCount, at.Status, at.ErrorMessage,
+		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
 	)
 	return err
+}
+
+// UpdateAudioProcessing updates processing stage/progress without changing transcript payload.
+func (db *DB) UpdateAudioProcessing(ctx context.Context, id, stage string, progress int) error {
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 100 {
+		progress = 100
+	}
+	_, err := db.ExecContext(ctx,
+		`UPDATE audio_transcriptions SET processing_stage = $2, processing_progress = $3 WHERE id = $1`,
+		id, stage, progress,
+	)
+	return err
+}
+
+// IncrementAudioRetryCount increments retry_count and returns the new value.
+func (db *DB) IncrementAudioRetryCount(ctx context.Context, id string) (int, error) {
+	var retryCount int
+	err := db.QueryRowContext(ctx,
+		`UPDATE audio_transcriptions SET retry_count = retry_count + 1 WHERE id = $1 RETURNING retry_count`,
+		id,
+	).Scan(&retryCount)
+	if err != nil {
+		return 0, err
+	}
+	return retryCount, nil
+}
+
+// ListRecoverableAudioTranscriptions returns pending/processing jobs that can be requeued after restart.
+func (db *DB) ListRecoverableAudioTranscriptions(ctx context.Context, limit int) ([]models.AudioTranscription, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	var rows []models.AudioTranscription
+	err := db.SelectContext(ctx, &rows, `
+		SELECT * FROM audio_transcriptions
+		WHERE status IN ('pending', 'processing')
+		ORDER BY created_at ASC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 // UpdateAudioSummary updates the summary fields of an audio transcription (MTA-22).

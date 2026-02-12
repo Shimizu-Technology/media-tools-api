@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { FileText, Mic, FileType2, Library, Settings, Book, Webhook, Key, Github, ChevronDown } from 'lucide-react'
+import { FileText, Mic, FileType2, Library, Settings, Book, Webhook, Key, Github, ChevronDown, Activity } from 'lucide-react'
 import { ApiKeySetup } from './ApiKeySetup'
 
 const mainNavLinks = [
@@ -13,6 +13,7 @@ const mainNavLinks = [
 const settingsLinks = [
   { to: '/docs', label: 'API Docs', icon: Book },
   { to: '/webhooks', label: 'Webhooks', icon: Webhook },
+  { to: '/ops', label: 'Ops Health', icon: Activity },
 ]
 
 export function Header() {

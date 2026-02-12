@@ -30,6 +30,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
 	webhookservice "github.com/Shimizu-Technology/media-tools-api/internal/services/webhook"
@@ -69,6 +70,7 @@ type SummaryPayload struct {
 type AudioPayload struct {
 	AudioID      string `json:"audio_id"`
 	TempFilePath string `json:"temp_file_path"`
+	AudioS3Key   string `json:"audio_s3_key,omitempty"`
 	OriginalName string `json:"original_name"`
 }
 
@@ -80,6 +82,7 @@ type Pool struct {
 	extractor       transcript.Extractor
 	summarizer      *summary.Service
 	audioTranscriber *audio.Transcriber // Audio transcription via Whisper
+	audioStorage    *storage.S3
 	webhooks        *webhookservice.Service // MTA-18: webhook notifications
 	wg              sync.WaitGroup
 	ctx             context.Context
@@ -94,6 +97,10 @@ func (p *Pool) SetWebhookService(ws *webhookservice.Service) {
 // SetAudioTranscriber sets the audio transcriber for Whisper jobs.
 func (p *Pool) SetAudioTranscriber(at *audio.Transcriber) {
 	p.audioTranscriber = at
+}
+
+func (p *Pool) SetAudioStorage(as *storage.S3) {
+	p.audioStorage = as
 }
 
 // notifyWebhook fires a webhook event if the service is configured.
@@ -172,6 +179,40 @@ func (p *Pool) QueueSize() int {
 // WorkerCount returns the number of workers.
 func (p *Pool) WorkerCount() int {
 	return p.workers
+}
+
+// RecoverAudioJobs requeues pending/processing audio jobs on startup.
+func (p *Pool) RecoverAudioJobs(ctx context.Context, limit int) (int, error) {
+	rows, err := p.db.ListRecoverableAudioTranscriptions(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+	requeued := 0
+	for _, at := range rows {
+		if at.Status == "completed" {
+			continue
+		}
+		payload := AudioPayload{
+			AudioID:      at.ID,
+			AudioS3Key:   at.AudioS3Key,
+			OriginalName: at.OriginalName,
+		}
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			continue
+		}
+		job := Job{
+			ID:        at.ID,
+			Type:      JobAudioTranscription,
+			Payload:   payloadJSON,
+			CreatedAt: time.Now(),
+		}
+		if err := p.Submit(job); err == nil {
+			requeued++
+			_ = p.db.UpdateAudioProcessing(ctx, at.ID, "queued", 0)
+		}
+	}
+	return requeued, nil
 }
 
 // worker is the main loop for each worker goroutine.
@@ -347,10 +388,44 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		return fmt.Errorf("failed to get audio transcription: %w", err)
 	}
 
+	if retryCount, err := p.db.IncrementAudioRetryCount(ctx, at.ID); err == nil {
+		at.RetryCount = retryCount
+	}
+
 	// Update status to processing
 	at.Status = "processing"
+	at.ProcessingStage = "starting"
+	at.ProcessingProgress = 5
 	if err := p.db.UpdateAudioTranscription(ctx, at); err != nil {
 		log.Printf("⚠️  Failed to update audio status to processing: %v", err)
+	}
+
+	if payload.TempFilePath == "" {
+		if payload.AudioS3Key == "" {
+			payload.AudioS3Key = at.AudioS3Key
+		}
+		if p.audioStorage == nil || !p.audioStorage.IsConfigured() || payload.AudioS3Key == "" {
+			at.Status = "failed"
+			at.ErrorMessage = "Audio source file is unavailable for processing."
+			at.ProcessingStage = "failed"
+			at.ProcessingProgress = 100
+			_ = p.db.UpdateAudioTranscription(ctx, at)
+			return fmt.Errorf("no local temp file or durable S3 key available")
+		}
+		_ = p.db.UpdateAudioProcessing(ctx, at.ID, "downloading", 10)
+		ext := filepath.Ext(at.Filename)
+		if ext == "" {
+			ext = ".webm"
+		}
+		payload.TempFilePath = filepath.Join(os.TempDir(), fmt.Sprintf("%s%s", at.ID, ext))
+		if err := p.audioStorage.DownloadFile(ctx, payload.AudioS3Key, payload.TempFilePath); err != nil {
+			at.Status = "failed"
+			at.ErrorMessage = "Failed to download source audio: " + err.Error()
+			at.ProcessingStage = "failed"
+			at.ProcessingProgress = 100
+			_ = p.db.UpdateAudioTranscription(ctx, at)
+			return fmt.Errorf("failed to download source audio: %w", err)
+		}
 	}
 
 	// Ensure temp file is always cleaned up
@@ -382,6 +457,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 
 	var transcriptionParts []string
 	if fileInfo.Size() > whisperTargetBytes {
+		_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcoding", 25)
 		compressedPath := payload.TempFilePath + ".whisper.ogg"
 		if err := transcodeForWhisper(ctx, payload.TempFilePath, compressedPath); err != nil {
 			at.Status = "failed"
@@ -408,6 +484,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		if compressedInfo.Size() > whisperTargetBytes {
 			segmentSeconds := whisperInitialSegmentSeconds
 			for {
+				_ = p.db.UpdateAudioProcessing(ctx, at.ID, "chunking", 35)
 				segmentPaths, err := splitAudioForWhisper(ctx, compressedPath, segmentSeconds)
 				if err != nil {
 					at.Status = "failed"
@@ -456,6 +533,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	var duration float64
 
 	if len(transcriptionParts) == 0 {
+		_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcribing", 70)
 		// Single-file transcription
 		result, err := p.transcribeFile(ctx, transcriptionPath, payload.OriginalName)
 		if err != nil {
@@ -473,6 +551,10 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		partTexts := make([]string, 0, len(transcriptionParts))
 		languageCounts := map[string]int{}
 		for idx, partPath := range transcriptionParts {
+			if len(transcriptionParts) > 0 {
+				progress := 40 + int(float64(idx)/float64(len(transcriptionParts))*50)
+				_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcribing", progress)
+			}
 			partName := fmt.Sprintf("%s.part.%03d", payload.OriginalName, idx+1)
 			result, err := p.transcribeFile(ctx, partPath, partName)
 			if err != nil {
@@ -494,11 +576,14 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	}
 
 	// Update the record with results
+	_ = p.db.UpdateAudioProcessing(ctx, at.ID, "stitching", 95)
 	at.TranscriptText = transcriptText
 	at.Language = language
 	at.Duration = duration
 	at.WordCount = audio.CountWords(transcriptText)
 	at.Status = "completed"
+	at.ProcessingStage = "completed"
+	at.ProcessingProgress = 100
 
 	if err := p.db.UpdateAudioTranscription(ctx, at); err != nil {
 		log.Printf("⚠️  Failed to save audio transcription result: %v", err)

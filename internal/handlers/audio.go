@@ -41,6 +41,18 @@ var allowedAudioTypes = map[string]bool{
 // 2GB keeps room for very long recordings while chunking handles Whisper limits.
 const maxAudioSize = 2 << 30
 
+type AudioUploadPresignRequest struct {
+	Filename    string `json:"filename" binding:"required"`
+	ContentType string `json:"content_type"`
+	SizeBytes   int64  `json:"size_bytes"`
+}
+
+type AudioUploadCompleteRequest struct {
+	ObjectKey    string `json:"object_key" binding:"required"`
+	OriginalName string `json:"original_name" binding:"required"`
+	SizeBytes    int64  `json:"size_bytes"`
+}
+
 // TranscribeAudio handles audio file upload and queues transcription job.
 // POST /api/v1/audio/transcribe
 //
@@ -160,6 +172,8 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		AudioS3Key:   audioS3Key,
 		AudioS3Status: audioS3Status,
 		AudioS3Size:  audioS3Size,
+		ProcessingStage: "queued",
+		ProcessingProgress: 0,
 		APIKeyID:     apiKeyID,
 	}
 
@@ -178,6 +192,7 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	payload := worker.AudioPayload{
 		AudioID:      at.ID,
 		TempFilePath: tempFilePath,
+		AudioS3Key:   at.AudioS3Key,
 		OriginalName: header.Filename,
 	}
 
@@ -230,6 +245,169 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		at.ID, header.Filename, float64(header.Size)/(1024*1024))
 
 	// Return 202 Accepted — frontend should poll for completion
+	c.JSON(http.StatusAccepted, at)
+}
+
+// PresignAudioUpload returns a short-lived S3 URL for direct browser upload.
+// POST /api/v1/audio/uploads/presign
+func (h *Handler) PresignAudioUpload(c *gin.Context) {
+	if h.AudioStorage == nil || !h.AudioStorage.IsConfigured() {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
+			Error:   "storage_unavailable",
+			Message: "Audio storage is not configured.",
+			Code:    http.StatusServiceUnavailable,
+		})
+		return
+	}
+
+	var req AudioUploadPresignRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "filename is required",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+	if req.SizeBytes <= 0 || req.SizeBytes > maxAudioSize {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "file_too_large",
+			Message: "size_bytes must be between 1 byte and 2GB",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+	if req.SizeBytes <= 0 || req.SizeBytes > maxAudioSize {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "file_too_large",
+			Message: "size_bytes must be between 1 byte and 2GB",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(req.Filename))
+	if !allowedAudioTypes[ext] {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_file_type",
+			Message: fmt.Sprintf("Unsupported audio format '%s'. Supported formats: mp3, wav, m4a, ogg, flac, webm", ext),
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	storedFilename := uuid.New().String() + ext
+	objectKey := h.AudioStorage.BuildKey(storedFilename)
+	putURL, err := h.AudioStorage.PresignedPutURL(objectKey, req.ContentType)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse{
+			Error:   "storage_error",
+			Message: "Failed to generate upload URL",
+			Code:    http.StatusBadGateway,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"upload_url":  putURL,
+		"object_key":  objectKey,
+		"stored_name": storedFilename,
+		"expires_in":  "60m",
+	})
+}
+
+// CompleteAudioUpload creates a transcription job after direct S3 upload.
+// POST /api/v1/audio/uploads/complete
+func (h *Handler) CompleteAudioUpload(c *gin.Context) {
+	if h.AudioStorage == nil || !h.AudioStorage.IsConfigured() {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
+			Error:   "storage_unavailable",
+			Message: "Audio storage is not configured.",
+			Code:    http.StatusServiceUnavailable,
+		})
+		return
+	}
+
+	var req AudioUploadCompleteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "object_key and original_name are required",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	var apiKeyID *string
+	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
+		apiKeyID = &apiKey.ID
+	}
+
+	at := &models.AudioTranscription{
+		Filename:           filepath.Base(req.ObjectKey),
+		OriginalName:       req.OriginalName,
+		Status:             "pending",
+		AudioS3Key:         req.ObjectKey,
+		AudioS3Status:      "uploaded",
+		AudioS3Size:        req.SizeBytes,
+		ProcessingStage:    "queued",
+		ProcessingProgress: 0,
+		APIKeyID:           apiKeyID,
+	}
+	if err := h.DB.CreateAudioTranscription(c.Request.Context(), at); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "database_error",
+			Message: "Failed to create transcription record",
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+
+	payload := worker.AudioPayload{
+		AudioID:      at.ID,
+		AudioS3Key:   req.ObjectKey,
+		OriginalName: req.OriginalName,
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "server_error",
+			Message: "Failed to queue transcription job",
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+
+	job := worker.Job{
+		ID:        at.ID,
+		Type:      worker.JobAudioTranscription,
+		Payload:   payloadJSON,
+		CreatedAt: time.Now(),
+	}
+
+	if err := h.Worker.Submit(job); err != nil {
+		if h.isOwnerRequest(c) {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+			defer cancel()
+			if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
+				c.JSON(http.StatusAccepted, at)
+				return
+			}
+		}
+		at.Status = "failed"
+		at.ErrorMessage = "Job queue is full, please try again later"
+		at.ProcessingStage = "failed"
+		at.ProcessingProgress = 100
+		_ = h.DB.UpdateAudioTranscription(c.Request.Context(), at)
+
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
+			Error:   "queue_full",
+			Message: "Server is busy. Please try again in a moment.",
+			Code:    http.StatusServiceUnavailable,
+		})
+		return
+	}
+
 	c.JSON(http.StatusAccepted, at)
 }
 
@@ -305,6 +483,8 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 
 	at.Status = "pending"
 	at.ErrorMessage = ""
+	at.ProcessingStage = "queued"
+	at.ProcessingProgress = 0
 	if err := h.DB.UpdateAudioTranscription(c.Request.Context(), at); err != nil {
 		os.Remove(tempFilePath)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -318,6 +498,7 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 	payload := worker.AudioPayload{
 		AudioID:      at.ID,
 		TempFilePath: tempFilePath,
+		AudioS3Key:   at.AudioS3Key,
 		OriginalName: at.OriginalName,
 	}
 	payloadJSON, err := json.Marshal(payload)
@@ -705,6 +886,56 @@ func buildMarkdownExport(at *models.AudioTranscription) string {
 	sb.WriteString("\n")
 
 	return sb.String()
+}
+
+// GetAudioOpsHealth returns operational metrics for audio processing.
+// GET /api/v1/ops/audio/health
+func (h *Handler) GetAudioOpsHealth(c *gin.Context) {
+	if !h.isOwnerRequest(c) {
+		c.JSON(http.StatusForbidden, models.ErrorResponse{
+			Error:   "forbidden",
+			Message: "Owner key required for ops metrics",
+			Code:    http.StatusForbidden,
+		})
+		return
+	}
+
+	type stats struct {
+		Pending    int `db:"pending"`
+		Processing int `db:"processing"`
+		Failed     int `db:"failed"`
+		Completed  int `db:"completed"`
+		Last24h    int `db:"last_24h"`
+	}
+	var s stats
+	err := h.DB.GetContext(c.Request.Context(), &s, `
+		SELECT
+			COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+			COUNT(*) FILTER (WHERE status = 'processing') AS processing,
+			COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+			COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+			COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') AS last_24h
+		FROM audio_transcriptions
+	`)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "database_error",
+			Message: "Failed to load ops metrics",
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"queue_size":    h.Worker.QueueSize(),
+		"worker_count":  h.Worker.WorkerCount(),
+		"pending":       s.Pending,
+		"processing":    s.Processing,
+		"failed":        s.Failed,
+		"completed":     s.Completed,
+		"created_last24h": s.Last24h,
+		"timestamp":     time.Now().UTC(),
+	})
 }
 
 // DeleteAudioTranscription removes an audio transcription by ID.

@@ -7,6 +7,7 @@ import { AudioPage } from './pages/AudioPage'
 import { PdfPage } from './pages/PdfPage'
 import { DocsPage } from './pages/DocsPage'
 import { WebhooksPage } from './pages/WebhooksPage'
+import { OpsPage } from './pages/OpsPage'
 import { useAuthStore } from './stores/authStore'
 
 function App() {
@@ -28,6 +29,7 @@ function App() {
           <Route path="/pdf" element={<PdfPage />} />
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/webhooks" element={<WebhooksPage />} />
+          <Route path="/ops" element={<OpsPage />} />
           {/* Redirect old history route to new library */}
           <Route path="/history" element={<Navigate to="/library?type=youtube" replace />} />
         </Routes>

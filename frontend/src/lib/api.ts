@@ -174,6 +174,9 @@ export interface AudioTranscription {
   audio_s3_key?: string;
   audio_s3_status?: string;
   audio_s3_size?: number;
+  processing_stage?: string;
+  processing_progress?: number;
+  retry_count?: number;
   duration: number;
   language: string;
   transcript_text: string;
@@ -193,6 +196,24 @@ export interface AudioTranscription {
 export interface AudioPlaybackResponse {
   url: string;
   expires_in: string;
+}
+
+export interface AudioUploadPresignResponse {
+  upload_url: string;
+  object_key: string;
+  stored_name: string;
+  expires_in: string;
+}
+
+export interface AudioOpsHealth {
+  queue_size: number;
+  worker_count: number;
+  pending: number;
+  processing: number;
+  failed: number;
+  completed: number;
+  created_last24h: number;
+  timestamp: string;
 }
 
 export interface PDFExtraction {
@@ -453,6 +474,43 @@ export async function transcribeAudio(file: File): Promise<AudioTranscription> {
   return handleResponse<AudioTranscription>(res);
 }
 
+export async function presignAudioUpload(file: File): Promise<AudioUploadPresignResponse> {
+  const res = await fetch(`${API_BASE}/audio/uploads/presign`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({
+      filename: file.name,
+      content_type: file.type || 'application/octet-stream',
+      size_bytes: file.size,
+    }),
+  });
+  return handleResponse<AudioUploadPresignResponse>(res);
+}
+
+export async function uploadAudioToPresignedUrl(url: string, file: File): Promise<void> {
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  });
+  if (!res.ok) {
+    throw new Error(`Storage upload failed: ${res.status}`);
+  }
+}
+
+export async function completeAudioUpload(params: {
+  object_key: string;
+  original_name: string;
+  size_bytes: number;
+}): Promise<AudioTranscription> {
+  const res = await fetch(`${API_BASE}/audio/uploads/complete`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(params),
+  });
+  return handleResponse<AudioTranscription>(res);
+}
+
 export async function getAudioTranscription(id: string): Promise<AudioTranscription> {
   const res = await fetch(`${API_BASE}/audio/transcriptions/${id}`, { headers: getHeaders() });
   return handleResponse<AudioTranscription>(res);
@@ -469,6 +527,11 @@ export async function retryAudioTranscription(id: string): Promise<AudioTranscri
 export async function getAudioPlaybackUrl(id: string): Promise<AudioPlaybackResponse> {
   const res = await fetch(`${API_BASE}/audio/transcriptions/${id}/audio`, { headers: getHeaders() });
   return handleResponse<AudioPlaybackResponse>(res);
+}
+
+export async function getAudioOpsHealth(): Promise<AudioOpsHealth> {
+  const res = await fetch(`${API_BASE}/ops/audio/health`, { headers: getHeaders() });
+  return handleResponse<AudioOpsHealth>(res);
 }
 
 export async function listAudioTranscriptions(): Promise<AudioTranscription[]> {

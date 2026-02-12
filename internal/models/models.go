@@ -194,6 +194,9 @@ type AudioTranscription struct {
 	AudioS3Key     string           `json:"audio_s3_key,omitempty" db:"audio_s3_key"`
 	AudioS3Status  string           `json:"audio_s3_status,omitempty" db:"audio_s3_status"`
 	AudioS3Size    int64            `json:"audio_s3_size,omitempty" db:"audio_s3_size"`
+	ProcessingStage string          `json:"processing_stage,omitempty" db:"processing_stage"`
+	ProcessingProgress int          `json:"processing_progress,omitempty" db:"processing_progress"`
+	RetryCount     int              `json:"retry_count,omitempty" db:"retry_count"`
 	Duration       float64          `json:"duration" db:"duration"`
 	Language       string           `json:"language" db:"language"`
 	TranscriptText string           `json:"transcript_text" db:"transcript_text"`

@@ -23,7 +23,7 @@ import (
 func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.S3, ws *webhookservice.Service, sum *summary.Service, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix string, allowedOrigins []string) *gin.Engine {
 	r := gin.Default()
 
-	// Allow up to 100MB audio uploads plus multipart overhead.
+	// Keep multipart parsing memory bounded; larger uploads are streamed to temp files.
 	r.MaxMultipartMemory = 120 << 20
 
 	r.Use(middleware.CORS(allowedOrigins))
@@ -82,6 +82,8 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.
 
 		// Audio transcription endpoints (MTA-16, MTA-22, MTA-25, MTA-26)
 		protected.POST("/audio/transcribe", h.TranscribeAudio)
+		protected.POST("/audio/uploads/presign", h.PresignAudioUpload)
+		protected.POST("/audio/uploads/complete", h.CompleteAudioUpload)
 		protected.GET("/audio/transcriptions/search", h.SearchAudioTranscriptions) // MTA-25: must be before :id
 		protected.GET("/audio/transcriptions/:id", h.GetAudioTranscription)
 		protected.POST("/audio/transcriptions/:id/retry", h.RetryAudioTranscription)
@@ -107,6 +109,9 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.
 		protected.GET("/webhooks/deliveries", h.ListWebhookDeliveries)
 		protected.PATCH("/webhooks/:id", h.UpdateWebhook)
 		protected.DELETE("/webhooks/:id", h.DeleteWebhook)
+
+		// Ops
+		protected.GET("/ops/audio/health", h.GetAudioOpsHealth)
 	}
 
 	// --- Static Frontend Serving (SPA) ---

@@ -29,6 +29,9 @@ import {
 } from 'lucide-react';
 import {
   transcribeAudio,
+  presignAudioUpload,
+  uploadAudioToPresignedUrl,
+  completeAudioUpload,
   getAudioTranscription,
   retryAudioTranscription,
   summarizeAudio,
@@ -154,6 +157,9 @@ export function AudioPage() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [playbackUrl, setPlaybackUrl] = useState('');
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isDirectUploading, setIsDirectUploading] = useState(false);
+  const [recoveredDraft, setRecoveredDraft] = useState(false);
+  const [draftAudioUrl, setDraftAudioUrl] = useState('');
 
   // Tab state: 'upload' | 'record'
   const [activeTab, setActiveTab] = useState<'upload' | 'record'>('upload');
@@ -177,6 +183,8 @@ export function AudioPage() {
         setActiveTab('record');
         setRecordedBlob(saved.blob);
         setRecordingTime(saved.durationSeconds);
+        setRecoveredDraft(true);
+        setDraftAudioUrl(URL.createObjectURL(saved.blob));
       })
       .catch(() => {
         // Best-effort recovery only.
@@ -185,6 +193,14 @@ export function AudioPage() {
       cancelled = true;
     };
   }, [result]);
+
+  useEffect(() => {
+    return () => {
+      if (draftAudioUrl) {
+        URL.revokeObjectURL(draftAudioUrl);
+      }
+    };
+  }, [draftAudioUrl]);
 
   // Load transcription from URL param (when coming from My Library)
   useEffect(() => {
@@ -330,15 +346,34 @@ export function AudioPage() {
 
     setIsProcessing(true);
     setError('');
+    setRecoveredDraft(false);
 
     try {
-      // This now returns immediately with status "pending"
-      // The usePolling hook will poll for completion
-      const transcription = await transcribeAudio(uploadFile);
+      let transcription: AudioTranscription;
+      try {
+        setIsDirectUploading(true);
+        const presign = await presignAudioUpload(uploadFile);
+        await uploadAudioToPresignedUrl(presign.upload_url, uploadFile);
+        transcription = await completeAudioUpload({
+          object_key: presign.object_key,
+          original_name: uploadFile.name,
+          size_bytes: uploadFile.size,
+        });
+      } catch {
+        // Fallback to server-upload flow for environments without S3 direct upload.
+        transcription = await transcribeAudio(uploadFile);
+      } finally {
+        setIsDirectUploading(false);
+      }
       setResult(transcription);
       if (activeTab === 'record') {
         clearPendingRecording().catch(() => {});
       }
+      if (draftAudioUrl) {
+        URL.revokeObjectURL(draftAudioUrl);
+        setDraftAudioUrl('');
+      }
+      setRecoveredDraft(false);
       // Don't set isProcessing to false here - polling will do that
     } catch (err: unknown) {
       const apiErr = err as APIError;
@@ -429,6 +464,11 @@ export function AudioPage() {
     setContentType('general');
     setShowExportMenu(false);
     setPlaybackUrl('');
+    setRecoveredDraft(false);
+    if (draftAudioUrl) {
+      URL.revokeObjectURL(draftAudioUrl);
+      setDraftAudioUrl('');
+    }
     setSearchParams({});
     clearPendingRecording().catch(() => {});
   };
@@ -464,6 +504,18 @@ export function AudioPage() {
     const s = Math.floor(seconds % 60);
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
+
+  const processingLabel = (() => {
+    const stage = result?.processing_stage || '';
+    if (isDirectUploading) return 'Uploading directly to secure storage...';
+    if (stage === 'downloading') return 'Preparing source audio...';
+    if (stage === 'transcoding') return 'Compressing audio for transcription...';
+    if (stage === 'chunking') return 'Splitting long audio into chunks...';
+    if (stage === 'transcribing') return 'Transcribing audio chunks...';
+    if (stage === 'stitching') return 'Combining transcript chunks...';
+    if (result?.status === 'pending') return 'Queued for processing...';
+    return 'Transcribing audio...';
+  })();
 
   const hasSubmittable = (activeTab === 'upload' && file) || (activeTab === 'record' && recordedBlob);
   const canEditInput = (!result || result.status === 'failed') && !isProcessing;
@@ -585,6 +637,45 @@ export function AudioPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {recoveredDraft && recordedBlob && !result && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-3xl mx-auto mb-6 p-4 rounded-2xl border"
+          style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Recovered draft recording</p>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                We restored an unsent recording from your device so you can upload it safely.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setActiveTab('record')}
+                className="px-3 py-2 rounded-lg text-sm font-medium border"
+                style={{ borderColor: 'var(--color-brand-300)', color: 'var(--color-brand-500)', minHeight: '40px' }}
+              >
+                Resume upload
+              </button>
+              <button
+                onClick={handleReset}
+                className="px-3 py-2 rounded-lg text-sm font-medium border"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', minHeight: '40px' }}
+              >
+                Discard
+              </button>
+            </div>
+          </div>
+          {draftAudioUrl && (
+            <div className="mt-3">
+              <audio controls src={draftAudioUrl} className="w-full" />
+            </div>
+          )}
+        </motion.div>
+      )}
 
       {/* Input Tabs: Upload / Record */}
       {canEditInput && (
@@ -856,13 +947,29 @@ export function AudioPage() {
           style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
           <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" style={{ color: 'var(--color-brand-500)' }} />
           <p className="text-lg font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            {result?.status === 'pending' ? 'Uploading audio...' : 'Transcribing audio...'}
+            {processingLabel}
           </p>
           <p className="text-sm mt-2" style={{ color: 'var(--color-text-secondary)' }}>
-            {result?.status === 'processing' 
-              ? 'Processing in background — this may take a few minutes for longer files'
+            {(result?.status === 'processing' || result?.status === 'pending')
+              ? 'Processing in background — long recordings may take several minutes.'
               : 'This may take a moment'}
           </p>
+          {typeof result?.processing_progress === 'number' && result.processing_progress > 0 && (
+            <div className="mt-4 max-w-md mx-auto">
+              <div className="h-2 rounded-full" style={{ backgroundColor: 'var(--color-surface-subtle)' }}>
+                <div
+                  className="h-2 rounded-full transition-all"
+                  style={{
+                    width: `${Math.min(100, Math.max(0, result.processing_progress))}%`,
+                    backgroundColor: 'var(--color-brand-500)',
+                  }}
+                />
+              </div>
+              <p className="text-xs mt-2" style={{ color: 'var(--color-text-muted)' }}>
+                {result.processing_progress}% complete
+              </p>
+            </div>
+          )}
         </motion.div>
       )}
 

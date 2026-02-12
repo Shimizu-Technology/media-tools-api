@@ -105,8 +105,16 @@ func main() {
 	wp := worker.NewPool(cfg.WorkerCount, cfg.JobQueueSize, db, extractor, summarizer)
 	wp.SetWebhookService(webhookService) // MTA-18: wire webhooks into worker for job notifications
 	wp.SetAudioTranscriber(audioTranscriber) // Wire audio transcriber for async Whisper jobs
+	wp.SetAudioStorage(audioStorage)
 	wp.Start()
 	defer wp.Stop()
+
+	requeued, err := wp.RecoverAudioJobs(context.Background(), 200)
+	if err != nil {
+		log.Printf("⚠️  Audio job recovery failed: %v", err)
+	} else if requeued > 0 {
+		log.Printf("♻️  Requeued %d recoverable audio job(s) on startup", requeued)
+	}
 
 	// Log admin API key status
 	if cfg.AdminAPIKey != "" {
