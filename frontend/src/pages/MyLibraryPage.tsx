@@ -290,10 +290,12 @@ export function MyLibraryPage() {
   };
 
   const formatDate = (dateStr: string): string => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      month: 'short',
+    return new Date(dateStr).toLocaleString('en-US', {
+      month: 'long',
       day: 'numeric',
       year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
     });
   };
 

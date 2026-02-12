@@ -200,6 +200,8 @@ export function AudioPage() {
   // Export state (MTA-26)
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [playbackUrl, setPlaybackUrl] = useState('');
+  const [showPlayback, setShowPlayback] = useState(false);
+  const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
   const [isDirectUploading, setIsDirectUploading] = useState(false);
   const [recoveredDraft, setRecoveredDraft] = useState(false);
@@ -524,6 +526,8 @@ export function AudioPage() {
 
   const loadFromHistory = (item: AudioTranscription) => {
     setResult(item);
+    setPlaybackUrl('');
+    setShowPlayback(false);
     setShowHistory(false);
   };
 
@@ -541,6 +545,8 @@ export function AudioPage() {
     setContentType('general');
     setShowExportMenu(false);
     setPlaybackUrl('');
+    setShowPlayback(false);
+    setIsLoadingPlayback(false);
     setRecoveredDraft(false);
     if (draftAudioUrl) {
       URL.revokeObjectURL(draftAudioUrl);
@@ -568,11 +574,23 @@ export function AudioPage() {
 
   const handleLoadPlayback = async () => {
     if (!result) return;
+    if (showPlayback) {
+      setShowPlayback(false);
+      return;
+    }
+    if (playbackUrl) {
+      setShowPlayback(true);
+      return;
+    }
+    setIsLoadingPlayback(true);
     try {
       const res = await getAudioPlaybackUrl(result.id);
       setPlaybackUrl(res.url);
+      setShowPlayback(true);
     } catch {
       setError('Playback URL could not be generated for this transcription.');
+    } finally {
+      setIsLoadingPlayback(false);
     }
   };
 
@@ -642,7 +660,7 @@ export function AudioPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3 }}
-            className="flex items-center gap-4 mt-2"
+            className="flex items-center justify-center gap-4 mt-2"
           >
             <button
               onClick={toggleHistory}
@@ -961,6 +979,9 @@ export function AudioPage() {
                   )}
                 </AnimatePresence>
               </div>
+              <p className="text-xs mt-2" style={{ color: 'var(--color-text-muted)' }}>
+                Content type tunes AI summary structure only (it does not change transcription accuracy).
+              </p>
             </motion.div>
           )}
 
@@ -1079,7 +1100,7 @@ export function AudioPage() {
             className="max-w-5xl mx-auto">
 
             {/* Top actions */}
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
               <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                 onClick={handleReset}
                 className="flex items-center gap-1.5 text-sm font-medium transition-colors"
@@ -1092,7 +1113,8 @@ export function AudioPage() {
                 className="flex items-center gap-1.5 text-sm font-medium transition-colors"
                 style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
               >
-                <FileAudio className="w-4 h-4" /> Replay recording
+                <FileAudio className="w-4 h-4" />
+                {isLoadingPlayback ? 'Loading audio...' : showPlayback ? 'Hide recording' : 'Replay recording'}
               </button>
 
               {/* Export dropdown (MTA-26) */}
@@ -1125,8 +1147,20 @@ export function AudioPage() {
               </div>
             </div>
 
-            {playbackUrl && (
-              <div className="mb-4 rounded-xl border p-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-elevated)' }}>
+            {showPlayback && playbackUrl && (
+              <div className="mb-4 rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-elevated)' }}>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+                    Original Recording
+                  </p>
+                  <button
+                    onClick={() => setShowPlayback(false)}
+                    className="text-xs px-2 py-1 rounded-md border"
+                    style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                  >
+                    Close
+                  </button>
+                </div>
                 <audio controls src={playbackUrl} className="w-full" />
               </div>
             )}
