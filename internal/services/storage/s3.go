@@ -158,7 +158,7 @@ func (s *S3) PresignedGetURL(key string) (string, error) {
 		expires = 604800
 	}
 
-	escapedKey := strings.ReplaceAll(url.PathEscape(key), "+", "%20")
+	escapedKey := escapeS3KeyPath(key)
 	host := s.host()
 	path := "/" + escapedKey
 	amzDate := now.Format("20060102T150405Z")
@@ -210,7 +210,7 @@ func (s *S3) PresignedPutURL(key, contentType string) (string, error) {
 		expires = 604800
 	}
 
-	escapedKey := strings.ReplaceAll(url.PathEscape(key), "+", "%20")
+	escapedKey := escapeS3KeyPath(key)
 	host := s.host()
 	path := "/" + escapedKey
 	amzDate := now.Format("20060102T150405Z")
@@ -269,7 +269,7 @@ func (s *S3) signRequest(req *http.Request, key, payloadHash string) error {
 		req.Header.Set("X-Amz-Security-Token", s.sessionTok)
 	}
 
-	escapedKey := strings.ReplaceAll(url.PathEscape(key), "+", "%20")
+	escapedKey := escapeS3KeyPath(key)
 	canonicalURI := "/" + escapedKey
 	canonicalQuery := req.URL.Query().Encode()
 	canonicalHeaders := "host:" + host + "\n" + "x-amz-content-sha256:" + payloadHash + "\n" + "x-amz-date:" + amzDate + "\n"
@@ -307,8 +307,19 @@ func (s *S3) signRequest(req *http.Request, key, payloadHash string) error {
 }
 
 func (s *S3) objectURL(key string) string {
-	escapedKey := strings.ReplaceAll(url.PathEscape(key), "+", "%20")
+	escapedKey := escapeS3KeyPath(key)
 	return fmt.Sprintf("https://%s/%s", s.host(), escapedKey)
+}
+
+// escapeS3KeyPath escapes each key segment while preserving path separators.
+// This avoids double-encoding "/" into "%252F" during signature validation.
+func escapeS3KeyPath(key string) string {
+	key = strings.TrimPrefix(key, "/")
+	parts := strings.Split(key, "/")
+	for i, part := range parts {
+		parts[i] = strings.ReplaceAll(url.PathEscape(part), "+", "%20")
+	}
+	return strings.Join(parts, "/")
 }
 
 func (s *S3) host() string {
