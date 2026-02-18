@@ -9,7 +9,7 @@ const LazyClerkUserButton = CLERK_CONFIGURED
 import { ApiKeySetup } from './ApiKeySetup'
 
 const mainNavLinks = [
-  { to: '/', label: 'YouTube', icon: FileText },
+  { to: '/', label: 'Video', icon: FileText },
   { to: '/audio', label: 'Audio', icon: Mic },
   { to: '/pdf', label: 'PDF', icon: FileType2 },
   { to: '/library', label: 'My Library', icon: Library },
@@ -72,7 +72,7 @@ export function Header() {
                 Media Tools
               </div>
               <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                YouTube Transcripts & AI Summaries
+                Video Transcripts & AI Summaries
               </div>
             </div>
           </Link>

@@ -26,7 +26,7 @@ import (
 // implemented. This is opposite to Java/C# — and it's one of Go's
 // most powerful design patterns. Small interfaces (1-3 methods) are preferred.
 type Extractor interface {
-	Extract(ctx context.Context, videoID string) (*Result, error)
+	ExtractFromURL(ctx context.Context, videoURL, videoID string) (*Result, error)
 }
 
 // Result holds the extracted transcript and video metadata.
@@ -49,7 +49,7 @@ type WhisperResult struct {
 
 // WhisperTranscriber is an interface for audio transcription (used as fallback).
 // This allows the transcript package to use Whisper without importing the audio package.
-// The TranscribeForYouTube method is specifically for YouTube fallback and returns our WhisperResult.
+// The TranscribeForYouTube method is used as a fallback when subtitles are unavailable and returns our WhisperResult.
 type WhisperTranscriber interface {
 	TranscribeForYouTube(ctx context.Context, audioData io.Reader, filename string) (*WhisperResult, error)
 	IsConfigured() bool
@@ -112,22 +112,18 @@ type subtitle struct {
 	Ext  string `json:"ext"`
 }
 
-// Extract downloads the transcript for a YouTube video.
-// It first tries manual subtitles, then auto-generated captions.
-// If both fail and Whisper is configured, it downloads audio and transcribes with Whisper.
-func (e *YtDlpExtractor) Extract(ctx context.Context, videoID string) (*Result, error) {
-	url := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
-
+// ExtractFromURL downloads the transcript for any video URL supported by yt-dlp.
+// It first tries subtitles, then falls back to Whisper audio transcription.
+func (e *YtDlpExtractor) ExtractFromURL(ctx context.Context, videoURL, videoID string) (*Result, error) {
 	// Step 1: Get video metadata (title, channel, duration, available subtitles)
-	log.Printf("🎬 Extracting metadata for video: %s", videoID)
-	metadata, metadataErr := e.getMetadata(ctx, url)
+	log.Printf("🎬 Extracting metadata for video: %s", videoURL)
+	metadata, metadataErr := e.getMetadata(ctx, videoURL)
 
 	// Step 2: Try subtitle extraction first
 	if metadataErr == nil {
 		log.Printf("📝 Extracting transcript for: %s", metadata.Title)
-		transcript, lang, err := e.getTranscript(ctx, url)
+		transcript, lang, err := e.getTranscript(ctx, videoURL)
 		if err == nil {
-			// Success! Clean up and return
 			cleaned := cleanTranscript(transcript)
 			wordCount := countWords(cleaned)
 			return &Result{
@@ -147,18 +143,24 @@ func (e *YtDlpExtractor) Extract(ctx context.Context, videoID string) (*Result, 
 
 	// Step 3: Fallback to Whisper if configured
 	if e.whisper != nil && e.whisper.IsConfigured() {
-		log.Printf("🎤 Falling back to Whisper transcription for video: %s", videoID)
-		return e.extractWithWhisper(ctx, url, videoID, metadata)
+		log.Printf("🎤 Falling back to Whisper transcription for: %s", videoURL)
+		return e.extractWithWhisper(ctx, videoURL, videoID, metadata)
 	}
 
-	// No Whisper fallback available
 	if metadataErr != nil {
 		return nil, fmt.Errorf("failed to get video metadata: %w", metadataErr)
 	}
 	return nil, fmt.Errorf("no transcript available and Whisper fallback not configured")
 }
 
-// extractWithWhisper downloads audio from YouTube and transcribes with Whisper.
+// Extract downloads the transcript for a YouTube video by ID.
+// Deprecated: Use ExtractFromURL for universal video support.
+func (e *YtDlpExtractor) Extract(ctx context.Context, videoID string) (*Result, error) {
+	url := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+	return e.ExtractFromURL(ctx, url, videoID)
+}
+
+// extractWithWhisper downloads audio from a video URL and transcribes with Whisper.
 func (e *YtDlpExtractor) extractWithWhisper(ctx context.Context, url, videoID string, metadata *ytDlpMetadata) (*Result, error) {
 	// Create temp directory for audio
 	tmpDir, err := os.MkdirTemp("", "mta-audio-*")
@@ -432,34 +434,122 @@ func countWords(text string) int {
 	return len(strings.Fields(text)) // Fields splits on any whitespace
 }
 
-// ParseYouTubeURL extracts the video ID from various YouTube URL formats.
-// Supports:
-//   - https://www.youtube.com/watch?v=VIDEO_ID
-//   - https://youtu.be/VIDEO_ID
-//   - https://youtube.com/watch?v=VIDEO_ID&list=...
-//   - Just the video ID itself (11 characters)
-func ParseYouTubeURL(input string) (string, string, error) {
-	input = strings.TrimSpace(input)
-
-	// If it looks like a plain video ID (11 alphanumeric chars + - and _)
-	videoIDRegex := regexp.MustCompile(`^[a-zA-Z0-9_-]{11}$`)
-	if videoIDRegex.MatchString(input) {
-		return fmt.Sprintf("https://www.youtube.com/watch?v=%s", input), input, nil
-	}
-
-	// Try to extract video ID from URL
-	patterns := []*regexp.Regexp{
+// Pre-compiled regex patterns for URL parsing (compiled once at package init, not per-call).
+var (
+	plainVideoIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{11}$`)
+	ytURLPatterns     = []*regexp.Regexp{
 		regexp.MustCompile(`(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/v/)([a-zA-Z0-9_-]{11})`),
 		regexp.MustCompile(`(?:youtube\.com/shorts/)([a-zA-Z0-9_-]{11})`),
 	}
+	vimeoURLPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`vimeo\.com/(?:video/)?(\d+)(?:\?|$|/)`),
+		regexp.MustCompile(`vimeo\.com/channels/[^/]+/(\d+)(?:\?|$|/)`),
+		regexp.MustCompile(`vimeo\.com/groups/[^/]+/videos/(\d+)(?:\?|$|/)`),
+		regexp.MustCompile(`player\.vimeo\.com/video/(\d+)(?:\?|$|/)`),
+	}
+)
 
-	for _, pattern := range patterns {
+// VideoSource identifies which platform a video URL belongs to.
+type VideoSource string
+
+const (
+	SourceYouTube VideoSource = "youtube"
+	SourceVimeo   VideoSource = "vimeo"
+	SourceOther   VideoSource = "other" // Any other yt-dlp-supported site
+)
+
+// ParsedVideo holds the parsed video URL, identifier, and source platform.
+type ParsedVideo struct {
+	URL      string
+	VideoID  string
+	Source   VideoSource
+}
+
+// ParseVideoURL parses a video URL from YouTube, Vimeo, or any yt-dlp-supported site.
+// Returns the canonical URL, a video identifier, and the source platform.
+//
+// Supported formats:
+//   - YouTube: youtube.com/watch?v=ID, youtu.be/ID, shorts/ID, plain 11-char ID
+//   - Vimeo: vimeo.com/ID, vimeo.com/channels/NAME/ID, player.vimeo.com/video/ID
+//   - Other: Any URL that yt-dlp can handle (Dailymotion, Twitch VODs, etc.)
+func ParseVideoURL(input string) (*ParsedVideo, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return nil, fmt.Errorf("empty URL or video ID")
+	}
+
+	// YouTube: plain video ID (11 alphanumeric chars + - and _)
+	if plainVideoIDRegex.MatchString(input) {
+		return &ParsedVideo{
+			URL:     fmt.Sprintf("https://www.youtube.com/watch?v=%s", input),
+			VideoID: input,
+			Source:  SourceYouTube,
+		}, nil
+	}
+
+	// YouTube URL patterns
+	for _, pattern := range ytURLPatterns {
 		matches := pattern.FindStringSubmatch(input)
 		if len(matches) >= 2 {
-			videoID := matches[1]
-			return fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID), videoID, nil
+			return &ParsedVideo{
+				URL:     fmt.Sprintf("https://www.youtube.com/watch?v=%s", matches[1]),
+				VideoID: matches[1],
+				Source:  SourceYouTube,
+			}, nil
 		}
 	}
 
-	return "", "", fmt.Errorf("invalid YouTube URL or video ID: %s", input)
+	// Vimeo URL patterns (anchored to avoid matching manage/settings paths)
+	for _, pattern := range vimeoURLPatterns {
+		matches := pattern.FindStringSubmatch(input)
+		if len(matches) >= 2 {
+			// Preserve original URL for yt-dlp — private/unlisted Vimeo videos
+			// use URLs like vimeo.com/123456789/abc123def where the trailing
+			// segment is a privacy hash required for access. Constructing a
+			// canonical URL would strip this hash and break private video access.
+			return &ParsedVideo{
+				URL:     input,
+				VideoID: matches[1],
+				Source:  SourceVimeo,
+			}, nil
+		}
+	}
+
+	// Any other URL — let yt-dlp try to handle it
+	if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") {
+		// Extract a stable identifier: host + path (no scheme, no query params)
+		// This ensures http:// vs https:// and ?ref=share vs no query produce the same ID
+		videoID := input
+		parts := strings.SplitN(input, "://", 2)
+		if len(parts) == 2 {
+			videoID = parts[1]
+		}
+		// Strip query parameters and fragments for stable deduplication
+		if idx := strings.IndexAny(videoID, "?#"); idx != -1 {
+			videoID = videoID[:idx]
+		}
+		// Remove trailing slash
+		videoID = strings.TrimRight(videoID, "/")
+		return &ParsedVideo{
+			URL:     input,
+			VideoID: videoID,
+			Source:  SourceOther,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("invalid video URL: %s (supported: YouTube, Vimeo, or any yt-dlp-compatible URL)", input)
+}
+
+// ParseYouTubeURL is a backward-compatible wrapper around ParseVideoURL.
+// Only accepts YouTube URLs/IDs — rejects other platforms to preserve existing behavior.
+// Deprecated: Use ParseVideoURL instead.
+func ParseYouTubeURL(input string) (string, string, error) {
+	parsed, err := ParseVideoURL(input)
+	if err != nil {
+		return "", "", err
+	}
+	if parsed.Source != SourceYouTube {
+		return "", "", fmt.Errorf("invalid YouTube URL or video ID: %s", input)
+	}
+	return parsed.URL, parsed.VideoID, nil
 }

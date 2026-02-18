@@ -52,11 +52,10 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
     return minutes <= 1 ? '1 min read' : `${minutes} min read`;
   }, [transcript.word_count]);
 
-  const youtubeLink = useMemo(() => {
+  const videoLink = useMemo(() => {
     if (transcript.youtube_url) return transcript.youtube_url;
-    if (transcript.youtube_id) return `https://www.youtube.com/watch?v=${transcript.youtube_id}`;
     return '';
-  }, [transcript.youtube_url, transcript.youtube_id]);
+  }, [transcript.youtube_url]);
 
   // Process transcript text: detect code blocks and optionally add timestamps
   const processedText = useMemo(() => {
@@ -283,12 +282,12 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
             active={linkCopied}
           />
 
-          {/* Open on YouTube */}
-          {youtubeLink && (
+          {/* Open original video */}
+          {videoLink && (
             <ActionLink
-              href={youtubeLink}
+              href={videoLink}
               icon={<ExternalLink className="w-4 h-4" />}
-              label="Open YouTube"
+              label="Open Video"
             />
           )}
 

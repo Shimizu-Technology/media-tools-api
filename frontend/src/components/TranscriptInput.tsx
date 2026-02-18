@@ -8,7 +8,8 @@ interface TranscriptInputProps {
 }
 
 /**
- * YouTube URL input with submit button.
+ * Video URL input with submit button.
+ * Supports YouTube, Vimeo, and any yt-dlp-compatible video URL.
  * Mobile-first: 44px min touch targets (Shimizu design guide).
  * Uses Lucide icons, not emoji.
  */
@@ -47,7 +48,7 @@ export function TranscriptInput({ onSubmit, isLoading }: TranscriptInputProps) {
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="Paste a YouTube URL or video ID..."
+            placeholder="Paste a video URL (YouTube, Vimeo, etc.)..."
             disabled={isLoading}
             className="w-full pl-12 pr-4 py-3 rounded-xl text-base bg-transparent outline-none transition-colors duration-200"
             style={{
@@ -89,7 +90,7 @@ export function TranscriptInput({ onSubmit, isLoading }: TranscriptInputProps) {
         className="text-sm text-center mt-3"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Supports youtube.com, youtu.be, and video IDs
+        Supports YouTube, Vimeo, and other video platforms
       </p>
     </motion.form>
   );

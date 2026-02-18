@@ -260,3 +260,131 @@ func TestCountWords(t *testing.T) {
 		})
 	}
 }
+
+func TestParseVideoURL(t *testing.T) {
+	tests := []struct {
+		name       string
+		url        string
+		wantSource VideoSource
+		wantID     string
+		wantURL    string
+		wantErr    bool
+	}{
+		// YouTube URLs (should still work)
+		{
+			name:       "standard YouTube",
+			url:        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+			wantSource: SourceYouTube,
+			wantID:     "dQw4w9WgXcQ",
+			wantURL:    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+		},
+		{
+			name:       "YouTube short URL",
+			url:        "https://youtu.be/dQw4w9WgXcQ",
+			wantSource: SourceYouTube,
+			wantID:     "dQw4w9WgXcQ",
+			wantURL:    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+		},
+		// Vimeo URLs
+		{
+			name:       "standard Vimeo",
+			url:        "https://vimeo.com/123456789",
+			wantSource: SourceVimeo,
+			wantID:     "123456789",
+			wantURL:    "https://vimeo.com/123456789",
+		},
+		{
+			name:       "Vimeo /video/ path",
+			url:        "https://vimeo.com/video/123456789",
+			wantSource: SourceVimeo,
+			wantID:     "123456789",
+			wantURL:    "https://vimeo.com/video/123456789",
+		},
+		{
+			name:       "Vimeo player embed",
+			url:        "https://player.vimeo.com/video/123456789",
+			wantSource: SourceVimeo,
+			wantID:     "123456789",
+			wantURL:    "https://player.vimeo.com/video/123456789",
+		},
+		{
+			name:       "Vimeo channel video",
+			url:        "https://vimeo.com/channels/staffpicks/123456789",
+			wantSource: SourceVimeo,
+			wantID:     "123456789",
+			wantURL:    "https://vimeo.com/channels/staffpicks/123456789",
+		},
+		{
+			name:       "Vimeo private share link preserves hash",
+			url:        "https://vimeo.com/123456789/abc123def456",
+			wantSource: SourceVimeo,
+			wantID:     "123456789",
+			wantURL:    "https://vimeo.com/123456789/abc123def456",
+		},
+		// Generic URLs (yt-dlp supported)
+		{
+			name:       "Dailymotion",
+			url:        "https://www.dailymotion.com/video/x7zzrmj",
+			wantSource: SourceOther,
+			wantID:     "www.dailymotion.com/video/x7zzrmj",
+			wantURL:    "https://www.dailymotion.com/video/x7zzrmj",
+		},
+		{
+			name:       "generic https URL",
+			url:        "https://example.com/video/12345",
+			wantSource: SourceOther,
+			wantID:     "example.com/video/12345",
+			wantURL:    "https://example.com/video/12345",
+		},
+		{
+			name:       "strips query params from other URLs",
+			url:        "https://example.com/video/12345?ref=share&t=30",
+			wantSource: SourceOther,
+			wantID:     "example.com/video/12345",
+			wantURL:    "https://example.com/video/12345?ref=share&t=30",
+		},
+		// Invalid inputs
+		{
+			name:    "empty string",
+			url:     "",
+			wantErr: true,
+		},
+		{
+			name:    "not a URL",
+			url:     "just some text",
+			wantErr: true,
+		},
+		{
+			name:       "http URL (also accepted by yt-dlp)",
+			url:        "http://example.com/video",
+			wantSource: SourceOther,
+			wantID:     "example.com/video",
+			wantURL:    "http://example.com/video",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ParseVideoURL(tt.url)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ParseVideoURL(%q) expected error, got nil", tt.url)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("ParseVideoURL(%q) unexpected error: %v", tt.url, err)
+				return
+			}
+			if result.Source != tt.wantSource {
+				t.Errorf("ParseVideoURL(%q) source = %v, want %v", tt.url, result.Source, tt.wantSource)
+			}
+			if result.VideoID != tt.wantID {
+				t.Errorf("ParseVideoURL(%q) videoID = %q, want %q", tt.url, result.VideoID, tt.wantID)
+			}
+			if result.URL != tt.wantURL {
+				t.Errorf("ParseVideoURL(%q) url = %q, want %q", tt.url, result.URL, tt.wantURL)
+			}
+		})
+	}
+}

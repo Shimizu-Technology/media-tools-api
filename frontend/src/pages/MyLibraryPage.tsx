@@ -301,7 +301,7 @@ export function MyLibraryPage() {
 
   const tabs: { value: ContentType; label: string; icon: React.ReactNode }[] = [
     { value: 'all', label: 'All', icon: <Library className="w-4 h-4" /> },
-    { value: 'youtube', label: 'YouTube', icon: <Youtube className="w-4 h-4" /> },
+    { value: 'youtube', label: 'Video', icon: <Youtube className="w-4 h-4" /> },
     { value: 'audio', label: 'Audio', icon: <Mic className="w-4 h-4" /> },
     { value: 'pdf', label: 'PDF', icon: <FileType2 className="w-4 h-4" /> },
   ];
@@ -526,7 +526,7 @@ export function MyLibraryPage() {
             {searchInput
               ? 'Try adjusting your search'
               : activeTab === 'youtube'
-              ? 'Extract a YouTube transcript to see it here'
+              ? 'Extract a video transcript to see it here'
               : activeTab === 'audio'
               ? 'Upload or record audio to see it here'
               : activeTab === 'pdf'
