@@ -50,12 +50,5 @@ export function ClerkTokenSync() {
     };
   }, [getToken, isSignedIn]);
 
-  // Clean up on sign-out
-  useEffect(() => {
-    if (!isSignedIn) {
-      localStorage.removeItem(TOKEN_KEY);
-    }
-  }, [isSignedIn]);
-
   return null;
 }

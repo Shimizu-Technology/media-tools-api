@@ -19,22 +19,40 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
+// RouterConfig holds all dependencies for the router setup.
+// Avoids a fragile 13-parameter function signature.
+type RouterConfig struct {
+	DB              *database.DB
+	WorkerPool      *worker.Pool
+	AudioTranscriber *audio.Transcriber
+	AudioStorage    *storage.S3
+	Webhooks        *webhookservice.Service
+	Summarizer      *summary.Service
+	JWTSecret       string
+	AdminAPIKey     string
+	OwnerKeyID      string
+	OwnerKeyPrefix  string
+	ClerkJWKSURL    string
+	ClerkSecretKey  string
+	AllowedOrigins  []string
+}
+
 // Setup creates and configures the Gin router with all routes.
-func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.S3, ws *webhookservice.Service, sum *summary.Service, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix, clerkJWKSURL, clerkSecretKey string, allowedOrigins []string) *gin.Engine {
+func Setup(cfg RouterConfig) *gin.Engine {
 	r := gin.Default()
 
 	// Keep multipart parsing memory bounded; larger uploads are streamed to temp files.
 	r.MaxMultipartMemory = 120 << 20
 
-	r.Use(middleware.CORS(allowedOrigins))
+	r.Use(middleware.CORS(cfg.AllowedOrigins))
 
-	h := handlers.NewHandler(db, wp, at, as, ws, sum, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix)
-	rateLimiter := middleware.NewRateLimiter(ownerKeyID, ownerKeyPrefix)
+	h := handlers.NewHandler(cfg.DB, cfg.WorkerPool, cfg.AudioTranscriber, cfg.AudioStorage, cfg.Webhooks, cfg.Summarizer, cfg.JWTSecret, cfg.AdminAPIKey, cfg.OwnerKeyID, cfg.OwnerKeyPrefix)
+	rateLimiter := middleware.NewRateLimiter(cfg.OwnerKeyID, cfg.OwnerKeyPrefix)
 
 	// Initialize Clerk JWKS cache if configured
 	var jwksCache *middleware.JWKSCache
-	if clerkJWKSURL != "" {
-		jwksCache = middleware.NewJWKSCache(clerkJWKSURL)
+	if cfg.ClerkJWKSURL != "" {
+		jwksCache = middleware.NewJWKSCache(cfg.ClerkJWKSURL)
 	}
 
 	// --- Public Routes (no auth required) ---
@@ -52,9 +70,9 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.
 	// --- JWT-protected routes (MTA-20) — accepts Clerk or legacy JWT ---
 	jwtProtected := r.Group("/api/v1")
 	if jwksCache != nil {
-		jwtProtected.Use(middleware.BearerOnlyAuth(db, jwtSecret, jwksCache, clerkSecretKey))
+		jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey))
 	} else {
-		jwtProtected.Use(middleware.JWTAuth(db, jwtSecret))
+		jwtProtected.Use(middleware.JWTAuth(cfg.DB, cfg.JWTSecret))
 	}
 	{
 		jwtProtected.GET("/auth/me", h.GetMe)
@@ -66,7 +84,7 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.
 
 	// --- Protected Routes (API key OR Clerk JWT OR legacy JWT — backward compatible) ---
 	protected := r.Group("/api/v1")
-	protected.Use(middleware.DualAuth(db, jwtSecret, jwksCache, clerkSecretKey))
+	protected.Use(middleware.DualAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey))
 	protected.Use(rateLimiter.RateLimit())
 	{
 		// Transcript endpoints

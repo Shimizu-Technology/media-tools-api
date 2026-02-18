@@ -68,26 +68,45 @@ func (c *JWKSCache) GetKey(kid string) (*rsa.PublicKey, error) {
 	}
 	c.mu.RUnlock()
 
-	// Fetch fresh keys
-	if err := c.refresh(); err != nil {
+	// Fetch fresh keys (normal TTL-based refresh)
+	if err := c.refresh(false); err != nil {
+		return nil, err
+	}
+
+	c.mu.RLock()
+	key, ok := c.keys[kid]
+	c.mu.RUnlock()
+	if ok {
+		return key, nil
+	}
+
+	// Key not found after normal refresh — force refresh to handle key rotation.
+	// Uses a shorter 5s guard instead of 30s to pick up new keys promptly.
+	if err := c.refresh(true); err != nil {
 		return nil, err
 	}
 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	key, ok := c.keys[kid]
+	key, ok = c.keys[kid]
 	if !ok {
 		return nil, fmt.Errorf("key %s not found in JWKS", kid)
 	}
 	return key, nil
 }
 
-func (c *JWKSCache) refresh() error {
+func (c *JWKSCache) refresh(force bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Double-check after acquiring write lock
-	if time.Since(c.lastFetch) < 30*time.Second {
+	// Double-check after acquiring write lock.
+	// Normal refresh: 30s guard prevents stampede.
+	// Forced refresh (missing kid / key rotation): 5s guard for faster pickup.
+	guard := 30 * time.Second
+	if force {
+		guard = 5 * time.Second
+	}
+	if time.Since(c.lastFetch) < guard {
 		return nil
 	}
 

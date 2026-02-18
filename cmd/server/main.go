@@ -124,21 +124,21 @@ func main() {
 	}
 
 	// Step 5: Setup HTTP Router
-	r := router.Setup(
-		db,
-		wp,
-		audioTranscriber,
-		audioStorage,
-		webhookService,
-		summarizer,
-		cfg.JWTSecret,
-		cfg.AdminAPIKey,
-		cfg.OwnerAPIKeyID,
-		cfg.OwnerAPIKeyPrefix,
-		cfg.ClerkJWKSURL,
-		cfg.ClerkSecretKey,
-		cfg.AllowedOrigins,
-	)
+	r := router.Setup(router.RouterConfig{
+		DB:               db,
+		WorkerPool:       wp,
+		AudioTranscriber: audioTranscriber,
+		AudioStorage:     audioStorage,
+		Webhooks:         webhookService,
+		Summarizer:       summarizer,
+		JWTSecret:        cfg.JWTSecret,
+		AdminAPIKey:      cfg.AdminAPIKey,
+		OwnerKeyID:       cfg.OwnerAPIKeyID,
+		OwnerKeyPrefix:   cfg.OwnerAPIKeyPrefix,
+		ClerkJWKSURL:     cfg.ClerkJWKSURL,
+		ClerkSecretKey:   cfg.ClerkSecretKey,
+		AllowedOrigins:   cfg.AllowedOrigins,
+	})
 
 	// Step 6: Start the HTTP Server
 	srv := &http.Server{

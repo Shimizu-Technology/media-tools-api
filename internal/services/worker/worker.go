@@ -84,6 +84,7 @@ type Pool struct {
 	audioTranscriber *audio.Transcriber // Audio transcription via Whisper
 	audioStorage    *storage.S3
 	webhooks        *webhookservice.Service // MTA-18: webhook notifications
+	webhookSem      chan struct{}           // Caps concurrent webhook goroutines
 	wg              sync.WaitGroup
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -108,11 +109,18 @@ func (p *Pool) SetAudioStorage(as *storage.S3) {
 // Now fires in a goroutine with its own timeout context.
 func (p *Pool) notifyWebhook(event string, data interface{}) {
 	if p.webhooks != nil {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			p.webhooks.NotifyEvent(ctx, event, data)
-		}()
+		// Acquire semaphore slot (non-blocking: drop webhook if at capacity)
+		select {
+		case p.webhookSem <- struct{}{}:
+			go func() {
+				defer func() { <-p.webhookSem }()
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				p.webhooks.NotifyEvent(ctx, event, data)
+			}()
+		default:
+			log.Printf("⚠️ Webhook semaphore full, dropping %s event", event)
+		}
 	}
 }
 
@@ -125,6 +133,7 @@ func NewPool(workers, queueSize int, db *database.DB, ext transcript.Extractor, 
 		db:         db,
 		extractor:  ext,
 		summarizer: sum,
+		webhookSem: make(chan struct{}, 20), // Cap concurrent webhook goroutines
 		ctx:        ctx,
 		cancel:     cancel,
 	}
