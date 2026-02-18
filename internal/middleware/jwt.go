@@ -152,7 +152,10 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 									Name:    clerkUser.Name,
 									ClerkID: claims.Subject,
 								}
-								if createErr := db.CreateUserFromClerk(c.Request.Context(), user); createErr == nil {
+								if createErr := db.CreateUserFromClerk(c.Request.Context(), user); createErr != nil {
+									log.Printf("❌ Failed to auto-create user for clerk_id %s: %v", claims.Subject, createErr)
+									user = nil // Don't use a non-persisted user
+								} else {
 									log.Printf("✅ Auto-created user %s from Clerk (DualAuth)", user.Email)
 								}
 							}

@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Bookmark, BookmarkCheck, AlertCircle } from 'lucide-react';
 import { saveToWorkspace } from '../lib/api';
 import type { APIError } from '../lib/api';
-import { useAuth } from '@clerk/clerk-react';
 
 interface SaveToWorkspaceProps {
   itemType: 'transcript' | 'audio' | 'pdf';
@@ -11,16 +10,17 @@ interface SaveToWorkspaceProps {
 }
 
 /**
- * Save to Workspace button — shown on transcript/audio/PDF results (MTA-20).
- * Only visible when logged in.
+ * Save to Workspace button — shown on transcript/audio/PDF results.
+ * Checks authentication via localStorage tokens (works with both Clerk and API keys).
+ * No Clerk hooks needed — ClerkTokenSync keeps localStorage in sync.
  */
 export function SaveToWorkspace({ itemType, itemId }: SaveToWorkspaceProps) {
-  const { isSignedIn } = useAuth();
+  const isAuthenticated = !!localStorage.getItem('mta_jwt_token') || !!localStorage.getItem('mta_api_key');
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!isSignedIn) return null;
+  if (!isAuthenticated) return null;
 
   const handleSave = async () => {
     if (saved || saving) return;
@@ -32,7 +32,6 @@ export function SaveToWorkspace({ itemType, itemId }: SaveToWorkspaceProps) {
     } catch (err: unknown) {
       const apiErr = err as APIError;
       setError(apiErr.message || 'Failed to save');
-      // Auto-clear error after 3 seconds
       setTimeout(() => setError(null), 3000);
     }
     setSaving(false);

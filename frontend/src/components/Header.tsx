@@ -1,7 +1,11 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, lazy, Suspense } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { FileText, Mic, FileType2, Library, Settings, Book, Webhook, Key, Github, ChevronDown, Activity } from 'lucide-react'
-import { SignedIn, UserButton } from '@clerk/clerk-react'
+// Clerk components conditionally imported — they crash without ClerkProvider
+const CLERK_CONFIGURED = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
+const LazyClerkUserButton = CLERK_CONFIGURED
+  ? lazy(() => import('./ClerkUserButton').then(m => ({ default: m.ClerkUserButton })))
+  : null
 import { ApiKeySetup } from './ApiKeySetup'
 
 const mainNavLinks = [
@@ -102,16 +106,12 @@ export function Header() {
 
           {/* Actions */}
           <div className="flex items-center gap-2">
-            {/* Clerk User Button */}
-            <SignedIn>
-              <UserButton
-                appearance={{
-                  elements: {
-                    avatarBox: 'w-8 h-8',
-                  },
-                }}
-              />
-            </SignedIn>
+            {/* Clerk User Button (only when Clerk is configured) */}
+            {LazyClerkUserButton && (
+              <Suspense fallback={null}>
+                <LazyClerkUserButton />
+              </Suspense>
+            )}
 
             {/* Settings Dropdown */}
             <div className="relative" ref={settingsRef}>
