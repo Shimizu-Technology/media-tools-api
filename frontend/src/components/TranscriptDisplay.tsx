@@ -283,12 +283,12 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
             active={linkCopied}
           />
 
-          {/* Open on YouTube */}
+          {/* Open original video */}
           {youtubeLink && (
             <ActionLink
               href={youtubeLink}
               icon={<ExternalLink className="w-4 h-4" />}
-              label="Open YouTube"
+              label="Open Video"
             />
           )}
 

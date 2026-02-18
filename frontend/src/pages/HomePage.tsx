@@ -98,14 +98,14 @@ export function HomePage() {
               className="text-4xl md:text-5xl font-semibold tracking-tight mb-4"
               style={{ color: 'var(--color-text-primary)' }}
             >
-              Extract YouTube transcripts and chat with the content.
+              Extract video transcripts and chat with the content.
             </h1>
 
             <p
               className="text-lg max-w-2xl mb-6"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Paste any YouTube URL to capture the full transcript, generate concise summaries,
+              Paste any video URL to capture the full transcript, generate concise summaries,
               and ask follow-up questions without leaving the page.
             </p>
 
@@ -136,7 +136,7 @@ export function HomePage() {
                 {
                   icon: <PlayCircle className="w-4 h-4" />,
                   title: 'Paste a link',
-                  detail: 'Works with youtube.com, youtu.be, and video IDs.',
+                  detail: 'Supports YouTube, Vimeo, and 1000+ video sites via yt-dlp.',
                 },
                 {
                   icon: <Wand2 className="w-4 h-4" />,

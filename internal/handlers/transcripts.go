@@ -17,22 +17,20 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
-// CreateTranscript starts transcript extraction for a YouTube video.
+// CreateTranscript starts transcript extraction for a video.
 // POST /api/v1/transcripts
 //
 // Request body:
 //
 //	{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}
+//	{"url": "https://vimeo.com/123456789"}
+//	{"url": "https://any-yt-dlp-supported-site.com/video"}
 //	  or
 //	{"video_id": "dQw4w9WgXcQ"}
 //
 // Response: The created transcript record (status will be "pending").
 // The actual extraction happens in the background via the worker pool.
 func (h *Handler) CreateTranscript(c *gin.Context) {
-	// Parse request body
-	// Go Pattern: ShouldBindJSON reads the request body and validates it
-	// using the `binding` tags on the struct. If validation fails, it returns
-	// an error (unlike Ruby's strong_params which silently ignores bad data).
 	var req models.CreateTranscriptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
@@ -43,14 +41,14 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 		return
 	}
 
-	// Parse the YouTube URL to extract the video ID
-	var youtubeURL, videoID string
+	// Parse the video URL (YouTube, Vimeo, or any yt-dlp-supported site)
+	var parsed *transcript.ParsedVideo
 	var err error
 
 	if req.URL != "" {
-		youtubeURL, videoID, err = transcript.ParseYouTubeURL(req.URL)
+		parsed, err = transcript.ParseVideoURL(req.URL)
 	} else {
-		youtubeURL, videoID, err = transcript.ParseYouTubeURL(req.VideoID)
+		parsed, err = transcript.ParseVideoURL(req.VideoID)
 	}
 
 	if err != nil {
@@ -61,6 +59,9 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 		})
 		return
 	}
+
+	youtubeURL := parsed.URL
+	videoID := parsed.VideoID
 
 	// Check if we already have a transcript for this video
 	existing, _ := h.DB.GetTranscriptByYouTubeID(c.Request.Context(), videoID)

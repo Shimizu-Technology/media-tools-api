@@ -504,7 +504,7 @@ export function HistoryPage() {
           <p className="text-sm mb-6" style={{ color: 'var(--color-text-secondary)' }}>
             {hasHistory
               ? 'Try adjusting your search or filters'
-              : 'Extract your first YouTube transcript to see it here'}
+              : 'Extract your first video transcript to see it here'}
           </p>
           {!hasHistory && (
             <button

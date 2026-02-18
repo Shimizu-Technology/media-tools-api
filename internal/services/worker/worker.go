@@ -276,8 +276,8 @@ func (p *Pool) processTranscript(job Job) error {
 		return fmt.Errorf("failed to update status: %w", err)
 	}
 
-	// Extract the transcript
-	result, err := p.extractor.Extract(ctx, t.YouTubeID)
+	// Extract the transcript (supports YouTube, Vimeo, and other yt-dlp sites)
+	result, err := p.extractor.ExtractFromURL(ctx, t.YouTubeURL, t.YouTubeID)
 	if err != nil {
 		t.Status = models.StatusFailed
 		t.ErrorMessage = err.Error()
