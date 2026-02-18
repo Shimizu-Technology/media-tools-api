@@ -177,6 +177,67 @@ make health
 
 Open **http://localhost:5173** — you're in!
 
+### 6. (Optional) Enable Clerk Authentication
+
+Without Clerk keys, the app runs in **API-key-only mode** — the same way it worked before. This is fine for local development and testing.
+
+To enable **user sign-in via Clerk** (Google/email login, user accounts):
+
+#### a. Create a Clerk Application
+
+1. Go to [dashboard.clerk.com](https://dashboard.clerk.com) and create a new application
+2. Enable the sign-in methods you want (Email, Google, etc.)
+3. Copy your **Publishable Key** and **Secret Key**
+
+#### b. Set Backend Environment Variables
+
+Add to your `.env`:
+
+```bash
+# Clerk Authentication
+CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+CLERK_JWKS_URL=https://your-app.clerk.accounts.dev/.well-known/jwks.json
+```
+
+The JWKS URL is found in **Clerk Dashboard → API Keys → Advanced → JWKS URL**.
+
+#### c. Set Frontend Environment Variables
+
+Create `frontend/.env` (or copy from `frontend/.env.example`):
+
+```bash
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
+```
+
+#### d. Restart Both Servers
+
+```bash
+# Terminal 1: restart backend
+make run
+
+# Terminal 2: restart frontend
+make frontend-dev
+```
+
+You should now see a **Sign In** button in the header. When a user signs in via Clerk, the app automatically:
+- Creates a local user record linked to their Clerk ID
+- Issues JWT tokens for API authentication
+- Shows their profile in the header dropdown
+
+#### How Auth Works (Dual Mode)
+
+The app supports **two auth modes simultaneously**:
+
+| Mode | How It Works | Best For |
+|------|-------------|----------|
+| **API Key** | `X-API-Key` header | Scripts, automation, CI/CD |
+| **Clerk JWT** | `Authorization: Bearer <token>` header | Browser users, the React UI |
+
+Both modes work on all endpoints. Clerk auth additionally gives you user-scoped features (workspace, library, etc.).
+
+**Without Clerk keys configured**, the frontend hides the sign-in UI and everything works via API keys only. No code changes needed — it's automatic.
+
 ---
 
 ## Key Concepts for Rails Developers

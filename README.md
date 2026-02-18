@@ -11,8 +11,9 @@ A media processing API for YouTube transcripts, audio transcription, PDF extract
 - **PDF Text Extraction** — Extract text from PDF documents
 - **AI Summaries** — Generate summaries with key points, action items, and decisions
 - **Background Processing** — Long-running jobs processed asynchronously
-- **API Key Auth** — Secure access with per-key rate limiting
-- **Ownership** — Each transcript is linked to the API key that created it
+- **Dual Auth** — API keys for scripts + Clerk sign-in for browser users
+- **Universal Video URLs** — YouTube, Vimeo, and any yt-dlp-supported video platform
+- **Ownership** — Each transcript is linked to the user or API key that created it
 
 ## Architecture
 
@@ -91,11 +92,19 @@ make frontend-dev
 
 ### Authentication
 
-All endpoints require an API key via the `X-API-Key` header:
+The API supports two authentication methods:
 
+**1. API Key** (for scripts, automation):
 ```bash
 curl -H "X-API-Key: mta_your_key_here" http://localhost:8080/api/v1/transcripts
 ```
+
+**2. Clerk JWT** (for browser users — automatic via the React UI):
+```bash
+curl -H "Authorization: Bearer eyJ..." http://localhost:8080/api/v1/transcripts
+```
+
+When using the React frontend, Clerk handles authentication automatically. See `GETTING_STARTED.md` for setup instructions.
 
 ### Create an API Key
 
