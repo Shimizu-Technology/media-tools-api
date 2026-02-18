@@ -1,4 +1,5 @@
-// Package transcript handles YouTube transcript extraction using yt-dlp.
+// Package transcript handles video transcript extraction using yt-dlp.
+// Supports YouTube, Vimeo, and any other yt-dlp-supported video platform.
 //
 // Go Pattern: This package defines a Service with an interface, making it
 // easy to test (you can mock the interface) and swap implementations.
@@ -49,7 +50,7 @@ type WhisperResult struct {
 
 // WhisperTranscriber is an interface for audio transcription (used as fallback).
 // This allows the transcript package to use Whisper without importing the audio package.
-// The TranscribeForYouTube method is used as a fallback when subtitles are unavailable and returns our WhisperResult.
+// The TranscribeForYouTube method is used as a fallback when subtitles are unavailable.
 type WhisperTranscriber interface {
 	TranscribeForYouTube(ctx context.Context, audioData io.Reader, filename string) (*WhisperResult, error)
 	IsConfigured() bool
@@ -77,7 +78,7 @@ func (e *YtDlpExtractor) SetProxy(proxyURL string) {
 }
 
 // SetWhisperFallback enables Whisper-based transcription as a fallback
-// when subtitle extraction fails (e.g., due to YouTube bot detection).
+// when subtitle extraction fails (e.g., due to bot detection or missing subtitles).
 func (e *YtDlpExtractor) SetWhisperFallback(w WhisperTranscriber) {
 	e.whisper = w
 }
@@ -112,7 +113,7 @@ type subtitle struct {
 	Ext  string `json:"ext"`
 }
 
-// ExtractFromURL downloads the transcript for any video URL supported by yt-dlp.
+// ExtractFromURL downloads the transcript for any yt-dlp-supported video URL (YouTube, Vimeo, etc.).
 // It first tries subtitles, then falls back to Whisper audio transcription.
 func (e *YtDlpExtractor) ExtractFromURL(ctx context.Context, videoURL, videoID string) (*Result, error) {
 	// Step 1: Get video metadata (title, channel, duration, available subtitles)
