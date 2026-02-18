@@ -645,16 +645,16 @@ func isRetryableError(err error) bool {
 	}
 	// Whisper API errors: "Whisper API returned status NNN: ..."
 	if strings.Contains(errStr, "Whisper API returned status") {
+		// 429 rate limit = retryable (must check before generic 4xx)
+		if strings.Contains(errStr, "status 429") {
+			return true
+		}
 		// 4xx = non-retryable (bad request, unauthorized, etc)
 		if strings.Contains(errStr, "status 4") {
 			return false
 		}
 		// 5xx = retryable (server error)
 		if strings.Contains(errStr, "status 5") {
-			return true
-		}
-		// 429 rate limit = retryable
-		if strings.Contains(errStr, "status 429") {
 			return true
 		}
 	}

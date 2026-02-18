@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { ClerkProvider, useAuth } from '@clerk/clerk-react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Header } from './components/Header'
@@ -11,6 +11,7 @@ import { WebhooksPage } from './pages/WebhooksPage'
 import { OpsPage } from './pages/OpsPage'
 import { AuthProvider } from './contexts/AuthContext'
 import { setAuthTokenGetter } from './lib/apiAuth'
+import { ClerkTokenSync } from './components/ClerkTokenSync'
 
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 const isClerkEnabled = Boolean(CLERK_PUBLISHABLE_KEY && CLERK_PUBLISHABLE_KEY !== 'YOUR_PUBLISHABLE_KEY')
@@ -75,6 +76,7 @@ function ClerkAppContent() {
       isAuthenticated={isSignedIn ?? false}
       isLoading={!isLoaded}
     >
+      <ClerkTokenSync />
       <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
         <Header />
         <AppRoutes />
@@ -89,10 +91,24 @@ function ClerkAppContent() {
  * No auth gates — full access for development / API-key mode.
  */
 function NoClerkAppContent() {
+  const [hasApiKey, setHasApiKey] = useState(!!localStorage.getItem('mta_api_key'))
+
+  // Listen for storage changes (e.g., API key set in another component)
+  useEffect(() => {
+    const check = () => setHasApiKey(!!localStorage.getItem('mta_api_key'))
+    window.addEventListener('storage', check)
+    // Also poll briefly in case same-tab writes don't fire 'storage'
+    const interval = setInterval(check, 2000)
+    return () => {
+      window.removeEventListener('storage', check)
+      clearInterval(interval)
+    }
+  }, [])
+
   return (
     <AuthProvider
       isClerkEnabled={false}
-      isAuthenticated={!!localStorage.getItem('mta_api_key')}
+      isAuthenticated={hasApiKey}
       isLoading={false}
     >
       <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>

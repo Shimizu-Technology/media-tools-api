@@ -25,17 +25,6 @@ export function useAuthContext() {
   return useContext(AuthContext);
 }
 
-// Token getter for API client — set by auth providers
-let authTokenGetter: (() => Promise<string | null>) | null = null;
-
-export function setAuthTokenGetter(getter: () => Promise<string | null>) {
-  authTokenGetter = getter;
-}
-
-export function getAuthTokenGetter() {
-  return authTokenGetter;
-}
-
 interface AuthProviderProps {
   children: ReactNode;
   isClerkEnabled: boolean;

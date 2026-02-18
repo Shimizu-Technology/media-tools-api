@@ -4,6 +4,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
@@ -93,8 +94,11 @@ func (db *DB) FindOrCreateClerkUser(ctx context.Context, clerkID, email, name st
 			existing.ClerkID = clerkID
 			// Update name if provided
 			if name != "" {
-				db.ExecContext(ctx, `UPDATE users SET name = $1 WHERE id = $2`, name, existing.ID)
-				existing.Name = name
+				if _, execErr := db.ExecContext(ctx, `UPDATE users SET name = $1 WHERE id = $2`, name, existing.ID); execErr != nil {
+					log.Printf("⚠️ Failed to update name for user %d: %v", existing.ID, execErr)
+				} else {
+					existing.Name = name
+				}
 			}
 			return existing, nil
 		}
@@ -107,6 +111,11 @@ func (db *DB) FindOrCreateClerkUser(ctx context.Context, clerkID, email, name st
 		ClerkID: clerkID,
 	}
 	if err := db.CreateUserFromClerk(ctx, u); err != nil {
+		// Race condition: another request may have just created this user.
+		// Retry the clerk_id lookup before giving up.
+		if retryUser, retryErr := db.GetUserByClerkID(ctx, clerkID); retryErr == nil {
+			return retryUser, nil
+		}
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
 	return u, nil

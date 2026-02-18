@@ -148,7 +148,11 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 							// Find or create via email migration flow
 							clerkUser, fetchErr := fetchClerkUser(claims.Subject, clerkSecretKey)
 							if fetchErr == nil {
-								user, _ = db.FindOrCreateClerkUser(c.Request.Context(), claims.Subject, clerkUser.Email, clerkUser.Name)
+								var createErr error
+								user, createErr = db.FindOrCreateClerkUser(c.Request.Context(), claims.Subject, clerkUser.Email, clerkUser.Name)
+								if createErr != nil {
+									log.Printf("❌ DualAuth: failed to find/create Clerk user %s: %v", claims.Subject, createErr)
+								}
 							}
 						}
 						if user != nil {
