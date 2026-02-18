@@ -390,10 +390,17 @@ func (p *Pool) processSummary(job Job) error {
 	// If we have a pre-created summary ID, update it; otherwise create new
 	if payload.SummaryID != "" {
 		// Update existing placeholder
-		return p.db.CreateSummary(ctx, s)
+		if err := p.db.CreateSummary(ctx, s); err != nil {
+			return err
+		}
+	} else {
+		if err := p.db.CreateSummary(ctx, s); err != nil {
+			return err
+		}
 	}
 
-	return p.db.CreateSummary(ctx, s)
+	p.notifyWebhook("summary.completed", s)
+	return nil
 }
 
 // processAudioTranscription handles audio transcription jobs via Whisper API.
