@@ -116,16 +116,14 @@ type subtitle struct {
 // ExtractFromURL downloads the transcript for any video URL supported by yt-dlp.
 // It first tries subtitles, then falls back to Whisper audio transcription.
 func (e *YtDlpExtractor) ExtractFromURL(ctx context.Context, videoURL, videoID string) (*Result, error) {
-	url := videoURL
-
 	// Step 1: Get video metadata (title, channel, duration, available subtitles)
-	log.Printf("🎬 Extracting metadata for video: %s", url)
-	metadata, metadataErr := e.getMetadata(ctx, url)
+	log.Printf("🎬 Extracting metadata for video: %s", videoURL)
+	metadata, metadataErr := e.getMetadata(ctx, videoURL)
 
 	// Step 2: Try subtitle extraction first
 	if metadataErr == nil {
 		log.Printf("📝 Extracting transcript for: %s", metadata.Title)
-		transcript, lang, err := e.getTranscript(ctx, url)
+		transcript, lang, err := e.getTranscript(ctx, videoURL)
 		if err == nil {
 			cleaned := cleanTranscript(transcript)
 			wordCount := countWords(cleaned)
@@ -146,8 +144,8 @@ func (e *YtDlpExtractor) ExtractFromURL(ctx context.Context, videoURL, videoID s
 
 	// Step 3: Fallback to Whisper if configured
 	if e.whisper != nil && e.whisper.IsConfigured() {
-		log.Printf("🎤 Falling back to Whisper transcription for: %s", url)
-		return e.extractWithWhisper(ctx, url, videoID, metadata)
+		log.Printf("🎤 Falling back to Whisper transcription for: %s", videoURL)
+		return e.extractWithWhisper(ctx, videoURL, videoID, metadata)
 	}
 
 	if metadataErr != nil {
