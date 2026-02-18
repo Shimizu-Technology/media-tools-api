@@ -530,12 +530,12 @@ func ParseVideoURL(input string) (*ParsedVideo, error) {
 		}
 	}
 
-	// Vimeo URL patterns
+	// Vimeo URL patterns (anchored to avoid matching manage/settings paths)
 	vimeoPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`vimeo\.com/(?:video/)?(\d+)`),
-		regexp.MustCompile(`vimeo\.com/channels/[^/]+/(\d+)`),
-		regexp.MustCompile(`vimeo\.com/groups/[^/]+/videos/(\d+)`),
-		regexp.MustCompile(`player\.vimeo\.com/video/(\d+)`),
+		regexp.MustCompile(`vimeo\.com/(?:video/)?(\d+)(?:\?|$|/)`),
+		regexp.MustCompile(`vimeo\.com/channels/[^/]+/(\d+)(?:\?|$|/)`),
+		regexp.MustCompile(`vimeo\.com/groups/[^/]+/videos/(\d+)(?:\?|$|/)`),
+		regexp.MustCompile(`player\.vimeo\.com/video/(\d+)(?:\?|$|/)`),
 	}
 	for _, pattern := range vimeoPatterns {
 		matches := pattern.FindStringSubmatch(input)
@@ -550,13 +550,19 @@ func ParseVideoURL(input string) (*ParsedVideo, error) {
 
 	// Any other URL — let yt-dlp try to handle it
 	if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") {
-		// Extract a reasonable identifier from the URL
+		// Extract a stable identifier: host + path (no scheme, no query params)
+		// This ensures http:// vs https:// and ?ref=share vs no query produce the same ID
 		videoID := input
-		// Try to get just the path for a cleaner ID
 		parts := strings.SplitN(input, "://", 2)
 		if len(parts) == 2 {
 			videoID = parts[1]
 		}
+		// Strip query parameters and fragments for stable deduplication
+		if idx := strings.IndexAny(videoID, "?#"); idx != -1 {
+			videoID = videoID[:idx]
+		}
+		// Remove trailing slash
+		videoID = strings.TrimRight(videoID, "/")
 		return &ParsedVideo{
 			URL:     input,
 			VideoID: videoID,
@@ -568,11 +574,15 @@ func ParseVideoURL(input string) (*ParsedVideo, error) {
 }
 
 // ParseYouTubeURL is a backward-compatible wrapper around ParseVideoURL.
+// Only accepts YouTube URLs/IDs — rejects other platforms to preserve existing behavior.
 // Deprecated: Use ParseVideoURL instead.
 func ParseYouTubeURL(input string) (string, string, error) {
 	parsed, err := ParseVideoURL(input)
 	if err != nil {
 		return "", "", err
+	}
+	if parsed.Source != SourceYouTube {
+		return "", "", fmt.Errorf("invalid YouTube URL or video ID: %s", input)
 	}
 	return parsed.URL, parsed.VideoID, nil
 }

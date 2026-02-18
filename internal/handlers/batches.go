@@ -63,16 +63,16 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 	parsed := make([]parsedURL, 0, len(req.URLs))
 
 	for i, url := range req.URLs {
-		fullURL, videoID, err := transcript.ParseYouTubeURL(url)
+		video, err := transcript.ParseVideoURL(url)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, models.ErrorResponse{
 				Error:   "invalid_url",
-				Message: "Invalid YouTube URL at index " + intToStr(i) + ": " + err.Error(),
+				Message: "Invalid video URL at index " + intToStr(i) + ": " + err.Error(),
 				Code:    http.StatusBadRequest,
 			})
 			return
 		}
-		parsed = append(parsed, parsedURL{fullURL: fullURL, videoID: videoID})
+		parsed = append(parsed, parsedURL{fullURL: video.URL, videoID: video.VideoID})
 	}
 
 	// Step 2: Create the batch record
