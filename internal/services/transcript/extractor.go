@@ -475,6 +475,21 @@ func countWords(text string) int {
 	return len(strings.Fields(text)) // Fields splits on any whitespace
 }
 
+// Pre-compiled regex patterns for URL parsing (compiled once at package init, not per-call).
+var (
+	plainVideoIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{11}$`)
+	ytURLPatterns     = []*regexp.Regexp{
+		regexp.MustCompile(`(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/v/)([a-zA-Z0-9_-]{11})`),
+		regexp.MustCompile(`(?:youtube\.com/shorts/)([a-zA-Z0-9_-]{11})`),
+	}
+	vimeoURLPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`vimeo\.com/(?:video/)?(\d+)(?:\?|$|/)`),
+		regexp.MustCompile(`vimeo\.com/channels/[^/]+/(\d+)(?:\?|$|/)`),
+		regexp.MustCompile(`vimeo\.com/groups/[^/]+/videos/(\d+)(?:\?|$|/)`),
+		regexp.MustCompile(`player\.vimeo\.com/video/(\d+)(?:\?|$|/)`),
+	}
+)
+
 // VideoSource identifies which platform a video URL belongs to.
 type VideoSource string
 
@@ -505,8 +520,7 @@ func ParseVideoURL(input string) (*ParsedVideo, error) {
 	}
 
 	// YouTube: plain video ID (11 alphanumeric chars + - and _)
-	videoIDRegex := regexp.MustCompile(`^[a-zA-Z0-9_-]{11}$`)
-	if videoIDRegex.MatchString(input) {
+	if plainVideoIDRegex.MatchString(input) {
 		return &ParsedVideo{
 			URL:     fmt.Sprintf("https://www.youtube.com/watch?v=%s", input),
 			VideoID: input,
@@ -515,11 +529,7 @@ func ParseVideoURL(input string) (*ParsedVideo, error) {
 	}
 
 	// YouTube URL patterns
-	ytPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/v/)([a-zA-Z0-9_-]{11})`),
-		regexp.MustCompile(`(?:youtube\.com/shorts/)([a-zA-Z0-9_-]{11})`),
-	}
-	for _, pattern := range ytPatterns {
+	for _, pattern := range ytURLPatterns {
 		matches := pattern.FindStringSubmatch(input)
 		if len(matches) >= 2 {
 			return &ParsedVideo{
@@ -531,13 +541,7 @@ func ParseVideoURL(input string) (*ParsedVideo, error) {
 	}
 
 	// Vimeo URL patterns (anchored to avoid matching manage/settings paths)
-	vimeoPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`vimeo\.com/(?:video/)?(\d+)(?:\?|$|/)`),
-		regexp.MustCompile(`vimeo\.com/channels/[^/]+/(\d+)(?:\?|$|/)`),
-		regexp.MustCompile(`vimeo\.com/groups/[^/]+/videos/(\d+)(?:\?|$|/)`),
-		regexp.MustCompile(`player\.vimeo\.com/video/(\d+)(?:\?|$|/)`),
-	}
-	for _, pattern := range vimeoPatterns {
+	for _, pattern := range vimeoURLPatterns {
 		matches := pattern.FindStringSubmatch(input)
 		if len(matches) >= 2 {
 			return &ParsedVideo{
