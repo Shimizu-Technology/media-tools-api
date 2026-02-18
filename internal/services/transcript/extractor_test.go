@@ -348,9 +348,11 @@ func TestParseVideoURL(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "http URL (not https)",
-			url:     "http://example.com/video",
-			wantErr: true,
+			name:       "http URL (also accepted by yt-dlp)",
+			url:        "http://example.com/video",
+			wantSource: SourceOther,
+			wantID:     "example.com/video",
+			wantURL:    "http://example.com/video",
 		},
 	}
 
