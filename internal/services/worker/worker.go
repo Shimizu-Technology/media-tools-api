@@ -103,10 +103,16 @@ func (p *Pool) SetAudioStorage(as *storage.S3) {
 	p.audioStorage = as
 }
 
-// notifyWebhook fires a webhook event if the service is configured.
+// notifyWebhook fires a webhook event asynchronously if the service is configured.
+// BUG FIX: Previously synchronous — slow webhook delivery would block workers.
+// Now fires in a goroutine with its own timeout context.
 func (p *Pool) notifyWebhook(event string, data interface{}) {
 	if p.webhooks != nil {
-		p.webhooks.NotifyEvent(p.ctx, event, data)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			p.webhooks.NotifyEvent(ctx, event, data)
+		}()
 	}
 }
 
@@ -346,6 +352,14 @@ func (p *Pool) processSummary(job Job) error {
 
 	result, err := p.summarizer.Summarize(ctx, t.TranscriptText, opts)
 	if err != nil {
+		// BUG FIX: Notify via webhook so users know the summary failed
+		// (Summary model has no status field, so failure was previously silent)
+		p.notifyWebhook("summary.failed", map[string]interface{}{
+			"transcript_id": payload.TranscriptID,
+			"summary_id":    payload.SummaryID,
+			"error":         err.Error(),
+		})
+		log.Printf("❌ Summary generation failed for transcript %s: %v", payload.TranscriptID, err)
 		return fmt.Errorf("summary generation failed: %w", err)
 	}
 
@@ -613,12 +627,41 @@ func (p *Pool) processAudioTranscription(job Job) error {
 }
 
 func (p *Pool) transcribeFile(ctx context.Context, path, originalName string) (*audio.TranscriptionResult, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open audio file: %w", err)
+	return p.transcribeFileWithRetry(ctx, path, originalName, 3)
+}
+
+// transcribeFileWithRetry calls the Whisper API with exponential backoff retry.
+// Retries on transient failures (HTTP 500, timeouts) up to maxRetries times.
+// Backoff: 1s, 4s, 16s (exponential with base 4).
+func (p *Pool) transcribeFileWithRetry(ctx context.Context, path, originalName string, maxRetries int) (*audio.TranscriptionResult, error) {
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(1<<(2*uint(attempt-1))) * time.Second // 1s, 4s, 16s
+			log.Printf("🔄 Whisper retry %d/%d for %s (backoff %v)", attempt, maxRetries, originalName, backoff)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open audio file: %w", err)
+		}
+		result, err := p.audioTranscriber.Transcribe(ctx, file, originalName)
+		file.Close()
+		if err == nil {
+			if attempt > 0 {
+				log.Printf("✅ Whisper succeeded on retry %d for %s", attempt, originalName)
+			}
+			return result, nil
+		}
+		lastErr = err
+		log.Printf("⚠️  Whisper attempt %d/%d failed for %s: %v", attempt+1, maxRetries+1, originalName, err)
 	}
-	defer file.Close()
-	return p.audioTranscriber.Transcribe(ctx, file, originalName)
+	return nil, fmt.Errorf("all %d Whisper attempts failed: %w", maxRetries+1, lastErr)
 }
 
 func pickDominantLanguage(counts map[string]int) string {

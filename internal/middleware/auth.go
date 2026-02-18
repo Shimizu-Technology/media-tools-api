@@ -7,9 +7,11 @@
 package middleware
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -66,7 +68,14 @@ func APIKeyAuth(db *database.DB) gin.HandlerFunc {
 
 		// Update last_used_at (fire and forget — don't block the request)
 		// Go Pattern: Using a goroutine for non-critical background work.
-		go db.UpdateAPIKeyLastUsed(c.Request.Context(), apiKey.ID)
+		// BUG FIX: Use context.Background() instead of request context —
+		// the goroutine outlives the request, so c.Request.Context() may be
+		// canceled before the DB call completes.
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			db.UpdateAPIKeyLastUsed(ctx, apiKey.ID)
+		}()
 
 		// Continue to the next handler
 		c.Next()
