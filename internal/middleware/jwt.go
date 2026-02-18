@@ -3,6 +3,8 @@
 package middleware
 
 import (
+	"context"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -98,10 +100,10 @@ func JWTAuth(db *database.DB, jwtSecret string) gin.HandlerFunc {
 	}
 }
 
-// DualAuth returns middleware that accepts EITHER API key OR JWT token.
-// This ensures backward compatibility: existing API key users keep working,
-// while new JWT-authenticated users can also access protected routes.
-func DualAuth(db *database.DB, jwtSecret string) gin.HandlerFunc {
+// DualAuth returns middleware that accepts API key, Clerk JWT, OR legacy JWT.
+// Priority: 1) API key, 2) Clerk JWT (RS256 via JWKS), 3) Legacy JWT (HS256).
+// This ensures backward compatibility while enabling Clerk authentication.
+func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Try API key first
 		rawKey := c.GetHeader("X-API-Key")
@@ -110,16 +112,61 @@ func DualAuth(db *database.DB, jwtSecret string) gin.HandlerFunc {
 			apiKey, err := db.GetAPIKeyByHash(c.Request.Context(), keyHash)
 			if err == nil {
 				c.Set(string(apiKeyContextKey), apiKey)
-				go db.UpdateAPIKeyLastUsed(c.Request.Context(), apiKey.ID)
+				// BUG FIX: Use context.Background() — goroutine outlives request
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					db.UpdateAPIKeyLastUsed(ctx, apiKey.ID)
+				}()
 				c.Next()
 				return
 			}
 		}
 
-		// Try JWT token
+		// Try Bearer token (Clerk or legacy JWT)
 		authHeader := c.GetHeader("Authorization")
 		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
 			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+
+			// Try Clerk JWT first (RS256 via JWKS) if configured
+			if jwksCache != nil {
+				token, err := jwt.ParseWithClaims(tokenString, &ClerkClaims{}, func(token *jwt.Token) (interface{}, error) {
+					if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+						return nil, fmt.Errorf("not RSA")
+					}
+					kid, ok := token.Header["kid"].(string)
+					if !ok {
+						return nil, fmt.Errorf("missing kid")
+					}
+					return jwksCache.GetKey(kid)
+				})
+				if err == nil && token.Valid {
+					if claims, ok := token.Claims.(*ClerkClaims); ok && claims.Subject != "" {
+						user, err := db.GetUserByClerkID(c.Request.Context(), claims.Subject)
+						if err != nil {
+							// Auto-create on first sign-in
+							clerkUser, fetchErr := fetchClerkUser(claims.Subject, clerkSecretKey)
+							if fetchErr == nil {
+								user = &models.User{
+									Email:   clerkUser.Email,
+									Name:    clerkUser.Name,
+									ClerkID: claims.Subject,
+								}
+								if createErr := db.CreateUserFromClerk(c.Request.Context(), user); createErr == nil {
+									log.Printf("✅ Auto-created user %s from Clerk (DualAuth)", user.Email)
+								}
+							}
+						}
+						if user != nil {
+							c.Set(userContextKey, user)
+							c.Next()
+							return
+						}
+					}
+				}
+			}
+
+			// Fall back to legacy JWT (HS256)
 			claims, err := ParseJWT(tokenString, jwtSecret)
 			if err == nil {
 				user, err := db.GetUserByID(c.Request.Context(), claims.UserID)

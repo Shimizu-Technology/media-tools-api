@@ -20,7 +20,7 @@ import (
 )
 
 // Setup creates and configures the Gin router with all routes.
-func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.S3, ws *webhookservice.Service, sum *summary.Service, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix string, allowedOrigins []string) *gin.Engine {
+func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.S3, ws *webhookservice.Service, sum *summary.Service, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix, clerkJWKSURL, clerkSecretKey string, allowedOrigins []string) *gin.Engine {
 	r := gin.Default()
 
 	// Keep multipart parsing memory bounded; larger uploads are streamed to temp files.
@@ -30,6 +30,12 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.
 
 	h := handlers.NewHandler(db, wp, at, as, ws, sum, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix)
 	rateLimiter := middleware.NewRateLimiter(ownerKeyID, ownerKeyPrefix)
+
+	// Initialize Clerk JWKS cache if configured
+	var jwksCache *middleware.JWKSCache
+	if clerkJWKSURL != "" {
+		jwksCache = middleware.NewJWKSCache(clerkJWKSURL)
+	}
 
 	// --- Public Routes (no auth required) ---
 	r.GET("/api/v1/health", h.HealthCheck)
@@ -43,9 +49,13 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.
 	r.POST("/api/v1/auth/register", h.Register)
 	r.POST("/api/v1/auth/login", h.Login)
 
-	// --- JWT-protected routes (MTA-20) ---
+	// --- JWT-protected routes (MTA-20) — accepts Clerk or legacy JWT ---
 	jwtProtected := r.Group("/api/v1")
-	jwtProtected.Use(middleware.JWTAuth(db, jwtSecret))
+	if jwksCache != nil {
+		jwtProtected.Use(middleware.DualAuth(db, jwtSecret, jwksCache, clerkSecretKey))
+	} else {
+		jwtProtected.Use(middleware.JWTAuth(db, jwtSecret))
+	}
 	{
 		jwtProtected.GET("/auth/me", h.GetMe)
 		jwtProtected.POST("/auth/refresh", h.RefreshToken)
@@ -54,9 +64,9 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.
 		jwtProtected.DELETE("/workspace/:type/:id", h.RemoveFromWorkspace)
 	}
 
-	// --- Protected Routes (API key OR JWT — backward compatible) ---
+	// --- Protected Routes (API key OR Clerk JWT OR legacy JWT — backward compatible) ---
 	protected := r.Group("/api/v1")
-	protected.Use(middleware.DualAuth(db, jwtSecret))
+	protected.Use(middleware.DualAuth(db, jwtSecret, jwksCache, clerkSecretKey))
 	protected.Use(rateLimiter.RateLimit())
 	{
 		// Transcript endpoints

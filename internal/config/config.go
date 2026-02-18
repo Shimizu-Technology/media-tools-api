@@ -48,6 +48,11 @@ type Config struct {
 	// JWT Authentication (MTA-20)
 	JWTSecret string
 
+	// Clerk Authentication
+	ClerkPublishableKey string
+	ClerkSecretKey      string
+	ClerkJWKSURL        string
+
 	// Admin API key for bootstrap operations (creating first API keys)
 	// This protects the API key creation endpoint in production.
 	AdminAPIKey string
@@ -104,6 +109,11 @@ func Load() (*Config, error) {
 
 		// JWT Authentication
 		JWTSecret: getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),
+
+		// Clerk Authentication
+		ClerkPublishableKey: getEnv("CLERK_PUBLISHABLE_KEY", ""),
+		ClerkSecretKey:      getEnv("CLERK_SECRET_KEY", ""),
+		ClerkJWKSURL:        getEnv("CLERK_JWKS_URL", ""),
 
 		// Admin API key for bootstrap — optional in dev, required in production
 		AdminAPIKey: getEnv("ADMIN_API_KEY", ""),

@@ -135,6 +135,8 @@ func main() {
 		cfg.AdminAPIKey,
 		cfg.OwnerAPIKeyID,
 		cfg.OwnerAPIKeyPrefix,
+		cfg.ClerkJWKSURL,
+		cfg.ClerkSecretKey,
 		cfg.AllowedOrigins,
 	)
 

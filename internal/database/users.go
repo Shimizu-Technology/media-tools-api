@@ -40,6 +40,28 @@ func (db *DB) GetUserByID(ctx context.Context, id string) (*models.User, error) 
 	return &u, nil
 }
 
+// GetUserByClerkID retrieves a user by their Clerk user ID.
+func (db *DB) GetUserByClerkID(ctx context.Context, clerkID string) (*models.User, error) {
+	var u models.User
+	err := db.GetContext(ctx, &u, `SELECT * FROM users WHERE clerk_id = $1`, clerkID)
+	if err != nil {
+		return nil, fmt.Errorf("user not found: %w", err)
+	}
+	return &u, nil
+}
+
+// CreateUserFromClerk creates a new user from Clerk authentication (no password).
+func (db *DB) CreateUserFromClerk(ctx context.Context, u *models.User) error {
+	query := `
+		INSERT INTO users (email, name, clerk_id)
+		VALUES ($1, $2, $3)
+		RETURNING id, created_at`
+
+	return db.QueryRowContext(ctx, query,
+		u.Email, u.Name, u.ClerkID,
+	).Scan(&u.ID, &u.CreatedAt)
+}
+
 // --- Workspace Operations ---
 
 // SaveWorkspaceItem adds an item to a user's workspace.

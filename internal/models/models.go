@@ -303,6 +303,7 @@ type User struct {
 	Email        string    `json:"email" db:"email"`
 	PasswordHash string    `json:"-" db:"password_hash"`
 	Name         string    `json:"name" db:"name"`
+	ClerkID      string    `json:"clerk_id,omitempty" db:"clerk_id"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 }
 
