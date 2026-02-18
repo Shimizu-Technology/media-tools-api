@@ -76,12 +76,13 @@ function ClerkAppContent() {
       isAuthenticated={isSignedIn ?? false}
       isLoading={!isLoaded}
     >
-      <ClerkTokenSync />
-      <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
-        <Header />
-        <AppRoutes />
-        <AppFooter />
-      </div>
+      <ClerkTokenSync>
+        <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
+          <Header />
+          <AppRoutes />
+          <AppFooter />
+        </div>
+      </ClerkTokenSync>
     </AuthProvider>
   )
 }

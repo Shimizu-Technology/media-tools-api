@@ -8,6 +8,18 @@
 // returns transcribed text. Max file size is 25MB.
 package audio
 
+// WhisperAPIError is a structured error from the Whisper API.
+// Used by the worker's retry logic to classify errors by status code
+// instead of parsing error message strings.
+type WhisperAPIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *WhisperAPIError) Error() string {
+	return fmt.Sprintf("Whisper API returned status %d: %s", e.StatusCode, e.Body)
+}
+
 import (
 	"bytes"
 	"context"
@@ -121,7 +133,7 @@ func (t *Transcriber) Transcribe(ctx context.Context, audioData io.Reader, filen
 
 	// Check for API errors
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Whisper API returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, &WhisperAPIError{StatusCode: resp.StatusCode, Body: string(respBody)}
 	}
 
 	// Parse the response

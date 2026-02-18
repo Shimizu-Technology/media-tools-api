@@ -2,32 +2,30 @@
  * ClerkTokenSync — bridges Clerk session tokens into localStorage
  * so the existing synchronous api.ts getHeaders() can read them.
  *
- * Design note: lib/api.ts uses synchronous getHeaders() for simplicity.
- * Rather than converting all API calls to async, this component eagerly
- * syncs the Clerk token to localStorage on mount and refreshes every 50s.
- * Race window: on first sign-in, there's a brief moment before the token
- * is written. In practice this is negligible since the UI renders before
- * any user-initiated API call.
+ * Blocks child rendering until the first token sync completes,
+ * preventing unauthenticated API calls on page load.
  *
- * Renders nothing. Must be inside <ClerkProvider> and <SignedIn>.
+ * Must be inside <ClerkProvider>.
  */
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@clerk/clerk-react';
+import type { ReactNode } from 'react';
 
 const TOKEN_KEY = 'mta_jwt_token';
 
-export function ClerkTokenSync() {
+export function ClerkTokenSync({ children }: { children: ReactNode }) {
   const { getToken, isSignedIn } = useAuth();
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     if (!isSignedIn) {
       localStorage.removeItem(TOKEN_KEY);
+      setReady(true);
       return;
     }
 
     let cancelled = false;
 
-    // Sync token immediately on sign-in
     const syncToken = async () => {
       try {
         const token = await getToken();
@@ -37,6 +35,7 @@ export function ClerkTokenSync() {
       } catch (err) {
         console.warn('ClerkTokenSync: failed to get token', err);
       }
+      if (!cancelled) setReady(true);
     };
 
     syncToken();
@@ -50,5 +49,8 @@ export function ClerkTokenSync() {
     };
   }, [getToken, isSignedIn]);
 
-  return null;
+  // Block rendering until first token sync completes
+  if (!ready) return null;
+
+  return <>{children}</>;
 }

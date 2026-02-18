@@ -17,6 +17,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -640,33 +641,34 @@ func (p *Pool) transcribeFile(ctx context.Context, path, originalName string) (*
 }
 
 // isRetryableError checks if a Whisper API error is transient and worth retrying.
-// Retryable: 5xx server errors, timeouts, network errors.
+// Retryable: 5xx server errors, 429 rate limits, timeouts, network errors.
 // Non-retryable: 4xx client errors (bad format, bad API key, etc).
 func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	errStr := err.Error()
+
+	// Check for structured WhisperAPIError first (preferred — no string parsing)
+	var whisperErr *audio.WhisperAPIError
+	if errors.As(err, &whisperErr) {
+		if whisperErr.StatusCode == 429 {
+			return true // Rate limited
+		}
+		if whisperErr.StatusCode >= 500 {
+			return true // Server error
+		}
+		if whisperErr.StatusCode >= 400 {
+			return false // Client error (bad request, unauthorized, etc)
+		}
+	}
+
 	// Network/timeout errors are always retryable
+	errStr := err.Error()
 	if strings.Contains(errStr, "timeout") || strings.Contains(errStr, "connection") ||
 		strings.Contains(errStr, "EOF") || strings.Contains(errStr, "reset by peer") {
 		return true
 	}
-	// Whisper API errors: "Whisper API returned status NNN: ..."
-	if strings.Contains(errStr, "Whisper API returned status") {
-		// 429 rate limit = retryable (must check before generic 4xx)
-		if strings.Contains(errStr, "status 429") {
-			return true
-		}
-		// 4xx = non-retryable (bad request, unauthorized, etc)
-		if strings.Contains(errStr, "status 4") {
-			return false
-		}
-		// 5xx = retryable (server error)
-		if strings.Contains(errStr, "status 5") {
-			return true
-		}
-	}
+
 	// Default: don't retry unknown errors
 	return false
 }
