@@ -147,7 +147,9 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 						if err != nil {
 							// Find or create via email migration flow
 							clerkUser, fetchErr := fetchClerkUser(claims.Subject, clerkSecretKey)
-							if fetchErr == nil {
+							if fetchErr != nil {
+								log.Printf("❌ DualAuth: failed to fetch Clerk user %s: %v", claims.Subject, fetchErr)
+							} else {
 								var createErr error
 								user, createErr = db.FindOrCreateClerkUser(c.Request.Context(), claims.Subject, clerkUser.Email, clerkUser.Name)
 								if createErr != nil {
@@ -197,4 +199,26 @@ func GetUser(c *gin.Context) *models.User {
 		return nil
 	}
 	return user
+}
+
+// BearerOnlyAuth accepts Clerk JWT (RS256) or legacy JWT (HS256) Bearer tokens,
+// but NOT API keys. Used for user-scoped routes like /auth/me and /workspace
+// where an API key should not grant access.
+func BearerOnlyAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Reject API key auth for these routes
+		if c.GetHeader("X-API-Key") != "" && c.GetHeader("Authorization") == "" {
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+				Error:   "unauthorized",
+				Message: "This endpoint requires a Bearer token, not an API key",
+				Code:    http.StatusUnauthorized,
+			})
+			c.Abort()
+			return
+		}
+
+		// Delegate to DualAuth for Bearer token handling (Clerk + legacy JWT)
+		handler := DualAuth(db, jwtSecret, jwksCache, clerkSecretKey)
+		handler(c)
+	}
 }

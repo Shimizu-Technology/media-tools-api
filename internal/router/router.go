@@ -52,7 +52,7 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.
 	// --- JWT-protected routes (MTA-20) — accepts Clerk or legacy JWT ---
 	jwtProtected := r.Group("/api/v1")
 	if jwksCache != nil {
-		jwtProtected.Use(middleware.DualAuth(db, jwtSecret, jwksCache, clerkSecretKey))
+		jwtProtected.Use(middleware.BearerOnlyAuth(db, jwtSecret, jwksCache, clerkSecretKey))
 	} else {
 		jwtProtected.Use(middleware.JWTAuth(db, jwtSecret))
 	}
