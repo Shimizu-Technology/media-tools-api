@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { FileText, Mic, FileType2, Library, Settings, Book, Webhook, Key, Github, ChevronDown, Activity } from 'lucide-react'
+import { SignedIn, UserButton } from '@clerk/clerk-react'
 import { ApiKeySetup } from './ApiKeySetup'
 
 const mainNavLinks = [
@@ -100,7 +101,18 @@ export function Header() {
           </nav>
 
           {/* Actions */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
+            {/* Clerk User Button */}
+            <SignedIn>
+              <UserButton
+                appearance={{
+                  elements: {
+                    avatarBox: 'w-8 h-8',
+                  },
+                }}
+              />
+            </SignedIn>
+
             {/* Settings Dropdown */}
             <div className="relative" ref={settingsRef}>
               <button

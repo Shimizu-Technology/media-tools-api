@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Bookmark, BookmarkCheck, AlertCircle } from 'lucide-react';
 import { saveToWorkspace } from '../lib/api';
 import type { APIError } from '../lib/api';
-import { useAuthStore } from '../stores/authStore';
+import { useAuth } from '@clerk/clerk-react';
 
 interface SaveToWorkspaceProps {
   itemType: 'transcript' | 'audio' | 'pdf';
@@ -15,12 +15,12 @@ interface SaveToWorkspaceProps {
  * Only visible when logged in.
  */
 export function SaveToWorkspace({ itemType, itemId }: SaveToWorkspaceProps) {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const { isSignedIn } = useAuth();
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!isAuthenticated) return null;
+  if (!isSignedIn) return null;
 
   const handleSave = async () => {
     if (saved || saving) return;
