@@ -1,6 +1,6 @@
 // batches.go handles batch transcript processing endpoints (MTA-8).
 //
-// Batch processing lets users submit multiple YouTube URLs at once.
+// Batch processing lets users submit multiple video URLs at once.
 // Each URL becomes its own transcript record, all linked to a single batch.
 // The batch provides aggregate status tracking.
 package handlers
@@ -19,7 +19,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
-// CreateBatch starts transcript extraction for multiple YouTube URLs.
+// CreateBatch starts transcript extraction for multiple video URLs.
 // POST /api/v1/transcripts/batch
 //
 // Request body:
@@ -37,7 +37,7 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "invalid_request",
-			Message: "Provide 'urls' array with 1-10 YouTube URLs",
+			Message: "Provide 'urls' array with 1-10 video URLs",
 			Code:    http.StatusBadRequest,
 		})
 		return

@@ -160,45 +160,7 @@ func (e *YtDlpExtractor) ExtractFromURL(ctx context.Context, videoURL, videoID s
 // Deprecated: Use ExtractFromURL for universal video support.
 func (e *YtDlpExtractor) Extract(ctx context.Context, videoID string) (*Result, error) {
 	url := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
-
-	// Step 1: Get video metadata (title, channel, duration, available subtitles)
-	log.Printf("🎬 Extracting metadata for video: %s", videoID)
-	metadata, metadataErr := e.getMetadata(ctx, url)
-
-	// Step 2: Try subtitle extraction first
-	if metadataErr == nil {
-		log.Printf("📝 Extracting transcript for: %s", metadata.Title)
-		transcript, lang, err := e.getTranscript(ctx, url)
-		if err == nil {
-			// Success! Clean up and return
-			cleaned := cleanTranscript(transcript)
-			wordCount := countWords(cleaned)
-			return &Result{
-				VideoID:     videoID,
-				Title:       metadata.Title,
-				ChannelName: metadata.Channel,
-				Duration:    int(metadata.Duration),
-				Language:    lang,
-				Transcript:  cleaned,
-				WordCount:   wordCount,
-			}, nil
-		}
-		log.Printf("⚠️  Subtitle extraction failed: %v", err)
-	} else {
-		log.Printf("⚠️  Metadata extraction failed: %v", metadataErr)
-	}
-
-	// Step 3: Fallback to Whisper if configured
-	if e.whisper != nil && e.whisper.IsConfigured() {
-		log.Printf("🎤 Falling back to Whisper transcription for video: %s", videoID)
-		return e.extractWithWhisper(ctx, url, videoID, metadata)
-	}
-
-	// No Whisper fallback available
-	if metadataErr != nil {
-		return nil, fmt.Errorf("failed to get video metadata: %w", metadataErr)
-	}
-	return nil, fmt.Errorf("no transcript available and Whisper fallback not configured")
+	return e.ExtractFromURL(ctx, url, videoID)
 }
 
 // extractWithWhisper downloads audio from YouTube and transcribes with Whisper.
