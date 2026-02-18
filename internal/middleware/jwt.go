@@ -205,9 +205,12 @@ func GetUser(c *gin.Context) *models.User {
 // but NOT API keys. Used for user-scoped routes like /auth/me and /workspace
 // where an API key should not grant access.
 func BearerOnlyAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string) gin.HandlerFunc {
+	// Create DualAuth handler once at init, not per-request
+	dualAuth := DualAuth(db, jwtSecret, jwksCache, clerkSecretKey)
+
 	return func(c *gin.Context) {
-		// Reject API key auth for these routes
-		if c.GetHeader("X-API-Key") != "" && c.GetHeader("Authorization") == "" {
+		// Reject any request with API key, even if Authorization is also present
+		if c.GetHeader("X-API-Key") != "" {
 			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 				Error:   "unauthorized",
 				Message: "This endpoint requires a Bearer token, not an API key",
@@ -218,7 +221,6 @@ func BearerOnlyAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, cle
 		}
 
 		// Delegate to DualAuth for Bearer token handling (Clerk + legacy JWT)
-		handler := DualAuth(db, jwtSecret, jwksCache, clerkSecretKey)
-		handler(c)
+		dualAuth(c)
 	}
 }
