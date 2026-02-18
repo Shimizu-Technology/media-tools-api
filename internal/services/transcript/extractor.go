@@ -26,7 +26,6 @@ import (
 // implemented. This is opposite to Java/C# — and it's one of Go's
 // most powerful design patterns. Small interfaces (1-3 methods) are preferred.
 type Extractor interface {
-	Extract(ctx context.Context, videoID string) (*Result, error)
 	ExtractFromURL(ctx context.Context, videoURL, videoID string) (*Result, error)
 }
 
@@ -504,8 +503,12 @@ func ParseVideoURL(input string) (*ParsedVideo, error) {
 	for _, pattern := range vimeoURLPatterns {
 		matches := pattern.FindStringSubmatch(input)
 		if len(matches) >= 2 {
+			// Preserve original URL for yt-dlp — private/unlisted Vimeo videos
+			// use URLs like vimeo.com/123456789/abc123def where the trailing
+			// segment is a privacy hash required for access. Constructing a
+			// canonical URL would strip this hash and break private video access.
 			return &ParsedVideo{
-				URL:     fmt.Sprintf("https://vimeo.com/%s", matches[1]),
+				URL:     input,
 				VideoID: matches[1],
 				Source:  SourceVimeo,
 			}, nil

@@ -298,21 +298,28 @@ func TestParseVideoURL(t *testing.T) {
 			url:        "https://vimeo.com/video/123456789",
 			wantSource: SourceVimeo,
 			wantID:     "123456789",
-			wantURL:    "https://vimeo.com/123456789",
+			wantURL:    "https://vimeo.com/video/123456789",
 		},
 		{
 			name:       "Vimeo player embed",
 			url:        "https://player.vimeo.com/video/123456789",
 			wantSource: SourceVimeo,
 			wantID:     "123456789",
-			wantURL:    "https://vimeo.com/123456789",
+			wantURL:    "https://player.vimeo.com/video/123456789",
 		},
 		{
 			name:       "Vimeo channel video",
 			url:        "https://vimeo.com/channels/staffpicks/123456789",
 			wantSource: SourceVimeo,
 			wantID:     "123456789",
-			wantURL:    "https://vimeo.com/123456789",
+			wantURL:    "https://vimeo.com/channels/staffpicks/123456789",
+		},
+		{
+			name:       "Vimeo private share link preserves hash",
+			url:        "https://vimeo.com/123456789/abc123def456",
+			wantSource: SourceVimeo,
+			wantID:     "123456789",
+			wantURL:    "https://vimeo.com/123456789/abc123def456",
 		},
 		// Generic URLs (yt-dlp supported)
 		{
