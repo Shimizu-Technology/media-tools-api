@@ -49,7 +49,7 @@ type WhisperResult struct {
 
 // WhisperTranscriber is an interface for audio transcription (used as fallback).
 // This allows the transcript package to use Whisper without importing the audio package.
-// The TranscribeForYouTube method is specifically for YouTube fallback and returns our WhisperResult.
+// The TranscribeForYouTube method is used as a fallback when subtitles are unavailable and returns our WhisperResult.
 type WhisperTranscriber interface {
 	TranscribeForYouTube(ctx context.Context, audioData io.Reader, filename string) (*WhisperResult, error)
 	IsConfigured() bool
@@ -160,7 +160,7 @@ func (e *YtDlpExtractor) Extract(ctx context.Context, videoID string) (*Result, 
 	return e.ExtractFromURL(ctx, url, videoID)
 }
 
-// extractWithWhisper downloads audio from YouTube and transcribes with Whisper.
+// extractWithWhisper downloads audio from a video URL and transcribes with Whisper.
 func (e *YtDlpExtractor) extractWithWhisper(ctx context.Context, url, videoID string, metadata *ytDlpMetadata) (*Result, error) {
 	// Create temp directory for audio
 	tmpDir, err := os.MkdirTemp("", "mta-audio-*")
