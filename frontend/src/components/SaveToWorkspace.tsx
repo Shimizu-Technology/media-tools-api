@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Bookmark, BookmarkCheck, AlertCircle } from 'lucide-react';
 import { saveToWorkspace } from '../lib/api';
 import type { APIError } from '../lib/api';
+import { useAuthContext } from '../contexts/AuthContext';
 
 interface SaveToWorkspaceProps {
   itemType: 'transcript' | 'audio' | 'pdf';
@@ -11,11 +12,11 @@ interface SaveToWorkspaceProps {
 
 /**
  * Save to Workspace button — shown on transcript/audio/PDF results.
- * Checks authentication via localStorage tokens (works with both Clerk and API keys).
- * No Clerk hooks needed — ClerkTokenSync keeps localStorage in sync.
+ * Uses AuthContext for reactive auth state (re-renders on sign-in/sign-out).
+ * Works with both Clerk and API key auth.
  */
 export function SaveToWorkspace({ itemType, itemId }: SaveToWorkspaceProps) {
-  const isAuthenticated = !!localStorage.getItem('mta_jwt_token') || !!localStorage.getItem('mta_api_key');
+  const { isAuthenticated } = useAuthContext();
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

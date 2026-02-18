@@ -62,6 +62,56 @@ func (db *DB) CreateUserFromClerk(ctx context.Context, u *models.User) error {
 	).Scan(&u.ID, &u.CreatedAt)
 }
 
+// LinkClerkIDToUser updates an existing user's clerk_id (email migration path).
+// Used when a legacy email/password user signs in via Clerk for the first time.
+func (db *DB) LinkClerkIDToUser(ctx context.Context, userID, clerkID string) error {
+	_, err := db.ExecContext(ctx,
+		`UPDATE users SET clerk_id = $1 WHERE id = $2`,
+		clerkID, userID)
+	return err
+}
+
+// FindOrCreateClerkUser handles the invite-only / migration flow:
+// 1. Find by clerk_id (returning Clerk user) → return
+// 2. Find by email (legacy user migrating to Clerk) → link clerk_id, return
+// 3. Not found → create new user
+func (db *DB) FindOrCreateClerkUser(ctx context.Context, clerkID, email, name string) (*models.User, error) {
+	// 1. Already linked to Clerk
+	user, err := db.GetUserByClerkID(ctx, clerkID)
+	if err == nil {
+		return user, nil
+	}
+
+	// 2. Existing user with same email (migration path)
+	if email != "" {
+		existing, err := db.GetUserByEmail(ctx, email)
+		if err == nil {
+			// Link Clerk ID to existing account
+			if linkErr := db.LinkClerkIDToUser(ctx, existing.ID, clerkID); linkErr != nil {
+				return nil, fmt.Errorf("failed to link clerk_id to existing user: %w", linkErr)
+			}
+			existing.ClerkID = clerkID
+			// Update name if provided
+			if name != "" {
+				db.ExecContext(ctx, `UPDATE users SET name = $1 WHERE id = $2`, name, existing.ID)
+				existing.Name = name
+			}
+			return existing, nil
+		}
+	}
+
+	// 3. Brand new user
+	u := &models.User{
+		Email:   email,
+		Name:    name,
+		ClerkID: clerkID,
+	}
+	if err := db.CreateUserFromClerk(ctx, u); err != nil {
+		return nil, fmt.Errorf("failed to create user: %w", err)
+	}
+	return u, nil
+}
+
 // --- Workspace Operations ---
 
 // SaveWorkspaceItem adds an item to a user's workspace.

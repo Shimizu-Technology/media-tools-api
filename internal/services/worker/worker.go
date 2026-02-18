@@ -630,8 +630,41 @@ func (p *Pool) transcribeFile(ctx context.Context, path, originalName string) (*
 	return p.transcribeFileWithRetry(ctx, path, originalName, 3)
 }
 
+// isRetryableError checks if a Whisper API error is transient and worth retrying.
+// Retryable: 5xx server errors, timeouts, network errors.
+// Non-retryable: 4xx client errors (bad format, bad API key, etc).
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// Network/timeout errors are always retryable
+	if strings.Contains(errStr, "timeout") || strings.Contains(errStr, "connection") ||
+		strings.Contains(errStr, "EOF") || strings.Contains(errStr, "reset by peer") {
+		return true
+	}
+	// Whisper API errors: "Whisper API returned status NNN: ..."
+	if strings.Contains(errStr, "Whisper API returned status") {
+		// 4xx = non-retryable (bad request, unauthorized, etc)
+		if strings.Contains(errStr, "status 4") {
+			return false
+		}
+		// 5xx = retryable (server error)
+		if strings.Contains(errStr, "status 5") {
+			return true
+		}
+		// 429 rate limit = retryable
+		if strings.Contains(errStr, "status 429") {
+			return true
+		}
+	}
+	// Default: don't retry unknown errors
+	return false
+}
+
 // transcribeFileWithRetry calls the Whisper API with exponential backoff retry.
-// Retries on transient failures (HTTP 500, timeouts) up to maxRetries times.
+// Only retries transient failures (5xx, timeouts, network errors).
+// Non-retryable errors (400, 401) fail immediately.
 // Backoff: 1s, 4s, 16s (exponential with base 4).
 func (p *Pool) transcribeFileWithRetry(ctx context.Context, path, originalName string, maxRetries int) (*audio.TranscriptionResult, error) {
 	var lastErr error
@@ -660,6 +693,12 @@ func (p *Pool) transcribeFileWithRetry(ctx context.Context, path, originalName s
 		}
 		lastErr = err
 		log.Printf("⚠️  Whisper attempt %d/%d failed for %s: %v", attempt+1, maxRetries+1, originalName, err)
+
+		// Don't retry non-transient errors (4xx, bad format, etc)
+		if !isRetryableError(err) {
+			log.Printf("❌ Non-retryable error, failing immediately: %v", err)
+			return nil, err
+		}
 	}
 	return nil, fmt.Errorf("all %d Whisper attempts failed: %w", maxRetries+1, lastErr)
 }

@@ -221,39 +221,32 @@ func ClerkAuth(db *database.DB, jwksCache *JWKSCache, clerkSecretKey string) gin
 			return
 		}
 
-		// Look up user by clerk_id
-		user, err := db.GetUserByClerkID(c.Request.Context(), clerkUserID)
-		if err != nil {
-			// Auto-create user on first sign-in
-			// Fetch user info from Clerk Backend API to get email/name
-			clerkUser, fetchErr := fetchClerkUser(clerkUserID, clerkSecretKey)
-			if fetchErr != nil {
-				log.Printf("❌ Failed to fetch Clerk user %s: %v", clerkUserID, fetchErr)
-				c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-					Error:   "unauthorized",
-					Message: "Failed to verify user identity",
-					Code:    http.StatusUnauthorized,
-				})
-				c.Abort()
-				return
-			}
+		// Find or create user via the invite-only / migration flow:
+		// 1. Find by clerk_id (returning user)
+		// 2. Find by email (legacy user migrating to Clerk → link clerk_id)
+		// 3. Create new user
+		clerkUser, fetchErr := fetchClerkUser(clerkUserID, clerkSecretKey)
+		if fetchErr != nil {
+			log.Printf("❌ Failed to fetch Clerk user %s: %v", clerkUserID, fetchErr)
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+				Error:   "unauthorized",
+				Message: "Failed to verify user identity",
+				Code:    http.StatusUnauthorized,
+			})
+			c.Abort()
+			return
+		}
 
-			user = &models.User{
-				Email:   clerkUser.Email,
-				Name:    clerkUser.Name,
-				ClerkID: clerkUserID,
-			}
-			if err := db.CreateUserFromClerk(c.Request.Context(), user); err != nil {
-				log.Printf("❌ Failed to auto-create user for clerk_id %s: %v", clerkUserID, err)
-				c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-					Error:   "server_error",
-					Message: "Failed to create user account",
-					Code:    http.StatusInternalServerError,
-				})
-				c.Abort()
-				return
-			}
-			log.Printf("✅ Auto-created user %s (%s) from Clerk", user.Email, clerkUserID)
+		user, err := db.FindOrCreateClerkUser(c.Request.Context(), clerkUserID, clerkUser.Email, clerkUser.Name)
+		if err != nil {
+			log.Printf("❌ Failed to find/create user for clerk_id %s: %v", clerkUserID, err)
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error:   "server_error",
+				Message: "Failed to authenticate user",
+				Code:    http.StatusInternalServerError,
+			})
+			c.Abort()
+			return
 		}
 
 		c.Set(userContextKey, user)

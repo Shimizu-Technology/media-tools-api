@@ -1,5 +1,5 @@
-import { ClerkProvider, SignedIn, SignedOut, SignInButton } from '@clerk/clerk-react'
-import { ClerkTokenSync } from './components/ClerkTokenSync'
+import { useEffect } from 'react'
+import { ClerkProvider, useAuth } from '@clerk/clerk-react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Header } from './components/Header'
 import { HomePage } from './pages/HomePage'
@@ -9,97 +9,114 @@ import { PdfPage } from './pages/PdfPage'
 import { DocsPage } from './pages/DocsPage'
 import { WebhooksPage } from './pages/WebhooksPage'
 import { OpsPage } from './pages/OpsPage'
+import { AuthProvider } from './contexts/AuthContext'
+import { setAuthTokenGetter } from './lib/apiAuth'
 
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
+const isClerkEnabled = Boolean(CLERK_PUBLISHABLE_KEY && CLERK_PUBLISHABLE_KEY !== 'YOUR_PUBLISHABLE_KEY')
 
-function AppContent() {
+// Log warning if Clerk is not configured (per Brain Dump guide)
+if (!isClerkEnabled) {
+  console.warn('⚠️ Clerk not configured — running without authentication. Add VITE_CLERK_PUBLISHABLE_KEY to .env.local')
+}
+
+/** Routes shared between Clerk and non-Clerk modes. */
+function AppRoutes() {
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
-      <ClerkTokenSync />
-      <Header />
-      
-      <SignedIn>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/library" element={<MyLibraryPage />} />
-          <Route path="/audio" element={<AudioPage />} />
-          <Route path="/pdf" element={<PdfPage />} />
-          <Route path="/docs" element={<DocsPage />} />
-          <Route path="/webhooks" element={<WebhooksPage />} />
-          <Route path="/ops" element={<OpsPage />} />
-          <Route path="/history" element={<Navigate to="/library?type=youtube" replace />} />
-        </Routes>
-      </SignedIn>
+    <Routes>
+      <Route path="/" element={<HomePage />} />
+      <Route path="/library" element={<MyLibraryPage />} />
+      <Route path="/audio" element={<AudioPage />} />
+      <Route path="/pdf" element={<PdfPage />} />
+      <Route path="/docs" element={<DocsPage />} />
+      <Route path="/webhooks" element={<WebhooksPage />} />
+      <Route path="/ops" element={<OpsPage />} />
+      <Route path="/history" element={<Navigate to="/library?type=youtube" replace />} />
+    </Routes>
+  )
+}
 
-      <SignedOut>
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 px-4">
-          <div className="text-center max-w-md">
-            <h1 className="text-3xl font-bold mb-3" style={{ color: 'var(--color-text)' }}>
-              Media Tools
-            </h1>
-            <p className="text-lg mb-6" style={{ color: 'var(--color-text-muted)' }}>
-              Transcribe YouTube videos, audio files, and extract text from PDFs. Sign in to get started.
-            </p>
-            <SignInButton mode="modal">
-              <button
-                className="px-6 py-3 rounded-lg font-semibold text-white transition-all hover:opacity-90"
-                style={{ backgroundColor: 'var(--color-brand-500)' }}
-              >
-                Sign In
-              </button>
-            </SignInButton>
-          </div>
-        </div>
-      </SignedOut>
+/** Footer shared between modes. */
+function AppFooter() {
+  return (
+    <footer className="py-8 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
+      Built with Go + React by{' '}
+      <a href="https://github.com/Shimizu-Technology" target="_blank" rel="noopener noreferrer"
+        style={{ color: 'var(--color-brand-500)' }}>
+        Shimizu Technology
+      </a>
+    </footer>
+  )
+}
 
-      <footer className="py-8 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
-        Built with Go + React by{' '}
-        <a
-          href="https://github.com/Shimizu-Technology"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ color: 'var(--color-brand-500)' }}
-        >
-          Shimizu Technology
-        </a>
-      </footer>
-    </div>
+/**
+ * ClerkAppContent — rendered inside ClerkProvider.
+ * Uses Clerk hooks safely since ClerkProvider is an ancestor.
+ * Wires up token getter for authenticated API calls.
+ */
+function ClerkAppContent() {
+  const { getToken, isLoaded, isSignedIn } = useAuth()
+
+  useEffect(() => {
+    // Wire Clerk's getToken into the API auth system
+    // getToken() automatically handles token refresh (Brain Dump guide pattern)
+    setAuthTokenGetter(async () => {
+      try {
+        return await getToken()
+      } catch {
+        return null
+      }
+    })
+  }, [getToken])
+
+  return (
+    <AuthProvider
+      isClerkEnabled={true}
+      isAuthenticated={isSignedIn ?? false}
+      isLoading={!isLoaded}
+    >
+      <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
+        <Header />
+        <AppRoutes />
+        <AppFooter />
+      </div>
+    </AuthProvider>
+  )
+}
+
+/**
+ * NoClerkAppContent — rendered when Clerk is not configured.
+ * No auth gates — full access for development / API-key mode.
+ */
+function NoClerkAppContent() {
+  return (
+    <AuthProvider
+      isClerkEnabled={false}
+      isAuthenticated={!!localStorage.getItem('mta_api_key')}
+      isLoading={false}
+    >
+      <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
+        <Header />
+        <AppRoutes />
+        <AppFooter />
+      </div>
+    </AuthProvider>
   )
 }
 
 function App() {
-  // If Clerk is not configured, render without auth (dev/API-key mode)
-  if (!CLERK_PUBLISHABLE_KEY) {
+  if (!isClerkEnabled) {
     return (
       <BrowserRouter>
-        <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
-          <Header />
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/library" element={<MyLibraryPage />} />
-            <Route path="/audio" element={<AudioPage />} />
-            <Route path="/pdf" element={<PdfPage />} />
-            <Route path="/docs" element={<DocsPage />} />
-            <Route path="/webhooks" element={<WebhooksPage />} />
-            <Route path="/ops" element={<OpsPage />} />
-            <Route path="/history" element={<Navigate to="/library?type=youtube" replace />} />
-          </Routes>
-          <footer className="py-8 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            Built with Go + React by{' '}
-            <a href="https://github.com/Shimizu-Technology" target="_blank" rel="noopener noreferrer"
-              style={{ color: 'var(--color-brand-500)' }}>
-              Shimizu Technology
-            </a>
-          </footer>
-        </div>
+        <NoClerkAppContent />
       </BrowserRouter>
     )
   }
 
   return (
-    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} afterSignOutUrl="/">
       <BrowserRouter>
-        <AppContent />
+        <ClerkAppContent />
       </BrowserRouter>
     </ClerkProvider>
   )

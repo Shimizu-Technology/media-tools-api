@@ -144,20 +144,10 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 					if claims, ok := token.Claims.(*ClerkClaims); ok && claims.Subject != "" {
 						user, err := db.GetUserByClerkID(c.Request.Context(), claims.Subject)
 						if err != nil {
-							// Auto-create on first sign-in
+							// Find or create via email migration flow
 							clerkUser, fetchErr := fetchClerkUser(claims.Subject, clerkSecretKey)
 							if fetchErr == nil {
-								user = &models.User{
-									Email:   clerkUser.Email,
-									Name:    clerkUser.Name,
-									ClerkID: claims.Subject,
-								}
-								if createErr := db.CreateUserFromClerk(c.Request.Context(), user); createErr != nil {
-									log.Printf("❌ Failed to auto-create user for clerk_id %s: %v", claims.Subject, createErr)
-									user = nil // Don't use a non-persisted user
-								} else {
-									log.Printf("✅ Auto-created user %s from Clerk (DualAuth)", user.Email)
-								}
+								user, _ = db.FindOrCreateClerkUser(c.Request.Context(), claims.Subject, clerkUser.Email, clerkUser.Name)
 							}
 						}
 						if user != nil {

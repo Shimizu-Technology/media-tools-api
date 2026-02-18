@@ -1,66 +1,13 @@
 /**
- * Auth store — bridges Clerk authentication with the API.
+ * Auth store — legacy helpers for API key management.
  *
- * With Clerk, auth state (user, session, tokens) is managed by @clerk/clerk-react.
- * This store provides helper functions to get auth headers for API calls,
- * maintaining backward compatibility with existing API key auth.
- *
- * Token refresh is handled natively by Clerk's getToken() — it automatically
- * refreshes expired tokens before returning them.
+ * With Clerk, auth tokens are managed via AuthContext + apiAuth.ts.
+ * This file only handles API key storage for backward compatibility.
  */
 
 const API_KEY_STORAGE_KEY = 'mta_api_key';
 
-/**
- * Get auth headers for API calls.
- * Priority: 1) Clerk token (passed in), 2) API key from localStorage.
- *
- * Usage with Clerk:
- *   const { getToken } = useAuth();
- *   const token = await getToken();
- *   const headers = getAuthHeaders(token);
- */
-export function getAuthHeaders(clerkToken?: string | null): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
-  if (clerkToken) {
-    headers['Authorization'] = `Bearer ${clerkToken}`;
-    return headers;
-  }
-
-  // Fallback to API key for backward compat
-  const apiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
-  if (apiKey) {
-    headers['X-API-Key'] = apiKey;
-  }
-
-  return headers;
-}
-
-/**
- * Get headers for file uploads (no Content-Type, let browser set multipart boundary).
- */
-export function getAuthUploadHeaders(clerkToken?: string | null): Record<string, string> {
-  const headers: Record<string, string> = {};
-
-  if (clerkToken) {
-    headers['Authorization'] = `Bearer ${clerkToken}`;
-    return headers;
-  }
-
-  const apiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
-  if (apiKey) {
-    headers['X-API-Key'] = apiKey;
-  }
-
-  return headers;
-}
-
-/**
- * Store/retrieve API key for backward compat (server-to-server use cases).
- */
+/** Get stored API key for backward compat. */
 export function getStoredAPIKey(): string | null {
   return localStorage.getItem(API_KEY_STORAGE_KEY);
 }
@@ -71,4 +18,42 @@ export function setStoredAPIKey(key: string): void {
 
 export function clearStoredAPIKey(): void {
   localStorage.removeItem(API_KEY_STORAGE_KEY);
+}
+
+/**
+ * Synchronous auth headers (legacy — uses stored tokens/keys).
+ * Prefer getAuthHeadersAsync() from lib/apiAuth.ts for new code.
+ */
+export function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+  const token = localStorage.getItem('mta_jwt_token');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+    return headers;
+  }
+
+  const apiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey;
+  }
+
+  return headers;
+}
+
+export function getAuthUploadHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+
+  const token = localStorage.getItem('mta_jwt_token');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+    return headers;
+  }
+
+  const apiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey;
+  }
+
+  return headers;
 }

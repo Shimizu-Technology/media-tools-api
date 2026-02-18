@@ -1,35 +1,23 @@
 /**
- * useApiAuth — provides authenticated API call helpers using Clerk tokens.
+ * useApiAuth — provides authenticated API call helpers.
  *
- * Clerk's getToken() automatically handles token refresh, so we never need
- * to manually refresh. Tokens are short-lived (~60s) but getToken() caches
- * and refreshes them transparently.
+ * Uses AuthContext for reactive auth state.
+ * Uses apiAuth module for async header generation (works with Clerk or API keys).
  */
-import { useAuth } from '@clerk/clerk-react';
 import { useCallback } from 'react';
-import { getAuthHeaders, getAuthUploadHeaders, getStoredAPIKey } from '../stores/authStore';
+import { useAuthContext } from '../contexts/AuthContext';
+import { getAuthHeadersAsync, getAuthUploadHeadersAsync } from '../lib/apiAuth';
 
 export function useApiAuth() {
-  const { getToken, isSignedIn } = useAuth();
+  const { isAuthenticated, isClerkEnabled } = useAuthContext();
 
   const getHeaders = useCallback(async (): Promise<Record<string, string>> => {
-    if (isSignedIn) {
-      const token = await getToken();
-      return getAuthHeaders(token);
-    }
-    // Fall back to API key
-    return getAuthHeaders(null);
-  }, [getToken, isSignedIn]);
+    return getAuthHeadersAsync();
+  }, []);
 
   const getUploadHeaders = useCallback(async (): Promise<Record<string, string>> => {
-    if (isSignedIn) {
-      const token = await getToken();
-      return getAuthUploadHeaders(token);
-    }
-    return getAuthUploadHeaders(null);
-  }, [getToken, isSignedIn]);
+    return getAuthUploadHeadersAsync();
+  }, []);
 
-  const isAuthenticated = isSignedIn || !!getStoredAPIKey();
-
-  return { getHeaders, getUploadHeaders, isAuthenticated, isSignedIn };
+  return { getHeaders, getUploadHeaders, isAuthenticated, isClerkEnabled };
 }
