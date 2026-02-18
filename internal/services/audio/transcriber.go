@@ -8,18 +8,6 @@
 // returns transcribed text. Max file size is 25MB.
 package audio
 
-// WhisperAPIError is a structured error from the Whisper API.
-// Used by the worker's retry logic to classify errors by status code
-// instead of parsing error message strings.
-type WhisperAPIError struct {
-	StatusCode int
-	Body       string
-}
-
-func (e *WhisperAPIError) Error() string {
-	return fmt.Sprintf("Whisper API returned status %d: %s", e.StatusCode, e.Body)
-}
-
 import (
 	"bytes"
 	"context"
@@ -33,6 +21,18 @@ import (
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
 )
+
+// WhisperAPIError is a structured error from the Whisper API.
+// Used by the worker's retry logic to classify errors by status code
+// instead of parsing error message strings.
+type WhisperAPIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *WhisperAPIError) Error() string {
+	return fmt.Sprintf("Whisper API returned status %d: %s", e.StatusCode, e.Body)
+}
 
 // TranscriptionResult holds the output from a Whisper API call.
 type TranscriptionResult struct {

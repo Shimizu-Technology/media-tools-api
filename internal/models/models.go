@@ -285,6 +285,8 @@ var ValidWebhookEvents = map[string]bool{
 	"pdf.completed":        true,
 	"pdf.failed":           true,
 	"batch.completed":      true,
+	"summary.completed":    true,
+	"summary.failed":       true,
 }
 
 type CreateWebhookRequest struct {

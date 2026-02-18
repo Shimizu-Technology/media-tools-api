@@ -154,6 +154,14 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 								user, createErr = db.FindOrCreateClerkUser(c.Request.Context(), claims.Subject, clerkUser.Email, clerkUser.Name)
 								if createErr != nil {
 									log.Printf("❌ DualAuth: failed to find/create Clerk user %s: %v", claims.Subject, createErr)
+									// Clerk token is valid but DB failed — return 500, don't fall through to legacy JWT
+									c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+										Error:   "server_error",
+										Message: "Failed to authenticate user",
+										Code:    http.StatusInternalServerError,
+									})
+									c.Abort()
+									return
 								}
 							}
 						}

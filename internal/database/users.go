@@ -53,6 +53,10 @@ func (db *DB) GetUserByClerkID(ctx context.Context, clerkID string) (*models.Use
 
 // CreateUserFromClerk creates a new user from Clerk authentication (no password).
 func (db *DB) CreateUserFromClerk(ctx context.Context, u *models.User) error {
+	if u.ClerkID == nil || *u.ClerkID == "" {
+		return fmt.Errorf("clerk_id is required for CreateUserFromClerk")
+	}
+
 	query := `
 		INSERT INTO users (email, name, clerk_id)
 		VALUES ($1, $2, $3)

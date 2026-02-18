@@ -637,7 +637,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 }
 
 func (p *Pool) transcribeFile(ctx context.Context, path, originalName string) (*audio.TranscriptionResult, error) {
-	return p.transcribeFileWithRetry(ctx, path, originalName, 3)
+	return p.transcribeFileWithRetry(ctx, path, originalName, 4)
 }
 
 // isRetryableError checks if a Whisper API error is transient and worth retrying.
@@ -676,13 +676,14 @@ func isRetryableError(err error) bool {
 // transcribeFileWithRetry calls the Whisper API with exponential backoff retry.
 // Only retries transient failures (5xx, timeouts, network errors).
 // Non-retryable errors (400, 401) fail immediately.
+// maxAttempts is the total number of attempts (e.g., 4 = 1 initial + 3 retries).
 // Backoff: 1s, 4s, 16s (exponential with base 4).
-func (p *Pool) transcribeFileWithRetry(ctx context.Context, path, originalName string, maxRetries int) (*audio.TranscriptionResult, error) {
+func (p *Pool) transcribeFileWithRetry(ctx context.Context, path, originalName string, maxAttempts int) (*audio.TranscriptionResult, error) {
 	var lastErr error
-	for attempt := 0; attempt <= maxRetries; attempt++ {
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			backoff := time.Duration(1<<(2*uint(attempt-1))) * time.Second // 1s, 4s, 16s
-			log.Printf("🔄 Whisper retry %d/%d for %s (backoff %v)", attempt, maxRetries, originalName, backoff)
+			log.Printf("🔄 Whisper retry %d/%d for %s (backoff %v)", attempt, maxAttempts, originalName, backoff)
 			select {
 			case <-time.After(backoff):
 			case <-ctx.Done():
@@ -703,7 +704,7 @@ func (p *Pool) transcribeFileWithRetry(ctx context.Context, path, originalName s
 			return result, nil
 		}
 		lastErr = err
-		log.Printf("⚠️  Whisper attempt %d/%d failed for %s: %v", attempt+1, maxRetries+1, originalName, err)
+		log.Printf("⚠️  Whisper attempt %d/%d failed for %s: %v", attempt+1, maxAttempts, originalName, err)
 
 		// Don't retry non-transient errors (4xx, bad format, etc)
 		if !isRetryableError(err) {
@@ -711,7 +712,7 @@ func (p *Pool) transcribeFileWithRetry(ctx context.Context, path, originalName s
 			return nil, err
 		}
 	}
-	return nil, fmt.Errorf("all %d Whisper attempts failed: %w", maxRetries+1, lastErr)
+	return nil, fmt.Errorf("all %d Whisper attempts failed: %w", maxAttempts, lastErr)
 }
 
 func pickDominantLanguage(counts map[string]int) string {
