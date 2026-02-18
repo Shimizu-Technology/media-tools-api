@@ -2,6 +2,13 @@
  * ClerkTokenSync — bridges Clerk session tokens into localStorage
  * so the existing synchronous api.ts getHeaders() can read them.
  *
+ * Design note: lib/api.ts uses synchronous getHeaders() for simplicity.
+ * Rather than converting all API calls to async, this component eagerly
+ * syncs the Clerk token to localStorage on mount and refreshes every 50s.
+ * Race window: on first sign-in, there's a brief moment before the token
+ * is written. In practice this is negligible since the UI renders before
+ * any user-initiated API call.
+ *
  * Renders nothing. Must be inside <ClerkProvider> and <SignedIn>.
  */
 import { useEffect } from 'react';

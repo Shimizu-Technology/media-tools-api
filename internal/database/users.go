@@ -91,11 +91,11 @@ func (db *DB) FindOrCreateClerkUser(ctx context.Context, clerkID, email, name st
 			if linkErr := db.LinkClerkIDToUser(ctx, existing.ID, clerkID); linkErr != nil {
 				return nil, fmt.Errorf("failed to link clerk_id to existing user: %w", linkErr)
 			}
-			existing.ClerkID = clerkID
+			existing.ClerkID = &clerkID
 			// Update name if provided
 			if name != "" {
 				if _, execErr := db.ExecContext(ctx, `UPDATE users SET name = $1 WHERE id = $2`, name, existing.ID); execErr != nil {
-					log.Printf("⚠️ Failed to update name for user %d: %v", existing.ID, execErr)
+					log.Printf("⚠️ Failed to update name for user %s: %v", existing.ID, execErr)
 				} else {
 					existing.Name = name
 				}
@@ -108,7 +108,7 @@ func (db *DB) FindOrCreateClerkUser(ctx context.Context, clerkID, email, name st
 	u := &models.User{
 		Email:   email,
 		Name:    name,
-		ClerkID: clerkID,
+		ClerkID: &clerkID,
 	}
 	if err := db.CreateUserFromClerk(ctx, u); err != nil {
 		// Race condition: another request may have just created this user.
