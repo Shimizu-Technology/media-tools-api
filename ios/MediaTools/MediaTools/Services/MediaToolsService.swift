@@ -60,7 +60,7 @@ final class MediaToolsService {
 
     func uploadAudio(data: Data, filename: String, contentType: String = "general") async throws -> AudioTranscription {
         try await api.upload(
-            "/audio/transcriptions",
+            "/audio/transcribe",
             fileData: data,
             filename: filename,
             mimeType: "audio/m4a",
