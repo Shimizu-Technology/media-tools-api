@@ -131,6 +131,15 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		protected.POST("/pdf/extractions/:id/chat", h.PostPDFChat)
 		protected.GET("/pdf/extractions", h.ListPDFExtractions)
 
+		// Collections (grouping transcripts, audio, PDFs)
+		protected.GET("/collections", h.ListCollections)
+		protected.POST("/collections", h.CreateCollection)
+		protected.GET("/collections/:id", h.GetCollection)
+		protected.PATCH("/collections/:id", h.UpdateCollection)
+		protected.DELETE("/collections/:id", h.DeleteCollection)
+		protected.POST("/collections/:id/items", h.AddCollectionItems)
+		protected.DELETE("/collections/:id/items/:itemId", h.RemoveCollectionItem)
+
 		// Webhook management (MTA-18)
 		protected.POST("/webhooks", h.CreateWebhook)
 		protected.GET("/webhooks", h.ListWebhooks)

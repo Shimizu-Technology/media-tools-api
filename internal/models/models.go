@@ -348,6 +348,58 @@ type WorkspaceResponse struct {
 
 // --- Common Response Types ---
 
+// --- Collections (grouping transcripts, audio, PDFs) ---
+
+// Collection represents a user-created group for organizing media items.
+type Collection struct {
+	ID          string    `json:"id" db:"id"`
+	Name        string    `json:"name" db:"name"`
+	Description string    `json:"description" db:"description"`
+	UserID      *string   `json:"user_id,omitempty" db:"user_id"`
+	APIKeyID    *string   `json:"api_key_id,omitempty" db:"api_key_id"`
+	ItemCount   int       `json:"item_count" db:"item_count"` // computed, not stored
+	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// CollectionItem represents a single item within a collection.
+type CollectionItem struct {
+	ID           string    `json:"id" db:"id"`
+	CollectionID string    `json:"collection_id" db:"collection_id"`
+	ItemType     string    `json:"item_type" db:"item_type"` // transcript, audio, pdf
+	ItemID       string    `json:"item_id" db:"item_id"`
+	Position     int       `json:"position" db:"position"`
+	AddedAt      time.Time `json:"added_at" db:"added_at"`
+	// Populated by JOIN queries — not always present
+	ItemTitle  string `json:"item_title,omitempty" db:"item_title"`
+	ItemStatus string `json:"item_status,omitempty" db:"item_status"`
+}
+
+// CollectionWithItems is a collection plus its items (for detail view).
+type CollectionWithItems struct {
+	Collection
+	Items []CollectionItem `json:"items"`
+}
+
+type CreateCollectionRequest struct {
+	Name        string `json:"name" binding:"required,max=255"`
+	Description string `json:"description"`
+}
+
+type UpdateCollectionRequest struct {
+	Name        *string `json:"name" binding:"omitempty,max=255"`
+	Description *string `json:"description"`
+}
+
+type AddCollectionItemsRequest struct {
+	Items []CollectionItemInput `json:"items" binding:"required,min=1,max=50"`
+}
+
+type CollectionItemInput struct {
+	ItemType string `json:"item_type" binding:"required,oneof=transcript audio pdf"`
+	ItemID   string `json:"item_id" binding:"required"`
+}
+
 type ErrorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
