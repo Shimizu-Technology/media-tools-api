@@ -251,6 +251,7 @@ func (h *Handler) CreateSummary(c *gin.Context) {
 		Model:        req.Model,
 		Length:        req.Length,
 		Style:        req.Style,
+		ContentType:  req.ContentType,
 	})
 
 	job := worker.Job{

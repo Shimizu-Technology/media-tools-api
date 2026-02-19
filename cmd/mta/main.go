@@ -81,6 +81,8 @@ func main() {
 		err = cmdCollection(args)
 	case "collect":
 		err = cmdCollect(args)
+	case "summary":
+		err = cmdSummary(args)
 	case "chat":
 		err = cmdChat(args)
 	case "chat-collection":
@@ -113,6 +115,8 @@ Commands:
   collection <id>               Show collection with items
   collection create <name>      Create a new collection
   collect <item-id> <col-id>    Add an item to a collection
+  summary <id> [--type tutorial|lecture|podcast|conference|review]
+                                Generate AI summary for a transcript
   chat <id> <message>           Chat about a transcript/audio/pdf
   chat-collection <id> <msg>    Chat about all items in a collection
   health                        Check API health
@@ -527,6 +531,57 @@ func cmdCollect(args []string) error {
 	}
 	json.Unmarshal(body, &result)
 	fmt.Printf("✅ Added %d item(s) to collection\n", result.Added)
+	return nil
+}
+
+func cmdSummary(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: mta summary <transcript-id> [--type tutorial|lecture|podcast|conference|review] [--length short|medium|detailed]")
+	}
+	id := args[0]
+	contentType := ""
+	length := "medium"
+	style := "bullet"
+	for i, arg := range args {
+		if arg == "--type" && i+1 < len(args) {
+			contentType = args[i+1]
+		}
+		if arg == "--length" && i+1 < len(args) {
+			length = args[i+1]
+		}
+		if arg == "--style" && i+1 < len(args) {
+			style = args[i+1]
+		}
+	}
+
+	payload := map[string]string{
+		"transcript_id": id,
+		"length":        length,
+		"style":         style,
+	}
+	if contentType != "" {
+		payload["content_type"] = contentType
+	}
+
+	fmt.Println("Generating summary...")
+	body, err := doPost("/summaries", payload)
+	if err != nil {
+		return fmt.Errorf("summary request failed: %w", err)
+	}
+
+	// The summary is async — check if we got a 202 or a direct result
+	var accepted struct {
+		Message string `json:"message"`
+	}
+	json.Unmarshal(body, &accepted)
+	if accepted.Message != "" {
+		fmt.Printf("⏳ %s\n", accepted.Message)
+		fmt.Println("Summary is generating in the background. Check with: mta status <id>")
+		return nil
+	}
+
+	// If we got a direct summary (synchronous path)
+	fmt.Println(prettyJSON(body))
 	return nil
 }
 

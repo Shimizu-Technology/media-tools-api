@@ -55,10 +55,12 @@ type AudioResult struct {
 
 // Result holds the generated summary.
 type Result struct {
-	Summary   string   `json:"summary"`
-	KeyPoints []string `json:"key_points"`
-	Model     string   `json:"model"`
-	Prompt    string   `json:"prompt"`
+	Summary     string   `json:"summary"`
+	KeyPoints   []string `json:"key_points"`
+	ActionItems []string `json:"action_items,omitempty"`
+	Topics      []string `json:"topics,omitempty"`
+	Model       string   `json:"model"`
+	Prompt      string   `json:"prompt"`
 }
 
 // --- OpenRouter API types ---
@@ -115,8 +117,9 @@ func (s *Service) Summarize(ctx context.Context, transcriptText string, opts Opt
 
 	// Build the prompt
 	prompt := buildPrompt(transcriptText, opts)
+	systemPrompt := getVideoSystemPrompt(opts.ContentType)
 
-	log.Printf("🤖 Generating %s %s summary using %s", opts.Length, opts.Style, model)
+	log.Printf("🤖 Generating %s %s summary (type: %s) using %s", opts.Length, opts.Style, opts.ContentType, model)
 
 	// Make the API request
 	reqBody := chatRequest{
@@ -124,7 +127,7 @@ func (s *Service) Summarize(ctx context.Context, transcriptText string, opts Opt
 		Messages: []chatMessage{
 			{
 				Role:    "system",
-				Content: "You are a precise and insightful content summarizer. You extract key information from video transcripts and present it clearly.",
+				Content: systemPrompt,
 			},
 			{
 				Role:    "user",
@@ -492,6 +495,25 @@ func parseAudioOutput(content string) *AudioResult {
 }
 
 // buildPrompt constructs the AI prompt based on options.
+// getVideoSystemPrompt returns a system prompt for video summarization.
+// Uses the content_type option if provided, otherwise defaults to general.
+func getVideoSystemPrompt(contentType string) string {
+	prompts := map[string]string{
+		"tutorial":      "You are an expert at summarizing programming tutorials and technical walkthroughs. Extract the technologies used, step-by-step instructions, gotchas/tips, and what the viewer should be able to do after watching.",
+		"lecture":       "You are an expert at summarizing educational lectures. Extract key concepts, definitions, frameworks, examples, and study-worthy takeaways. Structure for easy review.",
+		"podcast":       "You are an expert at summarizing podcast conversations. Identify the main topics discussed, interesting opinions, notable quotes, disagreements, and key recommendations.",
+		"news":          "You are an expert at summarizing news content. Extract the key facts (who, what, when, where, why), context, implications, and any calls to action.",
+		"conference":    "You are an expert at summarizing conference talks. Extract the speaker's thesis, key arguments, demos shown, tools/resources mentioned, and actionable takeaways.",
+		"entertainment": "You are an expert at summarizing entertainment content. Identify the main narrative or theme, standout moments, and overall tone.",
+		"review":        "You are an expert at summarizing product/tech reviews. Extract the product, pros, cons, key specs, comparisons, and the reviewer's verdict.",
+	}
+
+	if p, ok := prompts[contentType]; ok {
+		return p
+	}
+	return "You are an expert content summarizer. You extract the most important information and present it clearly. You identify key points, actionable takeaways, and important details."
+}
+
 func buildPrompt(transcript string, opts Options) string {
 	lengthGuide := map[string]string{
 		"short":    "2-3 sentences",
@@ -515,30 +537,40 @@ func buildPrompt(transcript string, opts Options) string {
 		style = styleGuide["bullet"]
 	}
 
-	// Truncate very long transcripts to avoid token limits
-	maxLen := 15000
+	// Increase truncation limit — modern models handle 100K+ tokens
+	maxLen := 50000
 	truncated := transcript
 	if len(transcript) > maxLen {
 		truncated = transcript[:maxLen] + "\n\n[Transcript truncated due to length...]"
 	}
 
-	return fmt.Sprintf(`Summarize the following YouTube video transcript.
+	return fmt.Sprintf(`Summarize the following video transcript.
 
 **Length:** %s
 **Style:** %s
 
 **Important:** Respond with valid JSON in this exact format:
 {
-  "summary": "Your summary text here",
-  "key_points": ["Point 1", "Point 2", "Point 3"]
+  "summary": "Clear executive summary of the content",
+  "key_points": ["Most important point 1", "Point 2", "Point 3"],
+  "action_items": ["Actionable takeaway 1", "Takeaway 2"],
+  "topics": ["Topic/technology/concept 1", "Topic 2"]
 }
 
+Rules:
+- "summary" should be a clear, informative executive summary (%s)
+- "key_points" should capture the most important information (5-10 items for detailed, 3-5 for short)
+- "action_items" should list actionable takeaways, things to try, or follow-ups (empty array if none)
+- "topics" should list the main subjects, technologies, or concepts covered
+- Be specific — include names, numbers, tools, and concrete details
+- %s
+
 **Transcript:**
-%s`, length, style, truncated)
+%s`, length, style, length, style, truncated)
 }
 
 func buildTranscriptContext(transcript string) string {
-	maxLen := 15000
+	maxLen := 50000
 	truncated := transcript
 	if len(transcript) > maxLen {
 		truncated = transcript[:maxLen] + "\n\n[Transcript truncated due to length...]"
@@ -549,21 +581,24 @@ func buildTranscriptContext(transcript string) string {
 // parseStructuredOutput tries to extract JSON from the AI response.
 // Falls back to treating the whole response as the summary text.
 func parseStructuredOutput(content string) *Result {
-	// Try to parse as JSON first
 	var structured struct {
-		Summary   string   `json:"summary"`
-		KeyPoints []string `json:"key_points"`
+		Summary     string   `json:"summary"`
+		KeyPoints   []string `json:"key_points"`
+		ActionItems []string `json:"action_items"`
+		Topics      []string `json:"topics"`
 	}
 
+	// Try direct JSON parse
 	if err := json.Unmarshal([]byte(content), &structured); err == nil && structured.Summary != "" {
 		return &Result{
-			Summary:   structured.Summary,
-			KeyPoints: structured.KeyPoints,
+			Summary:     structured.Summary,
+			KeyPoints:   structured.KeyPoints,
+			ActionItems: structured.ActionItems,
+			Topics:      structured.Topics,
 		}
 	}
 
-	// Try to find JSON within the response (models sometimes wrap it in markdown)
-	// Look for { ... } pattern
+	// Try to find JSON within the response (models sometimes wrap in markdown)
 	start := -1
 	end := -1
 	braceCount := 0
@@ -586,8 +621,10 @@ func parseStructuredOutput(content string) *Result {
 		jsonStr := content[start:end]
 		if err := json.Unmarshal([]byte(jsonStr), &structured); err == nil && structured.Summary != "" {
 			return &Result{
-				Summary:   structured.Summary,
-				KeyPoints: structured.KeyPoints,
+				Summary:     structured.Summary,
+				KeyPoints:   structured.KeyPoints,
+				ActionItems: structured.ActionItems,
+				Topics:      structured.Topics,
 			}
 		}
 	}

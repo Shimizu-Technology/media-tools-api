@@ -63,6 +63,7 @@ type SummaryPayload struct {
 	Model        string `json:"model"`
 	Length       string `json:"length"`
 	Style        string `json:"style"`
+	ContentType  string `json:"content_type"`
 	SummaryID    string `json:"summary_id"`
 }
 
@@ -355,9 +356,10 @@ func (p *Pool) processSummary(job Job) error {
 
 	// Generate the summary
 	opts := summary.Options{
-		Model:  payload.Model,
-		Length: payload.Length,
-		Style:  payload.Style,
+		Model:       payload.Model,
+		Length:      payload.Length,
+		Style:       payload.Style,
+		ContentType: payload.ContentType,
 	}
 
 	result, err := p.summarizer.Summarize(ctx, t.TranscriptText, opts)

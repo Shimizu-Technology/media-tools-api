@@ -105,6 +105,7 @@ type CreateSummaryRequest struct {
 	Model        string `json:"model,omitempty"`
 	Length       string `json:"length,omitempty"`
 	Style        string `json:"style,omitempty"`
+	ContentType  string `json:"content_type,omitempty"` // tutorial, lecture, podcast, conference, review, news, entertainment
 }
 
 type CreateChatMessageRequest struct {
