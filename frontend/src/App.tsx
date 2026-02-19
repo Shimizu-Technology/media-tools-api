@@ -9,6 +9,7 @@ import { PdfPage } from './pages/PdfPage'
 import { DocsPage } from './pages/DocsPage'
 import { WebhooksPage } from './pages/WebhooksPage'
 import { OpsPage } from './pages/OpsPage'
+import { CollectionsPage } from './pages/CollectionsPage'
 import { AuthProvider } from './contexts/AuthContext'
 import { setAuthTokenGetter } from './lib/apiAuth'
 import { ClerkTokenSync } from './components/ClerkTokenSync'
@@ -31,6 +32,8 @@ function AppRoutes() {
       <Route path="/pdf" element={<PdfPage />} />
       <Route path="/docs" element={<DocsPage />} />
       <Route path="/webhooks" element={<WebhooksPage />} />
+      <Route path="/collections" element={<CollectionsPage />} />
+      <Route path="/collections/:collectionId" element={<CollectionsPage />} />
       <Route path="/ops" element={<OpsPage />} />
       <Route path="/history" element={<Navigate to="/library?type=youtube" replace />} />
     </Routes>

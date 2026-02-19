@@ -711,3 +711,72 @@ export async function listWebhookDeliveries(): Promise<WebhookDelivery[]> {
   const res = await fetch(`${API_BASE}/webhooks/deliveries`, { headers: getHeaders() });
   return handleResponse<WebhookDelivery[]>(res);
 }
+
+// ── Collections ──
+
+export interface Collection {
+  id: string;
+  name: string;
+  description: string;
+  user_id?: string;
+  api_key_id?: string;
+  item_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CollectionItem {
+  id: string;
+  collection_id: string;
+  item_type: 'transcript' | 'audio' | 'pdf';
+  item_id: string;
+  item_title?: string;
+  item_status?: string;
+  position: number;
+  added_at: string;
+}
+
+export interface CollectionWithItems extends Collection {
+  items: CollectionItem[];
+}
+
+export async function listCollections(): Promise<Collection[]> {
+  const res = await fetch(`${API_BASE}/collections`, { headers: getHeaders() });
+  return handleResponse<Collection[]>(res);
+}
+
+export async function createCollection(name: string, description?: string): Promise<Collection> {
+  const res = await fetch(`${API_BASE}/collections`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ name, description: description || '' }),
+  });
+  return handleResponse<Collection>(res);
+}
+
+export async function getCollection(id: string): Promise<CollectionWithItems> {
+  const res = await fetch(`${API_BASE}/collections/${id}`, { headers: getHeaders() });
+  return handleResponse<CollectionWithItems>(res);
+}
+
+export async function updateCollection(id: string, data: { name?: string; description?: string }): Promise<Collection> {
+  const res = await fetch(`${API_BASE}/collections/${id}`, {
+    method: 'PATCH', headers: getHeaders(), body: JSON.stringify(data),
+  });
+  return handleResponse<Collection>(res);
+}
+
+export async function deleteCollection(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/collections/${id}`, { method: 'DELETE', headers: getHeaders() });
+  if (!res.ok) throw new Error('Failed to delete collection');
+}
+
+export async function addCollectionItems(id: string, items: { item_type: string; item_id: string }[]): Promise<{ added: number }> {
+  const res = await fetch(`${API_BASE}/collections/${id}/items`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ items }),
+  });
+  return handleResponse<{ added: number }>(res);
+}
+
+export async function removeCollectionItem(collectionId: string, itemId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/collections/${collectionId}/items/${itemId}`, { method: 'DELETE', headers: getHeaders() });
+  if (!res.ok) throw new Error('Failed to remove item from collection');
+}

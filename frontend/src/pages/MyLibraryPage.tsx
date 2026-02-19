@@ -20,7 +20,9 @@ import {
   Trash2,
   CheckCircle2,
   Circle,
+  FolderPlus,
 } from 'lucide-react';
+import { AddToCollectionModal } from '../components/AddToCollectionModal';
 import {
   listTranscripts,
   listAudioTranscriptions,
@@ -74,6 +76,7 @@ export function MyLibraryPage() {
   // Selection state for bulk delete
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
+  const [collectionModal, setCollectionModal] = useState<{ type: 'transcript' | 'audio' | 'pdf'; id: string; title: string } | null>(null);
 
   // Update URL when tab changes
   const handleTabChange = (tab: ContentType) => {
@@ -586,6 +589,15 @@ export function MyLibraryPage() {
 
                 {/* Type indicator + Delete button */}
                 <div className="absolute top-4 right-4 flex items-center gap-1">
+                  {/* Add to collection - shown on hover */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setCollectionModal({ type: item.type === 'youtube' ? 'transcript' : item.type, id: item.id, title: item.title }); }}
+                    className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ color: 'var(--color-text-muted)' }}
+                    title="Add to collection"
+                  >
+                    <FolderPlus className="w-4 h-4" />
+                  </button>
                   {/* Delete button - shown on hover */}
                   <button
                     onClick={(e) => handleDelete(item, e)}
@@ -701,6 +713,14 @@ export function MyLibraryPage() {
           </button>
         </motion.div>
       )}
+      {/* Add to Collection Modal */}
+      <AddToCollectionModal
+        open={!!collectionModal}
+        onClose={() => setCollectionModal(null)}
+        itemType={collectionModal?.type || 'transcript'}
+        itemId={collectionModal?.id || ''}
+        itemTitle={collectionModal?.title}
+      />
     </motion.div>
   );
 }
