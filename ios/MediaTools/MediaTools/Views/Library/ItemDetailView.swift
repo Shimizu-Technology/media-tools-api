@@ -5,81 +5,34 @@ struct ItemDetailView: View {
     @State private var transcript: Transcript?
     @State private var audio: AudioTranscription?
     @State private var showChat = false
-    @State private var showSummary = false
     @State private var showAddToCollection = false
     @State private var summary: Summary?
     @State private var isLoadingSummary = false
+    @State private var summaryContentType = "general"
+    @State private var showExportSheet = false
+    @State private var exportText = ""
 
     private let service = MediaToolsService.shared
+
+    private let summaryTypes = [
+        ("general", "General"),
+        ("tutorial", "Tutorial"),
+        ("lecture", "Lecture"),
+        ("podcast", "Podcast"),
+        ("conference", "Conference"),
+        ("review", "Review"),
+        ("news", "News"),
+    ]
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                // Header
                 headerSection
-
-                // Action buttons
                 actionButtons
-
-                // Content
-                if let text = contentText, !text.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Transcript")
-                            .font(.headline)
-
-                        Text(text)
-                            .font(.body)
-                            .foregroundStyle(.primary.opacity(0.85))
-                            .textSelection(.enabled)
-                    }
-                }
-
-                // Summary
-                if let summary, let summaryText = summary.summary {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Summary")
-                            .font(.headline)
-
-                        Text(summaryText)
-                            .font(.body)
-                            .foregroundStyle(.primary.opacity(0.85))
-                            .textSelection(.enabled)
-
-                        if let points = summary.keyPoints, !points.isEmpty {
-                            Text("Key Points")
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.top, 4)
-
-                            ForEach(points, id: \.self) { point in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: "circle.fill")
-                                        .font(.system(size: 5))
-                                        .padding(.top, 7)
-                                        .foregroundStyle(.teal)
-                                    Text(point)
-                                        .font(.subheadline)
-                                }
-                            }
-                        }
-
-                        if let actions = summary.actionItems, !actions.isEmpty {
-                            Text("Action Items")
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.top, 4)
-
-                            ForEach(actions, id: \.self) { action in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: "checkmark.square")
-                                        .font(.caption)
-                                        .foregroundStyle(.teal)
-                                        .padding(.top, 2)
-                                    Text(action)
-                                        .font(.subheadline)
-                                }
-                            }
-                        }
-                    }
-                }
+                summaryTypeSection
+                audioPlayerSection
+                summarySection
+                transcriptSection
             }
             .padding()
         }
@@ -104,6 +57,9 @@ struct ItemDetailView: View {
                 onDismiss: { showAddToCollection = false }
             )
         }
+        .sheet(isPresented: $showExportSheet) {
+            ExportSheet(text: exportText, title: title)
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
@@ -115,11 +71,15 @@ struct ItemDetailView: View {
                     if let text = contentText {
                         Button {
                             UIPasteboard.general.string = text
+                            Haptics.success()
                         } label: {
                             Label("Copy Text", systemImage: "doc.on.doc")
                         }
-                        ShareLink(item: text) {
-                            Label("Share", systemImage: "square.and.arrow.up")
+                        Button {
+                            exportText = text
+                            showExportSheet = true
+                        } label: {
+                            Label("Export", systemImage: "square.and.arrow.up")
                         }
                     }
                 } label: {
@@ -130,7 +90,7 @@ struct ItemDetailView: View {
         .task { await loadDetail() }
     }
 
-    // MARK: - Subviews
+    // MARK: - Header
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -142,19 +102,25 @@ struct ItemDetailView: View {
                 VStack(alignment: .leading) {
                     Text(title)
                         .font(.title3.weight(.semibold))
-                    Text(statusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        StatusBadge(status: statusText)
+                        if let wc = wordCount, wc > 0 {
+                            Text("\(wc) words")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let dur = audioDuration {
+                            Text(formatDuration(dur))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
-            }
-
-            if let wc = wordCount, wc > 0 {
-                Text("\(wc) words")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
             }
         }
     }
+
+    // MARK: - Actions
 
     private var actionButtons: some View {
         HStack(spacing: 12) {
@@ -180,15 +146,136 @@ struct ItemDetailView: View {
             }
             .buttonStyle(.bordered)
             .disabled(isLoadingSummary)
+        }
+    }
 
-            // Copy button
-            if let text = contentText {
-                Button {
-                    UIPasteboard.general.string = text
-                } label: {
-                    Image(systemName: "doc.on.doc")
+    // MARK: - Summary Content Type
+
+    @ViewBuilder
+    private var summaryTypeSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Summary Style")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(summaryTypes, id: \.0) { type in
+                        Button {
+                            summaryContentType = type.0
+                        } label: {
+                            Text(type.1)
+                                .font(.caption)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(summaryContentType == type.0 ? Color.teal : Color.secondary.opacity(0.1))
+                                .foregroundStyle(summaryContentType == type.0 ? .white : .primary)
+                                .clipShape(Capsule())
+                        }
+                    }
                 }
-                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    // MARK: - Audio Player
+
+    @ViewBuilder
+    private var audioPlayerSection: some View {
+        if case .audio(let a) = item, a.isComplete {
+            AudioPlayerView(audioId: a.id)
+        }
+    }
+
+    // MARK: - Summary
+
+    @ViewBuilder
+    private var summarySection: some View {
+        if let summary, let summaryText = summary.summary {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(.teal)
+                    Text("Summary")
+                        .font(.headline)
+                }
+
+                Text(summaryText)
+                    .font(.body)
+                    .foregroundStyle(.primary.opacity(0.85))
+                    .textSelection(.enabled)
+
+                if let points = summary.keyPoints, !points.isEmpty {
+                    Text("Key Points")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.top, 4)
+
+                    ForEach(points, id: \.self) { point in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 5))
+                                .padding(.top, 7)
+                                .foregroundStyle(.teal)
+                            Text(point)
+                                .font(.subheadline)
+                        }
+                    }
+                }
+
+                if let actions = summary.actionItems, !actions.isEmpty {
+                    Text("Action Items")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.top, 4)
+
+                    ForEach(actions, id: \.self) { action in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "checkmark.square")
+                                .font(.caption)
+                                .foregroundStyle(.teal)
+                                .padding(.top, 2)
+                            Text(action)
+                                .font(.subheadline)
+                        }
+                    }
+                }
+
+                if let topics = summary.topics, !topics.isEmpty {
+                    Text("Topics")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.top, 4)
+
+                    FlowLayout(spacing: 6) {
+                        ForEach(topics, id: \.self) { topic in
+                            Text(topic)
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.teal.opacity(0.1))
+                                .foregroundStyle(.teal)
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+            .padding()
+            .background(.secondary.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    // MARK: - Transcript Text
+
+    @ViewBuilder
+    private var transcriptSection: some View {
+        if let text = contentText, !text.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Transcript")
+                    .font(.headline)
+
+                Text(text)
+                    .font(.body)
+                    .foregroundStyle(.primary.opacity(0.85))
+                    .textSelection(.enabled)
             }
         }
     }
@@ -251,8 +338,19 @@ struct ItemDetailView: View {
         }
     }
 
+    private var audioDuration: Double? {
+        if case .audio(let a) = item { return a.durationSeconds }
+        return nil
+    }
+
     private var contentText: String? {
         transcript?.transcriptText ?? audio?.transcriptText ?? nil
+    }
+
+    private func formatDuration(_ seconds: Double) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return "\(mins):\(String(format: "%02d", secs))"
     }
 
     private func loadDetail() async {
@@ -263,7 +361,7 @@ struct ItemDetailView: View {
             case .audio(let a):
                 audio = try await service.getAudioItem(a.id)
             case .pdf:
-                break // PDFs don't have a separate detail endpoint yet
+                break
             }
         } catch {
             print("Failed to load detail: \(error)")
@@ -272,11 +370,116 @@ struct ItemDetailView: View {
 
     private func generateSummary() async {
         isLoadingSummary = true
+        Haptics.light()
         defer { isLoadingSummary = false }
         do {
-            summary = try await service.getSummary(transcriptId: itemId)
+            summary = try await service.getSummary(
+                transcriptId: itemId,
+                contentType: summaryContentType == "general" ? nil : summaryContentType
+            )
+            Haptics.success()
         } catch {
+            Haptics.error()
             print("Summary failed: \(error)")
         }
+    }
+}
+
+// MARK: - Export Sheet
+
+struct ExportSheet: View {
+    let text: String
+    let title: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Button {
+                    shareText(text, as: "\(title).txt")
+                } label: {
+                    Label("Plain Text (.txt)", systemImage: "doc.text")
+                }
+
+                Button {
+                    let md = "# \(title)\n\n\(text)"
+                    shareText(md, as: "\(title).md")
+                } label: {
+                    Label("Markdown (.md)", systemImage: "doc.richtext")
+                }
+
+                Button {
+                    let json: [String: Any] = ["title": title, "text": text]
+                    if let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
+                       let jsonString = String(data: data, encoding: .utf8) {
+                        shareText(jsonString, as: "\(title).json")
+                    }
+                } label: {
+                    Label("JSON (.json)", systemImage: "curlybraces")
+                }
+            }
+            .navigationTitle("Export As")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func shareText(_ content: String, as filename: String) {
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        try? content.write(to: tempURL, atomically: true, encoding: .utf8)
+
+        let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = windowScene.windows.first?.rootViewController {
+            root.present(activityVC, animated: true)
+        }
+        dismiss()
+    }
+}
+
+// MARK: - Flow Layout (for topic chips)
+
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = arrange(proposal: proposal, subviews: subviews)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = arrange(proposal: proposal, subviews: subviews)
+        for (index, position) in result.positions.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), proposal: .unspecified)
+        }
+    }
+
+    private func arrange(proposal: ProposedViewSize, subviews: Subviews) -> (positions: [CGPoint], size: CGSize) {
+        let maxWidth = proposal.width ?? .infinity
+        var positions: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var maxX: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > maxWidth && x > 0 {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            positions.append(CGPoint(x: x, y: y))
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+            maxX = max(maxX, x)
+        }
+
+        return (positions, CGSize(width: maxX, height: y + rowHeight))
     }
 }

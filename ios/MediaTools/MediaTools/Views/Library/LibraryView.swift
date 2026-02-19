@@ -6,8 +6,25 @@ struct LibraryView: View {
     @State private var searchText = ""
     @State private var searchResults: [Transcript] = []
     @State private var isSearching = false
+    @State private var sortOrder: SortOrder = .newest
+    @State private var statusFilter: StatusFilter = .all
+    @State private var isSelecting = false
+    @State private var selectedIds: Set<String> = []
 
     private let tabs = ["All", "Videos", "Audio", "PDFs"]
+
+    enum SortOrder: String, CaseIterable {
+        case newest = "Newest"
+        case oldest = "Oldest"
+        case title = "Title"
+    }
+
+    enum StatusFilter: String, CaseIterable {
+        case all = "All"
+        case completed = "Completed"
+        case processing = "Processing"
+        case failed = "Failed"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,16 +39,19 @@ struct LibraryView: View {
             .padding(.vertical, 8)
 
             // Content
-            List {
+            List(selection: isSelecting ? $selectedIds : nil) {
                 if isSearching && !searchText.isEmpty {
                     ForEach(searchResults) { item in
-                        TranscriptRow(transcript: item)
+                        NavigationLink(value: LibraryItem.transcript(item)) {
+                            TranscriptRow(transcript: item)
+                        }
                     }
                 } else {
                     if selectedTab == 0 || selectedTab == 1 {
-                        if !service.transcripts.isEmpty {
-                            Section("Videos") {
-                                ForEach(service.transcripts) { item in
+                        let filtered = filteredTranscripts
+                        if !filtered.isEmpty {
+                            Section("Videos (\(filtered.count))") {
+                                ForEach(filtered) { item in
                                     NavigationLink(value: LibraryItem.transcript(item)) {
                                         TranscriptRow(transcript: item)
                                     }
@@ -45,9 +65,10 @@ struct LibraryView: View {
                     }
 
                     if selectedTab == 0 || selectedTab == 2 {
-                        if !service.audioItems.isEmpty {
-                            Section("Audio") {
-                                ForEach(service.audioItems) { item in
+                        let filtered = filteredAudio
+                        if !filtered.isEmpty {
+                            Section("Audio (\(filtered.count))") {
+                                ForEach(filtered) { item in
                                     NavigationLink(value: LibraryItem.audio(item)) {
                                         AudioRow(audio: item)
                                     }
@@ -61,9 +82,10 @@ struct LibraryView: View {
                     }
 
                     if selectedTab == 0 || selectedTab == 3 {
-                        if !service.pdfItems.isEmpty {
-                            Section("PDFs") {
-                                ForEach(service.pdfItems) { item in
+                        let filtered = filteredPDFs
+                        if !filtered.isEmpty {
+                            Section("PDFs (\(filtered.count))") {
+                                ForEach(filtered) { item in
                                     NavigationLink(value: LibraryItem.pdf(item)) {
                                         PDFRow(pdf: item)
                                     }
@@ -76,7 +98,7 @@ struct LibraryView: View {
                         }
                     }
 
-                    if service.transcripts.isEmpty && service.audioItems.isEmpty && service.pdfItems.isEmpty && !service.isLoading {
+                    if totalCount == 0 && !service.isLoading {
                         ContentUnavailableView(
                             "No Items Yet",
                             systemImage: "tray",
@@ -88,6 +110,24 @@ struct LibraryView: View {
             .listStyle(.insetGrouped)
             .navigationDestination(for: LibraryItem.self) { item in
                 ItemDetailView(item: item)
+            }
+
+            // Bulk action bar
+            if isSelecting && !selectedIds.isEmpty {
+                HStack {
+                    Text("\(selectedIds.count) selected")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Button(role: .destructive) {
+                        Task { await bulkDelete() }
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                }
+                .padding()
+                .background(.bar)
             }
         }
         .navigationTitle("Library")
@@ -103,8 +143,61 @@ struct LibraryView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                NavigationLink(value: "pdf-upload") {
-                    Image(systemName: "doc.badge.plus")
+                Menu {
+                    // Sort
+                    Menu {
+                        ForEach(SortOrder.allCases, id: \.self) { order in
+                            Button {
+                                sortOrder = order
+                            } label: {
+                                HStack {
+                                    Text(order.rawValue)
+                                    if sortOrder == order {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Sort", systemImage: "arrow.up.arrow.down")
+                    }
+
+                    // Filter
+                    Menu {
+                        ForEach(StatusFilter.allCases, id: \.self) { filter in
+                            Button {
+                                statusFilter = filter
+                            } label: {
+                                HStack {
+                                    Text(filter.rawValue)
+                                    if statusFilter == filter {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Filter", systemImage: "line.3.horizontal.decrease")
+                    }
+
+                    Divider()
+
+                    // Select mode
+                    Button {
+                        isSelecting.toggle()
+                        if !isSelecting { selectedIds.removeAll() }
+                    } label: {
+                        Label(isSelecting ? "Cancel Selection" : "Select", systemImage: isSelecting ? "xmark" : "checkmark.circle")
+                    }
+
+                    Divider()
+
+                    // PDF upload
+                    NavigationLink(value: "pdf-upload") {
+                        Label("Upload PDF", systemImage: "doc.badge.plus")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
             }
         }
@@ -121,6 +214,51 @@ struct LibraryView: View {
         }
     }
 
+    // MARK: - Filtering & Sorting
+
+    private var filteredTranscripts: [Transcript] {
+        var items = service.transcripts
+        if statusFilter != .all {
+            items = items.filter { $0.status == statusFilter.rawValue.lowercased() }
+        }
+        return sorted(items, by: \.title, date: \.createdAt)
+    }
+
+    private var filteredAudio: [AudioTranscription] {
+        var items = service.audioItems
+        if statusFilter != .all {
+            items = items.filter { $0.status == statusFilter.rawValue.lowercased() }
+        }
+        return sorted(items, by: \.title, date: \.createdAt)
+    }
+
+    private var filteredPDFs: [PDFExtraction] {
+        var items = service.pdfItems
+        if statusFilter != .all {
+            items = items.filter { $0.status == statusFilter.rawValue.lowercased() }
+        }
+        return sorted(items, by: \.filename, date: \.createdAt)
+    }
+
+    private var totalCount: Int {
+        (selectedTab == 0 || selectedTab == 1 ? filteredTranscripts.count : 0) +
+        (selectedTab == 0 || selectedTab == 2 ? filteredAudio.count : 0) +
+        (selectedTab == 0 || selectedTab == 3 ? filteredPDFs.count : 0)
+    }
+
+    private func sorted<T>(_ items: [T], by titlePath: KeyPath<T, String?>, date datePath: KeyPath<T, Date?>) -> [T] {
+        switch sortOrder {
+        case .newest:
+            return items.sorted { ($0[keyPath: datePath] ?? .distantPast) > ($1[keyPath: datePath] ?? .distantPast) }
+        case .oldest:
+            return items.sorted { ($0[keyPath: datePath] ?? .distantPast) < ($1[keyPath: datePath] ?? .distantPast) }
+        case .title:
+            return items.sorted { ($0[keyPath: titlePath] ?? "") < ($1[keyPath: titlePath] ?? "") }
+        }
+    }
+
+    // MARK: - Actions
+
     private func search() async {
         isSearching = true
         do {
@@ -128,6 +266,19 @@ struct LibraryView: View {
         } catch {
             print("Search failed: \(error)")
         }
+    }
+
+    private func bulkDelete() async {
+        for id in selectedIds {
+            // Try deleting from each type (API will 404 for wrong type, that's fine)
+            try? await service.deleteTranscript(id)
+            try? await service.deleteAudioItem(id)
+            try? await service.deletePDF(id)
+        }
+        selectedIds.removeAll()
+        isSelecting = false
+        await service.refreshAll()
+        Haptics.success()
     }
 }
 
@@ -138,7 +289,6 @@ enum LibraryItem: Hashable {
     case audio(AudioTranscription)
     case pdf(PDFExtraction)
 
-    // Hashable conformance by id
     func hash(into hasher: inout Hasher) {
         switch self {
         case .transcript(let t): hasher.combine("t-\(t.id)")

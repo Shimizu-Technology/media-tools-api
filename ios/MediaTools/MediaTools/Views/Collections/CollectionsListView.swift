@@ -20,6 +20,17 @@ struct CollectionsListView: View {
                 NavigationLink(value: collection.id) {
                     CollectionRow(collection: collection)
                 }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        Task {
+                            try? await service.deleteCollection(collection.id)
+                            await service.loadCollections()
+                            Haptics.success()
+                        }
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
             }
         }
         .listStyle(.insetGrouped)
