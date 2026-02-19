@@ -6,6 +6,7 @@ struct ItemDetailView: View {
     @State private var audio: AudioTranscription?
     @State private var showChat = false
     @State private var showSummary = false
+    @State private var showAddToCollection = false
     @State private var summary: Summary?
     @State private var isLoadingSummary = false
 
@@ -94,6 +95,36 @@ struct ItemDetailView: View {
                             Button("Done") { showChat = false }
                         }
                     }
+            }
+        }
+        .sheet(isPresented: $showAddToCollection) {
+            AddToCollectionSheet(
+                itemType: chatItemType,
+                itemId: itemId,
+                onDismiss: { showAddToCollection = false }
+            )
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button {
+                        showAddToCollection = true
+                    } label: {
+                        Label("Add to Collection", systemImage: "folder.badge.plus")
+                    }
+                    if let text = contentText {
+                        Button {
+                            UIPasteboard.general.string = text
+                        } label: {
+                            Label("Copy Text", systemImage: "doc.on.doc")
+                        }
+                        ShareLink(item: text) {
+                            Label("Share", systemImage: "square.and.arrow.up")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
             }
         }
         .task { await loadDetail() }

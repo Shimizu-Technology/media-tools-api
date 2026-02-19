@@ -89,6 +89,18 @@ struct LibraryView: View {
                 searchResults = []
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                NavigationLink(value: "pdf-upload") {
+                    Image(systemName: "doc.badge.plus")
+                }
+            }
+        }
+        .navigationDestination(for: String.self) { value in
+            if value == "pdf-upload" {
+                PDFUploadView()
+            }
+        }
         .refreshable {
             await service.refreshAll()
         }

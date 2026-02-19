@@ -128,6 +128,10 @@ struct TranscribeView: View {
             if result?.status == "completed" {
                 url = "" // Clear on success
                 await service.loadTranscripts() // Refresh library
+                NotificationService.notifyTranscriptionComplete(
+                    title: result?.displayTitle ?? "Video",
+                    itemId: result?.id ?? ""
+                )
             }
         } catch {
             self.error = error.localizedDescription

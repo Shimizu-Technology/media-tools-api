@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Microphone access for audio recording -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Media Tools needs microphone access to record audio for transcription.</string>
+
+    <!-- Configuration values (can be overridden via xcconfig) -->
+    <key>CLERK_PUBLISHABLE_KEY</key>
+    <string>$(CLERK_PUBLISHABLE_KEY)</string>
+    <key>API_BASE_URL</key>
+    <string>$(API_BASE_URL)</string>
+
+    <!-- App Transport Security (allow localhost in dev) -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+</dict>
+</plist>
