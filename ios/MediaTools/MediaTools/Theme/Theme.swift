@@ -96,13 +96,11 @@ extension View {
     }
 }
 
-// MARK: - Themed Button Styles
+// MARK: - Themed Button Modifiers
 
-struct BrandButtonStyle: SwiftUI.ButtonStyle {
-    var isDestructive: Bool = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+extension View {
+    func brandButtonStyle(isDestructive: Bool = false) -> some View {
+        self
             .font(Theme.body(16, weight: .semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 20)
@@ -110,14 +108,11 @@ struct BrandButtonStyle: SwiftUI.ButtonStyle {
             .background(
                 RoundedRectangle(cornerRadius: Theme.radiusMedium)
                     .fill(isDestructive ? Theme.error : Theme.brand500)
-                    .opacity(configuration.isPressed ? 0.8 : 1.0)
             )
     }
-}
 
-struct SecondaryButtonStyle: SwiftUI.ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+    func secondaryButtonStyle() -> some View {
+        self
             .font(Theme.body(14, weight: .medium))
             .foregroundStyle(Theme.textPrimary)
             .padding(.horizontal, 16)
@@ -125,20 +120,15 @@ struct SecondaryButtonStyle: SwiftUI.ButtonStyle {
             .background(
                 RoundedRectangle(cornerRadius: Theme.radiusMedium)
                     .fill(Theme.surfaceCard)
-                    .opacity(configuration.isPressed ? 0.7 : 1.0)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radiusMedium)
                     .stroke(Theme.border, lineWidth: 1)
             )
     }
-}
 
-struct ChipStyle: SwiftUI.ButtonStyle {
-    var isSelected: Bool = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+    func chipStyle(isSelected: Bool = false) -> some View {
+        self
             .font(Theme.caption(12, weight: .medium))
             .padding(.horizontal, 12)
             .padding(.vertical, 6)

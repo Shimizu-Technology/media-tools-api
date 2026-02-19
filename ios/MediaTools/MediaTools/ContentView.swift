@@ -110,7 +110,7 @@ struct WelcomeView: View {
                     Text("Get Started")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(BrandButtonStyle())
+                .brandButtonStyle()
                 .padding(.horizontal, 32)
 
                 Text("Powered by Shimizu Technology")
