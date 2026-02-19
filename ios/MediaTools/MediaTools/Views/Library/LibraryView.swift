@@ -35,6 +35,10 @@ struct LibraryView: View {
                                     NavigationLink(value: LibraryItem.transcript(item)) {
                                         TranscriptRow(transcript: item)
                                     }
+                                    .librarySwipeActions(itemType: "transcript", itemId: item.id) {
+                                        try? await service.deleteTranscript(item.id)
+                                        await service.loadTranscripts()
+                                    }
                                 }
                             }
                         }
@@ -47,6 +51,10 @@ struct LibraryView: View {
                                     NavigationLink(value: LibraryItem.audio(item)) {
                                         AudioRow(audio: item)
                                     }
+                                    .librarySwipeActions(itemType: "audio", itemId: item.id) {
+                                        try? await service.deleteAudioItem(item.id)
+                                        await service.loadAudioItems()
+                                    }
                                 }
                             }
                         }
@@ -58,6 +66,10 @@ struct LibraryView: View {
                                 ForEach(service.pdfItems) { item in
                                     NavigationLink(value: LibraryItem.pdf(item)) {
                                         PDFRow(pdf: item)
+                                    }
+                                    .librarySwipeActions(itemType: "pdf", itemId: item.id) {
+                                        try? await service.deletePDF(item.id)
+                                        await service.loadPDFs()
                                     }
                                 }
                             }

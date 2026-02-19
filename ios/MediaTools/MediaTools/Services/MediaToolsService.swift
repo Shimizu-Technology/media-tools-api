@@ -40,6 +40,10 @@ final class MediaToolsService {
         return response.data
     }
 
+    func deleteTranscript(_ id: String) async throws {
+        try await api.delete("/transcripts/\(id)")
+    }
+
     // MARK: - Audio
 
     func loadAudioItems() async {
@@ -64,6 +68,10 @@ final class MediaToolsService {
         )
     }
 
+    func deleteAudioItem(_ id: String) async throws {
+        try await api.delete("/audio/transcriptions/\(id)")
+    }
+
     // MARK: - PDFs
 
     func loadPDFs() async {
@@ -72,6 +80,10 @@ final class MediaToolsService {
         } catch {
             print("Failed to load PDFs: \(error)")
         }
+    }
+
+    func deletePDF(_ id: String) async throws {
+        try await api.delete("/pdf/extractions/\(id)")
     }
 
     // MARK: - Collections
@@ -158,5 +170,16 @@ final class MediaToolsService {
         async let p: () = loadPDFs()
         async let c: () = loadCollections()
         _ = await (t, a, p, c)
+
+        // Index in Spotlight for system-wide search
+        SpotlightService.indexTranscripts(transcripts)
+        SpotlightService.indexAudioItems(audioItems)
+
+        // Update home screen widget
+        WidgetService.updateRecentItems(
+            transcripts: transcripts,
+            audioItems: audioItems,
+            pdfItems: pdfItems
+        )
     }
 }
