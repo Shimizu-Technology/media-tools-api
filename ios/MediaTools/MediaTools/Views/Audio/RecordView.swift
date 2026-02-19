@@ -41,7 +41,7 @@ struct RecordView: View {
                                 }
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
-                                .background(contentType == type.0 ? Color.teal : Color.secondary.opacity(0.1))
+                                .background(contentType == type.0 ? Theme.brand500 : Color.secondary.opacity(0.1))
                                 .foregroundStyle(contentType == type.0 ? .white : .primary)
                                 .clipShape(Capsule())
                             }
@@ -58,14 +58,14 @@ struct RecordView: View {
                 // Timer
                 Text(recorder.formattedDuration)
                     .font(.system(size: 48, weight: .light, design: .monospaced))
-                    .foregroundStyle(recorder.isRecording ? .teal : .secondary)
+                    .foregroundStyle(recorder.isRecording ? Theme.brand500 : .secondary)
 
                 // Waveform placeholder
                 if recorder.isRecording {
                     HStack(spacing: 3) {
                         ForEach(0..<20, id: \.self) { i in
                             RoundedRectangle(cornerRadius: 2)
-                                .fill(.teal)
+                                .fill(Theme.brand500)
                                 .frame(width: 4, height: CGFloat.random(in: 8...40))
                                 .animation(
                                     .easeInOut(duration: 0.3)
@@ -88,7 +88,7 @@ struct RecordView: View {
                 } label: {
                     ZStack {
                         Circle()
-                            .fill(recorder.isRecording ? .red : .teal)
+                            .fill(recorder.isRecording ? .red : Theme.brand500)
                             .frame(width: 72, height: 72)
 
                         if recorder.isRecording {
@@ -102,11 +102,11 @@ struct RecordView: View {
                         }
                     }
                 }
-                .shadow(color: (recorder.isRecording ? Color.red : .teal).opacity(0.3), radius: 12)
+                .shadow(color: (recorder.isRecording ? Color.red : Theme.brand500).opacity(0.3), radius: 12)
 
                 Text(recorder.isRecording ? "Tap to stop" : "Tap to record")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
 
             Spacer()
@@ -133,7 +133,7 @@ struct RecordView: View {
                             }
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(.teal)
+                        .tint(Theme.brand500)
                         .disabled(isUploading)
 
                         Button {
@@ -142,7 +142,7 @@ struct RecordView: View {
                             Label("Discard", systemImage: "trash")
                         }
                         .buttonStyle(.bordered)
-                        .tint(.red)
+                        .tint(Theme.error)
                     }
                 }
                 .padding()

@@ -23,7 +23,7 @@ struct SettingsView: View {
                             if let email = user.primaryEmailAddress?.emailAddress {
                                 Text(email)
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(Theme.textSecondary)
                             }
                         }
                     }
@@ -62,8 +62,10 @@ struct SettingsView: View {
                         Spacer()
                         Image(systemName: "arrow.up.right")
                             .font(.caption)
+                            .foregroundStyle(Theme.textMuted)
                     }
                 }
+                .foregroundStyle(Theme.textPrimary)
             }
         }
         .listStyle(.insetGrouped)

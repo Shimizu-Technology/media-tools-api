@@ -51,7 +51,7 @@ struct TranscribeView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
-            .tint(.teal)
+            .tint(Theme.brand500)
             .disabled(url.isEmpty || isSubmitting)
             .padding(.horizontal)
 
@@ -60,7 +60,7 @@ struct TranscribeView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Image(systemName: result.isComplete ? "checkmark.circle.fill" : "clock")
-                            .foregroundStyle(result.isComplete ? .green : .orange)
+                            .foregroundStyle(result.isComplete ? .green : Theme.audioColor)
                         Text(result.isComplete ? "Complete" : "Processing...")
                             .font(.headline)
                     }
@@ -71,12 +71,12 @@ struct TranscribeView: View {
                     if let wc = result.wordCount, wc > 0 {
                         Text("\(wc) words")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.teal.opacity(0.08))
+                .background(Theme.brand500.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal)
             }
@@ -95,7 +95,7 @@ struct TranscribeView: View {
             VStack(spacing: 8) {
                 Text("Supported Platforms")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
 
                 HStack(spacing: 16) {
                     PlatformChip(name: "YouTube", icon: "play.rectangle.fill")

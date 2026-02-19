@@ -124,7 +124,7 @@ struct LibraryView: View {
                         Label("Delete", systemImage: "trash")
                     }
                     .buttonStyle(.bordered)
-                    .tint(.red)
+                    .tint(Theme.error)
                 }
                 .padding()
                 .background(.bar)
@@ -311,7 +311,7 @@ struct TranscriptRow: View {
         HStack(spacing: 12) {
             Image(systemName: "play.rectangle.fill")
                 .font(.title2)
-                .foregroundStyle(.teal)
+                .foregroundStyle(Theme.videoColor)
                 .frame(width: 36)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -324,7 +324,7 @@ struct TranscriptRow: View {
                     if let wc = transcript.wordCount, wc > 0 {
                         Text("\(wc) words")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                 }
             }
@@ -340,7 +340,7 @@ struct AudioRow: View {
         HStack(spacing: 12) {
             Image(systemName: "mic.fill")
                 .font(.title2)
-                .foregroundStyle(.orange)
+                .foregroundStyle(Theme.audioColor)
                 .frame(width: 36)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -353,7 +353,7 @@ struct AudioRow: View {
                     if let dur = audio.durationSeconds {
                         Text(formatDuration(dur))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                 }
             }
@@ -375,7 +375,7 @@ struct PDFRow: View {
         HStack(spacing: 12) {
             Image(systemName: "doc.fill")
                 .font(.title2)
-                .foregroundStyle(.red)
+                .foregroundStyle(Theme.pdfColor)
                 .frame(width: 36)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -388,7 +388,7 @@ struct PDFRow: View {
                     if let pages = pdf.pageCount {
                         Text("\(pages) pages")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                 }
             }
@@ -414,10 +414,10 @@ struct StatusBadge: View {
 
     private var backgroundColor: Color {
         switch status {
-        case "completed": .green
-        case "processing", "pending": .orange
-        case "failed": .red
-        default: .gray
+        case "completed": Theme.success
+        case "processing", "pending": Theme.warning
+        case "failed": Theme.error
+        default: Theme.textMuted
         }
     }
 }

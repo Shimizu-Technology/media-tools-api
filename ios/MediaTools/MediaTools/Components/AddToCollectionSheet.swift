@@ -28,14 +28,14 @@ struct AddToCollectionSheet: View {
                     } label: {
                         HStack {
                             Image(systemName: "folder.fill")
-                                .foregroundStyle(.teal)
+                                .foregroundStyle(Theme.brand500)
                             VStack(alignment: .leading) {
                                 Text(collection.name)
                                     .font(.subheadline.weight(.medium))
                                 if let count = collection.itemCount {
                                     Text("\(count) items")
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(Theme.textSecondary)
                                 }
                             }
                             Spacer()

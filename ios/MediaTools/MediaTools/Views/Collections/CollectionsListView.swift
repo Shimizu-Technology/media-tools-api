@@ -100,7 +100,7 @@ struct CollectionRow: View {
         HStack(spacing: 12) {
             Image(systemName: "folder.fill")
                 .font(.title2)
-                .foregroundStyle(.teal)
+                .foregroundStyle(Theme.brand500)
                 .frame(width: 36)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -111,12 +111,12 @@ struct CollectionRow: View {
                     if let count = collection.itemCount {
                         Text("\(count) item\(count == 1 ? "" : "s")")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                     if let desc = collection.description, !desc.isEmpty {
                         Text(desc)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                             .lineLimit(1)
                     }
                 }
@@ -215,9 +215,9 @@ struct CollectionDetailView: View {
 
     private func colorForType(_ type: String) -> Color {
         switch type {
-        case "transcript": .teal
-        case "audio": .orange
-        case "pdf": .red
+        case "transcript": Theme.brand500
+        case "audio": Theme.audioColor
+        case "pdf": Theme.error
         default: .gray
         }
     }

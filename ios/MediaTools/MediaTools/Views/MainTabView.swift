@@ -38,9 +38,8 @@ struct MainTabView: View {
                 }
             }
         }
-        .tint(.teal)
+        .tint(Theme.brand500)
         .task {
-            // Request notification permission on first launch
             _ = await NotificationService.requestPermission()
         }
     }

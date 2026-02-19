@@ -36,87 +36,89 @@ struct WelcomeView: View {
     @Binding var showAuth: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
+        ZStack {
+            Theme.surface.ignoresSafeArea()
 
-            // Hero section
-            VStack(spacing: 24) {
-                // Animated icon
-                ZStack {
-                    Circle()
-                        .fill(.teal.opacity(0.1))
-                        .frame(width: 120, height: 120)
+            VStack(spacing: 0) {
+                Spacer()
 
-                    Circle()
-                        .fill(.teal.opacity(0.2))
-                        .frame(width: 90, height: 90)
+                // Hero
+                VStack(spacing: 28) {
+                    // Layered circles
+                    ZStack {
+                        Circle()
+                            .fill(Theme.brand500.opacity(0.06))
+                            .frame(width: 160, height: 160)
 
-                    Image(systemName: "waveform.circle.fill")
-                        .font(.system(size: 56))
-                        .foregroundStyle(.teal)
+                        Circle()
+                            .fill(Theme.brand500.opacity(0.12))
+                            .frame(width: 110, height: 110)
+
+                        Image(systemName: "waveform.circle.fill")
+                            .font(.system(size: 56))
+                            .foregroundStyle(Theme.brand500)
+                    }
+
+                    VStack(spacing: 10) {
+                        Text("Media Tools")
+                            .font(Theme.heading(34))
+                            .foregroundStyle(Theme.textPrimary)
+
+                        Text("Transcribe. Organize. Understand.")
+                            .font(Theme.body(16))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
                 }
 
-                VStack(spacing: 10) {
-                    Text("Media Tools")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                Spacer()
 
-                    Text("Transcribe. Organize. Understand.")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
+                // Features
+                VStack(spacing: 14) {
+                    FeatureRow(
+                        icon: "play.rectangle.fill",
+                        color: Theme.videoColor,
+                        title: "Video Transcription",
+                        subtitle: "YouTube, Vimeo, and any video URL"
+                    )
+                    FeatureRow(
+                        icon: "mic.fill",
+                        color: Theme.audioColor,
+                        title: "Audio Recording",
+                        subtitle: "Record and transcribe with one tap"
+                    )
+                    FeatureRow(
+                        icon: "bubble.left.and.bubble.right.fill",
+                        color: .purple,
+                        title: "AI Chat",
+                        subtitle: "Ask questions about your content"
+                    )
+                    FeatureRow(
+                        icon: "square.and.arrow.up",
+                        color: .blue,
+                        title: "Share Sheet",
+                        subtitle: "Share from any app to transcribe"
+                    )
                 }
+                .padding(.horizontal, 32)
+
+                Spacer()
+
+                // Sign in button
+                Button {
+                    showAuth = true
+                } label: {
+                    Text("Get Started")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BrandButtonStyle())
+                .padding(.horizontal, 32)
+
+                Text("Powered by Shimizu Technology")
+                    .font(Theme.caption(11))
+                    .foregroundStyle(Theme.textMuted)
+                    .padding(.top, 14)
+                    .padding(.bottom, 32)
             }
-
-            Spacer()
-
-            // Features
-            VStack(spacing: 16) {
-                FeatureRow(
-                    icon: "play.rectangle.fill",
-                    color: .teal,
-                    title: "Video Transcription",
-                    subtitle: "YouTube, Vimeo, and any video URL"
-                )
-                FeatureRow(
-                    icon: "mic.fill",
-                    color: .orange,
-                    title: "Audio Recording",
-                    subtitle: "Record and transcribe with one tap"
-                )
-                FeatureRow(
-                    icon: "bubble.left.and.bubble.right.fill",
-                    color: .purple,
-                    title: "AI Chat",
-                    subtitle: "Ask questions about your content"
-                )
-                FeatureRow(
-                    icon: "square.and.arrow.up",
-                    color: .blue,
-                    title: "Share Sheet",
-                    subtitle: "Share from any app to transcribe"
-                )
-            }
-            .padding(.horizontal, 32)
-
-            Spacer()
-
-            // Sign in button
-            Button {
-                showAuth = true
-            } label: {
-                Text("Get Started")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.teal)
-            .padding(.horizontal, 32)
-
-            Text("Powered by Shimizu Technology")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .padding(.top, 12)
-                .padding(.bottom, 32)
         }
     }
 }
@@ -136,10 +138,11 @@ struct FeatureRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.subheadline.weight(.medium))
+                    .font(Theme.body(15, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary)
                 Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Theme.caption(13))
+                    .foregroundStyle(Theme.textSecondary)
             }
 
             Spacer()
@@ -150,4 +153,5 @@ struct FeatureRow: View {
 #Preview {
     ContentView()
         .environment(Clerk.shared)
+        .preferredColorScheme(.dark)
 }

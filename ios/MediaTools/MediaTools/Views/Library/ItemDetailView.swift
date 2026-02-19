@@ -107,12 +107,12 @@ struct ItemDetailView: View {
                         if let wc = wordCount, wc > 0 {
                             Text("\(wc) words")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.textSecondary)
                         }
                         if let dur = audioDuration {
                             Text(formatDuration(dur))
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.textSecondary)
                         }
                     }
                 }
@@ -131,7 +131,7 @@ struct ItemDetailView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.teal)
+            .tint(Theme.brand500)
 
             Button {
                 Task { await generateSummary() }
@@ -156,7 +156,7 @@ struct ItemDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Summary Style")
                 .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -168,7 +168,7 @@ struct ItemDetailView: View {
                                 .font(.caption)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(summaryContentType == type.0 ? Color.teal : Color.secondary.opacity(0.1))
+                                .background(summaryContentType == type.0 ? Theme.brand500 : Color.secondary.opacity(0.1))
                                 .foregroundStyle(summaryContentType == type.0 ? .white : .primary)
                                 .clipShape(Capsule())
                         }
@@ -195,7 +195,7 @@ struct ItemDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Image(systemName: "sparkles")
-                        .foregroundStyle(.teal)
+                        .foregroundStyle(Theme.brand500)
                     Text("Summary")
                         .font(.headline)
                 }
@@ -215,7 +215,7 @@ struct ItemDetailView: View {
                             Image(systemName: "circle.fill")
                                 .font(.system(size: 5))
                                 .padding(.top, 7)
-                                .foregroundStyle(.teal)
+                                .foregroundStyle(Theme.brand500)
                             Text(point)
                                 .font(.subheadline)
                         }
@@ -231,7 +231,7 @@ struct ItemDetailView: View {
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: "checkmark.square")
                                 .font(.caption)
-                                .foregroundStyle(.teal)
+                                .foregroundStyle(Theme.brand500)
                                 .padding(.top, 2)
                             Text(action)
                                 .font(.subheadline)
@@ -250,8 +250,8 @@ struct ItemDetailView: View {
                                 .font(.caption)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
-                                .background(.teal.opacity(0.1))
-                                .foregroundStyle(.teal)
+                                .background(Theme.brand500.opacity(0.1))
+                                .foregroundStyle(Theme.brand500)
                                 .clipShape(Capsule())
                         }
                     }
@@ -316,9 +316,9 @@ struct ItemDetailView: View {
 
     private var iconColor: Color {
         switch item {
-        case .transcript: .teal
-        case .audio: .orange
-        case .pdf: .red
+        case .transcript: Theme.brand500
+        case .audio: Theme.audioColor
+        case .pdf: Theme.error
         }
     }
 

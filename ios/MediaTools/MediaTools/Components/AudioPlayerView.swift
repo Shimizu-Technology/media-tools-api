@@ -12,7 +12,7 @@ struct AudioPlayerView: View {
         VStack(spacing: 12) {
             HStack {
                 Image(systemName: "speaker.wave.2.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Theme.audioColor)
                 Text("Playback")
                     .font(.subheadline.weight(.medium))
                 Spacer()
@@ -24,10 +24,10 @@ struct AudioPlayerView: View {
             } else if let error {
                 HStack {
                     Image(systemName: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Theme.audioColor)
                     Text(error)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                 }
             } else {
                 // Playback controls
@@ -40,7 +40,7 @@ struct AudioPlayerView: View {
                                 .frame(height: 4)
 
                             RoundedRectangle(cornerRadius: 2)
-                                .fill(.orange)
+                                .fill(Theme.audioColor)
                                 .frame(width: geo.size.width * player.progress, height: 4)
                         }
                         .gesture(
@@ -57,7 +57,7 @@ struct AudioPlayerView: View {
                     HStack {
                         Text(player.formattedCurrentTime)
                             .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
 
                         Spacer()
 
@@ -79,7 +79,7 @@ struct AudioPlayerView: View {
                         } label: {
                             Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                                 .font(.largeTitle)
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(Theme.audioColor)
                         }
 
                         // Forward 15s
@@ -94,7 +94,7 @@ struct AudioPlayerView: View {
 
                         Text(player.formattedDuration)
                             .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
 
                     // Speed control
@@ -107,8 +107,8 @@ struct AudioPlayerView: View {
                                     .font(.caption2.weight(.medium))
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
-                                    .background(player.speed == Float(speed) ? Color.orange.opacity(0.2) : Color.clear)
-                                    .foregroundStyle(player.speed == Float(speed) ? .orange : .secondary)
+                                    .background(player.speed == Float(speed) ? Theme.audioColor.opacity(0.2) : Color.clear)
+                                    .foregroundStyle(player.speed == Float(speed) ? Theme.audioColor : .secondary)
                                     .clipShape(Capsule())
                             }
                         }
@@ -117,7 +117,7 @@ struct AudioPlayerView: View {
             }
         }
         .padding()
-        .background(.orange.opacity(0.05))
+        .background(Theme.audioColor.opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .task {
             await loadAudio()

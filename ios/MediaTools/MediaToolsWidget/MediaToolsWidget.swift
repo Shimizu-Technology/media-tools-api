@@ -59,7 +59,7 @@ struct WidgetItem: Codable, Identifiable {
 
     var iconColor: Color {
         switch type {
-        case "video": .teal
+        case "video": Color(red: 47/255, green: 158/255, blue: 143/255)
         case "audio": .orange
         case "pdf": .red
         default: .gray
@@ -88,7 +88,7 @@ struct MediaToolsWidgetEntryView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: "waveform.circle.fill")
-                    .foregroundStyle(.teal)
+                    .foregroundStyle(Color(red: 47/255, green: 158/255, blue: 143/255))
                 Text("Media Tools")
                     .font(.caption.weight(.semibold))
             }
@@ -119,7 +119,7 @@ struct MediaToolsWidgetEntryView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "waveform.circle.fill")
-                    .foregroundStyle(.teal)
+                    .foregroundStyle(Color(red: 47/255, green: 158/255, blue: 143/255))
                 Text("Recent Items")
                     .font(.subheadline.weight(.semibold))
                 Spacer()

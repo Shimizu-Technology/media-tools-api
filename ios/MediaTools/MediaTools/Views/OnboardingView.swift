@@ -6,7 +6,7 @@ struct OnboardingView: View {
 
     private let pages: [(icon: String, color: Color, title: String, subtitle: String)] = [
         (
-            "waveform.circle.fill", .teal,
+            "waveform.circle.fill", Theme.brand500,
             "Transcribe Anything",
             "Paste a YouTube, Vimeo, or any video URL and get a full transcript in seconds."
         ),
@@ -57,7 +57,7 @@ struct OnboardingView: View {
                     .padding(.vertical, 16)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.teal)
+            .tint(Theme.brand500)
             .padding(.horizontal, 32)
             .padding(.bottom, 16)
 
@@ -66,7 +66,7 @@ struct OnboardingView: View {
                     isComplete = true
                 }
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
                 .padding(.bottom, 24)
             } else {
                 Spacer().frame(height: 48)
@@ -102,7 +102,7 @@ struct OnboardingPage: View {
 
                 Text(subtitle)
                     .font(.body)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
             }

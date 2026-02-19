@@ -27,7 +27,7 @@ struct PDFUploadView: View {
                             .font(.headline)
                         Text("Tap to browse your files")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -46,7 +46,7 @@ struct PDFUploadView: View {
                     ProgressView()
                     Text("Uploading & extracting...")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                 }
             }
 
@@ -63,7 +63,7 @@ struct PDFUploadView: View {
                     if let pages = result.pageCount {
                         Text("\(pages) pages")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                 }
                 .padding()

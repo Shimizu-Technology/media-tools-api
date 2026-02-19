@@ -29,7 +29,7 @@ struct ChatView: View {
                                     .padding(.horizontal, 8)
                                 Text("Thinking...")
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(Theme.textSecondary)
                                 Spacer()
                             }
                             .padding(.horizontal)
@@ -60,7 +60,7 @@ struct ChatView: View {
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.title2)
-                        .foregroundStyle(input.isEmpty || isSending ? .secondary : .teal)
+                        .foregroundStyle(input.isEmpty || isSending ? .secondary : Theme.brand500)
                 }
                 .disabled(input.isEmpty || isSending)
             }
@@ -123,7 +123,7 @@ struct ChatBubble: View {
                     .font(.body)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(isUser ? Color.teal : Color.secondary.opacity(0.12))
+                    .background(isUser ? Theme.brand500 : Theme.surfaceCard)
                     .foregroundStyle(isUser ? .white : .primary)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
             }
