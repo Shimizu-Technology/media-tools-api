@@ -17,11 +17,8 @@ enum Configuration {
         if let url = Bundle.main.infoDictionary?["API_BASE_URL"] as? String, !url.isEmpty {
             return url
         }
-        #if DEBUG
-        return "http://localhost:8080"
-        #else
+        // Point to production Render API (localhost won't work on device)
         return "https://media-tools-api.onrender.com"
-        #endif
     }()
 
     /// Keychain access group shared between the main app and share extension.
