@@ -235,6 +235,20 @@ class AudioRecorderService {
 
     func start() {
         let session = AVAudioSession.sharedInstance()
+
+        // Request microphone permission first
+        AVAudioApplication.requestRecordPermission { granted in
+            guard granted else {
+                print("Microphone permission denied")
+                return
+            }
+            DispatchQueue.main.async {
+                self.startRecording(session: session)
+            }
+        }
+    }
+
+    private func startRecording(session: AVAudioSession) {
         do {
             try session.setCategory(.playAndRecord, mode: .default)
             try session.setActive(true)
