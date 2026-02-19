@@ -16,8 +16,8 @@ struct SettingsView: View {
                             .frame(width: 44, height: 44)
 
                         VStack(alignment: .leading) {
-                            if let name = user.fullName {
-                                Text(name)
+                            if let first = user.firstName {
+                                Text([first, user.lastName].compactMap { $0 }.joined(separator: " "))
                                     .font(.subheadline.weight(.medium))
                             }
                             if let email = user.primaryEmailAddress?.emailAddress {
