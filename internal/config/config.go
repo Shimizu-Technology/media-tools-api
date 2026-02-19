@@ -45,6 +45,11 @@ type Config struct {
 	// OpenAI settings (for Whisper audio transcription)
 	OpenAIAPIKey string
 
+	// PDF OCR fallback settings
+	PDFOCREnabled       bool
+	PDFOCRLanguage      string
+	PDFOCRCloudFallback string // "", "aws_textract"
+
 	// JWT Authentication (MTA-20)
 	JWTSecret string
 
@@ -101,6 +106,11 @@ func Load() (*Config, error) {
 
 		// OpenAI (Whisper API for audio transcription)
 		OpenAIAPIKey: getEnv("OPENAI_API_KEY", ""),
+
+		// PDF OCR fallback
+		PDFOCREnabled:       getEnv("PDF_OCR_ENABLED", "true") != "false",
+		PDFOCRLanguage:      getEnv("PDF_OCR_LANGUAGE", "eng"),
+		PDFOCRCloudFallback: getEnv("PDF_OCR_CLOUD_FALLBACK", ""),
 
 		// JWT Authentication
 		JWTSecret: getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),

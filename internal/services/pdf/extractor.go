@@ -20,6 +20,9 @@ type ExtractionResult struct {
 	WordCount      int    // Word count
 	TextPages      int    // Pages with extracted text
 	OCRRecommended bool   // True when doc looks image/scanned-heavy
+	ExtractionMethod string  // text_layer, ocr_local, ocr_cloud
+	OCRProvider      string  // tesseract, aws_textract
+	OCRConfidence    float64 // Average OCR confidence when available
 }
 
 // Extract reads a PDF from the given reader and extracts all text content.
@@ -40,9 +43,12 @@ func Extract(data []byte) (*ExtractionResult, error) {
 	pageCount := pdfReader.NumPage()
 	if pageCount == 0 {
 		return &ExtractionResult{
-			Text:      "",
-			PageCount: 0,
-			WordCount: 0,
+			Text:             "",
+			PageCount:        0,
+			WordCount:        0,
+			TextPages:        0,
+			OCRRecommended:   false,
+			ExtractionMethod: "text_layer",
 		}, nil
 	}
 
@@ -83,6 +89,9 @@ func Extract(data []byte) (*ExtractionResult, error) {
 		WordCount:      wordCount,
 		TextPages:      textPages,
 		OCRRecommended: ocrRecommended,
+		ExtractionMethod: "text_layer",
+		OCRProvider:      "",
+		OCRConfidence:    0,
 	}, nil
 }
 

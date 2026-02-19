@@ -13,6 +13,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/handlers"
 	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
+	pdfservice "github.com/Shimizu-Technology/media-tools-api/internal/services/pdf"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	webhookservice "github.com/Shimizu-Technology/media-tools-api/internal/services/webhook"
@@ -20,7 +21,7 @@ import (
 )
 
 // Setup creates and configures the Gin router with all routes.
-func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.S3, ws *webhookservice.Service, sum *summary.Service, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix string, allowedOrigins []string) *gin.Engine {
+func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, ocr *pdfservice.OCRService, as *storage.S3, ws *webhookservice.Service, sum *summary.Service, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix string, allowedOrigins []string) *gin.Engine {
 	r := gin.Default()
 
 	// Keep multipart parsing memory bounded; larger uploads are streamed to temp files.
@@ -28,7 +29,7 @@ func Setup(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.
 
 	r.Use(middleware.CORS(allowedOrigins))
 
-	h := handlers.NewHandler(db, wp, at, as, ws, sum, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix)
+	h := handlers.NewHandler(db, wp, at, ocr, as, ws, sum, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix)
 	rateLimiter := middleware.NewRateLimiter(ownerKeyID, ownerKeyPrefix)
 
 	// --- Public Routes (no auth required) ---

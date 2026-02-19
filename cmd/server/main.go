@@ -15,6 +15,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/router"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
+	pdfservice "github.com/Shimizu-Technology/media-tools-api/internal/services/pdf"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
@@ -101,6 +102,21 @@ func main() {
 		log.Println("⚠️  Audio S3 storage not configured (raw recordings will not be durable across retries)")
 	}
 
+	pdfOCR := pdfservice.NewOCRService(pdfservice.OCRConfig{
+		Enabled:       cfg.PDFOCREnabled,
+		Language:      cfg.PDFOCRLanguage,
+		CloudFallback: cfg.PDFOCRCloudFallback,
+		AWSRegion:     cfg.AWSRegion,
+		AWSAccessKey:  cfg.AWSAccessKeyID,
+		AWSSecretKey:  cfg.AWSSecretAccessKey,
+		AWSSessionTok: cfg.AWSSessionToken,
+	})
+	if pdfOCR.IsConfigured() {
+		log.Printf("✅ PDF OCR fallback enabled (lang=%s, cloud=%s)", cfg.PDFOCRLanguage, cfg.PDFOCRCloudFallback)
+	} else {
+		log.Println("⚠️  PDF OCR fallback disabled")
+	}
+
 	// Step 4: Create and Start Worker Pool
 	wp := worker.NewPool(cfg.WorkerCount, cfg.JobQueueSize, db, extractor, summarizer)
 	wp.SetWebhookService(webhookService) // MTA-18: wire webhooks into worker for job notifications
@@ -128,6 +144,7 @@ func main() {
 		db,
 		wp,
 		audioTranscriber,
+		pdfOCR,
 		audioStorage,
 		webhookService,
 		summarizer,

@@ -114,41 +114,82 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 	// If most pages have no extractable text layer, this is likely a scanned/image PDF.
 	// Return a clear action message instead of a misleading mostly-empty extraction.
 	if result.OCRRecommended {
-		msg := fmt.Sprintf(
-			"This PDF appears to be image/scanned-based (text found on %d of %d pages). OCR extraction is not enabled yet for scanned PDFs.",
-			result.TextPages, result.PageCount,
-		)
-		log.Printf("PDF extraction requires OCR for %s: %s", header.Filename, msg)
+		if h.PDFOCR != nil && h.PDFOCR.IsConfigured() {
+			ocrResult, ocrErr := h.PDFOCR.Extract(c.Request.Context(), data)
+			if ocrErr == nil && strings.TrimSpace(ocrResult.Text) != "" {
+				result = ocrResult
+			} else {
+				msg := fmt.Sprintf(
+					"This PDF appears scanned/image-based (text on %d of %d pages). OCR fallback could not extract text.",
+					result.TextPages, result.PageCount,
+				)
+				if ocrErr != nil {
+					msg += " " + ocrErr.Error()
+				}
+				log.Printf("PDF OCR fallback failed for %s: %s", header.Filename, msg)
 
-		pe := &models.PDFExtraction{
-			Filename:     storedFilename,
-			OriginalName: header.Filename,
-			PageCount:    result.PageCount,
-			TextContent:  "",
-			WordCount:    0,
-			Status:       "failed",
-			ErrorMessage: msg,
-			APIKeyID:     apiKeyID,
+				pe := &models.PDFExtraction{
+					Filename:         storedFilename,
+					OriginalName:     header.Filename,
+					PageCount:        result.PageCount,
+					TextContent:      "",
+					WordCount:        0,
+					ExtractionMethod: "text_layer",
+					Status:           "failed",
+					ErrorMessage:     msg,
+					APIKeyID:         apiKeyID,
+				}
+				_ = h.DB.CreatePDFExtraction(c.Request.Context(), pe)
+
+				c.JSON(http.StatusUnprocessableEntity, models.ErrorResponse{
+					Error:   "ocr_required",
+					Message: msg,
+					Code:    http.StatusUnprocessableEntity,
+				})
+				return
+			}
+		} else {
+			msg := fmt.Sprintf(
+				"This PDF appears scanned/image-based (text on %d of %d pages). Enable OCR to extract text from scanned PDFs.",
+				result.TextPages, result.PageCount,
+			)
+			log.Printf("PDF extraction requires OCR for %s: %s", header.Filename, msg)
+
+			pe := &models.PDFExtraction{
+				Filename:         storedFilename,
+				OriginalName:     header.Filename,
+				PageCount:        result.PageCount,
+				TextContent:      "",
+				WordCount:        0,
+				ExtractionMethod: "text_layer",
+				Status:           "failed",
+				ErrorMessage:     msg,
+				APIKeyID:         apiKeyID,
+			}
+			_ = h.DB.CreatePDFExtraction(c.Request.Context(), pe)
+
+			c.JSON(http.StatusUnprocessableEntity, models.ErrorResponse{
+				Error:   "ocr_required",
+				Message: msg,
+				Code:    http.StatusUnprocessableEntity,
+			})
+			return
 		}
-		_ = h.DB.CreatePDFExtraction(c.Request.Context(), pe)
-
-		c.JSON(http.StatusUnprocessableEntity, models.ErrorResponse{
-			Error:   "ocr_required",
-			Message: msg,
-			Code:    http.StatusUnprocessableEntity,
-		})
-		return
 	}
 
 	// Save the successful extraction
 	pe := &models.PDFExtraction{
-		Filename:     storedFilename,
-		OriginalName: header.Filename,
-		PageCount:    result.PageCount,
-		TextContent:  result.Text,
-		WordCount:    result.WordCount,
-		Status:       "completed",
-		APIKeyID:     apiKeyID,
+		Filename:         storedFilename,
+		OriginalName:     header.Filename,
+		PageCount:        result.PageCount,
+		TextContent:      result.Text,
+		WordCount:        result.WordCount,
+		ExtractionMethod: result.ExtractionMethod,
+		OCRProvider:      result.OCRProvider,
+		OCRTextPages:     result.TextPages,
+		OCRConfidence:    result.OCRConfidence,
+		Status:           "completed",
+		APIKeyID:         apiKeyID,
 	}
 
 	if err := h.DB.CreatePDFExtraction(c.Request.Context(), pe); err != nil {

@@ -656,13 +656,22 @@ func (db *DB) DeleteAudioTranscription(ctx context.Context, id string) error {
 // CreatePDFExtraction inserts a new PDF extraction record.
 func (db *DB) CreatePDFExtraction(ctx context.Context, pe *models.PDFExtraction) error {
 	query := `
-		INSERT INTO pdf_extractions (filename, original_name, page_count, text_content, word_count, status, error_message, api_key_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO pdf_extractions (
+			filename, original_name, page_count, text_content, word_count,
+			extraction_method, ocr_provider, ocr_text_pages, ocr_confidence,
+			status, error_message, api_key_id
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, created_at`
+
+	if pe.ExtractionMethod == "" {
+		pe.ExtractionMethod = "text_layer"
+	}
 
 	return db.QueryRowContext(ctx, query,
 		pe.Filename, pe.OriginalName, pe.PageCount, pe.TextContent,
-		pe.WordCount, pe.Status, pe.ErrorMessage, pe.APIKeyID,
+		pe.WordCount, pe.ExtractionMethod, pe.OCRProvider, pe.OCRTextPages, pe.OCRConfidence,
+		pe.Status, pe.ErrorMessage, pe.APIKeyID,
 	).Scan(&pe.ID, &pe.CreatedAt)
 }
 

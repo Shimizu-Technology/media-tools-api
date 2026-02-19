@@ -239,6 +239,10 @@ type PDFExtraction struct {
 	PageCount    int       `json:"page_count" db:"page_count"`
 	TextContent  string    `json:"text_content" db:"text_content"`
 	WordCount    int       `json:"word_count" db:"word_count"`
+	ExtractionMethod string `json:"extraction_method" db:"extraction_method"` // text_layer, ocr_local, ocr_cloud
+	OCRProvider    string   `json:"ocr_provider,omitempty" db:"ocr_provider"` // tesseract, aws_textract, etc.
+	OCRTextPages   int      `json:"ocr_text_pages,omitempty" db:"ocr_text_pages"`
+	OCRConfidence  float64  `json:"ocr_confidence,omitempty" db:"ocr_confidence"`
 	Status       string    `json:"status" db:"status"`
 	ErrorMessage string    `json:"error_message,omitempty" db:"error_message"`
 	UserID       *string   `json:"user_id,omitempty" db:"user_id"`
