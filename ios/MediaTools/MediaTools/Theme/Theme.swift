@@ -98,7 +98,7 @@ extension View {
 
 // MARK: - Themed Button Styles
 
-struct BrandButtonStyle: ButtonStyle {
+struct BrandButtonStyle: SwiftUI.ButtonStyle {
     var isDestructive: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {
@@ -115,7 +115,7 @@ struct BrandButtonStyle: ButtonStyle {
     }
 }
 
-struct SecondaryButtonStyle: ButtonStyle {
+struct SecondaryButtonStyle: SwiftUI.ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(Theme.body(14, weight: .medium))
@@ -134,7 +134,7 @@ struct SecondaryButtonStyle: ButtonStyle {
     }
 }
 
-struct ChipStyle: ButtonStyle {
+struct ChipStyle: SwiftUI.ButtonStyle {
     var isSelected: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {
