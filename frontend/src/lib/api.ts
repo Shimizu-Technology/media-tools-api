@@ -39,7 +39,7 @@ export interface Summary {
   created_at: string;
 }
 
-export type ChatItemType = 'transcript' | 'audio' | 'pdf';
+export type ChatItemType = 'transcript' | 'audio' | 'pdf' | 'collection';
 
 export interface ChatSession {
   id: string;
@@ -355,6 +355,8 @@ function getChatPath(itemType: ChatItemType, itemId: string): string {
       return `${API_BASE}/audio/transcriptions/${itemId}/chat`;
     case 'pdf':
       return `${API_BASE}/pdf/extractions/${itemId}/chat`;
+    case 'collection':
+      return `${API_BASE}/collections/${itemId}/chat`;
     case 'transcript':
     default:
       return `${API_BASE}/transcripts/${itemId}/chat`;

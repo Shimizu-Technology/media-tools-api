@@ -139,6 +139,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		protected.DELETE("/collections/:id", h.DeleteCollection)
 		protected.POST("/collections/:id/items", h.AddCollectionItems)
 		protected.DELETE("/collections/:id/items/:itemId", h.RemoveCollectionItem)
+		protected.GET("/collections/:id/chat", h.GetCollectionChat)
+		protected.POST("/collections/:id/chat", h.PostCollectionChat)
 
 		// Webhook management (MTA-18)
 		protected.POST("/webhooks", h.CreateWebhook)

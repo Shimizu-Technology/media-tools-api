@@ -1,4 +1,5 @@
 // collections.go handles collection CRUD operations.
+// collections.go handles collection CRUD and item management.
 package database
 
 import (
@@ -196,4 +197,51 @@ func (db *DB) RemoveCollectionItem(ctx context.Context, collectionID, itemID str
 		`UPDATE collections SET updated_at = NOW() WHERE id = $1`, collectionID)
 
 	return nil
+}
+
+// CollectionItemContent holds the text content of a single collection item.
+type CollectionItemContent struct {
+	ItemType string
+	Title    string
+	Text     string
+}
+
+// GetCollectionItemContents fetches the text content of all completed items in a collection.
+// Used for collection-level AI chat — aggregates transcripts, audio, and PDF text.
+func (db *DB) GetCollectionItemContents(ctx context.Context, collectionID string) ([]CollectionItemContent, error) {
+	items, err := db.GetCollectionItems(ctx, collectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	var contents []CollectionItemContent
+	for _, item := range items {
+		switch item.ItemType {
+		case "transcript":
+			var title, text string
+			err := db.QueryRowContext(ctx,
+				`SELECT COALESCE(title, ''), COALESCE(transcript_text, '') FROM transcripts WHERE id = $1 AND status = 'completed'`,
+				item.ItemID).Scan(&title, &text)
+			if err == nil && text != "" {
+				contents = append(contents, CollectionItemContent{ItemType: "transcript", Title: title, Text: text})
+			}
+		case "audio":
+			var title, text string
+			err := db.QueryRowContext(ctx,
+				`SELECT COALESCE(title, ''), COALESCE(transcript_text, '') FROM audio_transcriptions WHERE id = $1 AND status = 'completed'`,
+				item.ItemID).Scan(&title, &text)
+			if err == nil && text != "" {
+				contents = append(contents, CollectionItemContent{ItemType: "audio", Title: title, Text: text})
+			}
+		case "pdf":
+			var title, text string
+			err := db.QueryRowContext(ctx,
+				`SELECT COALESCE(filename, ''), COALESCE(text_content, '') FROM pdf_extractions WHERE id = $1 AND status = 'completed'`,
+				item.ItemID).Scan(&title, &text)
+			if err == nil && text != "" {
+				contents = append(contents, CollectionItemContent{ItemType: "pdf", Title: title, Text: text})
+			}
+		}
+	}
+	return contents, nil
 }

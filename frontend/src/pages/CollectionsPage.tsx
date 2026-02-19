@@ -15,7 +15,9 @@ import {
   Loader2,
   AlertCircle,
   GripVertical,
+  MessageSquare,
 } from 'lucide-react';
+import { TranscriptChatPanel } from '../components/TranscriptChatPanel';
 import {
   listCollections,
   createCollection,
@@ -295,6 +297,7 @@ function CollectionDetail({ id }: { id: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [removing, setRemoving] = useState<string | null>(null);
+  const [showChat, setShowChat] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -370,9 +373,24 @@ function CollectionDetail({ id }: { id: string }) {
         {collection.description && (
           <p className="text-sm text-[var(--text-secondary)] mt-1">{collection.description}</p>
         )}
-        <p className="text-xs text-[var(--text-tertiary)] mt-2">
-          {collection.items.length} {collection.items.length === 1 ? 'item' : 'items'}
-        </p>
+        <div className="flex items-center gap-3 mt-2">
+          <p className="text-xs text-[var(--text-tertiary)]">
+            {collection.items.length} {collection.items.length === 1 ? 'item' : 'items'}
+          </p>
+          {collection.items.length > 0 && (
+            <button
+              onClick={() => setShowChat(!showChat)}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                showChat
+                  ? 'bg-[var(--brand)] text-white'
+                  : 'bg-[var(--brand)]/10 text-[var(--brand)] hover:bg-[var(--brand)]/20'
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              {showChat ? 'Hide Chat' : 'Chat with AI'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Items */}
@@ -426,6 +444,22 @@ function CollectionDetail({ id }: { id: string }) {
           })}
         </div>
       )}
+
+      {/* Collection AI Chat */}
+      <AnimatePresence>
+        {showChat && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden mt-8"
+          >
+            <div className="border border-[var(--border)] rounded-xl overflow-hidden">
+              <TranscriptChatPanel itemId={id} itemType="collection" />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
