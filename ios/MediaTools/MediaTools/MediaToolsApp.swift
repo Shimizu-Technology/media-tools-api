@@ -5,9 +5,6 @@ import ClerkKit
 struct MediaToolsApp: App {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
-    // Initialize Watch connectivity on app launch
-    @StateObject private var phoneConnectivity = PhoneConnectivityService.shared
-
     init() {
         Clerk.configure(publishableKey: Configuration.clerkPublishableKey)
         configureAppearance()
