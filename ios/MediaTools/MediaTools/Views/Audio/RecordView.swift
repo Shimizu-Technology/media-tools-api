@@ -6,6 +6,7 @@ struct RecordView: View {
     @State private var contentType = "general"
     @State private var isUploading = false
     @State private var uploadResult: AudioTranscription?
+    @State private var isPolling = false
     @State private var error: String?
     @State private var showFilePicker = false
     @State private var pulseRing = false
@@ -193,17 +194,72 @@ struct RecordView: View {
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
 
-            // Upload result
+            // Upload result / polling status
             if let uploadResult {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(Theme.success)
-                    Text("Uploaded! Processing transcription...")
-                        .font(Theme.caption())
-                        .foregroundStyle(Theme.textSecondary)
+                VStack(spacing: 8) {
+                    if uploadResult.status == "completed" {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(Theme.success)
+                            Text("Transcription complete!")
+                                .font(Theme.body(15, weight: .medium))
+                                .foregroundStyle(Theme.textPrimary)
+                        }
+
+                        if uploadResult.wordCount ?? 0 > 0 {
+                            Text("\(uploadResult.wordCount ?? 0) words  ·  \(formatDuration(uploadResult.duration ?? 0))")
+                                .font(Theme.caption())
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+
+                        if let text = uploadResult.transcriptText, !text.isEmpty {
+                            Text(text)
+                                .font(Theme.body(14))
+                                .foregroundStyle(Theme.textSecondary)
+                                .lineLimit(3)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        Button {
+                            withAnimation(Theme.springSnappy) {
+                                self.uploadResult = nil
+                            }
+                        } label: {
+                            Text("Record Another")
+                                .font(Theme.body(14, weight: .medium))
+                                .foregroundStyle(Theme.brand500)
+                        }
+                        .padding(.top, 4)
+                    } else if uploadResult.status == "failed" {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(Theme.error)
+                            Text("Transcription failed")
+                                .font(Theme.body(15, weight: .medium))
+                                .foregroundStyle(Theme.textPrimary)
+                        }
+                        Button {
+                            withAnimation(Theme.springSnappy) {
+                                self.uploadResult = nil
+                            }
+                        } label: {
+                            Text("Try Again")
+                                .font(Theme.body(14, weight: .medium))
+                                .foregroundStyle(Theme.brand500)
+                        }
+                    } else {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .tint(Theme.brand400)
+                            Text("Processing transcription...")
+                                .font(Theme.caption())
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                    }
                 }
-                .padding(.bottom, 8)
-                .transition(.opacity)
+                .cardStyle()
+                .padding(.horizontal)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
 
             if let error {
@@ -244,25 +300,56 @@ struct RecordView: View {
     private func uploadRecording(url: URL) async {
         isUploading = true
         error = nil
-        defer { isUploading = false }
 
         do {
             let data = try Data(contentsOf: url)
             let filename = url.lastPathComponent
-            uploadResult = try await service.uploadAudio(
+            let result = try await service.uploadAudio(
                 data: data,
                 filename: filename,
                 contentType: contentType
             )
+            isUploading = false
             withAnimation(Theme.springSnappy) {
+                uploadResult = result
                 recorder.discard()
             }
-            await service.loadAudioItems()
             Haptics.success()
+
+            // Poll for completion
+            guard let id = uploadResult?.id else { return }
+            isPolling = true
+            defer { isPolling = false }
+
+            while uploadResult?.status != "completed" && uploadResult?.status != "failed" {
+                try await Task.sleep(for: .seconds(3))
+                if let updated = try? await service.getAudioItem(id) {
+                    withAnimation(Theme.springSnappy) {
+                        uploadResult = updated
+                    }
+                }
+            }
+
+            // Refresh library and notify
+            await service.loadAudioItems()
+            if uploadResult?.status == "completed" {
+                Haptics.success()
+                NotificationService.notifyTranscriptionComplete(
+                    title: uploadResult?.displayTitle ?? "Audio",
+                    itemId: id
+                )
+            }
         } catch {
+            isUploading = false
             self.error = error.localizedDescription
             Haptics.error()
         }
+    }
+
+    private func formatDuration(_ seconds: Double) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return "\(mins):\(String(format: "%02d", secs))"
     }
 }
 
