@@ -220,14 +220,26 @@ struct RecordView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
 
-                        Button {
-                            withAnimation(Theme.springSnappy) {
-                                self.uploadResult = nil
+                        HStack(spacing: 12) {
+                            NavigationLink(value: LibraryItem.audio(uploadResult!)) {
+                                Label("View Details", systemImage: "arrow.right.circle.fill")
+                                    .font(Theme.body(14, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .background(Theme.brand500)
+                                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
                             }
-                        } label: {
-                            Text("Record Another")
-                                .font(Theme.body(14, weight: .medium))
-                                .foregroundStyle(Theme.brand500)
+
+                            Button {
+                                withAnimation(Theme.springSnappy) {
+                                    self.uploadResult = nil
+                                }
+                            } label: {
+                                Text("Record Another")
+                                    .font(Theme.body(14, weight: .medium))
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
                         }
                         .padding(.top, 4)
                     } else if uploadResult.status == "failed" {
@@ -295,6 +307,9 @@ struct RecordView: View {
         }
         .background(Theme.surface)
         .navigationTitle("Record")
+        .navigationDestination(for: LibraryItem.self) { item in
+            ItemDetailView(item: item)
+        }
     }
 
     private func uploadRecording(url: URL) async {

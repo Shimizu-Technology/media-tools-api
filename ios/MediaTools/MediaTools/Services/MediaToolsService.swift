@@ -48,9 +48,11 @@ final class MediaToolsService {
 
     func loadAudioItems() async {
         do {
-            audioItems = try await api.get("/audio/transcriptions")
+            let items: [AudioTranscription] = try await api.get("/audio/transcriptions")
+            print("📱 Loaded \(items.count) audio items")
+            audioItems = items
         } catch {
-            print("Failed to load audio: \(error)")
+            print("❌ Failed to load audio: \(error)")
         }
     }
 
