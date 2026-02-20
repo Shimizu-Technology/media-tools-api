@@ -21,15 +21,17 @@ struct ChatView: View {
                         ForEach(messages, id: \.stableId) { message in
                             ChatBubble(message: message)
                                 .id(message.stableId)
+                                .transition(.opacity.combined(with: .scale(scale: 0.95)))
                         }
 
                         if isSending {
                             HStack {
                                 ProgressView()
+                                    .tint(Theme.brand400)
                                     .padding(.horizontal, 8)
                                 Text("Thinking...")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.textSecondary)
+                                    .font(Theme.caption())
+                                    .foregroundStyle(Theme.textMuted)
                                 Spacer()
                             }
                             .padding(.horizontal)
@@ -39,18 +41,21 @@ struct ChatView: View {
                     .padding()
                 }
                 .onChange(of: messages.count) {
-                    withAnimation {
+                    withAnimation(Theme.springSnappy) {
                         proxy.scrollTo(messages.last?.stableId, anchor: .bottom)
                     }
                 }
             }
 
-            Divider()
+            // Divider
+            Rectangle()
+                .fill(Theme.border)
+                .frame(height: 1)
 
             // Input bar
             HStack(spacing: 8) {
                 TextField("Ask about this content...", text: $input, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.themed)
                     .lineLimit(1...4)
                     .focused($inputFocused)
                     .onSubmit { Task { await send() } }
@@ -60,20 +65,24 @@ struct ChatView: View {
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.title2)
-                        .foregroundStyle(input.isEmpty || isSending ? .secondary : Theme.brand500)
+                        .foregroundStyle(input.isEmpty || isSending ? Theme.textMuted : Theme.brand500)
                 }
                 .disabled(input.isEmpty || isSending)
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
+            .background(Theme.surfaceElevated)
         }
+        .background(Theme.surface)
         .task { await loadHistory() }
     }
 
     private func loadHistory() async {
         do {
             let response = try await service.getChatHistory(itemType: itemType, itemId: itemId)
-            messages = response.messages
+            withAnimation(Theme.springGentle) {
+                messages = response.messages
+            }
         } catch {
             // No history yet, that's fine
         }
@@ -83,24 +92,27 @@ struct ChatView: View {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
-        // Optimistic: add user message
-        messages.append(ChatMessage(id: UUID().uuidString, role: "user", content: text))
+        withAnimation(Theme.springSnappy) {
+            messages.append(ChatMessage(id: UUID().uuidString, role: "user", content: text))
+        }
         input = ""
         isSending = true
+        Haptics.light()
 
         do {
             let response = try await service.chat(itemType: itemType, itemId: itemId, message: text)
-
-            // Replace messages with server response (includes full history)
-            messages = response.messages
+            withAnimation(Theme.springGentle) {
+                messages = response.messages
+            }
         } catch {
             self.error = error.localizedDescription
-            // Add error message
-            messages.append(ChatMessage(
-                id: UUID().uuidString,
-                role: "assistant",
-                content: "Sorry, something went wrong. Please try again."
-            ))
+            withAnimation(Theme.springSnappy) {
+                messages.append(ChatMessage(
+                    id: UUID().uuidString,
+                    role: "assistant",
+                    content: "Sorry, something went wrong. Please try again."
+                ))
+            }
         }
 
         isSending = false
@@ -120,12 +132,16 @@ struct ChatBubble: View {
 
             VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
                 Text(message.content)
-                    .font(.body)
+                    .font(Theme.body(15))
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(isUser ? Theme.brand500 : Theme.surfaceCard)
-                    .foregroundStyle(isUser ? .white : .primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .foregroundStyle(isUser ? .white : Theme.textPrimary)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusLarge))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.radiusLarge)
+                            .stroke(isUser ? Color.clear : Theme.borderSubtle, lineWidth: 1)
+                    )
             }
             .textSelection(.enabled)
 

@@ -43,9 +43,6 @@ enum Theme {
     static let radiusXL: CGFloat = 20
 
     // MARK: - Fonts
-    /// Satoshi isn't available as a system font on iOS.
-    /// We use SF Rounded as the closest match — geometric, clean, modern.
-    /// To use actual Satoshi: add the .ttf files to the bundle and register them.
     static func heading(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
         .system(size: size, weight: weight, design: .rounded)
     }
@@ -60,6 +57,95 @@ enum Theme {
 
     static func mono(_ size: CGFloat = 14) -> Font {
         .system(size: size, design: .monospaced)
+    }
+
+    // MARK: - Gradients
+
+    static let brandGradient = LinearGradient(
+        colors: [brand600, brand500],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    static let subtleGlow = LinearGradient(
+        colors: [brand500.opacity(0.08), Color.clear],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+
+    // MARK: - Animation Presets
+
+    static let springSnappy = Animation.spring(response: 0.35, dampingFraction: 0.8)
+    static let springGentle = Animation.spring(response: 0.5, dampingFraction: 0.75)
+}
+
+// MARK: - Themed Text Field Style
+
+struct ThemedTextFieldStyle: TextFieldStyle {
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Theme.surfaceCard)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radiusMedium)
+                    .stroke(Theme.border, lineWidth: 1)
+            )
+    }
+}
+
+extension TextFieldStyle where Self == ThemedTextFieldStyle {
+    static var themed: ThemedTextFieldStyle { ThemedTextFieldStyle() }
+}
+
+// MARK: - Section Header
+
+struct SectionHeader: View {
+    let text: String
+    var icon: String?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(Theme.caption(11, weight: .semibold))
+                    .foregroundStyle(Theme.textMuted)
+            }
+            Text(text.uppercased())
+                .font(Theme.caption(11, weight: .semibold))
+                .foregroundStyle(Theme.textMuted)
+                .tracking(0.6)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Tab Chip
+
+struct TabChip: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(Theme.caption(13, weight: .semibold))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(
+                    Capsule()
+                        .fill(isSelected ? Theme.brand500 : Theme.surfaceCard)
+                )
+                .foregroundStyle(isSelected ? .white : Theme.textSecondary)
+                .overlay(
+                    Capsule()
+                        .stroke(isSelected ? Color.clear : Theme.borderSubtle, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -92,6 +178,18 @@ extension View {
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radiusLarge)
                     .stroke(Theme.border, lineWidth: 1)
+            )
+    }
+
+    /// Card with brand accent border.
+    func accentCardStyle(padding: CGFloat = 16) -> some View {
+        self
+            .padding(padding)
+            .background(Theme.surfaceCard)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radiusMedium)
+                    .stroke(Theme.brand500.opacity(0.4), lineWidth: 1)
             )
     }
 }

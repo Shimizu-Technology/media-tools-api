@@ -8,6 +8,7 @@ struct RecordView: View {
     @State private var uploadResult: AudioTranscription?
     @State private var error: String?
     @State private var showFilePicker = false
+    @State private var pulseRing = false
 
     private let service = MediaToolsService.shared
 
@@ -24,14 +25,17 @@ struct RecordView: View {
         VStack(spacing: 24) {
             // Content type selector
             VStack(alignment: .leading, spacing: 8) {
-                Text("Content Type")
-                    .font(.subheadline.weight(.medium))
+                SectionHeader(text: "Content Type", icon: "tag")
+                    .padding(.horizontal)
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(contentTypes, id: \.0) { type in
                             Button {
-                                contentType = type.0
+                                withAnimation(Theme.springSnappy) {
+                                    contentType = type.0
+                                }
+                                Haptics.light()
                             } label: {
                                 HStack(spacing: 4) {
                                     Image(systemName: type.2)
@@ -39,17 +43,13 @@ struct RecordView: View {
                                     Text(type.1)
                                         .font(.caption)
                                 }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(contentType == type.0 ? Theme.brand500 : Color.secondary.opacity(0.1))
-                                .foregroundStyle(contentType == type.0 ? .white : .primary)
-                                .clipShape(Capsule())
+                                .chipStyle(isSelected: contentType == type.0)
                             }
                         }
                     }
+                    .padding(.horizontal)
                 }
             }
-            .padding(.horizontal)
 
             Spacer()
 
@@ -58,14 +58,20 @@ struct RecordView: View {
                 // Timer
                 Text(recorder.formattedDuration)
                     .font(.system(size: 48, weight: .light, design: .monospaced))
-                    .foregroundStyle(recorder.isRecording ? Theme.brand500 : .secondary)
+                    .foregroundStyle(recorder.isRecording ? Theme.brand400 : Theme.textMuted)
 
-                // Waveform placeholder
+                // Waveform
                 if recorder.isRecording {
                     HStack(spacing: 3) {
                         ForEach(0..<20, id: \.self) { i in
                             RoundedRectangle(cornerRadius: 2)
-                                .fill(Theme.brand500)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Theme.brand400, Theme.brand500],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
                                 .frame(width: 4, height: CGFloat.random(in: 8...40))
                                 .animation(
                                     .easeInOut(duration: 0.3)
@@ -76,17 +82,45 @@ struct RecordView: View {
                         }
                     }
                     .frame(height: 44)
+                    .transition(.opacity)
                 }
 
-                // Record button
+                // Record button with pulsing ring
                 Button {
                     if recorder.isRecording {
                         recorder.stop()
+                        pulseRing = false
+                        Haptics.medium()
                     } else {
                         recorder.start()
+                        pulseRing = true
+                        Haptics.medium()
                     }
                 } label: {
                     ZStack {
+                        // Pulsing outer ring
+                        if recorder.isRecording {
+                            Circle()
+                                .stroke(Color.red.opacity(0.3), lineWidth: 3)
+                                .frame(width: 96, height: 96)
+                                .scaleEffect(pulseRing ? 1.2 : 1.0)
+                                .opacity(pulseRing ? 0.0 : 0.6)
+                                .animation(
+                                    .easeInOut(duration: 1).repeatForever(autoreverses: false),
+                                    value: pulseRing
+                                )
+
+                            Circle()
+                                .stroke(Color.red.opacity(0.15), lineWidth: 2)
+                                .frame(width: 96, height: 96)
+                                .scaleEffect(pulseRing ? 1.4 : 1.0)
+                                .opacity(pulseRing ? 0.0 : 0.4)
+                                .animation(
+                                    .easeInOut(duration: 1.3).repeatForever(autoreverses: false),
+                                    value: pulseRing
+                                )
+                        }
+
                         Circle()
                             .fill(recorder.isRecording ? .red : Theme.brand500)
                             .frame(width: 72, height: 72)
@@ -101,11 +135,12 @@ struct RecordView: View {
                                 .frame(width: 28, height: 28)
                         }
                     }
+                    .animation(Theme.springSnappy, value: recorder.isRecording)
                 }
                 .shadow(color: (recorder.isRecording ? Color.red : Theme.brand500).opacity(0.3), radius: 12)
 
                 Text(recorder.isRecording ? "Tap to stop" : "Tap to record")
-                    .font(.caption)
+                    .font(Theme.caption())
                     .foregroundStyle(Theme.textSecondary)
             }
 
@@ -114,16 +149,22 @@ struct RecordView: View {
             // Recorded audio actions
             if let recordingURL = recorder.recordingURL, !recorder.isRecording {
                 VStack(spacing: 12) {
-                    Text("Recording ready")
-                        .font(.subheadline.weight(.medium))
+                    HStack {
+                        Image(systemName: "checkmark.seal.fill")
+                            .foregroundStyle(Theme.success)
+                        Text("Recording ready")
+                            .font(Theme.body(15, weight: .medium))
+                            .foregroundStyle(Theme.textPrimary)
+                    }
 
                     HStack(spacing: 12) {
                         Button {
                             Task { await uploadRecording(url: recordingURL) }
                         } label: {
                             if isUploading {
-                                HStack {
+                                HStack(spacing: 8) {
                                     ProgressView()
+                                        .tint(.white)
                                     Text("Uploading...")
                                 }
                                 .frame(maxWidth: .infinity)
@@ -137,7 +178,9 @@ struct RecordView: View {
                         .disabled(isUploading)
 
                         Button {
-                            recorder.discard()
+                            withAnimation(Theme.springSnappy) {
+                                recorder.discard()
+                            }
                         } label: {
                             Label("Discard", systemImage: "trash")
                         }
@@ -145,27 +188,28 @@ struct RecordView: View {
                         .tint(Theme.error)
                     }
                 }
-                .padding()
-                .background(.secondary.opacity(0.05))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .cardStyle()
                 .padding(.horizontal)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
 
             // Upload result
             if let uploadResult {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(Theme.success)
                     Text("Uploaded! Processing transcription...")
-                        .font(.caption)
+                        .font(Theme.caption())
+                        .foregroundStyle(Theme.textSecondary)
                 }
                 .padding(.bottom, 8)
+                .transition(.opacity)
             }
 
             if let error {
                 Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(Theme.caption())
+                    .foregroundStyle(Theme.error)
                     .padding(.bottom, 8)
             }
 
@@ -174,7 +218,8 @@ struct RecordView: View {
                 showFilePicker = true
             } label: {
                 Label("Upload Audio File", systemImage: "square.and.arrow.up")
-                    .font(.subheadline)
+                    .font(Theme.body(14, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
             }
             .padding(.bottom, 20)
             .fileImporter(
@@ -192,6 +237,7 @@ struct RecordView: View {
                 }
             }
         }
+        .background(Theme.surface)
         .navigationTitle("Record")
     }
 
@@ -208,10 +254,14 @@ struct RecordView: View {
                 filename: filename,
                 contentType: contentType
             )
-            recorder.discard()
+            withAnimation(Theme.springSnappy) {
+                recorder.discard()
+            }
             await service.loadAudioItems()
+            Haptics.success()
         } catch {
             self.error = error.localizedDescription
+            Haptics.error()
         }
     }
 }
@@ -236,7 +286,6 @@ class AudioRecorderService {
     func start() {
         let session = AVAudioSession.sharedInstance()
 
-        // Request microphone permission first
         AVAudioApplication.requestRecordPermission { granted in
             guard granted else {
                 print("Microphone permission denied")

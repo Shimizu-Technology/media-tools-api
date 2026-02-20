@@ -39,6 +39,22 @@ struct MainTabView: View {
             }
         }
         .tint(Theme.brand500)
+        .preferredColorScheme(.dark)
+        .onAppear {
+            let tabAppearance = UITabBarAppearance()
+            tabAppearance.configureWithOpaqueBackground()
+            tabAppearance.backgroundColor = UIColor(Theme.surface)
+            UITabBar.appearance().standardAppearance = tabAppearance
+            UITabBar.appearance().scrollEdgeAppearance = tabAppearance
+
+            let navAppearance = UINavigationBarAppearance()
+            navAppearance.configureWithOpaqueBackground()
+            navAppearance.backgroundColor = UIColor(Theme.surface)
+            navAppearance.titleTextAttributes = [.foregroundColor: UIColor(Theme.textPrimary)]
+            navAppearance.largeTitleTextAttributes = [.foregroundColor: UIColor(Theme.textPrimary)]
+            UINavigationBar.appearance().standardAppearance = navAppearance
+            UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
+        }
         .task {
             _ = await NotificationService.requestPermission()
         }

@@ -5,35 +5,44 @@ struct CollectionsListView: View {
     @State private var showCreateSheet = false
     @State private var newName = ""
     @State private var newDescription = ""
+    @State private var hasAppeared = false
 
     var body: some View {
-        List {
-            if service.collections.isEmpty && !service.isLoading {
-                ContentUnavailableView(
-                    "No Collections",
-                    systemImage: "folder",
-                    description: Text("Create a collection to group related transcripts, audio, and PDFs together.")
-                )
-            }
-
-            ForEach(service.collections) { collection in
-                NavigationLink(value: collection.id) {
-                    CollectionRow(collection: collection)
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                if service.collections.isEmpty && !service.isLoading {
+                    ContentUnavailableView(
+                        "No Collections",
+                        systemImage: "folder",
+                        description: Text("Create a collection to group related transcripts, audio, and PDFs together.")
+                    )
+                    .padding(.top, 60)
                 }
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
-                        Task {
-                            try? await service.deleteCollection(collection.id)
-                            await service.loadCollections()
-                            Haptics.success()
+
+                ForEach(Array(service.collections.enumerated()), id: \.element.id) { index, collection in
+                    NavigationLink(value: collection.id) {
+                        CollectionRow(collection: collection)
+                            .cardStyle(padding: 12)
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            Task {
+                                try? await service.deleteCollection(collection.id)
+                                await service.loadCollections()
+                                Haptics.success()
+                            }
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
-                    } label: {
-                        Label("Delete", systemImage: "trash")
                     }
                 }
             }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
         }
-        .listStyle(.insetGrouped)
+        .background(Theme.surface)
         .navigationTitle("Collections")
         .navigationDestination(for: String.self) { collectionId in
             CollectionDetailView(collectionId: collectionId)
@@ -49,10 +58,23 @@ struct CollectionsListView: View {
         }
         .sheet(isPresented: $showCreateSheet) {
             NavigationStack {
-                Form {
-                    TextField("Name", text: $newName)
-                    TextField("Description (optional)", text: $newDescription)
+                VStack(spacing: 20) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        SectionHeader(text: "Name", icon: "folder")
+                        TextField("Collection name", text: $newName)
+                            .textFieldStyle(.themed)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        SectionHeader(text: "Description")
+                        TextField("Optional description", text: $newDescription)
+                            .textFieldStyle(.themed)
+                    }
+
+                    Spacer()
                 }
+                .padding()
+                .background(Theme.surface)
                 .navigationTitle("New Collection")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -68,12 +90,16 @@ struct CollectionsListView: View {
                 }
             }
             .presentationDetents([.medium])
+            .preferredColorScheme(.dark)
         }
         .refreshable {
             await service.loadCollections()
         }
         .task {
             await service.loadCollections()
+            withAnimation(Theme.springGentle) {
+                hasAppeared = true
+            }
         }
     }
 
@@ -87,6 +113,7 @@ struct CollectionsListView: View {
             newDescription = ""
             showCreateSheet = false
             await service.loadCollections()
+            Haptics.success()
         } catch {
             print("Create failed: \(error)")
         }
@@ -105,24 +132,30 @@ struct CollectionRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(collection.name)
-                    .font(.subheadline.weight(.medium))
+                    .font(Theme.body(15, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary)
 
                 HStack(spacing: 8) {
                     if let count = collection.itemCount {
                         Text("\(count) item\(count == 1 ? "" : "s")")
-                            .font(.caption)
+                            .font(Theme.caption())
                             .foregroundStyle(Theme.textSecondary)
                     }
                     if let desc = collection.description, !desc.isEmpty {
                         Text(desc)
-                            .font(.caption)
-                            .foregroundStyle(Theme.textSecondary)
+                            .font(Theme.caption())
+                            .foregroundStyle(Theme.textMuted)
                             .lineLimit(1)
                     }
                 }
             }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(Theme.textMuted)
         }
-        .padding(.vertical, 4)
     }
 }
 
@@ -139,10 +172,12 @@ struct CollectionDetailView: View {
     var body: some View {
         Group {
             if let collection {
-                List {
-                    // Items
-                    if let items = collection.items, !items.isEmpty {
-                        Section("Items") {
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        if let items = collection.items, !items.isEmpty {
+                            SectionHeader(text: "Items", icon: "square.stack")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
                             ForEach(items) { item in
                                 HStack(spacing: 12) {
                                     Image(systemName: iconForType(item.itemType))
@@ -151,24 +186,31 @@ struct CollectionDetailView: View {
 
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(item.itemTitle ?? item.itemId)
-                                            .font(.subheadline)
+                                            .font(Theme.body(14, weight: .medium))
+                                            .foregroundStyle(Theme.textPrimary)
                                             .lineLimit(2)
                                         if let status = item.itemStatus {
                                             StatusBadge(status: status)
                                         }
                                     }
+
+                                    Spacer()
                                 }
+                                .cardStyle(padding: 12)
                             }
+                        } else {
+                            ContentUnavailableView(
+                                "Empty Collection",
+                                systemImage: "tray",
+                                description: Text("Add items from your library.")
+                            )
+                            .padding(.top, 60)
                         }
-                    } else {
-                        ContentUnavailableView(
-                            "Empty Collection",
-                            systemImage: "tray",
-                            description: Text("Add items from your library.")
-                        )
                     }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
                 }
-                .listStyle(.insetGrouped)
+                .background(Theme.surface)
                 .navigationTitle(collection.name)
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
@@ -190,6 +232,7 @@ struct CollectionDetailView: View {
                                 }
                             }
                     }
+                    .preferredColorScheme(.dark)
                 }
             } else {
                 ProgressView()
