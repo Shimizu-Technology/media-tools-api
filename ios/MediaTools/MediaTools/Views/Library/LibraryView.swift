@@ -10,6 +10,7 @@ struct LibraryView: View {
     @State private var statusFilter: StatusFilter = .all
     @State private var isSelecting = false
     @State private var selectedIds: Set<String> = []
+    @State private var hasAppeared = false
 
     private let tabs = ["All", "Videos", "Audio", "PDFs"]
 
@@ -28,86 +29,118 @@ struct LibraryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Tab picker
-            Picker("Type", selection: $selectedTab) {
-                ForEach(0..<tabs.count, id: \.self) { i in
-                    Text(tabs[i]).tag(i)
+            // Tab chips
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(0..<tabs.count, id: \.self) { i in
+                        TabChip(title: tabs[i], isSelected: selectedTab == i) {
+                            withAnimation(Theme.springSnappy) {
+                                selectedTab = i
+                            }
+                        }
+                    }
                 }
+                .padding(.horizontal)
+                .padding(.vertical, 10)
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.vertical, 8)
 
             // Content
-            List(selection: isSelecting ? $selectedIds : nil) {
-                if isSearching && !searchText.isEmpty {
-                    ForEach(searchResults) { item in
-                        NavigationLink(value: LibraryItem.transcript(item)) {
-                            TranscriptRow(transcript: item)
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    if isSearching && !searchText.isEmpty {
+                        ForEach(searchResults) { item in
+                            NavigationLink(value: LibraryItem.transcript(item)) {
+                                TranscriptRow(transcript: item)
+                                    .cardStyle(padding: 12)
+                            }
+                            .buttonStyle(.plain)
                         }
-                    }
-                } else {
-                    if selectedTab == 0 || selectedTab == 1 {
-                        let filtered = filteredTranscripts
-                        if !filtered.isEmpty {
-                            Section("Videos (\(filtered.count))") {
-                                ForEach(filtered) { item in
-                                    NavigationLink(value: LibraryItem.transcript(item)) {
-                                        TranscriptRow(transcript: item)
+                        .padding(.horizontal)
+                    } else {
+                        if selectedTab == 0 || selectedTab == 1 {
+                            let filtered = filteredTranscripts
+                            if !filtered.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    SectionHeader(text: "Videos (\(filtered.count))", icon: "play.rectangle.fill")
+                                        .padding(.horizontal)
+
+                                    ForEach(Array(filtered.enumerated()), id: \.element.id) { index, item in
+                                        NavigationLink(value: LibraryItem.transcript(item)) {
+                                            TranscriptRow(transcript: item)
+                                                .cardStyle(padding: 12)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                                        .librarySwipeActions(itemType: "transcript", itemId: item.id) {
+                                            try? await service.deleteTranscript(item.id)
+                                            await service.loadTranscripts()
+                                        }
                                     }
-                                    .librarySwipeActions(itemType: "transcript", itemId: item.id) {
-                                        try? await service.deleteTranscript(item.id)
-                                        await service.loadTranscripts()
-                                    }
+                                    .padding(.horizontal)
                                 }
                             }
                         }
-                    }
 
-                    if selectedTab == 0 || selectedTab == 2 {
-                        let filtered = filteredAudio
-                        if !filtered.isEmpty {
-                            Section("Audio (\(filtered.count))") {
-                                ForEach(filtered) { item in
-                                    NavigationLink(value: LibraryItem.audio(item)) {
-                                        AudioRow(audio: item)
+                        if selectedTab == 0 || selectedTab == 2 {
+                            let filtered = filteredAudio
+                            if !filtered.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    SectionHeader(text: "Audio (\(filtered.count))", icon: "mic.fill")
+                                        .padding(.horizontal)
+
+                                    ForEach(Array(filtered.enumerated()), id: \.element.id) { index, item in
+                                        NavigationLink(value: LibraryItem.audio(item)) {
+                                            AudioRow(audio: item)
+                                                .cardStyle(padding: 12)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                                        .librarySwipeActions(itemType: "audio", itemId: item.id) {
+                                            try? await service.deleteAudioItem(item.id)
+                                            await service.loadAudioItems()
+                                        }
                                     }
-                                    .librarySwipeActions(itemType: "audio", itemId: item.id) {
-                                        try? await service.deleteAudioItem(item.id)
-                                        await service.loadAudioItems()
-                                    }
+                                    .padding(.horizontal)
                                 }
                             }
                         }
-                    }
 
-                    if selectedTab == 0 || selectedTab == 3 {
-                        let filtered = filteredPDFs
-                        if !filtered.isEmpty {
-                            Section("PDFs (\(filtered.count))") {
-                                ForEach(filtered) { item in
-                                    NavigationLink(value: LibraryItem.pdf(item)) {
-                                        PDFRow(pdf: item)
+                        if selectedTab == 0 || selectedTab == 3 {
+                            let filtered = filteredPDFs
+                            if !filtered.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    SectionHeader(text: "PDFs (\(filtered.count))", icon: "doc.fill")
+                                        .padding(.horizontal)
+
+                                    ForEach(Array(filtered.enumerated()), id: \.element.id) { index, item in
+                                        NavigationLink(value: LibraryItem.pdf(item)) {
+                                            PDFRow(pdf: item)
+                                                .cardStyle(padding: 12)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                                        .librarySwipeActions(itemType: "pdf", itemId: item.id) {
+                                            try? await service.deletePDF(item.id)
+                                            await service.loadPDFs()
+                                        }
                                     }
-                                    .librarySwipeActions(itemType: "pdf", itemId: item.id) {
-                                        try? await service.deletePDF(item.id)
-                                        await service.loadPDFs()
-                                    }
+                                    .padding(.horizontal)
                                 }
                             }
                         }
-                    }
 
-                    if totalCount == 0 && !service.isLoading {
-                        ContentUnavailableView(
-                            "No Items Yet",
-                            systemImage: "tray",
-                            description: Text("Transcribe a video, record audio, or upload a PDF to get started.")
-                        )
+                        if totalCount == 0 && !service.isLoading {
+                            ContentUnavailableView(
+                                "No Items Yet",
+                                systemImage: "tray",
+                                description: Text("Transcribe a video, record audio, or upload a PDF to get started.")
+                            )
+                            .padding(.top, 60)
+                        }
                     }
                 }
+                .padding(.vertical, 4)
             }
-            .listStyle(.insetGrouped)
             .navigationDestination(for: LibraryItem.self) { item in
                 ItemDetailView(item: item)
             }
@@ -116,7 +149,8 @@ struct LibraryView: View {
             if isSelecting && !selectedIds.isEmpty {
                 HStack {
                     Text("\(selectedIds.count) selected")
-                        .font(.subheadline.weight(.medium))
+                        .font(Theme.body(14, weight: .medium))
+                        .foregroundStyle(Theme.textPrimary)
                     Spacer()
                     Button(role: .destructive) {
                         Task { await bulkDelete() }
@@ -127,9 +161,10 @@ struct LibraryView: View {
                     .tint(Theme.error)
                 }
                 .padding()
-                .background(.bar)
+                .background(Theme.surfaceElevated)
             }
         }
+        .background(Theme.surface)
         .navigationTitle("Library")
         .searchable(text: $searchText, prompt: "Search transcripts...")
         .onSubmit(of: .search) {
@@ -144,7 +179,6 @@ struct LibraryView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    // Sort
                     Menu {
                         ForEach(SortOrder.allCases, id: \.self) { order in
                             Button {
@@ -162,7 +196,6 @@ struct LibraryView: View {
                         Label("Sort", systemImage: "arrow.up.arrow.down")
                     }
 
-                    // Filter
                     Menu {
                         ForEach(StatusFilter.allCases, id: \.self) { filter in
                             Button {
@@ -182,17 +215,17 @@ struct LibraryView: View {
 
                     Divider()
 
-                    // Select mode
                     Button {
-                        isSelecting.toggle()
-                        if !isSelecting { selectedIds.removeAll() }
+                        withAnimation(Theme.springSnappy) {
+                            isSelecting.toggle()
+                            if !isSelecting { selectedIds.removeAll() }
+                        }
                     } label: {
                         Label(isSelecting ? "Cancel Selection" : "Select", systemImage: isSelecting ? "xmark" : "checkmark.circle")
                     }
 
                     Divider()
 
-                    // PDF upload
                     NavigationLink(value: "pdf-upload") {
                         Label("Upload PDF", systemImage: "doc.badge.plus")
                     }
@@ -211,6 +244,9 @@ struct LibraryView: View {
         }
         .task {
             await service.refreshAll()
+            withAnimation(Theme.springGentle) {
+                hasAppeared = true
+            }
         }
     }
 
@@ -270,7 +306,6 @@ struct LibraryView: View {
 
     private func bulkDelete() async {
         for id in selectedIds {
-            // Try deleting from each type (API will 404 for wrong type, that's fine)
             try? await service.deleteTranscript(id)
             try? await service.deleteAudioItem(id)
             try? await service.deletePDF(id)
@@ -316,20 +351,26 @@ struct TranscriptRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(transcript.displayTitle)
-                    .font(.subheadline.weight(.medium))
+                    .font(Theme.body(15, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
 
                 HStack(spacing: 8) {
                     StatusBadge(status: transcript.status)
                     if let wc = transcript.wordCount, wc > 0 {
                         Text("\(wc) words")
-                            .font(.caption)
+                            .font(Theme.caption())
                             .foregroundStyle(Theme.textSecondary)
                     }
                 }
             }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(Theme.textMuted)
         }
-        .padding(.vertical, 4)
     }
 }
 
@@ -345,20 +386,26 @@ struct AudioRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(audio.displayTitle)
-                    .font(.subheadline.weight(.medium))
+                    .font(Theme.body(15, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
 
                 HStack(spacing: 8) {
                     StatusBadge(status: audio.status)
                     if let dur = audio.duration {
                         Text(formatDuration(dur))
-                            .font(.caption)
+                            .font(Theme.caption())
                             .foregroundStyle(Theme.textSecondary)
                     }
                 }
             }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(Theme.textMuted)
         }
-        .padding(.vertical, 4)
     }
 
     private func formatDuration(_ seconds: Double) -> String {
@@ -380,20 +427,26 @@ struct PDFRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(pdf.displayTitle)
-                    .font(.subheadline.weight(.medium))
+                    .font(Theme.body(15, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
 
                 HStack(spacing: 8) {
                     StatusBadge(status: pdf.status)
                     if let pages = pdf.pageCount {
                         Text("\(pages) pages")
-                            .font(.caption)
+                            .font(Theme.caption())
                             .foregroundStyle(Theme.textSecondary)
                     }
                 }
             }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(Theme.textMuted)
         }
-        .padding(.vertical, 4)
     }
 }
 

@@ -20,22 +20,27 @@ struct PDFUploadView: View {
                 VStack(spacing: 16) {
                     Image(systemName: "doc.badge.plus")
                         .font(.system(size: 48))
-                        .foregroundStyle(.red.opacity(0.7))
+                        .foregroundStyle(Theme.pdfColor.opacity(0.7))
 
                     VStack(spacing: 4) {
                         Text("Select PDF")
-                            .font(.headline)
+                            .font(Theme.heading(16))
+                            .foregroundStyle(Theme.textPrimary)
                         Text("Tap to browse your files")
-                            .font(.caption)
+                            .font(Theme.caption())
                             .foregroundStyle(Theme.textSecondary)
                     }
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 200)
                 .background(
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: Theme.radiusLarge)
+                        .fill(Theme.surfaceCard)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.radiusLarge)
                         .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [8]))
-                        .foregroundStyle(.secondary.opacity(0.3))
+                        .foregroundStyle(Theme.border)
                 )
             }
             .buttonStyle(.plain)
@@ -44,8 +49,9 @@ struct PDFUploadView: View {
             if isUploading {
                 VStack(spacing: 8) {
                     ProgressView()
+                        .tint(Theme.brand400)
                     Text("Uploading & extracting...")
-                        .font(.caption)
+                        .font(Theme.caption())
                         .foregroundStyle(Theme.textSecondary)
                 }
             }
@@ -54,33 +60,35 @@ struct PDFUploadView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
+                            .foregroundStyle(Theme.success)
                         Text("Extracted!")
-                            .font(.headline)
+                            .font(Theme.heading(16))
+                            .foregroundStyle(Theme.textPrimary)
                     }
                     Text(result.displayTitle)
-                        .font(.subheadline)
+                        .font(Theme.body(14))
+                        .foregroundStyle(Theme.textSecondary)
                     if let pages = result.pageCount {
                         Text("\(pages) pages")
-                            .font(.caption)
-                            .foregroundStyle(Theme.textSecondary)
+                            .font(Theme.caption())
+                            .foregroundStyle(Theme.textMuted)
                     }
                 }
-                .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.green.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .accentCardStyle()
                 .padding(.horizontal)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
 
             if let error {
                 Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(Theme.caption())
+                    .foregroundStyle(Theme.error)
             }
 
             Spacer()
         }
+        .background(Theme.surface)
         .navigationTitle("Upload PDF")
         .fileImporter(
             isPresented: $showFilePicker,
@@ -103,7 +111,6 @@ struct PDFUploadView: View {
         error = nil
         defer { isUploading = false }
 
-        // Start accessing security-scoped resource
         guard url.startAccessingSecurityScopedResource() else {
             error = "Cannot access file"
             return
@@ -112,15 +119,20 @@ struct PDFUploadView: View {
 
         do {
             let data = try Data(contentsOf: url)
-            result = try await APIClient.shared.upload(
+            let extraction: PDFExtraction = try await APIClient.shared.upload(
                 "/pdf/extractions",
                 fileData: data,
                 filename: url.lastPathComponent,
                 mimeType: "application/pdf"
             )
+            withAnimation(Theme.springGentle) {
+                result = extraction
+            }
             await service.loadPDFs()
+            Haptics.success()
         } catch {
             self.error = error.localizedDescription
+            Haptics.error()
         }
     }
 }

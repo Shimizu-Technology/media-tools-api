@@ -39,6 +39,7 @@ struct MainTabView: View {
             }
         }
         .tint(Theme.brand500)
+        .preferredColorScheme(.dark)
         .task {
             _ = await NotificationService.requestPermission()
         }

@@ -36,6 +36,7 @@ struct ItemDetailView: View {
             }
             .padding()
         }
+        .background(Theme.surface)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showChat) {
@@ -49,6 +50,7 @@ struct ItemDetailView: View {
                         }
                     }
             }
+            .preferredColorScheme(.dark)
         }
         .sheet(isPresented: $showAddToCollection) {
             AddToCollectionSheet(
@@ -101,17 +103,18 @@ struct ItemDetailView: View {
 
                 VStack(alignment: .leading) {
                     Text(title)
-                        .font(.title3.weight(.semibold))
+                        .font(Theme.heading(18))
+                        .foregroundStyle(Theme.textPrimary)
                     HStack(spacing: 8) {
                         StatusBadge(status: statusText)
                         if let wc = wordCount, wc > 0 {
                             Text("\(wc) words")
-                                .font(.caption)
+                                .font(Theme.caption())
                                 .foregroundStyle(Theme.textSecondary)
                         }
                         if let dur = audioDuration {
                             Text(formatDuration(dur))
-                                .font(.caption)
+                                .font(Theme.caption())
                                 .foregroundStyle(Theme.textSecondary)
                         }
                     }
@@ -145,6 +148,7 @@ struct ItemDetailView: View {
                 }
             }
             .buttonStyle(.bordered)
+            .tint(Theme.brand400)
             .disabled(isLoadingSummary)
         }
     }
@@ -154,23 +158,18 @@ struct ItemDetailView: View {
     @ViewBuilder
     private var summaryTypeSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Summary Style")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(Theme.textSecondary)
+            SectionHeader(text: "Summary Style", icon: "sparkles")
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(summaryTypes, id: \.0) { type in
                         Button {
-                            summaryContentType = type.0
+                            withAnimation(Theme.springSnappy) {
+                                summaryContentType = type.0
+                            }
                         } label: {
                             Text(type.1)
-                                .font(.caption)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(summaryContentType == type.0 ? Theme.brand500 : Color.secondary.opacity(0.1))
-                                .foregroundStyle(summaryContentType == type.0 ? .white : .primary)
-                                .clipShape(Capsule())
+                                .chipStyle(isSelected: summaryContentType == type.0)
                         }
                     }
                 }
@@ -195,19 +194,21 @@ struct ItemDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Image(systemName: "sparkles")
-                        .foregroundStyle(Theme.brand500)
+                        .foregroundStyle(Theme.brand400)
                     Text("Summary")
-                        .font(.headline)
+                        .font(Theme.heading(16))
+                        .foregroundStyle(Theme.textPrimary)
                 }
 
                 Text(summaryText)
-                    .font(.body)
-                    .foregroundStyle(.primary.opacity(0.85))
+                    .font(Theme.body())
+                    .foregroundStyle(Theme.textSecondary)
                     .textSelection(.enabled)
 
                 if let points = summary.keyPoints, !points.isEmpty {
                     Text("Key Points")
-                        .font(.subheadline.weight(.semibold))
+                        .font(Theme.body(14, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
                         .padding(.top, 4)
 
                     ForEach(points, id: \.self) { point in
@@ -217,14 +218,16 @@ struct ItemDetailView: View {
                                 .padding(.top, 7)
                                 .foregroundStyle(Theme.brand500)
                             Text(point)
-                                .font(.subheadline)
+                                .font(Theme.body(14))
+                                .foregroundStyle(Theme.textSecondary)
                         }
                     }
                 }
 
                 if let actions = summary.actionItems, !actions.isEmpty {
                     Text("Action Items")
-                        .font(.subheadline.weight(.semibold))
+                        .font(Theme.body(14, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
                         .padding(.top, 4)
 
                     ForEach(actions, id: \.self) { action in
@@ -234,32 +237,33 @@ struct ItemDetailView: View {
                                 .foregroundStyle(Theme.brand500)
                                 .padding(.top, 2)
                             Text(action)
-                                .font(.subheadline)
+                                .font(Theme.body(14))
+                                .foregroundStyle(Theme.textSecondary)
                         }
                     }
                 }
 
                 if let topics = summary.topics, !topics.isEmpty {
                     Text("Topics")
-                        .font(.subheadline.weight(.semibold))
+                        .font(Theme.body(14, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
                         .padding(.top, 4)
 
                     FlowLayout(spacing: 6) {
                         ForEach(topics, id: \.self) { topic in
                             Text(topic)
-                                .font(.caption)
+                                .font(Theme.caption())
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
                                 .background(Theme.brand500.opacity(0.1))
-                                .foregroundStyle(Theme.brand500)
+                                .foregroundStyle(Theme.brand400)
                                 .clipShape(Capsule())
                         }
                     }
                 }
             }
-            .padding()
-            .background(.secondary.opacity(0.05))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .accentCardStyle()
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
     }
 
@@ -269,14 +273,14 @@ struct ItemDetailView: View {
     private var transcriptSection: some View {
         if let text = contentText, !text.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Transcript")
-                    .font(.headline)
+                SectionHeader(text: "Transcript", icon: "doc.text")
 
                 Text(text)
-                    .font(.body)
-                    .foregroundStyle(.primary.opacity(0.85))
+                    .font(Theme.body())
+                    .foregroundStyle(Theme.textSecondary)
                     .textSelection(.enabled)
             }
+            .cardStyle()
         }
     }
 
@@ -373,10 +377,13 @@ struct ItemDetailView: View {
         Haptics.light()
         defer { isLoadingSummary = false }
         do {
-            summary = try await service.getSummary(
+            let result = try await service.getSummary(
                 transcriptId: itemId,
                 contentType: summaryContentType == "general" ? nil : summaryContentType
             )
+            withAnimation(Theme.springGentle) {
+                summary = result
+            }
             Haptics.success()
         } catch {
             Haptics.error()
@@ -394,19 +401,23 @@ struct ExportSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            VStack(spacing: 12) {
                 Button {
                     shareText(text, as: "\(title).txt")
                 } label: {
                     Label("Plain Text (.txt)", systemImage: "doc.text")
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .cardStyle(padding: 14)
 
                 Button {
                     let md = "# \(title)\n\n\(text)"
                     shareText(md, as: "\(title).md")
                 } label: {
                     Label("Markdown (.md)", systemImage: "doc.richtext")
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .cardStyle(padding: 14)
 
                 Button {
                     let json: [String: Any] = ["title": title, "text": text]
@@ -416,8 +427,15 @@ struct ExportSheet: View {
                     }
                 } label: {
                     Label("JSON (.json)", systemImage: "curlybraces")
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .cardStyle(padding: 14)
+
+                Spacer()
             }
+            .padding()
+            .background(Theme.surface)
+            .foregroundStyle(Theme.textPrimary)
             .navigationTitle("Export As")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -427,6 +445,7 @@ struct ExportSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .preferredColorScheme(.dark)
     }
 
     private func shareText(_ content: String, as filename: String) {
