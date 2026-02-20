@@ -7,6 +7,7 @@ struct RecordView: View {
     @State private var isUploading = false
     @State private var uploadResult: AudioTranscription?
     @State private var isPolling = false
+    @State private var pollingTask: Task<Void, Never>?
     @State private var error: String?
     @State private var showFilePicker = false
     @State private var pulseRing = false
@@ -310,6 +311,9 @@ struct RecordView: View {
         .navigationDestination(for: LibraryItem.self) { item in
             ItemDetailView(item: item)
         }
+        .onDisappear {
+            pollingTask?.cancel()
+        }
     }
 
     private func uploadRecording(url: URL) async {
@@ -331,28 +335,33 @@ struct RecordView: View {
             }
             Haptics.success()
 
-            // Poll for completion
+            // Poll for completion in a cancellable task
             guard let id = uploadResult?.id else { return }
-            isPolling = true
-            defer { isPolling = false }
+            pollingTask = Task {
+                isPolling = true
+                defer { isPolling = false }
 
-            while uploadResult?.status != "completed" && uploadResult?.status != "failed" {
-                try await Task.sleep(for: .seconds(3))
-                if let updated = try? await service.getAudioItem(id) {
-                    withAnimation(Theme.springSnappy) {
-                        uploadResult = updated
+                while !Task.isCancelled,
+                      uploadResult?.status != "completed",
+                      uploadResult?.status != "failed" {
+                    try? await Task.sleep(for: .seconds(3))
+                    guard !Task.isCancelled else { break }
+                    if let updated = try? await service.getAudioItem(id) {
+                        withAnimation(Theme.springSnappy) {
+                            uploadResult = updated
+                        }
                     }
                 }
-            }
 
-            // Refresh library and notify
-            await service.loadAudioItems()
-            if uploadResult?.status == "completed" {
-                Haptics.success()
-                NotificationService.notifyTranscriptionComplete(
-                    title: uploadResult?.displayTitle ?? "Audio",
-                    itemId: id
-                )
+                guard !Task.isCancelled else { return }
+                await service.loadAudioItems()
+                if uploadResult?.status == "completed" {
+                    Haptics.success()
+                    NotificationService.notifyTranscriptionComplete(
+                        title: uploadResult?.displayTitle ?? "Audio",
+                        itemId: id
+                    )
+                }
             }
         } catch {
             isUploading = false
