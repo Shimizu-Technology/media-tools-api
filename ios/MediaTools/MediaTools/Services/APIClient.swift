@@ -17,7 +17,20 @@ actor APIClient {
 
         self.decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        decoder.dateDecodingStrategy = .iso8601
+
+        // Go API returns dates with fractional seconds (e.g. "2026-02-20T00:33:45.123Z")
+        // which the default .iso8601 can't parse. Use a custom formatter.
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoFallback = ISO8601DateFormatter()
+        isoFallback.formatOptions = [.withInternetDateTime]
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let str = try container.decode(String.self)
+            if let date = isoFormatter.date(from: str) { return date }
+            if let date = isoFallback.date(from: str) { return date }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date: \(str)")
+        }
 
         self.encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
