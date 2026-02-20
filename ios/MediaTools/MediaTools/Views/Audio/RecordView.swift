@@ -195,9 +195,9 @@ struct RecordView: View {
             }
 
             // Upload result / polling status
-            if let uploadResult {
+            if let result = uploadResult {
                 VStack(spacing: 8) {
-                    if uploadResult.status == "completed" {
+                    if result.status == "completed" {
                         HStack(spacing: 8) {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(Theme.success)
@@ -206,13 +206,13 @@ struct RecordView: View {
                                 .foregroundStyle(Theme.textPrimary)
                         }
 
-                        if uploadResult.wordCount ?? 0 > 0 {
-                            Text("\(uploadResult.wordCount ?? 0) words  ·  \(formatDuration(uploadResult.duration ?? 0))")
+                        if result.wordCount ?? 0 > 0 {
+                            Text("\(result.wordCount ?? 0) words  ·  \(formatDuration(result.duration ?? 0))")
                                 .font(Theme.caption())
                                 .foregroundStyle(Theme.textSecondary)
                         }
 
-                        if let text = uploadResult.transcriptText, !text.isEmpty {
+                        if let text = result.transcriptText, !text.isEmpty {
                             Text(text)
                                 .font(Theme.body(14))
                                 .foregroundStyle(Theme.textSecondary)
@@ -221,7 +221,7 @@ struct RecordView: View {
                         }
 
                         HStack(spacing: 12) {
-                            NavigationLink(value: LibraryItem.audio(uploadResult!)) {
+                            NavigationLink(value: LibraryItem.audio(result)) {
                                 Label("View Details", systemImage: "arrow.right.circle.fill")
                                     .font(Theme.body(14, weight: .semibold))
                                     .foregroundStyle(.white)
@@ -242,7 +242,7 @@ struct RecordView: View {
                             }
                         }
                         .padding(.top, 4)
-                    } else if uploadResult.status == "failed" {
+                    } else if result.status == "failed" {
                         HStack(spacing: 8) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundStyle(Theme.error)
