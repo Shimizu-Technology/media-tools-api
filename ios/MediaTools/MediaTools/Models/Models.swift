@@ -40,9 +40,12 @@ struct AudioTranscription: Identifiable, Codable {
     let status: String
     let transcriptText: String?
     let contentType: String?
-    let durationSeconds: Double?
+    let duration: Double?
     let wordCount: Int?
     let createdAt: Date?
+    let filename: String?
+    let originalName: String?
+    let errorMessage: String?
 
     var displayTitle: String {
         title ?? "(Untitled Recording)"
