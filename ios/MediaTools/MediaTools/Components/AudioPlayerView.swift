@@ -130,7 +130,7 @@ struct AudioPlayerView: View {
     private func loadAudio() async {
         isLoading = true
         do {
-            let playbackURL: PlaybackURLResponse = try await APIClient.shared.get("/audio/transcriptions/\(audioId)/playback")
+            let playbackURL: PlaybackURLResponse = try await APIClient.shared.get("/audio/transcriptions/\(audioId)/audio")
             if let url = URL(string: playbackURL.url) {
                 player.load(url: url)
             } else {

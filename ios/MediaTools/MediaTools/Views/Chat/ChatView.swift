@@ -58,6 +58,7 @@ struct ChatView: View {
                     .textFieldStyle(.themed)
                     .lineLimit(1...4)
                     .focused($inputFocused)
+                    .submitLabel(.send)
                     .onSubmit { Task { await send() } }
 
                 Button {
@@ -72,6 +73,7 @@ struct ChatView: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
             .background(Theme.surfaceElevated)
+            .animation(.easeOut(duration: 0.15), value: inputFocused)
         }
         .background(Theme.surface)
         .task { await loadHistory() }
@@ -92,8 +94,9 @@ struct ChatView: View {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
+        let tempId = UUID().uuidString
         withAnimation(Theme.springSnappy) {
-            messages.append(ChatMessage(id: UUID().uuidString, role: "user", content: text))
+            messages.append(ChatMessage(id: tempId, role: "user", content: text))
         }
         input = ""
         isSending = true
@@ -102,7 +105,9 @@ struct ChatView: View {
         do {
             let response = try await service.chat(itemType: itemType, itemId: itemId, message: text)
             withAnimation(Theme.springGentle) {
-                messages = response.messages
+                // Remove the optimistic user message, then append the real pair
+                messages.removeAll { $0.id == tempId }
+                messages.append(contentsOf: response.messages)
             }
         } catch {
             self.error = error.localizedDescription
