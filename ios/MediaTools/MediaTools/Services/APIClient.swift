@@ -130,7 +130,15 @@ actor APIClient {
 
         let (data, response) = try await session.data(for: request)
         try validateResponse(response, data: data)
-        return try decoder.decode(T.self, from: data)
+        if let raw = String(data: data, encoding: .utf8) {
+            print("📦 Upload response: \(raw.prefix(500))")
+        }
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            print("❌ Upload decode error: \(error)")
+            throw error
+        }
     }
 
     // MARK: - Validation
