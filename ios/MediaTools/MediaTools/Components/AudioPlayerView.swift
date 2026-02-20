@@ -9,39 +9,53 @@ struct AudioPlayerView: View {
     @State private var error: String?
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             HStack {
                 Image(systemName: "speaker.wave.2.fill")
                     .foregroundStyle(Theme.audioColor)
                 Text("Playback")
-                    .font(.subheadline.weight(.medium))
+                    .font(Theme.body(15, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
                 Spacer()
             }
 
             if isLoading {
-                ProgressView("Loading audio...")
-                    .font(.caption)
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .tint(Theme.audioColor)
+                    Text("Loading audio...")
+                        .font(Theme.caption())
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .padding(.vertical, 8)
             } else if let error {
-                HStack {
-                    Image(systemName: "exclamationmark.triangle")
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(Theme.audioColor)
                     Text(error)
-                        .font(.caption)
+                        .font(Theme.caption())
                         .foregroundStyle(Theme.textSecondary)
                 }
             } else {
                 // Playback controls
-                VStack(spacing: 8) {
+                VStack(spacing: 10) {
                     // Progress bar
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(.secondary.opacity(0.2))
-                                .frame(height: 4)
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Theme.surfaceOverlay)
+                                .frame(height: 6)
 
-                            RoundedRectangle(cornerRadius: 2)
+                            RoundedRectangle(cornerRadius: 3)
                                 .fill(Theme.audioColor)
-                                .frame(width: geo.size.width * player.progress, height: 4)
+                                .frame(width: geo.size.width * player.progress, height: 6)
+
+                            // Scrubber dot
+                            Circle()
+                                .fill(Theme.audioColor)
+                                .frame(width: 14, height: 14)
+                                .shadow(color: Theme.audioColor.opacity(0.4), radius: 4)
+                                .offset(x: geo.size.width * player.progress - 7)
                         }
                         .gesture(
                             DragGesture(minimumDistance: 0)
@@ -51,7 +65,7 @@ struct AudioPlayerView: View {
                                 }
                         )
                     }
-                    .frame(height: 4)
+                    .frame(height: 14)
 
                     // Time + controls
                     HStack {
@@ -98,27 +112,35 @@ struct AudioPlayerView: View {
                     }
 
                     // Speed control
-                    HStack(spacing: 8) {
-                        ForEach([0.5, 1.0, 1.25, 1.5, 2.0], id: \.self) { speed in
+                    HStack(spacing: 6) {
+                        ForEach(Array(zip([0.5, 1.0, 1.25, 1.5, 2.0], ["0.5x", "1x", "1.25x", "1.5x", "2x"])), id: \.0) { speed, label in
                             Button {
                                 player.setSpeed(Float(speed))
                             } label: {
-                                Text(speed == 1.0 ? "1x" : "\(speed, specifier: "%.1g")x")
-                                    .font(.caption2.weight(.medium))
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(player.speed == Float(speed) ? Theme.audioColor.opacity(0.2) : Color.clear)
-                                    .foregroundStyle(player.speed == Float(speed) ? Theme.audioColor : .secondary)
+                                Text(label)
+                                    .font(Theme.caption(11, weight: .semibold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(player.speed == Float(speed) ? Theme.audioColor.opacity(0.2) : Theme.surfaceCard)
+                                    .foregroundStyle(player.speed == Float(speed) ? Theme.audioColor : Theme.textSecondary)
                                     .clipShape(Capsule())
+                                    .overlay(
+                                        Capsule()
+                                            .stroke(player.speed == Float(speed) ? Theme.audioColor.opacity(0.4) : Theme.borderSubtle, lineWidth: 1)
+                                    )
                             }
                         }
                     }
                 }
             }
         }
-        .padding()
-        .background(Theme.audioColor.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(16)
+        .background(Theme.surfaceCard)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radiusMedium)
+                .stroke(Theme.audioColor.opacity(0.2), lineWidth: 1)
+        )
         .task {
             await loadAudio()
         }
@@ -169,6 +191,14 @@ class AudioPlayerService {
     }
 
     func load(url: URL) {
+        // Switch to playback mode so audio comes from speaker, not earpiece
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("Audio session setup failed: \(error)")
+        }
+
         let item = AVPlayerItem(url: url)
         avPlayer = AVPlayer(playerItem: item)
 
