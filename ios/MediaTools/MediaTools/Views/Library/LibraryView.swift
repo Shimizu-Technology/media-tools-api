@@ -350,7 +350,7 @@ struct AudioRow: View {
 
                 HStack(spacing: 8) {
                     StatusBadge(status: audio.status)
-                    if let dur = audio.durationSeconds {
+                    if let dur = audio.duration {
                         Text(formatDuration(dur))
                             .font(.caption)
                             .foregroundStyle(Theme.textSecondary)

@@ -339,7 +339,7 @@ struct ItemDetailView: View {
     }
 
     private var audioDuration: Double? {
-        if case .audio(let a) = item { return a.durationSeconds }
+        if case .audio(let a) = item { return a.duration }
         return nil
     }
 

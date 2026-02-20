@@ -37,7 +37,7 @@ enum SpotlightService {
             attributes.title = audio.displayTitle
             attributes.contentDescription = String(audio.transcriptText?.prefix(200) ?? "")
             attributes.keywords = ["audio", "recording", "transcript", "media tools"]
-            if let dur = audio.durationSeconds {
+            if let dur = audio.duration {
                 attributes.duration = NSNumber(value: dur)
             }
 
