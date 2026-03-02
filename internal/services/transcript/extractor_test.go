@@ -8,6 +8,7 @@
 package transcript
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -386,5 +387,21 @@ func TestParseVideoURL(t *testing.T) {
 				t.Errorf("ParseVideoURL(%q) url = %q, want %q", tt.url, result.URL, tt.wantURL)
 			}
 		})
+	}
+}
+
+func TestBuildBaseArgs_IncludesCookiesAndProxy(t *testing.T) {
+	e := NewExtractor("/usr/bin/yt-dlp")
+	e.SetCookiesFile("/tmp/vimeo-cookies.txt")
+	e.SetProxy("http://user:pass@proxy.example.com:8080")
+
+	args := e.buildBaseArgs()
+	joined := strings.Join(args, " ")
+
+	if !strings.Contains(joined, "--cookies /tmp/vimeo-cookies.txt") {
+		t.Fatalf("expected --cookies arg, got: %v", args)
+	}
+	if !strings.Contains(joined, "--proxy http://user:pass@proxy.example.com:8080") {
+		t.Fatalf("expected --proxy arg, got: %v", args)
 	}
 }

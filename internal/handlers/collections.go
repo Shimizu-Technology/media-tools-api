@@ -11,27 +11,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 )
 
-// getOwnership extracts user ID and API key ID from the request context.
-// Collections can be owned by either a Clerk user or an API key.
-func getOwnership(c *gin.Context) (userID, apiKeyID *string) {
-	if user := middleware.GetUser(c); user != nil {
-		return &user.ID, nil
-	}
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		return nil, &apiKey.ID
-	}
-	return nil, nil
-}
-
 // ListCollections returns all collections for the authenticated user/key.
 // GET /api/v1/collections
 func (h *Handler) ListCollections(c *gin.Context) {
-	userID, apiKeyID := getOwnership(c)
+	actor := getActorOwnership(c)
+	userID, apiKeyID := actor.UserID, actor.APIKeyID
 	if userID == nil && apiKeyID == nil {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error: "unauthorized", Message: "Authentication required", Code: http.StatusUnauthorized,
@@ -61,7 +49,8 @@ func (h *Handler) CreateCollection(c *gin.Context) {
 		return
 	}
 
-	userID, apiKeyID := getOwnership(c)
+	actor := getActorOwnership(c)
+	userID, apiKeyID := actor.UserID, actor.APIKeyID
 	if userID == nil && apiKeyID == nil {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error: "unauthorized", Message: "Authentication required", Code: http.StatusUnauthorized,
@@ -90,7 +79,8 @@ func (h *Handler) CreateCollection(c *gin.Context) {
 // GET /api/v1/collections/:id
 func (h *Handler) GetCollection(c *gin.Context) {
 	id := c.Param("id")
-	userID, apiKeyID := getOwnership(c)
+	actor := getActorOwnership(c)
+	userID, apiKeyID := actor.UserID, actor.APIKeyID
 
 	col, err := h.DB.GetCollection(c.Request.Context(), id, userID, apiKeyID)
 	if err != nil {
@@ -123,7 +113,8 @@ func (h *Handler) UpdateCollection(c *gin.Context) {
 		return
 	}
 
-	userID, apiKeyID := getOwnership(c)
+	actor := getActorOwnership(c)
+	userID, apiKeyID := actor.UserID, actor.APIKeyID
 
 	col, err := h.DB.UpdateCollection(c.Request.Context(), id, userID, apiKeyID, req.Name, req.Description)
 	if err != nil {
@@ -140,7 +131,8 @@ func (h *Handler) UpdateCollection(c *gin.Context) {
 // DELETE /api/v1/collections/:id
 func (h *Handler) DeleteCollection(c *gin.Context) {
 	id := c.Param("id")
-	userID, apiKeyID := getOwnership(c)
+	actor := getActorOwnership(c)
+	userID, apiKeyID := actor.UserID, actor.APIKeyID
 
 	if err := h.DB.DeleteCollection(c.Request.Context(), id, userID, apiKeyID); err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
@@ -156,7 +148,8 @@ func (h *Handler) DeleteCollection(c *gin.Context) {
 // POST /api/v1/collections/:id/items
 func (h *Handler) AddCollectionItems(c *gin.Context) {
 	id := c.Param("id")
-	userID, apiKeyID := getOwnership(c)
+	actor := getActorOwnership(c)
+	userID, apiKeyID := actor.UserID, actor.APIKeyID
 
 	// Verify ownership first
 	_, err := h.DB.GetCollection(c.Request.Context(), id, userID, apiKeyID)
@@ -191,7 +184,8 @@ func (h *Handler) AddCollectionItems(c *gin.Context) {
 func (h *Handler) RemoveCollectionItem(c *gin.Context) {
 	collectionID := c.Param("id")
 	itemID := c.Param("itemId")
-	userID, apiKeyID := getOwnership(c)
+	actor := getActorOwnership(c)
+	userID, apiKeyID := actor.UserID, actor.APIKeyID
 
 	// Verify ownership
 	_, err := h.DB.GetCollection(c.Request.Context(), collectionID, userID, apiKeyID)
@@ -216,7 +210,8 @@ func (h *Handler) RemoveCollectionItem(c *gin.Context) {
 // GET /api/v1/collections/:id/chat
 func (h *Handler) GetCollectionChat(c *gin.Context) {
 	id := c.Param("id")
-	userID, apiKeyID := getOwnership(c)
+	actor := getActorOwnership(c)
+	userID, apiKeyID := actor.UserID, actor.APIKeyID
 
 	_, err := h.DB.GetCollection(c.Request.Context(), id, userID, apiKeyID)
 	if err != nil {
@@ -226,7 +221,7 @@ func (h *Handler) GetCollectionChat(c *gin.Context) {
 		return
 	}
 
-	session, err := h.DB.GetOrCreateChatSession(c.Request.Context(), "collection", id, apiKeyID)
+	session, err := h.DB.GetOrCreateChatSession(c.Request.Context(), "collection", id, userID, apiKeyID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error: "database_error", Message: "Failed to load chat session", Code: http.StatusInternalServerError,
@@ -253,7 +248,8 @@ func (h *Handler) PostCollectionChat(c *gin.Context) {
 	}
 
 	id := c.Param("id")
-	userID, apiKeyID := getOwnership(c)
+	actor := getActorOwnership(c)
+	userID, apiKeyID := actor.UserID, actor.APIKeyID
 
 	col, err := h.DB.GetCollection(c.Request.Context(), id, userID, apiKeyID)
 	if err != nil {
@@ -307,7 +303,7 @@ func (h *Handler) PostCollectionChat(c *gin.Context) {
 	contextLabel := fmt.Sprintf("collection '%s' containing %d items", col.Name, len(contents))
 
 	// Chat session
-	session, err := h.DB.GetOrCreateChatSession(c.Request.Context(), "collection", id, apiKeyID)
+	session, err := h.DB.GetOrCreateChatSession(c.Request.Context(), "collection", id, userID, apiKeyID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error: "database_error", Message: "Failed to load chat session", Code: http.StatusInternalServerError,

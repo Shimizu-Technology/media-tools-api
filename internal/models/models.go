@@ -66,6 +66,7 @@ type TranscriptChatSession struct {
 	TranscriptID *string   `json:"transcript_id,omitempty" db:"transcript_id"`
 	ItemType     string    `json:"item_type" db:"item_type"` // transcript, audio, pdf
 	ItemID       string    `json:"item_id" db:"item_id"`
+	UserID       *string   `json:"user_id,omitempty" db:"user_id"`
 	APIKeyID     *string   `json:"api_key_id,omitempty" db:"api_key_id"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
@@ -153,6 +154,7 @@ type TranscriptListParams struct {
 	SortDir  string           `form:"sort_dir"`
 	DateFrom string           `form:"date_from"`
 	DateTo   string           `form:"date_to"`
+	UserID   *string          // Filter by owning user (set internally, not from form)
 	APIKeyID *string          // Filter by owning API key (set internally, not from form)
 }
 
@@ -408,8 +410,9 @@ type ErrorResponse struct {
 }
 
 type HealthResponse struct {
-	Status   string `json:"status"`
-	Version  string `json:"version"`
-	Database string `json:"database"`
-	Workers  int    `json:"workers"`
+	Status                 string `json:"status"`
+	Version                string `json:"version"`
+	Database               string `json:"database"`
+	Workers                int    `json:"workers"`
+	YtDlpCookiesConfigured bool   `json:"yt_dlp_cookies_configured"`
 }

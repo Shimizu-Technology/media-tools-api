@@ -55,8 +55,8 @@ func (db *DB) ListWebhooksByAPIKey(ctx context.Context, apiKeyID string) ([]mode
 }
 
 // UpdateWebhookActive toggles a webhook's active state.
-func (db *DB) UpdateWebhookActive(ctx context.Context, id string, active bool) error {
-	result, err := db.ExecContext(ctx, `UPDATE webhooks SET active = $2 WHERE id = $1`, id, active)
+func (db *DB) UpdateWebhookActive(ctx context.Context, id, apiKeyID string, active bool) error {
+	result, err := db.ExecContext(ctx, `UPDATE webhooks SET active = $3 WHERE id = $1 AND api_key_id = $2`, id, apiKeyID, active)
 	if err != nil {
 		return fmt.Errorf("failed to update webhook: %w", err)
 	}
@@ -68,8 +68,8 @@ func (db *DB) UpdateWebhookActive(ctx context.Context, id string, active bool) e
 }
 
 // DeleteWebhook removes a webhook by ID.
-func (db *DB) DeleteWebhook(ctx context.Context, id string) error {
-	result, err := db.ExecContext(ctx, `DELETE FROM webhooks WHERE id = $1`, id)
+func (db *DB) DeleteWebhook(ctx context.Context, id, apiKeyID string) error {
+	result, err := db.ExecContext(ctx, `DELETE FROM webhooks WHERE id = $1 AND api_key_id = $2`, id, apiKeyID)
 	if err != nil {
 		return fmt.Errorf("failed to delete webhook: %w", err)
 	}

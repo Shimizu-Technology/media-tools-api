@@ -212,6 +212,8 @@ Options:
 | `OPENROUTER_API_KEY` | For summaries | OpenRouter API key |
 | `OPENAI_API_KEY` | For audio | OpenAI API key (Whisper) |
 | `CORS_ORIGIN` | Yes | Frontend URL (e.g., https://your-app.netlify.app) |
+| `YT_DLP_COOKIES_FILE` | Optional | Path to cookies.txt for login-required/private Vimeo links |
+| `YT_DLP_COOKIES_B64` | Optional | Base64-encoded cookies.txt contents (for env-only platforms) |
 | `GIN_MODE` | Recommended | Set to `release` |
 
 ### Generate Secrets
@@ -223,6 +225,25 @@ openssl rand -base64 32
 # ADMIN_API_KEY
 openssl rand -hex 32
 ```
+
+### Vimeo Private/Login-Required Videos
+
+Some Vimeo links only work for authenticated sessions. In production, export a
+Netscape-format `cookies.txt` from a logged-in Vimeo browser and set:
+
+```bash
+YT_DLP_COOKIES_FILE=/etc/secrets/vimeo-cookies.txt
+```
+
+The backend passes this file to `yt-dlp --cookies ...` for metadata/subtitle/audio extraction.
+
+If your platform only supports environment variables, use:
+
+```bash
+YT_DLP_COOKIES_B64=<base64-of-cookies.txt>
+```
+
+At startup, the API decodes this value into a temporary cookies file and passes it to yt-dlp.
 
 ## Project Structure
 

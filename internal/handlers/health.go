@@ -38,10 +38,11 @@ type Handler struct {
 	AdminAPIKey      string                        // Admin key for protected bootstrap operations
 	OwnerAPIKeyID     string                       // Optional owner key ID override
 	OwnerAPIKeyPrefix string                       // Optional owner key prefix override
+	YtDlpCookiesConfigured bool                    // True when yt-dlp cookies are configured
 }
 
 // NewHandler creates a new handler with all dependencies.
-func NewHandler(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.S3, ws *webhookservice.Service, sum *summary.Service, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix string) *Handler {
+func NewHandler(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *storage.S3, ws *webhookservice.Service, sum *summary.Service, jwtSecret, adminAPIKey, ownerKeyID, ownerKeyPrefix string, ytDlpCookiesConfigured bool) *Handler {
 	return &Handler{
 		DB:               db,
 		Worker:           wp,
@@ -53,6 +54,7 @@ func NewHandler(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *sto
 		AdminAPIKey:      adminAPIKey,
 		OwnerAPIKeyID:     ownerKeyID,
 		OwnerAPIKeyPrefix: ownerKeyPrefix,
+		YtDlpCookiesConfigured: ytDlpCookiesConfigured,
 	}
 }
 
@@ -66,9 +68,10 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, models.HealthResponse{
-		Status:   "ok",
-		Version:  "1.0.0",
-		Database: dbStatus,
-		Workers:  h.Worker.WorkerCount(),
+		Status:                 "ok",
+		Version:                "1.0.0",
+		Database:               dbStatus,
+		Workers:                h.Worker.WorkerCount(),
+		YtDlpCookiesConfigured: h.YtDlpCookiesConfigured,
 	})
 }

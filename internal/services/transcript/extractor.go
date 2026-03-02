@@ -59,9 +59,10 @@ type WhisperTranscriber interface {
 // YtDlpExtractor uses the yt-dlp CLI tool to extract transcripts.
 // Go Pattern: This struct implements the Extractor interface (implicitly).
 type YtDlpExtractor struct {
-	ytDlpPath string
-	proxyURL  string             // Optional: residential proxy for YouTube
-	whisper   WhisperTranscriber // Optional: fallback to Whisper if subtitles fail
+	ytDlpPath   string
+	proxyURL    string             // Optional: residential proxy for YouTube
+	cookiesFile string             // Optional: Netscape cookies.txt for login-required sites
+	whisper     WhisperTranscriber // Optional: fallback to Whisper if subtitles fail
 }
 
 // NewExtractor creates a new yt-dlp based extractor.
@@ -77,6 +78,12 @@ func (e *YtDlpExtractor) SetProxy(proxyURL string) {
 	e.proxyURL = proxyURL
 }
 
+// SetCookiesFile configures a Netscape-format cookie jar for yt-dlp.
+// This enables access to login-required/private videos (e.g., Vimeo private links).
+func (e *YtDlpExtractor) SetCookiesFile(path string) {
+	e.cookiesFile = strings.TrimSpace(path)
+}
+
 // SetWhisperFallback enables Whisper-based transcription as a fallback
 // when subtitle extraction fails (e.g., due to bot detection or missing subtitles).
 func (e *YtDlpExtractor) SetWhisperFallback(w WhisperTranscriber) {
@@ -88,6 +95,9 @@ func (e *YtDlpExtractor) buildBaseArgs() []string {
 	args := []string{
 		"--js-runtimes", "node",              // Required for YouTube extraction
 		"--remote-components", "ejs:github",  // Download JS challenge solver from GitHub
+	}
+	if e.cookiesFile != "" {
+		args = append(args, "--cookies", e.cookiesFile)
 	}
 	if e.proxyURL != "" {
 		args = append(args, "--proxy", e.proxyURL)
@@ -192,7 +202,7 @@ func (e *YtDlpExtractor) extractWithWhisper(ctx context.Context, url, videoID st
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("failed to download audio: %s - %v", string(output), err)
+		return nil, ytDlpError("failed to download audio", string(output), err)
 	}
 
 	// Check if audio file was created
@@ -278,7 +288,7 @@ func (e *YtDlpExtractor) getMetadata(ctx context.Context, url string) (*ytDlpMet
 		if errMsg == "" {
 			errMsg = err.Error()
 		}
-		return nil, fmt.Errorf("yt-dlp metadata failed: %s", errMsg)
+		return nil, ytDlpError("yt-dlp metadata failed", errMsg, err)
 	}
 
 	output := stdout.Bytes()
@@ -553,4 +563,15 @@ func ParseYouTubeURL(input string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid YouTube URL or video ID: %s", input)
 	}
 	return parsed.URL, parsed.VideoID, nil
+}
+
+func ytDlpError(prefix, details string, cause error) error {
+	msg := strings.TrimSpace(details)
+	if strings.Contains(msg, "works when logged-in") || strings.Contains(msg, "cookies-from-browser") {
+		return fmt.Errorf(
+			"%s: %s. This video requires authentication. Configure YT_DLP_COOKIES_FILE to a valid cookies.txt with Vimeo login session",
+			prefix, msg,
+		)
+	}
+	return fmt.Errorf("%s: %s - %v", prefix, msg, cause)
 }

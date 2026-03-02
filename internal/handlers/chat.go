@@ -2,15 +2,12 @@
 package handlers
 
 import (
-	"database/sql"
-	"errors"
 	"log"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 )
@@ -20,21 +17,15 @@ type chatTarget struct {
 	ItemID       string
 	ContextLabel string
 	Text         string
+	UserID       *string
 	APIKeyID     *string
 }
 
 func (h *Handler) loadTranscriptChatTarget(c *gin.Context) (*chatTarget, *models.ErrorResponse, int) {
 	transcriptID := c.Param("id")
-	t, err := h.DB.GetTranscript(c.Request.Context(), transcriptID)
+	actor := getActorOwnership(c)
+	t, err := h.DB.GetTranscriptForActor(c.Request.Context(), transcriptID, actor.UserID, actor.APIKeyID)
 	if err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			log.Printf("Failed to load transcript %s: %v", transcriptID, err)
-			return nil, &models.ErrorResponse{
-				Error:   "database_error",
-				Message: "Failed to load transcript",
-				Code:    http.StatusInternalServerError,
-			}, http.StatusInternalServerError
-		}
 		return nil, &models.ErrorResponse{
 			Error:   "not_found",
 			Message: "Transcript not found",
@@ -48,40 +39,21 @@ func (h *Handler) loadTranscriptChatTarget(c *gin.Context) (*chatTarget, *models
 			Code:    http.StatusConflict,
 		}, http.StatusConflict
 	}
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		if t.APIKeyID != nil && *t.APIKeyID != apiKey.ID {
-			return nil, &models.ErrorResponse{
-				Error:   "forbidden",
-				Message: "You can only chat about your own transcripts",
-				Code:    http.StatusForbidden,
-			}, http.StatusForbidden
-		}
-	}
-	var apiKeyID *string
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		apiKeyID = &apiKey.ID
-	}
 	return &chatTarget{
 		ItemType:     "transcript",
 		ItemID:       t.ID,
 		ContextLabel: "YouTube transcript",
 		Text:         t.TranscriptText,
-		APIKeyID:     apiKeyID,
+		UserID:       actor.UserID,
+		APIKeyID:     actor.APIKeyID,
 	}, nil, 0
 }
 
 func (h *Handler) loadAudioChatTarget(c *gin.Context) (*chatTarget, *models.ErrorResponse, int) {
 	audioID := c.Param("id")
-	at, err := h.DB.GetAudioTranscription(c.Request.Context(), audioID)
+	actor := getActorOwnership(c)
+	at, err := h.DB.GetAudioTranscriptionForActor(c.Request.Context(), audioID, actor.UserID, actor.APIKeyID)
 	if err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			log.Printf("Failed to load audio transcription %s: %v", audioID, err)
-			return nil, &models.ErrorResponse{
-				Error:   "database_error",
-				Message: "Failed to load audio transcription",
-				Code:    http.StatusInternalServerError,
-			}, http.StatusInternalServerError
-		}
 		return nil, &models.ErrorResponse{
 			Error:   "not_found",
 			Message: "Audio transcription not found",
@@ -95,40 +67,21 @@ func (h *Handler) loadAudioChatTarget(c *gin.Context) (*chatTarget, *models.Erro
 			Code:    http.StatusConflict,
 		}, http.StatusConflict
 	}
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		if at.APIKeyID != nil && *at.APIKeyID != apiKey.ID {
-			return nil, &models.ErrorResponse{
-				Error:   "forbidden",
-				Message: "You can only chat about your own transcriptions",
-				Code:    http.StatusForbidden,
-			}, http.StatusForbidden
-		}
-	}
-	var apiKeyID *string
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		apiKeyID = &apiKey.ID
-	}
 	return &chatTarget{
 		ItemType:     "audio",
 		ItemID:       at.ID,
 		ContextLabel: "audio transcription",
 		Text:         at.TranscriptText,
-		APIKeyID:     apiKeyID,
+		UserID:       actor.UserID,
+		APIKeyID:     actor.APIKeyID,
 	}, nil, 0
 }
 
 func (h *Handler) loadPDFChatTarget(c *gin.Context) (*chatTarget, *models.ErrorResponse, int) {
 	pdfID := c.Param("id")
-	pe, err := h.DB.GetPDFExtraction(c.Request.Context(), pdfID)
+	actor := getActorOwnership(c)
+	pe, err := h.DB.GetPDFExtractionForActor(c.Request.Context(), pdfID, actor.UserID, actor.APIKeyID)
 	if err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			log.Printf("Failed to load PDF extraction %s: %v", pdfID, err)
-			return nil, &models.ErrorResponse{
-				Error:   "database_error",
-				Message: "Failed to load PDF extraction",
-				Code:    http.StatusInternalServerError,
-			}, http.StatusInternalServerError
-		}
 		return nil, &models.ErrorResponse{
 			Error:   "not_found",
 			Message: "PDF extraction not found",
@@ -142,30 +95,18 @@ func (h *Handler) loadPDFChatTarget(c *gin.Context) (*chatTarget, *models.ErrorR
 			Code:    http.StatusConflict,
 		}, http.StatusConflict
 	}
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		if pe.APIKeyID != nil && *pe.APIKeyID != apiKey.ID {
-			return nil, &models.ErrorResponse{
-				Error:   "forbidden",
-				Message: "You can only chat about your own PDF extractions",
-				Code:    http.StatusForbidden,
-			}, http.StatusForbidden
-		}
-	}
-	var apiKeyID *string
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		apiKeyID = &apiKey.ID
-	}
 	return &chatTarget{
 		ItemType:     "pdf",
 		ItemID:       pe.ID,
 		ContextLabel: "PDF text extraction",
 		Text:         pe.TextContent,
-		APIKeyID:     apiKeyID,
+		UserID:       actor.UserID,
+		APIKeyID:     actor.APIKeyID,
 	}, nil, 0
 }
 
 func (h *Handler) getChatResponse(c *gin.Context, target *chatTarget) {
-	session, err := h.DB.GetOrCreateChatSession(c.Request.Context(), target.ItemType, target.ItemID, target.APIKeyID)
+	session, err := h.DB.GetOrCreateChatSession(c.Request.Context(), target.ItemType, target.ItemID, target.UserID, target.APIKeyID)
 	if err != nil {
 		log.Printf("Chat session load failed (%s:%s): %v", target.ItemType, target.ItemID, err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -217,7 +158,7 @@ func (h *Handler) postChatResponse(c *gin.Context, target *chatTarget, req model
 		return
 	}
 
-	session, err := h.DB.GetOrCreateChatSession(c.Request.Context(), target.ItemType, target.ItemID, target.APIKeyID)
+	session, err := h.DB.GetOrCreateChatSession(c.Request.Context(), target.ItemType, target.ItemID, target.UserID, target.APIKeyID)
 	if err != nil {
 		log.Printf("Chat session load failed (%s:%s): %v", target.ItemType, target.ItemID, err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{

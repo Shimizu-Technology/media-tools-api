@@ -32,6 +32,7 @@ import (
 func (h *Handler) ExportTranscript(c *gin.Context) {
 	id := c.Param("id")
 	format := c.DefaultQuery("format", "txt")
+	actor := getActorOwnership(c)
 
 	// Validate format before doing any database work
 	validFormats := map[string]bool{"txt": true, "md": true, "srt": true, "json": true}
@@ -45,7 +46,7 @@ func (h *Handler) ExportTranscript(c *gin.Context) {
 	}
 
 	// Get the transcript
-	t, err := h.DB.GetTranscript(c.Request.Context(), id)
+	t, err := h.DB.GetTranscriptForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",

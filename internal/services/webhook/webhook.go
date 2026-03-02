@@ -11,7 +11,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
@@ -176,6 +179,10 @@ func (s *Service) deliverWithRetry(wh models.Webhook, event string, payloadJSON 
 
 // deliver sends a single webhook HTTP request with context support.
 func (s *Service) deliver(ctx context.Context, wh models.Webhook, payloadJSON []byte) (int, error) {
+	if err := ValidateWebhookURL(ctx, wh.URL); err != nil {
+		return 0, fmt.Errorf("invalid webhook URL: %w", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "POST", wh.URL, bytes.NewReader(payloadJSON))
 	if err != nil {
 		return 0, fmt.Errorf("failed to create request: %w", err)
@@ -197,4 +204,56 @@ func (s *Service) deliver(ctx context.Context, wh models.Webhook, payloadJSON []
 	defer resp.Body.Close()
 
 	return resp.StatusCode, nil
+}
+
+// ValidateWebhookURL blocks unsafe destinations to reduce SSRF risk.
+// Policy:
+// - https scheme only
+// - no localhost / loopback / private / link-local / multicast / unspecified IPs
+func ValidateWebhookURL(ctx context.Context, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("malformed URL")
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("only https webhook URLs are allowed")
+	}
+	if u.Host == "" {
+		return fmt.Errorf("missing host")
+	}
+	hostname := strings.ToLower(u.Hostname())
+	if hostname == "" || hostname == "localhost" {
+		return fmt.Errorf("localhost is not allowed")
+	}
+
+	// Direct IP literal host (IPv4/IPv6) checks.
+	if ip := net.ParseIP(hostname); ip != nil {
+		if isBlockedIP(ip) {
+			return fmt.Errorf("private or local network destinations are not allowed")
+		}
+		return nil
+	}
+
+	// DNS host checks.
+	resolveCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ips, err := net.DefaultResolver.LookupIPAddr(resolveCtx, hostname)
+	if err != nil || len(ips) == 0 {
+		return fmt.Errorf("failed to resolve host")
+	}
+	for _, ip := range ips {
+		if isBlockedIP(ip.IP) {
+			return fmt.Errorf("private or local network destinations are not allowed")
+		}
+	}
+	return nil
+}
+
+func isBlockedIP(ip net.IP) bool {
+	return ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsMulticast() ||
+		ip.IsUnspecified()
 }

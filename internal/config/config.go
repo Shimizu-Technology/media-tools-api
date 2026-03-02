@@ -26,8 +26,10 @@ type Config struct {
 	DatabaseURLDirect string
 
 	// External tools
-	YtDlpPath    string // Path to yt-dlp binary
-	YouTubeProxy string // Optional: Residential proxy for YouTube (format: http://user:pass@host:port)
+	YtDlpPath          string // Path to yt-dlp binary
+	YtDlpCookiesFile   string // Optional: Netscape cookie jar path for login-required sites (e.g., Vimeo private/unlisted)
+	YtDlpCookiesBase64 string // Optional: Base64-encoded cookies.txt content (written to temp file at startup)
+	YouTubeProxy       string // Optional: Residential proxy for YouTube (format: http://user:pass@host:port)
 
 	// AWS S3 (raw audio persistence)
 	AWSAccessKeyID               string
@@ -88,8 +90,10 @@ func Load() (*Config, error) {
 		DatabaseURLDirect: getEnv("DATABASE_URL_DIRECT", ""),
 
 		// yt-dlp — try common locations
-		YtDlpPath:    getEnv("YT_DLP_PATH", findYtDlp()),
-		YouTubeProxy: getEnv("YOUTUBE_PROXY", ""), // Optional: residential proxy for YouTube
+		YtDlpPath:          getEnv("YT_DLP_PATH", findYtDlp()),
+		YtDlpCookiesFile:   getEnv("YT_DLP_COOKIES_FILE", ""),
+		YtDlpCookiesBase64: getEnv("YT_DLP_COOKIES_B64", ""),
+		YouTubeProxy:       getEnv("YOUTUBE_PROXY", ""), // Optional: residential proxy for YouTube
 
 		// AWS S3 (raw audio persistence)
 		AWSAccessKeyID:               getEnv("AWS_ACCESS_KEY_ID", ""),
@@ -138,6 +142,15 @@ func Load() (*Config, error) {
 	// Validate required configuration
 	if cfg.YtDlpPath == "" {
 		return nil, fmt.Errorf("yt-dlp not found; set YT_DLP_PATH environment variable")
+	}
+	if cfg.YtDlpCookiesFile != "" {
+		info, err := os.Stat(cfg.YtDlpCookiesFile)
+		if err != nil {
+			return nil, fmt.Errorf("YT_DLP_COOKIES_FILE not readable (%s): %w", cfg.YtDlpCookiesFile, err)
+		}
+		if info.IsDir() {
+			return nil, fmt.Errorf("YT_DLP_COOKIES_FILE must be a file, got directory: %s", cfg.YtDlpCookiesFile)
+		}
 	}
 
 	// Security: JWT secret MUST be set in production mode

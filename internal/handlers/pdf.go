@@ -16,7 +16,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	pdfservice "github.com/Shimizu-Technology/media-tools-api/internal/services/pdf"
 )
@@ -82,11 +81,7 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 	// Generate a unique filename for storage reference
 	storedFilename := uuid.New().String() + ".pdf"
 
-	// Get the API key from context (set by auth middleware)
-	var apiKeyID *string
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		apiKeyID = &apiKey.ID
-	}
+	actor := getActorOwnership(c)
 
 	// Extract text from the PDF (synchronous — PDFs process fast)
 	result, err := pdfservice.Extract(data)
@@ -99,7 +94,8 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 			OriginalName: header.Filename,
 			Status:       "failed",
 			ErrorMessage: err.Error(),
-			APIKeyID:     apiKeyID,
+			UserID:       actor.UserID,
+			APIKeyID:     actor.APIKeyID,
 		}
 		h.DB.CreatePDFExtraction(c.Request.Context(), pe)
 
@@ -128,7 +124,8 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 			WordCount:    0,
 			Status:       "failed",
 			ErrorMessage: msg,
-			APIKeyID:     apiKeyID,
+			UserID:       actor.UserID,
+			APIKeyID:     actor.APIKeyID,
 		}
 		_ = h.DB.CreatePDFExtraction(c.Request.Context(), pe)
 
@@ -148,7 +145,8 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 		TextContent:  result.Text,
 		WordCount:    result.WordCount,
 		Status:       "completed",
-		APIKeyID:     apiKeyID,
+		UserID:       actor.UserID,
+		APIKeyID:     actor.APIKeyID,
 	}
 
 	if err := h.DB.CreatePDFExtraction(c.Request.Context(), pe); err != nil {
@@ -163,8 +161,9 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 // GET /api/v1/pdf/extractions/:id
 func (h *Handler) GetPDFExtraction(c *gin.Context) {
 	id := c.Param("id")
+	actor := getActorOwnership(c)
 
-	pe, err := h.DB.GetPDFExtraction(c.Request.Context(), id)
+	pe, err := h.DB.GetPDFExtractionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
@@ -180,13 +179,9 @@ func (h *Handler) GetPDFExtraction(c *gin.Context) {
 // ListPDFExtractions returns recent PDF extractions for the authenticated API key.
 // GET /api/v1/pdf/extractions
 func (h *Handler) ListPDFExtractions(c *gin.Context) {
-	// Get the API key from context to filter by owner
-	var apiKeyID *string
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		apiKeyID = &apiKey.ID
-	}
+	actor := getActorOwnership(c)
 
-	extractions, err := h.DB.ListPDFExtractions(c.Request.Context(), 50, apiKeyID)
+	extractions, err := h.DB.ListPDFExtractions(c.Request.Context(), 50, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		log.Printf("Failed to list PDF extractions: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -208,31 +203,9 @@ func (h *Handler) ListPDFExtractions(c *gin.Context) {
 // DELETE /api/v1/pdf/extractions/:id
 func (h *Handler) DeletePDFExtraction(c *gin.Context) {
 	id := c.Param("id")
+	actor := getActorOwnership(c)
 
-	// Verify ownership: only delete if it belongs to the authenticated API key
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		pe, err := h.DB.GetPDFExtraction(c.Request.Context(), id)
-		if err != nil {
-			c.JSON(http.StatusNotFound, models.ErrorResponse{
-				Error:   "not_found",
-				Message: "PDF extraction not found",
-				Code:    http.StatusNotFound,
-			})
-			return
-		}
-
-		// Check ownership
-		if pe.APIKeyID != nil && *pe.APIKeyID != apiKey.ID {
-			c.JSON(http.StatusForbidden, models.ErrorResponse{
-				Error:   "forbidden",
-				Message: "You can only delete your own extractions",
-				Code:    http.StatusForbidden,
-			})
-			return
-		}
-	}
-
-	if err := h.DB.DeletePDFExtraction(c.Request.Context(), id); err != nil {
+	if err := h.DB.DeletePDFExtractionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID); err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
 			Message: "PDF extraction not found",

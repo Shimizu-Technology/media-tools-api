@@ -254,6 +254,9 @@ components:
         workers:
           type: integer
           example: 3
+        yt_dlp_cookies_configured:
+          type: boolean
+          example: true
 
 paths:
   /health:
@@ -274,6 +277,7 @@ paths:
                 version: "1.0.0"
                 database: "healthy"
                 workers: 3
+                yt_dlp_cookies_configured: true
 
   /keys:
     post:

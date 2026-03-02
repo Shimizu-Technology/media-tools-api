@@ -11,7 +11,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
@@ -63,18 +62,22 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 	youtubeURL := parsed.URL
 	videoID := parsed.VideoID
 
+	actor := getActorOwnership(c)
+	if !actor.IsAuthenticated() {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Authentication required",
+			Code:    http.StatusUnauthorized,
+		})
+		return
+	}
+
 	// Check if we already have a transcript for this video
-	existing, _ := h.DB.GetTranscriptByYouTubeID(c.Request.Context(), videoID)
+	existing, _ := h.DB.GetTranscriptByYouTubeIDForActor(c.Request.Context(), videoID, actor.UserID, actor.APIKeyID)
 	if existing != nil && existing.Status == models.StatusCompleted {
 		// Return the existing transcript instead of re-extracting
 		c.JSON(http.StatusOK, existing)
 		return
-	}
-
-	// Get the API key from context (set by auth middleware)
-	var apiKeyID *string
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		apiKeyID = &apiKey.ID
 	}
 
 	// Create a new transcript record with "pending" status
@@ -82,7 +85,8 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 		YouTubeURL: youtubeURL,
 		YouTubeID:  videoID,
 		Status:     models.StatusPending,
-		APIKeyID:   apiKeyID,
+		UserID:     actor.UserID,
+		APIKeyID:   actor.APIKeyID,
 	}
 
 	if err := h.DB.CreateTranscript(c.Request.Context(), t); err != nil {
@@ -127,8 +131,9 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 // GET /api/v1/transcripts/:id
 func (h *Handler) GetTranscript(c *gin.Context) {
 	id := c.Param("id")
+	actor := getActorOwnership(c)
 
-	t, err := h.DB.GetTranscript(c.Request.Context(), id)
+	t, err := h.DB.GetTranscriptForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
@@ -156,10 +161,9 @@ func (h *Handler) ListTranscripts(c *gin.Context) {
 		return
 	}
 
-	// Filter by the authenticated API key
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		params.APIKeyID = &apiKey.ID
-	}
+	actor := getActorOwnership(c)
+	params.UserID = actor.UserID
+	params.APIKeyID = actor.APIKeyID
 
 	transcripts, total, err := h.DB.ListTranscripts(c.Request.Context(), params)
 	if err != nil {
@@ -218,7 +222,8 @@ func (h *Handler) CreateSummary(c *gin.Context) {
 	}
 
 	// Verify the transcript exists and is completed
-	t, err := h.DB.GetTranscript(c.Request.Context(), req.TranscriptID)
+	actor := getActorOwnership(c)
+	t, err := h.DB.GetTranscriptForActor(c.Request.Context(), req.TranscriptID, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
@@ -295,6 +300,15 @@ func (h *Handler) CreateSummary(c *gin.Context) {
 // GET /api/v1/transcripts/:id/summaries
 func (h *Handler) GetSummariesByTranscript(c *gin.Context) {
 	transcriptID := c.Param("id")
+	actor := getActorOwnership(c)
+	if _, err := h.DB.GetTranscriptForActor(c.Request.Context(), transcriptID, actor.UserID, actor.APIKeyID); err != nil {
+		c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error:   "not_found",
+			Message: "Transcript not found",
+			Code:    http.StatusNotFound,
+		})
+		return
+	}
 
 	summaries, err := h.DB.GetSummariesByTranscript(c.Request.Context(), transcriptID)
 	if err != nil {
@@ -317,31 +331,8 @@ func (h *Handler) GetSummariesByTranscript(c *gin.Context) {
 // DELETE /api/v1/transcripts/:id
 func (h *Handler) DeleteTranscript(c *gin.Context) {
 	id := c.Param("id")
-
-	// Verify ownership: only delete if it belongs to the authenticated API key
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		t, err := h.DB.GetTranscript(c.Request.Context(), id)
-		if err != nil {
-			c.JSON(http.StatusNotFound, models.ErrorResponse{
-				Error:   "not_found",
-				Message: "Transcript not found",
-				Code:    http.StatusNotFound,
-			})
-			return
-		}
-
-		// Check ownership - only allow deletion if the API key owns this transcript
-		if t.APIKeyID != nil && *t.APIKeyID != apiKey.ID {
-			c.JSON(http.StatusForbidden, models.ErrorResponse{
-				Error:   "forbidden",
-				Message: "You can only delete your own transcripts",
-				Code:    http.StatusForbidden,
-			})
-			return
-		}
-	}
-
-	if err := h.DB.DeleteTranscript(c.Request.Context(), id); err != nil {
+	actor := getActorOwnership(c)
+	if err := h.DB.DeleteTranscriptForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID); err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
 			Message: "Transcript not found",

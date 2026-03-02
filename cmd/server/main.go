@@ -3,10 +3,12 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"os/signal"
 	"syscall"
 	"time"
@@ -69,6 +71,22 @@ func main() {
 	} else {
 		log.Println("⚠️  No YouTube proxy configured (set YOUTUBE_PROXY for reliable YouTube access)")
 	}
+	cookiesPath := cfg.YtDlpCookiesFile
+	if cookiesPath == "" && cfg.YtDlpCookiesBase64 != "" {
+		decoded, err := base64.StdEncoding.DecodeString(cfg.YtDlpCookiesBase64)
+		if err != nil {
+			log.Fatalf("❌ Failed to decode YT_DLP_COOKIES_B64: %v", err)
+		}
+		cookiesPath = filepath.Join(os.TempDir(), "mta-yt-dlp-cookies.txt")
+		if err := os.WriteFile(cookiesPath, decoded, 0600); err != nil {
+			log.Fatalf("❌ Failed to write yt-dlp cookies file: %v", err)
+		}
+	}
+	if cookiesPath != "" {
+		extractor.SetCookiesFile(cookiesPath)
+		log.Printf("✅ yt-dlp cookies configured (%s)", cookiesPath)
+	}
+	ytDlpCookiesConfigured := cookiesPath != ""
 
 	audioTranscriber := audio.NewTranscriber(cfg.OpenAIAPIKey)
 	if audioTranscriber.IsConfigured() {
@@ -138,6 +156,7 @@ func main() {
 		ClerkJWKSURL:     cfg.ClerkJWKSURL,
 		ClerkSecretKey:   cfg.ClerkSecretKey,
 		AllowedOrigins:   cfg.AllowedOrigins,
+		YtDlpCookiesConfigured: ytDlpCookiesConfigured,
 	})
 
 	// Step 6: Start the HTTP Server

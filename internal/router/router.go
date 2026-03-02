@@ -35,6 +35,7 @@ type RouterConfig struct {
 	ClerkJWKSURL    string
 	ClerkSecretKey  string
 	AllowedOrigins  []string
+	YtDlpCookiesConfigured bool
 }
 
 // Setup creates and configures the Gin router with all routes.
@@ -46,7 +47,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 
 	r.Use(middleware.CORS(cfg.AllowedOrigins))
 
-	h := handlers.NewHandler(cfg.DB, cfg.WorkerPool, cfg.AudioTranscriber, cfg.AudioStorage, cfg.Webhooks, cfg.Summarizer, cfg.JWTSecret, cfg.AdminAPIKey, cfg.OwnerKeyID, cfg.OwnerKeyPrefix)
+	h := handlers.NewHandler(cfg.DB, cfg.WorkerPool, cfg.AudioTranscriber, cfg.AudioStorage, cfg.Webhooks, cfg.Summarizer, cfg.JWTSecret, cfg.AdminAPIKey, cfg.OwnerKeyID, cfg.OwnerKeyPrefix, cfg.YtDlpCookiesConfigured)
 	rateLimiter := middleware.NewRateLimiter(cfg.OwnerKeyID, cfg.OwnerKeyPrefix)
 
 	// Initialize Clerk JWKS cache if configured

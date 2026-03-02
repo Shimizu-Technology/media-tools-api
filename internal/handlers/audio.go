@@ -21,7 +21,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
@@ -158,10 +157,14 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		audioS3Size = header.Size
 	}
 
-	// Get the API key from context (set by auth middleware)
-	var apiKeyID *string
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		apiKeyID = &apiKey.ID
+	actor := getActorOwnership(c)
+	if !actor.IsAuthenticated() {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Authentication required",
+			Code:    http.StatusUnauthorized,
+		})
+		return
 	}
 
 	// Create a pending record in the database
@@ -174,7 +177,8 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		AudioS3Size:  audioS3Size,
 		ProcessingStage: "queued",
 		ProcessingProgress: 0,
-		APIKeyID:     apiKeyID,
+		UserID:       actor.UserID,
+		APIKeyID:     actor.APIKeyID,
 	}
 
 	if err := h.DB.CreateAudioTranscription(c.Request.Context(), at); err != nil {
@@ -338,10 +342,7 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		return
 	}
 
-	var apiKeyID *string
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		apiKeyID = &apiKey.ID
-	}
+	actor := getActorOwnership(c)
 
 	at := &models.AudioTranscription{
 		Filename:           filepath.Base(req.ObjectKey),
@@ -352,7 +353,8 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		AudioS3Size:        req.SizeBytes,
 		ProcessingStage:    "queued",
 		ProcessingProgress: 0,
-		APIKeyID:           apiKeyID,
+		UserID:             actor.UserID,
+		APIKeyID:           actor.APIKeyID,
 	}
 	if err := h.DB.CreateAudioTranscription(c.Request.Context(), at); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -415,8 +417,9 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 // GET /api/v1/audio/transcriptions/:id
 func (h *Handler) GetAudioTranscription(c *gin.Context) {
 	id := c.Param("id")
+	actor := getActorOwnership(c)
 
-	at, err := h.DB.GetAudioTranscription(c.Request.Context(), id)
+	at, err := h.DB.GetAudioTranscriptionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
@@ -434,7 +437,8 @@ func (h *Handler) GetAudioTranscription(c *gin.Context) {
 func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 	id := c.Param("id")
 
-	at, err := h.DB.GetAudioTranscription(c.Request.Context(), id)
+	actor := getActorOwnership(c)
+	at, err := h.DB.GetAudioTranscriptionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
@@ -442,17 +446,6 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 			Code:    http.StatusNotFound,
 		})
 		return
-	}
-
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		if at.APIKeyID != nil && *at.APIKeyID != apiKey.ID {
-			c.JSON(http.StatusForbidden, models.ErrorResponse{
-				Error:   "forbidden",
-				Message: "You can only retry your own transcriptions",
-				Code:    http.StatusForbidden,
-			})
-			return
-		}
 	}
 
 	if h.AudioStorage == nil || !h.AudioStorage.IsConfigured() || at.AudioS3Key == "" {
@@ -546,7 +539,8 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 func (h *Handler) GetAudioPlaybackURL(c *gin.Context) {
 	id := c.Param("id")
 
-	at, err := h.DB.GetAudioTranscription(c.Request.Context(), id)
+	actor := getActorOwnership(c)
+	at, err := h.DB.GetAudioTranscriptionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
@@ -554,17 +548,6 @@ func (h *Handler) GetAudioPlaybackURL(c *gin.Context) {
 			Code:    http.StatusNotFound,
 		})
 		return
-	}
-
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		if at.APIKeyID != nil && *at.APIKeyID != apiKey.ID {
-			c.JSON(http.StatusForbidden, models.ErrorResponse{
-				Error:   "forbidden",
-				Message: "You can only access your own transcriptions",
-				Code:    http.StatusForbidden,
-			})
-			return
-		}
 	}
 
 	if h.AudioStorage == nil || !h.AudioStorage.IsConfigured() || at.AudioS3Key == "" {
@@ -595,13 +578,9 @@ func (h *Handler) GetAudioPlaybackURL(c *gin.Context) {
 // ListAudioTranscriptions returns recent audio transcriptions for the authenticated API key.
 // GET /api/v1/audio/transcriptions
 func (h *Handler) ListAudioTranscriptions(c *gin.Context) {
-	// Get the API key from context to filter by owner
-	var apiKeyID *string
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		apiKeyID = &apiKey.ID
-	}
+	actor := getActorOwnership(c)
 
-	transcriptions, err := h.DB.ListAudioTranscriptions(c.Request.Context(), 50, apiKeyID)
+	transcriptions, err := h.DB.ListAudioTranscriptions(c.Request.Context(), 50, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		log.Printf("Failed to list audio transcriptions: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -643,7 +622,8 @@ func (h *Handler) SummarizeAudio(c *gin.Context) {
 	}
 
 	// Get the transcription
-	at, err := h.DB.GetAudioTranscription(c.Request.Context(), id)
+	actor := getActorOwnership(c)
+	at, err := h.DB.GetAudioTranscriptionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
@@ -761,7 +741,8 @@ func (h *Handler) SearchAudioTranscriptions(c *gin.Context) {
 		return
 	}
 
-	results, total, err := h.DB.SearchAudioTranscriptions(c.Request.Context(), params)
+	actor := getActorOwnership(c)
+	results, total, err := h.DB.SearchAudioTranscriptions(c.Request.Context(), params, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		log.Printf("Audio search failed: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -800,7 +781,8 @@ func (h *Handler) ExportAudioTranscription(c *gin.Context) {
 	id := c.Param("id")
 	format := c.DefaultQuery("format", "txt")
 
-	at, err := h.DB.GetAudioTranscription(c.Request.Context(), id)
+	actor := getActorOwnership(c)
+	at, err := h.DB.GetAudioTranscriptionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
@@ -942,8 +924,9 @@ func (h *Handler) GetAudioOpsHealth(c *gin.Context) {
 // DELETE /api/v1/audio/transcriptions/:id
 func (h *Handler) DeleteAudioTranscription(c *gin.Context) {
 	id := c.Param("id")
+	actor := getActorOwnership(c)
 
-	at, err := h.DB.GetAudioTranscription(c.Request.Context(), id)
+	at, err := h.DB.GetAudioTranscriptionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
@@ -951,18 +934,6 @@ func (h *Handler) DeleteAudioTranscription(c *gin.Context) {
 			Code:    http.StatusNotFound,
 		})
 		return
-	}
-
-	// Verify ownership: only delete if it belongs to the authenticated API key
-	if apiKey := middleware.GetAPIKey(c); apiKey != nil {
-		if at.APIKeyID != nil && *at.APIKeyID != apiKey.ID {
-			c.JSON(http.StatusForbidden, models.ErrorResponse{
-				Error:   "forbidden",
-				Message: "You can only delete your own transcriptions",
-				Code:    http.StatusForbidden,
-			})
-			return
-		}
 	}
 
 	if h.AudioStorage != nil && h.AudioStorage.IsConfigured() && at.AudioS3Key != "" {
@@ -973,7 +944,7 @@ func (h *Handler) DeleteAudioTranscription(c *gin.Context) {
 		}
 	}
 
-	if err := h.DB.DeleteAudioTranscription(c.Request.Context(), id); err != nil {
+	if err := h.DB.DeleteAudioTranscriptionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID); err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
 			Message: "Audio transcription not found",

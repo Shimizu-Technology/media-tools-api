@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/lib/pq" // PostgreSQL driver + helpers
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
@@ -66,8 +65,8 @@ func (db *DB) HealthCheck(ctx context.Context) error {
 // Note: batch_id defaults to NULL for single transcript extractions.
 func (db *DB) CreateTranscript(ctx context.Context, t *models.Transcript) error {
 	query := `
-		INSERT INTO transcripts (youtube_url, youtube_id, title, channel_name, duration, language, transcript_text, word_count, status, error_message, batch_id, api_key_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		INSERT INTO transcripts (youtube_url, youtube_id, title, channel_name, duration, language, transcript_text, word_count, status, error_message, batch_id, user_id, api_key_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, created_at, updated_at`
 
 	// QueryRowContext executes a query that returns a single row.
@@ -75,7 +74,7 @@ func (db *DB) CreateTranscript(ctx context.Context, t *models.Transcript) error 
 	return db.QueryRowContext(ctx, query,
 		t.YouTubeURL, t.YouTubeID, t.Title, t.ChannelName,
 		t.Duration, t.Language, t.TranscriptText, t.WordCount,
-		t.Status, t.ErrorMessage, t.BatchID, t.APIKeyID,
+		t.Status, t.ErrorMessage, t.BatchID, t.UserID, t.APIKeyID,
 	).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt)
 }
 
@@ -119,6 +118,10 @@ func (db *DB) UpdateTranscript(ctx context.Context, t *models.Transcript) error 
 
 // ListTranscripts returns a paginated list of transcripts with optional filters.
 func (db *DB) ListTranscripts(ctx context.Context, params models.TranscriptListParams) ([]models.Transcript, int, error) {
+	if params.UserID == nil && params.APIKeyID == nil {
+		return []models.Transcript{}, 0, nil
+	}
+
 	// Set defaults
 	if params.Page < 1 {
 		params.Page = 1
@@ -168,6 +171,11 @@ func (db *DB) ListTranscripts(ctx context.Context, params models.TranscriptListP
 	if params.APIKeyID != nil {
 		conditions = append(conditions, fmt.Sprintf("api_key_id = $%d", argNum))
 		args = append(args, *params.APIKeyID)
+		argNum++
+	}
+	if params.UserID != nil {
+		conditions = append(conditions, fmt.Sprintf("user_id = $%d", argNum))
+		args = append(args, *params.UserID)
 		argNum++
 	}
 
@@ -268,20 +276,21 @@ func (db *DB) GetSummariesByTranscript(ctx context.Context, transcriptID string)
 // --- Chat Operations (MTA-27) ---
 
 // GetOrCreateChatSession finds or creates a chat session for an item.
-func (db *DB) GetOrCreateChatSession(ctx context.Context, itemType, itemID string, apiKeyID *string) (*models.TranscriptChatSession, error) {
+func (db *DB) GetOrCreateChatSession(ctx context.Context, itemType, itemID string, userID, apiKeyID *string) (*models.TranscriptChatSession, error) {
 	var session models.TranscriptChatSession
-	var err error
-	itemTypeLit := pq.QuoteLiteral(itemType)
-	itemIDLit := pq.QuoteLiteral(itemID)
-	apiKeyClause := "api_key_id IS NULL"
-	if apiKeyID != nil {
-		apiKeyClause = "api_key_id = " + pq.QuoteLiteral(*apiKeyID)
+	var ownerClause string
+	var ownerArg interface{}
+	if userID != nil {
+		ownerClause = "user_id = $3 AND api_key_id IS NULL"
+		ownerArg = *userID
+	} else if apiKeyID != nil {
+		ownerClause = "api_key_id = $3 AND user_id IS NULL"
+		ownerArg = *apiKeyID
+	} else {
+		return nil, fmt.Errorf("chat session owner is required")
 	}
-	selectQuery := fmt.Sprintf(
-		`SELECT * FROM transcript_chat_sessions WHERE item_type = %s AND item_id = %s AND %s`,
-		itemTypeLit, itemIDLit, apiKeyClause,
-	)
-	err = db.GetContext(ctx, &session, selectQuery)
+	selectQuery := fmt.Sprintf(`SELECT * FROM transcript_chat_sessions WHERE item_type = $1 AND item_id = $2 AND %s`, ownerClause)
+	err := db.GetContext(ctx, &session, selectQuery, itemType, itemID, ownerArg)
 
 	if err == nil {
 		return &session, nil
@@ -296,24 +305,15 @@ func (db *DB) GetOrCreateChatSession(ctx context.Context, itemType, itemID strin
 		transcriptID = &itemID
 	}
 
-	itemTypeLit = pq.QuoteLiteral(itemType)
-	itemIDLit = pq.QuoteLiteral(itemID)
-	transcriptIDLit := "NULL"
-	if transcriptID != nil {
-		transcriptIDLit = pq.QuoteLiteral(*transcriptID)
-	}
-	apiKeyLit := "NULL"
-	if apiKeyID != nil {
-		apiKeyLit = pq.QuoteLiteral(*apiKeyID)
-	}
-	insertQuery := fmt.Sprintf(
-		`INSERT INTO transcript_chat_sessions (item_type, item_id, transcript_id, api_key_id)
-		 VALUES (%s, %s, %s, %s)
-		 RETURNING id, created_at, updated_at`,
-		itemTypeLit, itemIDLit, transcriptIDLit, apiKeyLit,
-	)
-	err = db.QueryRowContext(ctx, insertQuery).
+	insertQuery := `
+		INSERT INTO transcript_chat_sessions (item_type, item_id, transcript_id, user_id, api_key_id)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, created_at, updated_at`
+	err = db.QueryRowContext(ctx, insertQuery, itemType, itemID, transcriptID, userID, apiKeyID).
 		Scan(&session.ID, &session.CreatedAt, &session.UpdatedAt)
+	if userID != nil {
+		session.UserID = userID
+	}
 	if apiKeyID != nil {
 		session.APIKeyID = apiKeyID
 	}
@@ -335,12 +335,10 @@ func (db *DB) ListChatMessages(ctx context.Context, sessionID string, limit int)
 		limit = 50
 	}
 	var messages []models.TranscriptChatMessage
-	sessionIDLit := pq.QuoteLiteral(sessionID)
-	selectQuery := fmt.Sprintf(
-		`SELECT * FROM transcript_chat_messages WHERE session_id = %s ORDER BY created_at ASC LIMIT %d`,
-		sessionIDLit, limit,
+	err := db.SelectContext(ctx, &messages,
+		`SELECT * FROM transcript_chat_messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT $2`,
+		sessionID, limit,
 	)
-	err := db.SelectContext(ctx, &messages, selectQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list chat messages: %w", err)
 	}
@@ -455,9 +453,9 @@ func (db *DB) CreateAudioTranscription(ctx context.Context, at *models.AudioTran
 		INSERT INTO audio_transcriptions (
 			filename, original_name, audio_s3_key, audio_s3_status, audio_s3_size,
 			processing_stage, processing_progress, retry_count,
-			duration, language, transcript_text, word_count, status, error_message, content_type, api_key_id
+			duration, language, transcript_text, word_count, status, error_message, content_type, user_id, api_key_id
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		RETURNING id, created_at`
 
 	if at.ContentType == "" {
@@ -471,7 +469,7 @@ func (db *DB) CreateAudioTranscription(ctx context.Context, at *models.AudioTran
 		at.Filename, at.OriginalName, at.AudioS3Key, at.AudioS3Status, at.AudioS3Size,
 		at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
 		at.Duration, at.Language, at.TranscriptText, at.WordCount, at.Status, at.ErrorMessage,
-		at.ContentType, at.APIKeyID,
+		at.ContentType, at.UserID, at.APIKeyID,
 	).Scan(&at.ID, &at.CreatedAt)
 }
 
@@ -564,20 +562,27 @@ func (db *DB) UpdateAudioSummary(ctx context.Context, at *models.AudioTranscript
 }
 
 // ListAudioTranscriptions returns recent audio transcriptions.
-func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int, apiKeyID *string) ([]models.AudioTranscription, error) {
+func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int, userID, apiKeyID *string) ([]models.AudioTranscription, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 	var transcriptions []models.AudioTranscription
-	var err error
-	query := fmt.Sprintf(
-		`SELECT %s FROM audio_transcriptions
-		 %s
-		 ORDER BY created_at DESC
-		 LIMIT %d`,
-		audioTranscriptionSelectColumns, buildAPIKeyWhereClause(apiKeyID), limit,
+	var whereClause string
+	var args []interface{}
+	if userID != nil {
+		whereClause = "WHERE user_id = $1"
+		args = append(args, *userID)
+	} else if apiKeyID != nil {
+		whereClause = "WHERE api_key_id = $1"
+		args = append(args, *apiKeyID)
+	} else {
+		return []models.AudioTranscription{}, nil
+	}
+	query := fmt.Sprintf(`SELECT %s FROM audio_transcriptions %s ORDER BY created_at DESC LIMIT $%d`,
+		audioTranscriptionSelectColumns, whereClause, len(args)+1,
 	)
-	err = db.SelectContext(ctx, &transcriptions, query)
+	args = append(args, limit)
+	err := db.SelectContext(ctx, &transcriptions, query, args...)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list audio transcriptions: %w", err)
@@ -586,7 +591,7 @@ func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int, apiKeyID *
 }
 
 // SearchAudioTranscriptions performs full-text search across transcripts and summaries (MTA-25).
-func (db *DB) SearchAudioTranscriptions(ctx context.Context, params models.AudioSearchParams) ([]models.AudioTranscription, int, error) {
+func (db *DB) SearchAudioTranscriptions(ctx context.Context, params models.AudioSearchParams, userID, apiKeyID *string) ([]models.AudioTranscription, int, error) {
 	if params.Page < 1 {
 		params.Page = 1
 	}
@@ -608,6 +613,16 @@ func (db *DB) SearchAudioTranscriptions(ctx context.Context, params models.Audio
 	if params.ContentType != "" {
 		conditions = append(conditions, fmt.Sprintf("content_type = $%d", argNum))
 		args = append(args, params.ContentType)
+		argNum++
+	}
+	if userID != nil {
+		conditions = append(conditions, fmt.Sprintf("user_id = $%d", argNum))
+		args = append(args, *userID)
+		argNum++
+	}
+	if apiKeyID != nil {
+		conditions = append(conditions, fmt.Sprintf("api_key_id = $%d", argNum))
+		args = append(args, *apiKeyID)
 		argNum++
 	}
 
@@ -677,32 +692,32 @@ func (db *DB) GetPDFExtraction(ctx context.Context, id string) (*models.PDFExtra
 }
 
 // ListPDFExtractions returns recent PDF extractions.
-func (db *DB) ListPDFExtractions(ctx context.Context, limit int, apiKeyID *string) ([]models.PDFExtraction, error) {
+func (db *DB) ListPDFExtractions(ctx context.Context, limit int, userID, apiKeyID *string) ([]models.PDFExtraction, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 	var extractions []models.PDFExtraction
-	var err error
-	query := fmt.Sprintf(
-		`SELECT * FROM pdf_extractions
-		 %s
-		 ORDER BY created_at DESC
-		 LIMIT %d`,
-		buildAPIKeyWhereClause(apiKeyID), limit,
+	var whereClause string
+	var args []interface{}
+	if userID != nil {
+		whereClause = "WHERE user_id = $1"
+		args = append(args, *userID)
+	} else if apiKeyID != nil {
+		whereClause = "WHERE api_key_id = $1"
+		args = append(args, *apiKeyID)
+	} else {
+		return []models.PDFExtraction{}, nil
+	}
+	query := fmt.Sprintf(`SELECT * FROM pdf_extractions %s ORDER BY created_at DESC LIMIT $%d`,
+		whereClause, len(args)+1,
 	)
-	err = db.SelectContext(ctx, &extractions, query)
+	args = append(args, limit)
+	err := db.SelectContext(ctx, &extractions, query, args...)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pdf extractions: %w", err)
 	}
 	return extractions, nil
-}
-
-func buildAPIKeyWhereClause(apiKeyID *string) string {
-	if apiKeyID == nil {
-		return ""
-	}
-	return "WHERE api_key_id = " + pq.QuoteLiteral(*apiKeyID)
 }
 
 // DeletePDFExtraction removes a PDF extraction by ID.

@@ -46,6 +46,14 @@ func (h *Handler) CreateWebhook(c *gin.Context) {
 			return
 		}
 	}
+	if err := webhookservice.ValidateWebhookURL(c.Request.Context(), req.URL); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_webhook_url",
+			Message: err.Error(),
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
 
 	// Generate HMAC secret
 	secret, err := webhookservice.GenerateSecret()
@@ -133,7 +141,14 @@ func (h *Handler) UpdateWebhook(c *gin.Context) {
 		return
 	}
 
-	if err := h.DB.UpdateWebhookActive(c.Request.Context(), id, *req.Active); err != nil {
+	if apiKey := middleware.GetAPIKey(c); apiKey == nil {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Webhook management requires API key authentication",
+			Code:    http.StatusUnauthorized,
+		})
+		return
+	} else if err := h.DB.UpdateWebhookActive(c.Request.Context(), id, apiKey.ID, *req.Active); err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
 			Message: "Webhook not found",
@@ -149,8 +164,17 @@ func (h *Handler) UpdateWebhook(c *gin.Context) {
 // DELETE /api/v1/webhooks/:id
 func (h *Handler) DeleteWebhook(c *gin.Context) {
 	id := c.Param("id")
+	apiKey := middleware.GetAPIKey(c)
+	if apiKey == nil {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Webhook management requires API key authentication",
+			Code:    http.StatusUnauthorized,
+		})
+		return
+	}
 
-	if err := h.DB.DeleteWebhook(c.Request.Context(), id); err != nil {
+	if err := h.DB.DeleteWebhook(c.Request.Context(), id, apiKey.ID); err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
 			Message: "Webhook not found",
