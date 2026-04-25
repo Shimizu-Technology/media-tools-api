@@ -265,6 +265,16 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 // PresignAudioUpload returns a short-lived S3 URL for direct browser upload.
 // POST /api/v1/audio/uploads/presign
 func (h *Handler) PresignAudioUpload(c *gin.Context) {
+	actor := getActorOwnership(c)
+	if !actor.IsAuthenticated() {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Authentication required",
+			Code:    http.StatusUnauthorized,
+		})
+		return
+	}
+
 	if h.AudioStorage == nil || !h.AudioStorage.IsConfigured() {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
 			Error:   "storage_unavailable",
@@ -325,6 +335,16 @@ func (h *Handler) PresignAudioUpload(c *gin.Context) {
 // CompleteAudioUpload creates a transcription job after direct S3 upload.
 // POST /api/v1/audio/uploads/complete
 func (h *Handler) CompleteAudioUpload(c *gin.Context) {
+	actor := getActorOwnership(c)
+	if !actor.IsAuthenticated() {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Authentication required",
+			Code:    http.StatusUnauthorized,
+		})
+		return
+	}
+
 	if h.AudioStorage == nil || !h.AudioStorage.IsConfigured() {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
 			Error:   "storage_unavailable",
@@ -353,8 +373,6 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		})
 		return
 	}
-
-	actor := getActorOwnership(c)
 
 	at := &models.AudioTranscription{
 		Filename:           filepath.Base(req.ObjectKey),
