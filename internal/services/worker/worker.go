@@ -255,6 +255,13 @@ func (p *Pool) RecoverTranscriptJobs(ctx context.Context, limit int) (int, error
 		if t.Status == models.StatusCompleted || t.Status == models.StatusFailed {
 			continue
 		}
+		if t.Status == models.StatusProcessing {
+			// A worker died mid-job, so reflect reality before requeueing it.
+			t.Status = models.StatusPending
+			if err := p.db.UpdateTranscript(ctx, &t); err != nil {
+				return requeued, fmt.Errorf("reset transcript %s for recovery: %w", t.ID, err)
+			}
+		}
 
 		job := Job{
 			ID:        t.ID,

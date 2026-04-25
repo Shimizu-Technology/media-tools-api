@@ -451,8 +451,14 @@ func (db *DB) RevokeAPIKeyForActor(ctx context.Context, id string, userID, apiKe
 		result, err = db.ExecContext(ctx,
 			`UPDATE api_keys SET active = false WHERE id = $1 AND user_id = $2`, id, *userID)
 	case apiKeyID != nil:
+		// API-key-authenticated callers may only revoke the exact key they are
+		// currently using. Keep the query simple and enforce the self-revoke rule
+		// explicitly instead of relying on a tautological SQL predicate.
+		if id != *apiKeyID {
+			return fmt.Errorf("API key not found")
+		}
 		result, err = db.ExecContext(ctx,
-			`UPDATE api_keys SET active = false WHERE id = $1 AND id = $2`, id, *apiKeyID)
+			`UPDATE api_keys SET active = false WHERE id = $1`, id)
 	default:
 		return fmt.Errorf("actor is required")
 	}
