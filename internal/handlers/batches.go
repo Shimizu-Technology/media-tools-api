@@ -198,15 +198,6 @@ func (h *Handler) GetBatch(c *gin.Context) {
 	id := c.Param("id")
 	actor := getActorOwnership(c)
 
-	// First, update the batch counts from actual transcript data
-	// Go Pattern: Self-healing data — we recalculate on every read
-	// rather than trusting stale counters. The performance cost is
-	// minimal since it's a single indexed query.
-	if err := h.DB.UpdateBatchCounts(c.Request.Context(), id); err != nil {
-		log.Printf("Failed to update batch counts: %v", err)
-		// Non-fatal — continue with potentially stale counts
-	}
-
 	batch, err := h.DB.GetBatchForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
@@ -215,6 +206,15 @@ func (h *Handler) GetBatch(c *gin.Context) {
 			Code:    http.StatusNotFound,
 		})
 		return
+	}
+
+	// Recalculate the batch counts from actual transcript data after ownership
+	// is confirmed so unauthorized reads never trigger writes.
+	if err := h.DB.UpdateBatchCounts(c.Request.Context(), id); err != nil {
+		log.Printf("Failed to update batch counts: %v", err)
+		// Non-fatal — continue with potentially stale counts
+	} else if refreshed, refreshErr := h.DB.GetBatchForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID); refreshErr == nil {
+		batch = refreshed
 	}
 
 	transcripts, err := h.DB.GetTranscriptsByBatchForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
