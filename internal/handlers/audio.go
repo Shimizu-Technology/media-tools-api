@@ -344,6 +344,16 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		return
 	}
 
+	ext := strings.ToLower(filepath.Ext(req.OriginalName))
+	if !isSupportedTranscriptionUploadExt(ext) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_file_type",
+			Message: fmt.Sprintf("Unsupported upload format '%s'. Supported formats: %s", ext, supportedTranscriptionUploadFormats),
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
 	actor := getActorOwnership(c)
 
 	at := &models.AudioTranscription{

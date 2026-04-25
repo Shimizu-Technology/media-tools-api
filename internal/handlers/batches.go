@@ -163,8 +163,9 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 			if err := h.Worker.Submit(job); err != nil {
 				if h.isOwnerRequest(c) {
 					ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
-					defer cancel()
-					if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
+					blockingErr := h.Worker.SubmitBlocking(ctx, job)
+					cancel()
+					if blockingErr == nil {
 						// queued successfully for owner; continue
 						transcripts = append(transcripts, *t)
 						continue
