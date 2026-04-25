@@ -171,8 +171,8 @@ func (h *Handler) AddCollectionItems(c *gin.Context) {
 	for _, item := range req.Items {
 		owned, err := h.DB.ActorOwnsCollectionItem(c.Request.Context(), item.ItemType, item.ItemID, userID, apiKeyID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, models.ErrorResponse{
-				Error: "invalid_request", Message: err.Error(), Code: http.StatusBadRequest,
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error: "database_error", Message: "Failed to verify item ownership", Code: http.StatusInternalServerError,
 			})
 			return
 		}

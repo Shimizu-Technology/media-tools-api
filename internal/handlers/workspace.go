@@ -91,10 +91,10 @@ func (h *Handler) SaveToWorkspace(c *gin.Context) {
 
 	owned, err := h.DB.UserOwnsWorkspaceItem(c.Request.Context(), user.ID, req.ItemType, req.ItemID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "invalid_request",
-			Message: err.Error(),
-			Code:    http.StatusBadRequest,
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "database_error",
+			Message: "Failed to verify item ownership",
+			Code:    http.StatusInternalServerError,
 		})
 		return
 	}
