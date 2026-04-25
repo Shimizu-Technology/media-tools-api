@@ -82,6 +82,16 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		return
 	}
 
+	actor := getActorOwnership(c)
+	if !actor.IsAuthenticated() {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Authentication required",
+			Code:    http.StatusUnauthorized,
+		})
+		return
+	}
+
 	// Get the uploaded file
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
@@ -165,16 +175,6 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		}
 		audioS3Status = "uploaded"
 		audioS3Size = header.Size
-	}
-
-	actor := getActorOwnership(c)
-	if !actor.IsAuthenticated() {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Error:   "unauthorized",
-			Message: "Authentication required",
-			Code:    http.StatusUnauthorized,
-		})
-		return
 	}
 
 	// Create a pending record in the database
@@ -279,14 +279,6 @@ func (h *Handler) PresignAudioUpload(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "invalid_request",
 			Message: "filename is required",
-			Code:    http.StatusBadRequest,
-		})
-		return
-	}
-	if req.SizeBytes <= 0 || req.SizeBytes > maxAudioSize {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "file_too_large",
-			Message: "size_bytes must be between 1 byte and 2GB",
 			Code:    http.StatusBadRequest,
 		})
 		return

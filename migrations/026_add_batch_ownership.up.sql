@@ -5,13 +5,24 @@ ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE SET NULL,
 ADD COLUMN IF NOT EXISTS api_key_id UUID REFERENCES api_keys(id) ON DELETE SET NULL;
 
 WITH batch_owners AS (
-    SELECT
-        batch_id,
-        MAX(user_id) AS user_id,
-        MAX(api_key_id) AS api_key_id
-    FROM transcripts
-    WHERE batch_id IS NOT NULL
-    GROUP BY batch_id
+    SELECT DISTINCT ON (t.batch_id)
+        t.batch_id,
+        t.user_id,
+        t.api_key_id
+    FROM transcripts t
+    WHERE t.batch_id IS NOT NULL
+      AND (t.user_id IS NOT NULL OR t.api_key_id IS NOT NULL)
+      AND NOT EXISTS (
+          SELECT 1
+          FROM transcripts t_conflict
+          WHERE t_conflict.batch_id = t.batch_id
+            AND (t_conflict.user_id IS NOT NULL OR t_conflict.api_key_id IS NOT NULL)
+            AND (
+                t_conflict.user_id IS DISTINCT FROM t.user_id
+                OR t_conflict.api_key_id IS DISTINCT FROM t.api_key_id
+            )
+      )
+    ORDER BY t.batch_id, t.created_at ASC, t.id ASC
 )
 UPDATE batches b
 SET user_id = COALESCE(b.user_id, bo.user_id),
