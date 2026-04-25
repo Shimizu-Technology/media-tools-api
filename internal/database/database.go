@@ -42,9 +42,9 @@ func New(databaseURL string) (*DB, error) {
 	// Go Pattern: The connection pool is managed by database/sql internally.
 	// These settings prevent resource exhaustion and handle Neon's aggressive
 	// connection timeouts (serverless PG closes idle connections quickly).
-	db.SetMaxOpenConns(10)                 // Fewer connections for serverless
-	db.SetMaxIdleConns(2)                  // Keep minimal idle connections
-	db.SetConnMaxLifetime(2 * time.Minute) // Recycle connections frequently
+	db.SetMaxOpenConns(10)                  // Fewer connections for serverless
+	db.SetMaxIdleConns(2)                   // Keep minimal idle connections
+	db.SetConnMaxLifetime(2 * time.Minute)  // Recycle connections frequently
 	db.SetConnMaxIdleTime(30 * time.Second) // Close idle connections before Neon does
 
 	return &DB{db}, nil
@@ -98,6 +98,25 @@ func (db *DB) GetTranscriptByYouTubeID(ctx context.Context, youtubeID string) (*
 		return nil, err
 	}
 	return &t, nil
+}
+
+// ListRecoverableTranscripts returns pending/processing transcripts that can be requeued after restart.
+func (db *DB) ListRecoverableTranscripts(ctx context.Context, limit int) ([]models.Transcript, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+
+	var rows []models.Transcript
+	err := db.SelectContext(ctx, &rows, `
+		SELECT * FROM transcripts
+		WHERE status IN ('pending', 'processing')
+		ORDER BY created_at ASC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 // UpdateTranscript updates a transcript's fields after processing.
@@ -394,22 +413,53 @@ func (db *DB) UpdateAPIKeyLastUsed(ctx context.Context, id string) error {
 	return err
 }
 
-// ListAPIKeys returns all API keys (active and inactive).
-func (db *DB) ListAPIKeys(ctx context.Context) ([]models.APIKey, error) {
+// ListAPIKeysForActor returns only the API keys visible to the authenticated actor.
+func (db *DB) ListAPIKeysForActor(ctx context.Context, userID, apiKeyID *string) ([]models.APIKey, error) {
 	var keys []models.APIKey
-	err := db.SelectContext(ctx, &keys, `SELECT * FROM api_keys ORDER BY created_at DESC`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list API keys: %w", err)
+	switch {
+	case userID != nil:
+		err := db.SelectContext(ctx, &keys,
+			`SELECT * FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC`, *userID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list API keys: %w", err)
+		}
+	case apiKeyID != nil:
+		err := db.SelectContext(ctx, &keys,
+			`SELECT * FROM api_keys WHERE id = $1 ORDER BY created_at DESC`, *apiKeyID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list API keys: %w", err)
+		}
+	default:
+		return []models.APIKey{}, nil
+	}
+
+	if keys == nil {
+		keys = []models.APIKey{}
 	}
 	return keys, nil
 }
 
-// RevokeAPIKey deactivates an API key.
-func (db *DB) RevokeAPIKey(ctx context.Context, id string) error {
-	result, err := db.ExecContext(ctx, `UPDATE api_keys SET active = false WHERE id = $1`, id)
+// RevokeAPIKeyForActor deactivates an API key only when it belongs to the authenticated actor.
+func (db *DB) RevokeAPIKeyForActor(ctx context.Context, id string, userID, apiKeyID *string) error {
+	var (
+		result sql.Result
+		err    error
+	)
+
+	switch {
+	case userID != nil:
+		result, err = db.ExecContext(ctx,
+			`UPDATE api_keys SET active = false WHERE id = $1 AND user_id = $2`, id, *userID)
+	case apiKeyID != nil:
+		result, err = db.ExecContext(ctx,
+			`UPDATE api_keys SET active = false WHERE id = $1 AND id = $2`, id, *apiKeyID)
+	default:
+		return fmt.Errorf("actor is required")
+	}
 	if err != nil {
 		return fmt.Errorf("failed to revoke key: %w", err)
 	}
+
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("API key not found")

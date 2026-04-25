@@ -1,13 +1,13 @@
 # Media Tools API
 
-A media processing API for YouTube transcripts, audio transcription, PDF extraction, and AI-powered summaries. Built with Go and React.
+A media processing API for YouTube transcripts, recording transcription, PDF extraction, and AI-powered summaries. Built with Go and React.
 
 **Live Demo:** [media-tools-gu.netlify.app](https://media-tools-gu.netlify.app)
 
 ## Features
 
 - **YouTube Transcripts** — Paste a URL, get the full transcript with metadata
-- **Audio Transcription** — Upload audio files (MP3, M4A, WAV, etc.) for Whisper transcription
+- **Recording Transcription** — Upload audio files or meeting recordings (MP3, M4A, MP4, WAV, etc.) for transcription
 - **PDF Text Extraction** — Extract text from PDF documents
 - **AI Summaries** — Generate summaries with key points, action items, and decisions
 - **Background Processing** — Long-running jobs processed asynchronously
@@ -139,11 +139,11 @@ GET /api/v1/transcripts?page=1&per_page=20&status=completed
 ### Audio Transcription
 
 ```bash
-# Upload audio file (returns immediately, processes in background)
+# Upload audio file or recording (returns immediately, processes in background)
 POST /api/v1/audio/transcribe
 curl -X POST http://localhost:8080/api/v1/audio/transcribe \
   -H "X-API-Key: mta_your_key" \
-  -F "file=@recording.m4a"
+  -F "file=@zoom-meeting.mp4"
 
 # Get transcription (poll until status is "completed")
 GET /api/v1/audio/transcriptions/:id
@@ -158,7 +158,7 @@ curl -X POST http://localhost:8080/api/v1/audio/transcriptions/:id/summarize \
 # Content types: general, phone_call, meeting, voice_memo, interview, lecture
 ```
 
-Supported formats: MP3, WAV, M4A, OGG, FLAC, WebM (max 25MB)
+Supported formats: MP3, WAV, M4A, MP4, OGG, FLAC, WebM (max 2GB; large files are transcoded/chunked before transcription)
 
 ### PDF Extraction
 

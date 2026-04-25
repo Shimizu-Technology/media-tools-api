@@ -16,12 +16,12 @@ import (
 // The batch starts in "pending" status with the given total count.
 func (db *DB) CreateBatch(ctx context.Context, b *models.Batch) error {
 	query := `
-		INSERT INTO batches (status, total_count, completed_count, failed_count)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO batches (status, total_count, completed_count, failed_count, user_id, api_key_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, created_at, updated_at`
 
 	return db.QueryRowContext(ctx, query,
-		b.Status, b.TotalCount, b.CompletedCount, b.FailedCount,
+		b.Status, b.TotalCount, b.CompletedCount, b.FailedCount, b.UserID, b.APIKeyID,
 	).Scan(&b.ID, &b.CreatedAt, &b.UpdatedAt)
 }
 
@@ -54,14 +54,14 @@ func (db *DB) GetTranscriptsByBatch(ctx context.Context, batchID string) ([]mode
 // two explicit functions makes the intent clearer and avoids nil-pointer issues.
 func (db *DB) CreateTranscriptWithBatch(ctx context.Context, t *models.Transcript) error {
 	query := `
-		INSERT INTO transcripts (youtube_url, youtube_id, title, channel_name, duration, language, transcript_text, word_count, status, error_message, batch_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO transcripts (youtube_url, youtube_id, title, channel_name, duration, language, transcript_text, word_count, status, error_message, batch_id, user_id, api_key_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, created_at, updated_at`
 
 	return db.QueryRowContext(ctx, query,
 		t.YouTubeURL, t.YouTubeID, t.Title, t.ChannelName,
 		t.Duration, t.Language, t.TranscriptText, t.WordCount,
-		t.Status, t.ErrorMessage, t.BatchID,
+		t.Status, t.ErrorMessage, t.BatchID, t.UserID, t.APIKeyID,
 	).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt)
 }
 
@@ -95,4 +95,48 @@ func (db *DB) UpdateBatchCounts(ctx context.Context, batchID string) error {
 		return fmt.Errorf("failed to update batch counts: %w", err)
 	}
 	return nil
+}
+
+// GetBatchForActor retrieves a batch only when it belongs to the authenticated actor.
+func (db *DB) GetBatchForActor(ctx context.Context, id string, userID, apiKeyID *string) (*models.Batch, error) {
+	if userID == nil && apiKeyID == nil {
+		return nil, fmt.Errorf("actor is required")
+	}
+
+	var b models.Batch
+	err := db.GetContext(ctx, &b, `
+		SELECT * FROM batches
+		WHERE id = $1
+		  AND (($2::uuid IS NOT NULL AND user_id = $2)
+		    OR ($3::uuid IS NOT NULL AND api_key_id = $3))`,
+		id, userID, apiKeyID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("batch not found: %w", err)
+	}
+	return &b, nil
+}
+
+// GetTranscriptsByBatchForActor returns batch transcripts scoped to the owning actor.
+func (db *DB) GetTranscriptsByBatchForActor(ctx context.Context, batchID string, userID, apiKeyID *string) ([]models.Transcript, error) {
+	if userID == nil && apiKeyID == nil {
+		return nil, fmt.Errorf("actor is required")
+	}
+
+	var transcripts []models.Transcript
+	err := db.SelectContext(ctx, &transcripts, `
+		SELECT * FROM transcripts
+		WHERE batch_id = $1
+		  AND (($2::uuid IS NOT NULL AND user_id = $2)
+		    OR ($3::uuid IS NOT NULL AND api_key_id = $3))
+		ORDER BY created_at ASC`,
+		batchID, userID, apiKeyID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list batch transcripts: %w", err)
+	}
+	if transcripts == nil {
+		transcripts = []models.Transcript{}
+	}
+	return transcripts, nil
 }

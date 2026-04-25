@@ -210,7 +210,7 @@ export function AudioPage() {
   // Tab state: 'upload' | 'record'
   const [activeTab, setActiveTab] = useState<'upload' | 'record'>('upload');
 
-  const allowedExtensions = ['.mp3', '.wav', '.m4a', '.ogg', '.flac', '.webm'];
+  const allowedExtensions = ['.mp3', '.wav', '.m4a', '.mp4', '.ogg', '.flac', '.webm'];
   const maxSizeMB = 2048;
 
   // Cleanup on unmount
@@ -604,12 +604,12 @@ export function AudioPage() {
     const stage = result?.processing_stage || '';
     if (isDirectUploading) return 'Uploading directly to secure storage...';
     if (stage === 'downloading') return 'Preparing source audio...';
-    if (stage === 'transcoding') return 'Compressing audio for transcription...';
+    if (stage === 'transcoding') return 'Preparing recording for transcription...';
     if (stage === 'chunking') return 'Splitting long audio into chunks...';
     if (stage === 'transcribing') return 'Transcribing audio chunks...';
     if (stage === 'stitching') return 'Combining transcript chunks...';
     if (result?.status === 'pending') return 'Queued for processing...';
-    return 'Transcribing audio...';
+    return 'Transcribing recording...';
   })();
 
   const hasSubmittable = (activeTab === 'upload' && file) || (activeTab === 'record' && recordedBlob);
@@ -828,10 +828,10 @@ export function AudioPage() {
                 <Upload className="w-12 h-12 mx-auto mb-4"
                   style={{ color: isDragging ? 'var(--color-brand-500)' : 'var(--color-text-muted)' }} />
                 <p className="text-base font-medium mb-2" style={{ color: 'var(--color-text-primary)' }}>
-                  {isDragging ? 'Drop your audio file here' : 'Drag and drop, or click to browse'}
+                  {isDragging ? 'Drop your recording here' : 'Drag and drop, or click to browse'}
                 </p>
                 <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  MP3, WAV, M4A, OGG, FLAC, WebM — Max {maxSizeMB}MB
+                  MP3, WAV, M4A, MP4, OGG, FLAC, WebM — Max {maxSizeMB}MB
                 </p>
               </div>
 

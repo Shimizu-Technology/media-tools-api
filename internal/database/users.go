@@ -140,6 +140,33 @@ func (db *DB) SaveWorkspaceItem(ctx context.Context, item *models.WorkspaceItem)
 	).Scan(&item.ID, &item.CreatedAt)
 }
 
+// UserOwnsWorkspaceItem returns true when the given user owns the referenced item.
+func (db *DB) UserOwnsWorkspaceItem(ctx context.Context, userID, itemType, itemID string) (bool, error) {
+	var exists bool
+	switch itemType {
+	case "transcript":
+		err := db.GetContext(ctx, &exists, `
+			SELECT EXISTS(
+				SELECT 1 FROM transcripts WHERE id = $1 AND user_id = $2
+			)`, itemID, userID)
+		return exists, err
+	case "audio":
+		err := db.GetContext(ctx, &exists, `
+			SELECT EXISTS(
+				SELECT 1 FROM audio_transcriptions WHERE id = $1 AND user_id = $2
+			)`, itemID, userID)
+		return exists, err
+	case "pdf":
+		err := db.GetContext(ctx, &exists, `
+			SELECT EXISTS(
+				SELECT 1 FROM pdf_extractions WHERE id = $1 AND user_id = $2
+			)`, itemID, userID)
+		return exists, err
+	default:
+		return false, fmt.Errorf("unsupported workspace item type: %s", itemType)
+	}
+}
+
 // RemoveWorkspaceItem removes an item from a user's workspace.
 func (db *DB) RemoveWorkspaceItem(ctx context.Context, userID, itemType, itemID string) error {
 	_, err := db.ExecContext(ctx,
@@ -165,7 +192,7 @@ func (db *DB) GetWorkspaceTranscripts(ctx context.Context, userID string) ([]mod
 	err := db.SelectContext(ctx, &transcripts,
 		`SELECT t.* FROM transcripts t
 		 JOIN workspace_items wi ON wi.item_id = t.id AND wi.item_type = 'transcript'
-		 WHERE wi.user_id = $1
+		 WHERE wi.user_id = $1 AND t.user_id = wi.user_id
 		 ORDER BY wi.created_at DESC LIMIT 50`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workspace transcripts: %w", err)
@@ -179,7 +206,7 @@ func (db *DB) GetWorkspaceAudio(ctx context.Context, userID string) ([]models.Au
 	err := db.SelectContext(ctx, &audio,
 		`SELECT a.* FROM audio_transcriptions a
 		 JOIN workspace_items wi ON wi.item_id = a.id AND wi.item_type = 'audio'
-		 WHERE wi.user_id = $1
+		 WHERE wi.user_id = $1 AND a.user_id = wi.user_id
 		 ORDER BY wi.created_at DESC LIMIT 50`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workspace audio: %w", err)
@@ -193,7 +220,7 @@ func (db *DB) GetWorkspacePDFs(ctx context.Context, userID string) ([]models.PDF
 	err := db.SelectContext(ctx, &pdfs,
 		`SELECT p.* FROM pdf_extractions p
 		 JOIN workspace_items wi ON wi.item_id = p.id AND wi.item_type = 'pdf'
-		 WHERE wi.user_id = $1
+		 WHERE wi.user_id = $1 AND p.user_id = wi.user_id
 		 ORDER BY wi.created_at DESC LIMIT 50`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workspace PDFs: %w", err)

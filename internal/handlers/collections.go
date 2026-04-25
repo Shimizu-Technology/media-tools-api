@@ -90,7 +90,7 @@ func (h *Handler) GetCollection(c *gin.Context) {
 		return
 	}
 
-	items, err := h.DB.GetCollectionItems(c.Request.Context(), id)
+	items, err := h.DB.GetCollectionItems(c.Request.Context(), id, userID, apiKeyID)
 	if err != nil {
 		items = []models.CollectionItem{}
 	}
@@ -166,6 +166,22 @@ func (h *Handler) AddCollectionItems(c *gin.Context) {
 			Error: "invalid_request", Message: "Provide items array with item_type and item_id", Code: http.StatusBadRequest,
 		})
 		return
+	}
+
+	for _, item := range req.Items {
+		owned, err := h.DB.ActorOwnsCollectionItem(c.Request.Context(), item.ItemType, item.ItemID, userID, apiKeyID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse{
+				Error: "invalid_request", Message: err.Error(), Code: http.StatusBadRequest,
+			})
+			return
+		}
+		if !owned {
+			c.JSON(http.StatusForbidden, models.ErrorResponse{
+				Error: "forbidden", Message: "You can only add items you own to a collection", Code: http.StatusForbidden,
+			})
+			return
+		}
 	}
 
 	added, err := h.DB.AddCollectionItems(c.Request.Context(), id, req.Items)
@@ -275,7 +291,7 @@ func (h *Handler) PostCollectionChat(c *gin.Context) {
 	}
 
 	// Load all item texts from collection
-	contents, err := h.DB.GetCollectionItemContents(c.Request.Context(), id)
+	contents, err := h.DB.GetCollectionItemContents(c.Request.Context(), id, userID, apiKeyID)
 	if err != nil {
 		log.Printf("Failed to load collection contents for %s: %v", id, err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{

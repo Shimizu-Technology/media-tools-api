@@ -1,11 +1,12 @@
-// Package audio provides audio transcription via OpenAI's Whisper API (MTA-16).
+// Package audio provides transcription for uploaded media files via OpenAI's
+// speech-to-text API (MTA-16).
 //
 // Go Pattern: We use the standard net/http package to make API calls.
 // Unlike JavaScript's fetch, Go's http.Client gives us full control
 // over timeouts, retries, and connection reuse.
 //
-// The Whisper API accepts multipart form uploads (audio files) and
-// returns transcribed text. Max file size is 25MB.
+// The transcription API accepts multipart form uploads for supported media
+// files containing audio and returns transcribed text. Max file size is 25MB.
 package audio
 
 import (
@@ -49,7 +50,7 @@ type whisperResponse struct {
 	Duration float64 `json:"duration"`
 }
 
-// Transcriber handles audio transcription via the OpenAI Whisper API.
+// Transcriber handles media transcription via OpenAI's transcription API.
 type Transcriber struct {
 	apiKey     string
 	httpClient *http.Client
@@ -60,7 +61,7 @@ func NewTranscriber(apiKey string) *Transcriber {
 	return &Transcriber{
 		apiKey: apiKey,
 		httpClient: &http.Client{
-			// Whisper can take a while for long audio files
+			// Transcription can take a while for long recordings.
 			Timeout: 5 * time.Minute,
 		},
 	}
@@ -71,7 +72,8 @@ func (t *Transcriber) IsConfigured() bool {
 	return t.apiKey != ""
 }
 
-// Transcribe sends an audio file to the Whisper API and returns the transcription.
+// Transcribe sends a media file containing audio to the transcription API and
+// returns the transcription.
 //
 // Go Pattern: We build a multipart form body manually. In Go, multipart.Writer
 // handles the boundary generation and MIME encoding — similar to FormData in JS.
@@ -94,7 +96,8 @@ func (t *Transcriber) Transcribe(ctx context.Context, audioData io.Reader, filen
 		return nil, fmt.Errorf("failed to copy audio data: %w", err)
 	}
 
-	// Add the model parameter (whisper-1 is currently the only model)
+	// Keep the existing model choice for now; Phase 1 Zoom support is only about
+	// input compatibility, not changing transcription models.
 	if err := writer.WriteField("model", "whisper-1"); err != nil {
 		return nil, fmt.Errorf("failed to write model field: %w", err)
 	}

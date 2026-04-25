@@ -4,6 +4,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
@@ -113,36 +114,32 @@ func (db *DB) DeleteCollection(ctx context.Context, id string, userID, apiKeyID 
 	return nil
 }
 
-// GetCollectionItems returns all items in a collection with title/status from their source tables.
-func (db *DB) GetCollectionItems(ctx context.Context, collectionID string) ([]models.CollectionItem, error) {
-	query := `
-		SELECT ci.id, ci.collection_id, ci.item_type, ci.item_id, ci.position, ci.added_at,
-		       COALESCE(
-		           t.title,
-		           at.original_name,
-		           pe.filename,
-		           ''
-		       ) AS item_title,
-		       COALESCE(
-		           t.status,
-		           at.status,
-		           pe.status,
-		           ''
-		       ) AS item_status
-		FROM collection_items ci
-		LEFT JOIN transcripts t ON ci.item_type = 'transcript' AND ci.item_id = t.id
-		LEFT JOIN audio_transcriptions at ON ci.item_type = 'audio' AND ci.item_id = at.id
-		LEFT JOIN pdf_extractions pe ON ci.item_type = 'pdf' AND ci.item_id = pe.id
-		WHERE ci.collection_id = $1
-		ORDER BY ci.position ASC, ci.added_at ASC`
-
-	var items []models.CollectionItem
-	err := db.SelectContext(ctx, &items, query, collectionID)
+// GetCollectionItems returns all items in a collection that the actor can still access.
+func (db *DB) GetCollectionItems(ctx context.Context, collectionID string, userID, apiKeyID *string) ([]models.CollectionItem, error) {
+	var baseItems []models.CollectionItem
+	err := db.SelectContext(ctx, &baseItems, `
+		SELECT id, collection_id, item_type, item_id, position, added_at
+		FROM collection_items
+		WHERE collection_id = $1
+		ORDER BY position ASC, added_at ASC`,
+		collectionID,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("get collection items: %w", err)
 	}
-	if items == nil {
-		items = []models.CollectionItem{}
+
+	items := make([]models.CollectionItem, 0, len(baseItems))
+	for _, item := range baseItems {
+		title, status, err := db.getOwnedCollectionItemMetadata(ctx, item.ItemType, item.ItemID, userID, apiKeyID)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				continue
+			}
+			return nil, fmt.Errorf("get collection item metadata: %w", err)
+		}
+		item.ItemTitle = title
+		item.ItemStatus = status
+		items = append(items, item)
 	}
 	return items, nil
 }
@@ -159,16 +156,18 @@ func (db *DB) AddCollectionItems(ctx context.Context, collectionID string, items
 	added := 0
 	for _, item := range items {
 		maxPos++
-		_, err := db.ExecContext(ctx, `
-			INSERT INTO collection_items (collection_id, item_type, item_id, position)
-			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (collection_id, item_type, item_id) DO NOTHING`,
+		result, err := db.ExecContext(ctx, `
+				INSERT INTO collection_items (collection_id, item_type, item_id, position)
+				VALUES ($1, $2, $3, $4)
+				ON CONFLICT (collection_id, item_type, item_id) DO NOTHING`,
 			collectionID, item.ItemType, item.ItemID, maxPos,
 		)
 		if err != nil {
 			return added, fmt.Errorf("add item %s/%s: %w", item.ItemType, item.ItemID, err)
 		}
-		added++
+		if rows, _ := result.RowsAffected(); rows > 0 {
+			added++
+		}
 	}
 
 	// Touch updated_at on the collection
@@ -208,8 +207,8 @@ type CollectionItemContent struct {
 
 // GetCollectionItemContents fetches the text content of all completed items in a collection.
 // Used for collection-level AI chat — aggregates transcripts, audio, and PDF text.
-func (db *DB) GetCollectionItemContents(ctx context.Context, collectionID string) ([]CollectionItemContent, error) {
-	items, err := db.GetCollectionItems(ctx, collectionID)
+func (db *DB) GetCollectionItemContents(ctx context.Context, collectionID string, userID, apiKeyID *string) ([]CollectionItemContent, error) {
+	items, err := db.GetCollectionItems(ctx, collectionID, userID, apiKeyID)
 	if err != nil {
 		return nil, err
 	}
@@ -220,28 +219,118 @@ func (db *DB) GetCollectionItemContents(ctx context.Context, collectionID string
 		case "transcript":
 			var title, text string
 			err := db.QueryRowContext(ctx,
-				`SELECT COALESCE(title, ''), COALESCE(transcript_text, '') FROM transcripts WHERE id = $1 AND status = 'completed'`,
-				item.ItemID).Scan(&title, &text)
+				`SELECT COALESCE(title, ''), COALESCE(transcript_text, '')
+				 FROM transcripts
+				 WHERE id = $1
+				   AND status = 'completed'
+				   AND (($2::uuid IS NOT NULL AND user_id = $2)
+				     OR ($3::uuid IS NOT NULL AND api_key_id = $3))`,
+				item.ItemID, userID, apiKeyID).Scan(&title, &text)
 			if err == nil && text != "" {
 				contents = append(contents, CollectionItemContent{ItemType: "transcript", Title: title, Text: text})
 			}
 		case "audio":
 			var title, text string
 			err := db.QueryRowContext(ctx,
-				`SELECT COALESCE(title, ''), COALESCE(transcript_text, '') FROM audio_transcriptions WHERE id = $1 AND status = 'completed'`,
-				item.ItemID).Scan(&title, &text)
+				`SELECT COALESCE(original_name, ''), COALESCE(transcript_text, '')
+				 FROM audio_transcriptions
+				 WHERE id = $1
+				   AND status = 'completed'
+				   AND (($2::uuid IS NOT NULL AND user_id = $2)
+				     OR ($3::uuid IS NOT NULL AND api_key_id = $3))`,
+				item.ItemID, userID, apiKeyID).Scan(&title, &text)
 			if err == nil && text != "" {
 				contents = append(contents, CollectionItemContent{ItemType: "audio", Title: title, Text: text})
 			}
 		case "pdf":
 			var title, text string
 			err := db.QueryRowContext(ctx,
-				`SELECT COALESCE(filename, ''), COALESCE(text_content, '') FROM pdf_extractions WHERE id = $1 AND status = 'completed'`,
-				item.ItemID).Scan(&title, &text)
+				`SELECT COALESCE(filename, ''), COALESCE(text_content, '')
+				 FROM pdf_extractions
+				 WHERE id = $1
+				   AND status = 'completed'
+				   AND (($2::uuid IS NOT NULL AND user_id = $2)
+				     OR ($3::uuid IS NOT NULL AND api_key_id = $3))`,
+				item.ItemID, userID, apiKeyID).Scan(&title, &text)
 			if err == nil && text != "" {
 				contents = append(contents, CollectionItemContent{ItemType: "pdf", Title: title, Text: text})
 			}
 		}
 	}
 	return contents, nil
+}
+
+// ActorOwnsCollectionItem returns true when the authenticated actor owns the referenced item.
+func (db *DB) ActorOwnsCollectionItem(ctx context.Context, itemType, itemID string, userID, apiKeyID *string) (bool, error) {
+	if userID == nil && apiKeyID == nil {
+		return false, fmt.Errorf("actor is required")
+	}
+
+	var exists bool
+	switch itemType {
+	case "transcript":
+		err := db.GetContext(ctx, &exists, `
+			SELECT EXISTS(
+				SELECT 1 FROM transcripts
+				WHERE id = $1
+				  AND (($2::uuid IS NOT NULL AND user_id = $2)
+				    OR ($3::uuid IS NOT NULL AND api_key_id = $3))
+			)`, itemID, userID, apiKeyID)
+		return exists, err
+	case "audio":
+		err := db.GetContext(ctx, &exists, `
+			SELECT EXISTS(
+				SELECT 1 FROM audio_transcriptions
+				WHERE id = $1
+				  AND (($2::uuid IS NOT NULL AND user_id = $2)
+				    OR ($3::uuid IS NOT NULL AND api_key_id = $3))
+			)`, itemID, userID, apiKeyID)
+		return exists, err
+	case "pdf":
+		err := db.GetContext(ctx, &exists, `
+			SELECT EXISTS(
+				SELECT 1 FROM pdf_extractions
+				WHERE id = $1
+				  AND (($2::uuid IS NOT NULL AND user_id = $2)
+				    OR ($3::uuid IS NOT NULL AND api_key_id = $3))
+			)`, itemID, userID, apiKeyID)
+		return exists, err
+	default:
+		return false, fmt.Errorf("unsupported item type: %s", itemType)
+	}
+}
+
+func (db *DB) getOwnedCollectionItemMetadata(ctx context.Context, itemType, itemID string, userID, apiKeyID *string) (string, string, error) {
+	var title, status string
+	switch itemType {
+	case "transcript":
+		err := db.QueryRowContext(ctx, `
+			SELECT COALESCE(title, ''), COALESCE(status, '')
+			FROM transcripts
+			WHERE id = $1
+			  AND (($2::uuid IS NOT NULL AND user_id = $2)
+			    OR ($3::uuid IS NOT NULL AND api_key_id = $3))`,
+			itemID, userID, apiKeyID).Scan(&title, &status)
+		return title, status, err
+	case "audio":
+		err := db.QueryRowContext(ctx, `
+			SELECT COALESCE(original_name, ''), COALESCE(status, '')
+			FROM audio_transcriptions
+			WHERE id = $1
+			  AND (($2::uuid IS NOT NULL AND user_id = $2)
+			    OR ($3::uuid IS NOT NULL AND api_key_id = $3))`,
+			itemID, userID, apiKeyID).Scan(&title, &status)
+		return title, status, err
+	case "pdf":
+		err := db.QueryRowContext(ctx, `
+			SELECT COALESCE(filename, ''), COALESCE(status, '')
+			FROM pdf_extractions
+			WHERE id = $1
+			  AND (($2::uuid IS NOT NULL AND user_id = $2)
+			    OR ($3::uuid IS NOT NULL AND api_key_id = $3))`,
+			itemID, userID, apiKeyID).Scan(&title, &status)
+		return title, status, err
+	default:
+		return "", "", fmt.Errorf("unsupported item type: %s", itemType)
+	}
 }

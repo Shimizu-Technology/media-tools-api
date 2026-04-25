@@ -107,8 +107,8 @@
 ## Phase 4: Media Processing Tools
 
 ### MTA-16: Audio Transcription Endpoint (Whisper) ✅
-- [x] POST /api/v1/audio/transcribe — multipart file upload (mp3, wav, m4a, ogg, flac, webm)
-- [x] Max 25MB file size (Whisper API limit)
+- [x] POST /api/v1/audio/transcribe — multipart file upload (mp3, wav, m4a, mp4, ogg, flac, webm)
+- [x] App accepts files up to 2GB and transcodes/chunks large recordings for the 25MB transcription API limit
 - [x] OpenAI Whisper API integration via OPENAI_API_KEY env var
 - [x] Graceful handling when API key not configured
 - [x] audio_transcriptions table (migration 005)

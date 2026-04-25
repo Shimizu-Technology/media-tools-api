@@ -1,6 +1,6 @@
-// audio.go handles audio transcription HTTP endpoints (MTA-16).
+// audio.go handles recording transcription HTTP endpoints (MTA-16).
 //
-// POST /api/v1/audio/transcribe — Upload audio file for Whisper transcription
+// POST /api/v1/audio/transcribe — Upload audio or recording file for transcription
 // GET  /api/v1/audio/transcriptions/:id — Get transcription result by ID
 // GET  /api/v1/audio/transcriptions — List recent transcriptions
 package handlers
@@ -26,17 +26,27 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
-// allowedAudioTypes maps file extensions to MIME types for validation.
-var allowedAudioTypes = map[string]bool{
+const supportedTranscriptionUploadFormats = "mp3, wav, m4a, mp4, ogg, flac, webm"
+
+// supportedTranscriptionUploadTypes maps upload extensions accepted by the app.
+//
+// Phase 1 Zoom support adds `.mp4` so users can upload Zoom cloud/computer
+// recordings while the worker continues to normalize them into audio.
+var supportedTranscriptionUploadTypes = map[string]bool{
 	".mp3":  true,
 	".wav":  true,
 	".m4a":  true,
+	".mp4":  true,
 	".ogg":  true,
 	".flac": true,
 	".webm": true,
 }
 
-// maxAudioSize is the max upload size for audio files.
+func isSupportedTranscriptionUploadExt(ext string) bool {
+	return supportedTranscriptionUploadTypes[strings.ToLower(ext)]
+}
+
+// maxAudioSize is the max upload size for audio and recording files.
 // 2GB keeps room for very long recordings while chunking handles Whisper limits.
 const maxAudioSize = 2 << 30
 
@@ -52,11 +62,11 @@ type AudioUploadCompleteRequest struct {
 	SizeBytes    int64  `json:"size_bytes"`
 }
 
-// TranscribeAudio handles audio file upload and queues transcription job.
+// TranscribeAudio handles audio/recording file upload and queues transcription job.
 // POST /api/v1/audio/transcribe
 //
 // Accepts multipart file upload with field name "file".
-// Supported formats: mp3, wav, m4a, ogg, flac, webm
+// Supported formats: mp3, wav, m4a, mp4, ogg, flac, webm
 //
 // Returns 202 Accepted immediately with the transcription record.
 // Frontend should poll GET /api/v1/audio/transcriptions/:id for completion.
@@ -77,7 +87,7 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "invalid_request",
-			Message: "No audio file provided. Upload a file with the field name 'file'. Max size: 2GB.",
+			Message: "No file provided. Upload an audio or recording file with the field name 'file'. Max size: 2GB.",
 			Code:    http.StatusBadRequest,
 		})
 		return
@@ -96,10 +106,10 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 
 	// Validate file extension
 	ext := strings.ToLower(filepath.Ext(header.Filename))
-	if !allowedAudioTypes[ext] {
+	if !isSupportedTranscriptionUploadExt(ext) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "invalid_file_type",
-			Message: fmt.Sprintf("Unsupported audio format '%s'. Supported formats: mp3, wav, m4a, ogg, flac, webm", ext),
+			Message: fmt.Sprintf("Unsupported upload format '%s'. Supported formats: %s", ext, supportedTranscriptionUploadFormats),
 			Code:    http.StatusBadRequest,
 		})
 		return
@@ -169,16 +179,16 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 
 	// Create a pending record in the database
 	at := &models.AudioTranscription{
-		Filename:     storedFilename,
-		OriginalName: header.Filename,
-		Status:       "pending",
-		AudioS3Key:   audioS3Key,
-		AudioS3Status: audioS3Status,
-		AudioS3Size:  audioS3Size,
-		ProcessingStage: "queued",
+		Filename:           storedFilename,
+		OriginalName:       header.Filename,
+		Status:             "pending",
+		AudioS3Key:         audioS3Key,
+		AudioS3Status:      audioS3Status,
+		AudioS3Size:        audioS3Size,
+		ProcessingStage:    "queued",
 		ProcessingProgress: 0,
-		UserID:       actor.UserID,
-		APIKeyID:     actor.APIKeyID,
+		UserID:             actor.UserID,
+		APIKeyID:           actor.APIKeyID,
 	}
 
 	if err := h.DB.CreateAudioTranscription(c.Request.Context(), at); err != nil {
@@ -291,10 +301,10 @@ func (h *Handler) PresignAudioUpload(c *gin.Context) {
 	}
 
 	ext := strings.ToLower(filepath.Ext(req.Filename))
-	if !allowedAudioTypes[ext] {
+	if !isSupportedTranscriptionUploadExt(ext) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "invalid_file_type",
-			Message: fmt.Sprintf("Unsupported audio format '%s'. Supported formats: mp3, wav, m4a, ogg, flac, webm", ext),
+			Message: fmt.Sprintf("Unsupported upload format '%s'. Supported formats: %s", ext, supportedTranscriptionUploadFormats),
 			Code:    http.StatusBadRequest,
 		})
 		return
@@ -909,14 +919,14 @@ func (h *Handler) GetAudioOpsHealth(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"queue_size":    h.Worker.QueueSize(),
-		"worker_count":  h.Worker.WorkerCount(),
-		"pending":       s.Pending,
-		"processing":    s.Processing,
-		"failed":        s.Failed,
-		"completed":     s.Completed,
+		"queue_size":      h.Worker.QueueSize(),
+		"worker_count":    h.Worker.WorkerCount(),
+		"pending":         s.Pending,
+		"processing":      s.Processing,
+		"failed":          s.Failed,
+		"completed":       s.Completed,
 		"created_last24h": s.Last24h,
-		"timestamp":     time.Now().UTC(),
+		"timestamp":       time.Now().UTC(),
 	})
 }
 

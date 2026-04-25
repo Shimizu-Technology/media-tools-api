@@ -43,6 +43,8 @@ type Batch struct {
 	TotalCount     int              `json:"total_count" db:"total_count"`
 	CompletedCount int              `json:"completed_count" db:"completed_count"`
 	FailedCount    int              `json:"failed_count" db:"failed_count"`
+	UserID         *string          `json:"user_id,omitempty" db:"user_id"`
+	APIKeyID       *string          `json:"api_key_id,omitempty" db:"api_key_id"`
 	CreatedAt      time.Time        `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time        `json:"updated_at" db:"updated_at"`
 }
@@ -115,7 +117,7 @@ type CreateChatMessageRequest struct {
 }
 
 type ChatResponse struct {
-	Session  TranscriptChatSession  `json:"session"`
+	Session  TranscriptChatSession   `json:"session"`
 	Messages []TranscriptChatMessage `json:"messages"`
 }
 
@@ -172,12 +174,12 @@ type PaginatedResponse[T any] struct {
 type AudioContentType string
 
 const (
-	ContentGeneral      AudioContentType = "general"
-	ContentPhoneCall    AudioContentType = "phone_call"
-	ContentMeeting      AudioContentType = "meeting"
-	ContentVoiceMemo    AudioContentType = "voice_memo"
-	ContentInterview    AudioContentType = "interview"
-	ContentLecture      AudioContentType = "lecture"
+	ContentGeneral   AudioContentType = "general"
+	ContentPhoneCall AudioContentType = "phone_call"
+	ContentMeeting   AudioContentType = "meeting"
+	ContentVoiceMemo AudioContentType = "voice_memo"
+	ContentInterview AudioContentType = "interview"
+	ContentLecture   AudioContentType = "lecture"
 )
 
 // ValidContentTypes for validation.
@@ -191,31 +193,31 @@ var ValidContentTypes = map[AudioContentType]bool{
 }
 
 type AudioTranscription struct {
-	ID             string           `json:"id" db:"id"`
-	Filename       string           `json:"filename" db:"filename"`
-	OriginalName   string           `json:"original_name" db:"original_name"`
-	AudioS3Key     string           `json:"audio_s3_key,omitempty" db:"audio_s3_key"`
-	AudioS3Status  string           `json:"audio_s3_status,omitempty" db:"audio_s3_status"`
-	AudioS3Size    int64            `json:"audio_s3_size,omitempty" db:"audio_s3_size"`
-	ProcessingStage string          `json:"processing_stage,omitempty" db:"processing_stage"`
-	ProcessingProgress int          `json:"processing_progress,omitempty" db:"processing_progress"`
-	RetryCount     int              `json:"retry_count,omitempty" db:"retry_count"`
-	Duration       float64          `json:"duration" db:"duration"`
-	Language       string           `json:"language" db:"language"`
-	TranscriptText string           `json:"transcript_text" db:"transcript_text"`
-	WordCount      int              `json:"word_count" db:"word_count"`
-	Status         string           `json:"status" db:"status"`
-	ErrorMessage   string           `json:"error_message,omitempty" db:"error_message"`
-	ContentType    AudioContentType `json:"content_type" db:"content_type"`
-	SummaryText    string           `json:"summary_text,omitempty" db:"summary_text"`
-	KeyPoints      json.RawMessage  `json:"key_points" db:"key_points"`
-	ActionItems    json.RawMessage  `json:"action_items" db:"action_items"`
-	Decisions      json.RawMessage  `json:"decisions" db:"decisions"`
-	SummaryModel   string           `json:"summary_model,omitempty" db:"summary_model"`
-	SummaryStatus  string           `json:"summary_status" db:"summary_status"`
-	UserID         *string          `json:"user_id,omitempty" db:"user_id"`
-	APIKeyID       *string          `json:"api_key_id,omitempty" db:"api_key_id"`
-	CreatedAt      time.Time        `json:"created_at" db:"created_at"`
+	ID                 string           `json:"id" db:"id"`
+	Filename           string           `json:"filename" db:"filename"`
+	OriginalName       string           `json:"original_name" db:"original_name"`
+	AudioS3Key         string           `json:"audio_s3_key,omitempty" db:"audio_s3_key"`
+	AudioS3Status      string           `json:"audio_s3_status,omitempty" db:"audio_s3_status"`
+	AudioS3Size        int64            `json:"audio_s3_size,omitempty" db:"audio_s3_size"`
+	ProcessingStage    string           `json:"processing_stage,omitempty" db:"processing_stage"`
+	ProcessingProgress int              `json:"processing_progress,omitempty" db:"processing_progress"`
+	RetryCount         int              `json:"retry_count,omitempty" db:"retry_count"`
+	Duration           float64          `json:"duration" db:"duration"`
+	Language           string           `json:"language" db:"language"`
+	TranscriptText     string           `json:"transcript_text" db:"transcript_text"`
+	WordCount          int              `json:"word_count" db:"word_count"`
+	Status             string           `json:"status" db:"status"`
+	ErrorMessage       string           `json:"error_message,omitempty" db:"error_message"`
+	ContentType        AudioContentType `json:"content_type" db:"content_type"`
+	SummaryText        string           `json:"summary_text,omitempty" db:"summary_text"`
+	KeyPoints          json.RawMessage  `json:"key_points" db:"key_points"`
+	ActionItems        json.RawMessage  `json:"action_items" db:"action_items"`
+	Decisions          json.RawMessage  `json:"decisions" db:"decisions"`
+	SummaryModel       string           `json:"summary_model,omitempty" db:"summary_model"`
+	SummaryStatus      string           `json:"summary_status" db:"summary_status"`
+	UserID             *string          `json:"user_id,omitempty" db:"user_id"`
+	APIKeyID           *string          `json:"api_key_id,omitempty" db:"api_key_id"`
+	CreatedAt          time.Time        `json:"created_at" db:"created_at"`
 }
 
 // SummarizeAudioRequest is the request body for POST /api/v1/audio/transcriptions/:id/summarize

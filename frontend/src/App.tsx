@@ -80,6 +80,7 @@ function ClerkAppContent() {
       isClerkEnabled={true}
       isAuthenticated={isSignedIn ?? false}
       isLoading={!isLoaded}
+      canUseWorkspace={true}
     >
       <ClerkTokenSync>
         <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
@@ -116,6 +117,7 @@ function NoClerkAppContent() {
       isClerkEnabled={false}
       isAuthenticated={hasApiKey}
       isLoading={false}
+      canUseWorkspace={false}
     >
       <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
         <Header />
