@@ -292,11 +292,26 @@ func (p *Pool) RecoverAudioJobs(ctx context.Context, limit int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+
 	requeued := 0
+	var recoveryErrs []string
 	for _, at := range rows {
 		if at.Status == "completed" {
 			continue
 		}
+
+		if at.Status == "processing" {
+			// A worker died mid-job, so reflect reality before requeueing it.
+			at.Status = "pending"
+			at.ProcessingStage = "queued"
+			at.ProcessingProgress = 0
+			if err := p.db.UpdateAudioTranscription(ctx, &at); err != nil {
+				recoveryErrs = append(recoveryErrs, fmt.Sprintf("reset %s: %v", at.ID, err))
+				log.Printf("⚠️  Failed to reset audio transcription %s for recovery: %v", at.ID, err)
+				continue
+			}
+		}
+
 		payload := AudioPayload{
 			AudioID:      at.ID,
 			AudioS3Key:   at.AudioS3Key,
@@ -304,19 +319,34 @@ func (p *Pool) RecoverAudioJobs(ctx context.Context, limit int) (int, error) {
 		}
 		payloadJSON, err := json.Marshal(payload)
 		if err != nil {
+			recoveryErrs = append(recoveryErrs, fmt.Sprintf("marshal %s: %v", at.ID, err))
+			log.Printf("⚠️  Failed to marshal audio job %s during recovery: %v", at.ID, err)
 			continue
 		}
+
 		job := Job{
 			ID:        at.ID,
 			Type:      JobAudioTranscription,
 			Payload:   payloadJSON,
 			CreatedAt: time.Now(),
 		}
-		if err := p.Submit(job); err == nil {
-			requeued++
-			_ = p.db.UpdateAudioProcessing(ctx, at.ID, "queued", 0)
+		if err := p.Submit(job); err != nil {
+			recoveryErrs = append(recoveryErrs, fmt.Sprintf("requeue %s: %v", at.ID, err))
+			log.Printf("⚠️  Failed to requeue audio transcription %s during recovery: %v", at.ID, err)
+			continue
+		}
+
+		requeued++
+		if err := p.db.UpdateAudioProcessing(ctx, at.ID, "queued", 0); err != nil {
+			recoveryErrs = append(recoveryErrs, fmt.Sprintf("mark queued %s: %v", at.ID, err))
+			log.Printf("⚠️  Failed to update recovered audio transcription %s to queued: %v", at.ID, err)
 		}
 	}
+
+	if len(recoveryErrs) > 0 {
+		return requeued, fmt.Errorf("audio recovery completed with %d issue(s): %s", len(recoveryErrs), strings.Join(recoveryErrs, "; "))
+	}
+
 	return requeued, nil
 }
 
