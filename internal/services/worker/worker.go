@@ -251,6 +251,7 @@ func (p *Pool) RecoverTranscriptJobs(ctx context.Context, limit int) (int, error
 	}
 
 	requeued := 0
+	var recoveryErrs []string
 	for _, t := range rows {
 		if t.Status == models.StatusCompleted || t.Status == models.StatusFailed {
 			continue
@@ -259,7 +260,9 @@ func (p *Pool) RecoverTranscriptJobs(ctx context.Context, limit int) (int, error
 			// A worker died mid-job, so reflect reality before requeueing it.
 			t.Status = models.StatusPending
 			if err := p.db.UpdateTranscript(ctx, &t); err != nil {
-				return requeued, fmt.Errorf("reset transcript %s for recovery: %w", t.ID, err)
+				recoveryErrs = append(recoveryErrs, fmt.Sprintf("reset %s: %v", t.ID, err))
+				log.Printf("⚠️  Failed to reset transcript %s for recovery: %v", t.ID, err)
+				continue
 			}
 		}
 
@@ -270,7 +273,14 @@ func (p *Pool) RecoverTranscriptJobs(ctx context.Context, limit int) (int, error
 		}
 		if err := p.Submit(job); err == nil {
 			requeued++
+		} else {
+			recoveryErrs = append(recoveryErrs, fmt.Sprintf("requeue %s: %v", t.ID, err))
+			log.Printf("⚠️  Failed to requeue transcript %s during recovery: %v", t.ID, err)
 		}
+	}
+
+	if len(recoveryErrs) > 0 {
+		return requeued, fmt.Errorf("transcript recovery completed with %d issue(s): %s", len(recoveryErrs), strings.Join(recoveryErrs, "; "))
 	}
 
 	return requeued, nil
