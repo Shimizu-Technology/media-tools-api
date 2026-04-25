@@ -51,6 +51,8 @@ const whisperInitialSegmentSeconds = 1800
 
 func requiresWhisperTranscode(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
+	// We accept these uploads at the API boundary, but normalize them before
+	// transcription so the worker feeds Whisper a predictable audio format.
 	case ".mp4", ".flac", ".ogg":
 		return true
 	default:
