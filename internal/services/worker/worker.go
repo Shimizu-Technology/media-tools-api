@@ -41,17 +41,28 @@ import (
 type JobType string
 
 const (
-	JobTranscriptExtraction  JobType = "transcript_extraction"
-	JobSummaryGeneration     JobType = "summary_generation"
-	JobAudioTranscription    JobType = "audio_transcription"
+	JobTranscriptExtraction JobType = "transcript_extraction"
+	JobSummaryGeneration    JobType = "summary_generation"
+	JobAudioTranscription   JobType = "audio_transcription"
 )
 
 const whisperTargetBytes = 24 << 20 // Keep below 25MB hard limit to account for multipart overhead
 const whisperInitialSegmentSeconds = 1800
 
+func requiresWhisperTranscode(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	// We accept these uploads at the API boundary, but normalize them before
+	// transcription so the worker feeds Whisper a predictable audio format.
+	case ".mp4", ".flac", ".ogg":
+		return true
+	default:
+		return false
+	}
+}
+
 // Job represents a unit of work to be processed by a worker.
 type Job struct {
-	ID        string          // The database record ID
+	ID        string // The database record ID
 	Type      JobType
 	Payload   json.RawMessage // Flexible payload — different job types need different data
 	CreatedAt time.Time
@@ -78,18 +89,19 @@ type AudioPayload struct {
 
 // Pool manages a pool of worker goroutines.
 type Pool struct {
-	jobs            chan Job
-	workers         int
-	db              *database.DB
-	extractor       transcript.Extractor
-	summarizer      *summary.Service
+	jobs             chan Job
+	workers          int
+	db               *database.DB
+	extractor        transcript.Extractor
+	summarizer       *summary.Service
 	audioTranscriber *audio.Transcriber // Audio transcription via Whisper
-	audioStorage    *storage.S3
-	webhooks        *webhookservice.Service // MTA-18: webhook notifications
-	webhookSem      chan struct{}           // Caps concurrent webhook goroutines
-	wg              sync.WaitGroup
-	ctx             context.Context
-	cancel          context.CancelFunc
+	audioStorage     *storage.S3
+	webhooks         *webhookservice.Service // MTA-18: webhook notifications
+	webhookSem       chan struct{}           // Caps concurrent webhook goroutines
+	wg               sync.WaitGroup
+	ctx              context.Context
+	cancel           context.CancelFunc
+	stopOnce         sync.Once
 }
 
 // SetWebhookService sets the webhook service for notifications (MTA-18).
@@ -155,19 +167,43 @@ func (p *Pool) Start() {
 // Stop gracefully shuts down all workers.
 // Go Pattern: Close the channel + cancel the context + wait for completion.
 func (p *Pool) Stop() {
-	log.Println("⏹️  Stopping workers...")
-	p.cancel()     // Signal all workers to stop
-	close(p.jobs)  // Close the channel (workers will drain remaining jobs)
-	p.wg.Wait()    // Wait for all workers to finish
-	log.Println("✅ All workers stopped")
+	p.stopOnce.Do(func() {
+		log.Println("⏹️  Stopping workers...")
+		close(p.jobs) // Closing the queue lets workers drain already-queued jobs.
+
+		done := make(chan struct{})
+		go func() {
+			p.wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			log.Println("✅ All workers stopped")
+		case <-time.After(30 * time.Second):
+			log.Println("⚠️  Worker drain timed out, canceling active jobs")
+			p.cancel()
+			<-done
+			log.Println("✅ All workers stopped after forced cancellation")
+		}
+	})
 }
 
 // Submit adds a job to the queue.
 // Returns an error if the queue is full (non-blocking).
-func (p *Pool) Submit(job Job) error {
+func (p *Pool) Submit(job Job) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("⚠️  Rejected job %s while worker pool was stopping", job.ID)
+			err = fmt.Errorf("worker pool is stopping")
+		}
+	}()
+
 	// Go Pattern: `select` with `default` makes channel operations non-blocking.
 	// Without default, sending to a full channel would block the HTTP handler.
 	select {
+	case <-p.ctx.Done():
+		return fmt.Errorf("worker pool is stopping")
 	case p.jobs <- job:
 		log.Printf("📥 Job queued: %s (type: %s)", job.ID, job.Type)
 		return nil
@@ -178,8 +214,17 @@ func (p *Pool) Submit(job Job) error {
 
 // SubmitBlocking adds a job to the queue and blocks until it can be queued
 // or the provided context is canceled.
-func (p *Pool) SubmitBlocking(ctx context.Context, job Job) error {
+func (p *Pool) SubmitBlocking(ctx context.Context, job Job) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("⚠️  Rejected blocking job %s while worker pool was stopping", job.ID)
+			err = fmt.Errorf("worker pool is stopping")
+		}
+	}()
+
 	select {
+	case <-p.ctx.Done():
+		return fmt.Errorf("worker pool is stopping")
 	case p.jobs <- job:
 		log.Printf("📥 Job queued (blocking): %s (type: %s)", job.ID, job.Type)
 		return nil
@@ -198,17 +243,75 @@ func (p *Pool) WorkerCount() int {
 	return p.workers
 }
 
+// RecoverTranscriptJobs requeues pending/processing transcript jobs on startup.
+func (p *Pool) RecoverTranscriptJobs(ctx context.Context, limit int) (int, error) {
+	rows, err := p.db.ListRecoverableTranscripts(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+
+	requeued := 0
+	var recoveryErrs []string
+	for _, t := range rows {
+		if t.Status == models.StatusCompleted || t.Status == models.StatusFailed {
+			continue
+		}
+		if t.Status == models.StatusProcessing {
+			// A worker died mid-job, so reflect reality before requeueing it.
+			t.Status = models.StatusPending
+			if err := p.db.UpdateTranscript(ctx, &t); err != nil {
+				recoveryErrs = append(recoveryErrs, fmt.Sprintf("reset %s: %v", t.ID, err))
+				log.Printf("⚠️  Failed to reset transcript %s for recovery: %v", t.ID, err)
+				continue
+			}
+		}
+
+		job := Job{
+			ID:        t.ID,
+			Type:      JobTranscriptExtraction,
+			CreatedAt: time.Now(),
+		}
+		if err := p.Submit(job); err == nil {
+			requeued++
+		} else {
+			recoveryErrs = append(recoveryErrs, fmt.Sprintf("requeue %s: %v", t.ID, err))
+			log.Printf("⚠️  Failed to requeue transcript %s during recovery: %v", t.ID, err)
+		}
+	}
+
+	if len(recoveryErrs) > 0 {
+		return requeued, fmt.Errorf("transcript recovery completed with %d issue(s): %s", len(recoveryErrs), strings.Join(recoveryErrs, "; "))
+	}
+
+	return requeued, nil
+}
+
 // RecoverAudioJobs requeues pending/processing audio jobs on startup.
 func (p *Pool) RecoverAudioJobs(ctx context.Context, limit int) (int, error) {
 	rows, err := p.db.ListRecoverableAudioTranscriptions(ctx, limit)
 	if err != nil {
 		return 0, err
 	}
+
 	requeued := 0
+	var recoveryErrs []string
 	for _, at := range rows {
 		if at.Status == "completed" {
 			continue
 		}
+
+		if at.Status == "processing" {
+			// A worker died mid-job, so reflect reality before requeueing it.
+			at.Status = "pending"
+			at.ProcessingStage = "queued"
+			at.ProcessingProgress = 0
+			if err := p.db.UpdateAudioTranscription(ctx, &at); err != nil {
+				recoveryErrs = append(recoveryErrs, fmt.Sprintf("reset %s: %v", at.ID, err))
+				log.Printf("⚠️  Failed to reset audio transcription %s for recovery: %v", at.ID, err)
+				continue
+			}
+		}
+
 		payload := AudioPayload{
 			AudioID:      at.ID,
 			AudioS3Key:   at.AudioS3Key,
@@ -216,19 +319,34 @@ func (p *Pool) RecoverAudioJobs(ctx context.Context, limit int) (int, error) {
 		}
 		payloadJSON, err := json.Marshal(payload)
 		if err != nil {
+			recoveryErrs = append(recoveryErrs, fmt.Sprintf("marshal %s: %v", at.ID, err))
+			log.Printf("⚠️  Failed to marshal audio job %s during recovery: %v", at.ID, err)
 			continue
 		}
+
 		job := Job{
 			ID:        at.ID,
 			Type:      JobAudioTranscription,
 			Payload:   payloadJSON,
 			CreatedAt: time.Now(),
 		}
-		if err := p.Submit(job); err == nil {
-			requeued++
-			_ = p.db.UpdateAudioProcessing(ctx, at.ID, "queued", 0)
+		if err := p.Submit(job); err != nil {
+			recoveryErrs = append(recoveryErrs, fmt.Sprintf("requeue %s: %v", at.ID, err))
+			log.Printf("⚠️  Failed to requeue audio transcription %s during recovery: %v", at.ID, err)
+			continue
+		}
+
+		requeued++
+		if err := p.db.UpdateAudioProcessing(ctx, at.ID, "queued", 0); err != nil {
+			recoveryErrs = append(recoveryErrs, fmt.Sprintf("mark queued %s: %v", at.ID, err))
+			log.Printf("⚠️  Failed to update recovered audio transcription %s to queued: %v", at.ID, err)
 		}
 	}
+
+	if len(recoveryErrs) > 0 {
+		return requeued, fmt.Errorf("audio recovery completed with %d issue(s): %s", len(recoveryErrs), strings.Join(recoveryErrs, "; "))
+	}
+
 	return requeued, nil
 }
 
@@ -489,7 +607,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	}
 
 	var transcriptionParts []string
-	if fileInfo.Size() > whisperTargetBytes {
+	if fileInfo.Size() > whisperTargetBytes || requiresWhisperTranscode(payload.TempFilePath) {
 		_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcoding", 25)
 		compressedPath := payload.TempFilePath + ".whisper.ogg"
 		if err := transcodeForWhisper(ctx, payload.TempFilePath, compressedPath); err != nil {
@@ -508,7 +626,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 			return fmt.Errorf("failed to stat compressed audio: %w", err)
 		}
 
-		log.Printf("🎚️  Transcoded large audio for Whisper: %s %.1fMB -> %.1fMB",
+		log.Printf("🎚️  Transcoded recording for Whisper: %s %.1fMB -> %.1fMB",
 			payload.OriginalName,
 			float64(fileInfo.Size())/(1024*1024),
 			float64(compressedInfo.Size())/(1024*1024),

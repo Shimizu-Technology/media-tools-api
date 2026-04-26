@@ -13,12 +13,14 @@ interface AuthContextType {
   isClerkEnabled: boolean;
   isAuthenticated: boolean;
   isLoading: boolean;
+  canUseWorkspace: boolean;
 }
 
 const AuthContext = createContext<AuthContextType>({
   isClerkEnabled: false,
   isAuthenticated: false,
   isLoading: true,
+  canUseWorkspace: false,
 });
 
 export function useAuthContext() {
@@ -30,15 +32,16 @@ interface AuthProviderProps {
   isClerkEnabled: boolean;
   isAuthenticated: boolean;
   isLoading: boolean;
+  canUseWorkspace: boolean;
 }
 
 /**
  * Generic auth provider — receives auth state from parent.
  * This decouples the context from Clerk hooks so it works outside ClerkProvider.
  */
-export function AuthProvider({ children, isClerkEnabled, isAuthenticated, isLoading }: AuthProviderProps) {
+export function AuthProvider({ children, isClerkEnabled, isAuthenticated, isLoading, canUseWorkspace }: AuthProviderProps) {
   return (
-    <AuthContext.Provider value={{ isClerkEnabled, isAuthenticated, isLoading }}>
+    <AuthContext.Provider value={{ isClerkEnabled, isAuthenticated, isLoading, canUseWorkspace }}>
       {children}
     </AuthContext.Provider>
   );

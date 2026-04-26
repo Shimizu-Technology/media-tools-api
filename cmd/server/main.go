@@ -8,8 +8,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -121,11 +121,18 @@ func main() {
 
 	// Step 4: Create and Start Worker Pool
 	wp := worker.NewPool(cfg.WorkerCount, cfg.JobQueueSize, db, extractor, summarizer)
-	wp.SetWebhookService(webhookService) // MTA-18: wire webhooks into worker for job notifications
+	wp.SetWebhookService(webhookService)     // MTA-18: wire webhooks into worker for job notifications
 	wp.SetAudioTranscriber(audioTranscriber) // Wire audio transcriber for async Whisper jobs
 	wp.SetAudioStorage(audioStorage)
 	wp.Start()
 	defer wp.Stop()
+
+	recoveredTranscripts, err := wp.RecoverTranscriptJobs(context.Background(), 200)
+	if err != nil {
+		log.Printf("⚠️  Transcript job recovery failed: %v", err)
+	} else if recoveredTranscripts > 0 {
+		log.Printf("♻️  Requeued %d recoverable transcript job(s) on startup", recoveredTranscripts)
+	}
 
 	requeued, err := wp.RecoverAudioJobs(context.Background(), 200)
 	if err != nil {
@@ -143,19 +150,19 @@ func main() {
 
 	// Step 5: Setup HTTP Router
 	r := router.Setup(router.RouterConfig{
-		DB:               db,
-		WorkerPool:       wp,
-		AudioTranscriber: audioTranscriber,
-		AudioStorage:     audioStorage,
-		Webhooks:         webhookService,
-		Summarizer:       summarizer,
-		JWTSecret:        cfg.JWTSecret,
-		AdminAPIKey:      cfg.AdminAPIKey,
-		OwnerKeyID:       cfg.OwnerAPIKeyID,
-		OwnerKeyPrefix:   cfg.OwnerAPIKeyPrefix,
-		ClerkJWKSURL:     cfg.ClerkJWKSURL,
-		ClerkSecretKey:   cfg.ClerkSecretKey,
-		AllowedOrigins:   cfg.AllowedOrigins,
+		DB:                     db,
+		WorkerPool:             wp,
+		AudioTranscriber:       audioTranscriber,
+		AudioStorage:           audioStorage,
+		Webhooks:               webhookService,
+		Summarizer:             summarizer,
+		JWTSecret:              cfg.JWTSecret,
+		AdminAPIKey:            cfg.AdminAPIKey,
+		OwnerKeyID:             cfg.OwnerAPIKeyID,
+		OwnerKeyPrefix:         cfg.OwnerAPIKeyPrefix,
+		ClerkJWKSURL:           cfg.ClerkJWKSURL,
+		ClerkSecretKey:         cfg.ClerkSecretKey,
+		AllowedOrigins:         cfg.AllowedOrigins,
 		YtDlpCookiesConfigured: ytDlpCookiesConfigured,
 	})
 

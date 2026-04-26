@@ -16,12 +16,12 @@ interface SaveToWorkspaceProps {
  * Works with both Clerk and API key auth.
  */
 export function SaveToWorkspace({ itemType, itemId }: SaveToWorkspaceProps) {
-  const { isAuthenticated } = useAuthContext();
+  const { isAuthenticated, canUseWorkspace } = useAuthContext();
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!isAuthenticated) return null;
+  if (!isAuthenticated || !canUseWorkspace) return null;
 
   const handleSave = async () => {
     if (saved || saving) return;

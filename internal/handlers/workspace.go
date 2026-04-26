@@ -89,6 +89,24 @@ func (h *Handler) SaveToWorkspace(c *gin.Context) {
 		ItemID:   req.ItemID,
 	}
 
+	owned, err := h.DB.UserOwnsWorkspaceItem(c.Request.Context(), user.ID, req.ItemType, req.ItemID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "database_error",
+			Message: "Failed to verify item ownership",
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+	if !owned {
+		c.JSON(http.StatusForbidden, models.ErrorResponse{
+			Error:   "forbidden",
+			Message: "You can only save items you own to your workspace",
+			Code:    http.StatusForbidden,
+		})
+		return
+	}
+
 	if err := h.DB.SaveWorkspaceItem(c.Request.Context(), item); err != nil {
 		// ON CONFLICT DO NOTHING means it might already exist — that's fine
 		c.JSON(http.StatusOK, gin.H{"message": "Item saved to workspace"})

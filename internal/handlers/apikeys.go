@@ -105,7 +105,8 @@ func (h *Handler) CreateAPIKey(c *gin.Context) {
 // ListAPIKeys returns all API keys (without the raw key values).
 // GET /api/v1/keys
 func (h *Handler) ListAPIKeys(c *gin.Context) {
-	keys, err := h.DB.ListAPIKeys(c.Request.Context())
+	actor := getActorOwnership(c)
+	keys, err := h.DB.ListAPIKeysForActor(c.Request.Context(), actor.UserID, actor.APIKeyID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
@@ -126,8 +127,9 @@ func (h *Handler) ListAPIKeys(c *gin.Context) {
 // DELETE /api/v1/keys/:id
 func (h *Handler) RevokeAPIKey(c *gin.Context) {
 	id := c.Param("id")
+	actor := getActorOwnership(c)
 
-	if err := h.DB.RevokeAPIKey(c.Request.Context(), id); err != nil {
+	if err := h.DB.RevokeAPIKeyForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID); err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
 			Message: "API key not found",

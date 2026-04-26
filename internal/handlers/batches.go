@@ -43,6 +43,16 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 		return
 	}
 
+	actor := getActorOwnership(c)
+	if !actor.IsAuthenticated() {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Authentication required",
+			Code:    http.StatusUnauthorized,
+		})
+		return
+	}
+
 	// Enforce the 10-URL limit explicitly (belt + suspenders with the binding tag)
 	if len(req.URLs) > 10 {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
@@ -79,6 +89,8 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 	batch := &models.Batch{
 		Status:     models.StatusPending,
 		TotalCount: len(parsed),
+		UserID:     actor.UserID,
+		APIKeyID:   actor.APIKeyID,
 	}
 
 	if err := h.DB.CreateBatch(c.Request.Context(), batch); err != nil {
@@ -98,7 +110,7 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 		// Check for existing completed transcript for this video
 		// If found, we create a new record pre-populated with the existing data
 		// so it completes immediately without re-extraction.
-		existing, _ := h.DB.GetTranscriptByYouTubeID(c.Request.Context(), p.videoID)
+		existing, _ := h.DB.GetTranscriptByYouTubeIDForActor(c.Request.Context(), p.videoID, actor.UserID, actor.APIKeyID)
 
 		var t *models.Transcript
 		var needsExtraction bool
@@ -113,8 +125,11 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 				Title:          existing.Title,
 				ChannelName:    existing.ChannelName,
 				Duration:       existing.Duration,
+				Language:       existing.Language,
 				TranscriptText: existing.TranscriptText,
 				WordCount:      existing.WordCount,
+				UserID:         actor.UserID,
+				APIKeyID:       actor.APIKeyID,
 			}
 			needsExtraction = false
 			log.Printf("Reusing existing transcript for %s (already extracted)", p.videoID)
@@ -125,6 +140,8 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 				YouTubeID:  p.videoID,
 				Status:     models.StatusPending,
 				BatchID:    &batch.ID,
+				UserID:     actor.UserID,
+				APIKeyID:   actor.APIKeyID,
 			}
 			needsExtraction = true
 		}
@@ -146,8 +163,9 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 			if err := h.Worker.Submit(job); err != nil {
 				if h.isOwnerRequest(c) {
 					ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
-					defer cancel()
-					if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
+					blockingErr := h.Worker.SubmitBlocking(ctx, job)
+					cancel()
+					if blockingErr == nil {
 						// queued successfully for owner; continue
 						transcripts = append(transcripts, *t)
 						continue
@@ -158,6 +176,10 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 		}
 
 		transcripts = append(transcripts, *t)
+	}
+
+	if err := h.DB.UpdateBatchCounts(c.Request.Context(), batch.ID); err != nil {
+		log.Printf("Failed to update batch counts for %s: %v", batch.ID, err)
 	}
 
 	// Return 202 Accepted with the batch and all transcript records
@@ -174,17 +196,9 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 // statuses, ensuring accuracy even if a worker update was missed.
 func (h *Handler) GetBatch(c *gin.Context) {
 	id := c.Param("id")
+	actor := getActorOwnership(c)
 
-	// First, update the batch counts from actual transcript data
-	// Go Pattern: Self-healing data — we recalculate on every read
-	// rather than trusting stale counters. The performance cost is
-	// minimal since it's a single indexed query.
-	if err := h.DB.UpdateBatchCounts(c.Request.Context(), id); err != nil {
-		log.Printf("Failed to update batch counts: %v", err)
-		// Non-fatal — continue with potentially stale counts
-	}
-
-	batch, err := h.DB.GetBatch(c.Request.Context(), id)
+	batch, err := h.DB.GetBatchForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
@@ -194,7 +208,16 @@ func (h *Handler) GetBatch(c *gin.Context) {
 		return
 	}
 
-	transcripts, err := h.DB.GetTranscriptsByBatch(c.Request.Context(), id)
+	// Recalculate the batch counts from actual transcript data after ownership
+	// is confirmed so unauthorized reads never trigger writes.
+	if err := h.DB.UpdateBatchCounts(c.Request.Context(), id); err != nil {
+		log.Printf("Failed to update batch counts: %v", err)
+		// Non-fatal — continue with potentially stale counts
+	} else if refreshed, refreshErr := h.DB.GetBatchForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID); refreshErr == nil {
+		batch = refreshed
+	}
+
+	transcripts, err := h.DB.GetTranscriptsByBatchForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		log.Printf("Failed to get batch transcripts: %v", err)
 		transcripts = []models.Transcript{} // Return empty array, not error

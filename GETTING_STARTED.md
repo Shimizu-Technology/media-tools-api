@@ -443,7 +443,7 @@ This is the fastest way to test the new Audio Intelligence features:
 1. Start the server: `make run`
 2. Start the frontend: `make frontend-dev`
 3. Open **http://localhost:5173/audio**
-4. **Upload tab**: Drag an .m4a file (iPhone recording) onto the page
+4. **Upload tab**: Drag an `.m4a` audio file or `.mp4` Zoom recording onto the page
 5. Select content type (e.g., "Phone Call")
 6. Hit **Transcribe**
 7. Once transcribed, hit **Generate AI Summary**
@@ -464,10 +464,10 @@ curl -X POST http://localhost:8080/api/v1/keys \
   -d '{"name": "dev-key"}' | jq
 # Save the raw_key from the response!
 
-# Transcribe an audio file
+# Transcribe an audio file or meeting recording
 curl -X POST http://localhost:8080/api/v1/audio/transcribe \
   -H "X-API-Key: YOUR_KEY_HERE" \
-  -F "file=@/path/to/recording.m4a"
+  -F "file=@/path/to/zoom-meeting.mp4"
 
 # Summarize a transcription
 curl -X POST http://localhost:8080/api/v1/audio/transcriptions/TRANSCRIPTION_ID/summarize \
