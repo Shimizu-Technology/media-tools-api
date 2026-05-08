@@ -260,7 +260,10 @@ func isBlockedIP(ip net.IP) bool {
 func safeHTTPClient() *http.Client {
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		// Do not honor HTTP_PROXY/HTTPS_PROXY for webhook delivery: a proxy
+		// would make DialContext validate the proxy host rather than the final
+		// webhook destination, bypassing the SSRF guard.
+		Proxy: nil,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(address)
 			if err != nil {

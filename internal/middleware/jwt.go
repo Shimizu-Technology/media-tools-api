@@ -139,6 +139,13 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 							clerkUser, fetchErr := fetchClerkUser(claims.Subject, clerkSecretKey)
 							if fetchErr != nil {
 								log.Printf("❌ DualAuth: failed to fetch Clerk user %s: %v", claims.Subject, fetchErr)
+								c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
+									Error:   "auth_provider_unavailable",
+									Message: "Failed to verify user identity",
+									Code:    http.StatusServiceUnavailable,
+								})
+								c.Abort()
+								return
 							} else {
 								var createErr error
 								user, createErr = db.FindOrCreateClerkUser(c.Request.Context(), claims.Subject, clerkUser.Email, clerkUser.Name)
