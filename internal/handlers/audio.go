@@ -8,6 +8,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -21,6 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
@@ -457,20 +459,20 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		UserID:             actor.UserID,
 		APIKeyID:           actor.APIKeyID,
 	}
-	if err := h.DB.CompleteAudioUploadSession(c.Request.Context(), session.ID); err != nil {
-		c.JSON(http.StatusConflict, models.ErrorResponse{
-			Error:   "upload_already_completed",
-			Message: "Upload session has already been completed",
-			Code:    http.StatusConflict,
-		})
-		return
-	}
-	if err := h.DB.CreateAudioTranscription(c.Request.Context(), at); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
-			Message: "Failed to create transcription record",
-			Code:    http.StatusInternalServerError,
-		})
+	if err := h.DB.CompleteAudioUploadAndCreateTranscription(c.Request.Context(), session.ID, at); err != nil {
+		if errors.Is(err, database.ErrAudioUploadSessionNotPending) {
+			c.JSON(http.StatusConflict, models.ErrorResponse{
+				Error:   "upload_already_completed",
+				Message: "Upload session has already been completed",
+				Code:    http.StatusConflict,
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error:   "database_error",
+				Message: "Failed to create transcription record",
+				Code:    http.StatusInternalServerError,
+			})
+		}
 		return
 	}
 

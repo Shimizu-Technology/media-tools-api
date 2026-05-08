@@ -15,6 +15,7 @@ export function usePolling<T>(
   const { interval = 2000, enabled = true, shouldStop } = options;
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  const [isPolling, setIsPolling] = useState(enabled);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stoppedRef = useRef(false);
   const fetcherRef = useRef(fetcher);
@@ -26,9 +27,13 @@ export function usePolling<T>(
   }, [fetcher, shouldStop]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      queueMicrotask(() => setIsPolling(false));
+      return;
+    }
 
     stoppedRef.current = false;
+    queueMicrotask(() => setIsPolling(true));
 
     const poll = async () => {
       if (stoppedRef.current) return;
@@ -40,6 +45,7 @@ export function usePolling<T>(
 
         if (shouldStopRef.current?.(result)) {
           stoppedRef.current = true;
+          setIsPolling(false);
           return;
         }
       } catch (err) {
@@ -61,5 +67,5 @@ export function usePolling<T>(
     };
   }, [enabled, interval]);
 
-  return { data, error, isPolling: enabled };
+  return { data, error, isPolling };
 }
