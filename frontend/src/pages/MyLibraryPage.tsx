@@ -91,22 +91,18 @@ export function MyLibraryPage() {
     setError('');
     
     try {
-      const unified: UnifiedItem[] = [];
-      
-      // Fetch based on active tab
+      const tasks: Promise<UnifiedItem[]>[] = [];
+
       if (activeTab === 'all' || activeTab === 'youtube') {
-        const ytResult: PaginatedResponse<Transcript> = await listTranscripts({
+        tasks.push(listTranscripts({
           page: activeTab === 'youtube' ? page : 1,
           per_page: activeTab === 'youtube' ? perPage : 50,
           search: searchQuery || undefined,
-        });
-        
-        if (activeTab === 'youtube') {
-          setTotalPages(ytResult.total_pages);
-        }
-        
-        ytResult.data.forEach((t) => {
-          unified.push({
+        }).then((ytResult: PaginatedResponse<Transcript>) => {
+          if (activeTab === 'youtube') {
+            setTotalPages(ytResult.total_pages);
+          }
+          return ytResult.data.map((t) => ({
             id: t.id,
             type: 'youtube',
             title: t.title || 'Untitled Video',
@@ -116,14 +112,12 @@ export function MyLibraryPage() {
             hasSummary: false, // YouTube summaries are separate
             createdAt: t.created_at,
             duration: t.duration,
-          });
-        });
+          }));
+        }));
       }
       
       if (activeTab === 'all' || activeTab === 'audio') {
-        const audioResult = await listAudioTranscriptions();
-        audioResult.forEach((a) => {
-          unified.push({
+        tasks.push(listAudioTranscriptions().then((audioResult) => audioResult.map((a) => ({
             id: a.id,
             type: 'audio',
             title: a.original_name,
@@ -133,14 +127,11 @@ export function MyLibraryPage() {
             hasSummary: a.summary_status === 'completed',
             createdAt: a.created_at,
             duration: a.duration,
-          });
-        });
+          }))));
       }
       
       if (activeTab === 'all' || activeTab === 'pdf') {
-        const pdfResult = await listPDFExtractions();
-        pdfResult.forEach((p) => {
-          unified.push({
+        tasks.push(listPDFExtractions().then((pdfResult) => pdfResult.map((p) => ({
             id: p.id,
             type: 'pdf',
             title: p.original_name,
@@ -150,10 +141,18 @@ export function MyLibraryPage() {
             hasSummary: false,
             createdAt: p.created_at,
             pageCount: p.page_count,
-          });
-        });
+          }))));
       }
-      
+
+      const settled = await Promise.allSettled(tasks);
+      const unified = settled.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
+      const failures = settled.filter((result) => result.status === 'rejected');
+      if (failures.length > 0 && unified.length === 0) {
+        throw new Error('Failed to load content');
+      }
+      if (failures.length > 0) {
+        setError('Some library items could not be loaded. Please refresh to try again.');
+      }
       setItems(unified);
     } catch (err: unknown) {
       const apiErr = err as { message?: string };
@@ -251,7 +250,7 @@ export function MyLibraryPage() {
       }
       // Remove from local state
       setItems((prev) => prev.filter((i) => !(i.type === item.type && i.id === item.id)));
-    } catch (err) {
+    } catch {
       setError('Failed to delete item');
     }
     setIsDeleting(false);

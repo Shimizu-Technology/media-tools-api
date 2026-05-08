@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Bookmark, BookmarkCheck, AlertCircle } from 'lucide-react';
 import { saveToWorkspace } from '../lib/api';
 import type { APIError } from '../lib/api';
-import { useAuthContext } from '../contexts/AuthContext';
+import { useAuthContext } from '../contexts/useAuthContext';
 
 interface SaveToWorkspaceProps {
   itemType: 'transcript' | 'audio' | 'pdf';

@@ -81,9 +81,12 @@ func (db *DB) DeleteWebhook(ctx context.Context, id, apiKeyID string) error {
 }
 
 // GetActiveWebhooksForEvent returns all active webhooks that subscribe to a given event.
-func (db *DB) GetActiveWebhooksForEvent(ctx context.Context, event string) ([]models.Webhook, error) {
-	query := `SELECT id, api_key_id, url, events, secret, active, created_at FROM webhooks WHERE active = true AND $1 = ANY(events)`
-	rows, err := db.QueryContext(ctx, query, event)
+func (db *DB) GetActiveWebhooksForEvent(ctx context.Context, event string, apiKeyID string) ([]models.Webhook, error) {
+	if apiKeyID == "" {
+		return []models.Webhook{}, nil
+	}
+	query := `SELECT id, api_key_id, url, events, secret, active, created_at FROM webhooks WHERE active = true AND api_key_id = $2 AND $1 = ANY(events)`
+	rows, err := db.QueryContext(ctx, query, event, apiKeyID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get webhooks for event: %w", err)
 	}

@@ -220,11 +220,29 @@ type AudioTranscription struct {
 	CreatedAt          time.Time        `json:"created_at" db:"created_at"`
 }
 
+type AudioUploadSession struct {
+	ID           string     `json:"id" db:"id"`
+	ObjectKey    string     `json:"object_key" db:"object_key"`
+	OriginalName string     `json:"original_name" db:"original_name"`
+	ContentType  string     `json:"content_type" db:"content_type"`
+	SizeBytes    int64      `json:"size_bytes" db:"size_bytes"`
+	UserID       *string    `json:"user_id,omitempty" db:"user_id"`
+	APIKeyID     *string    `json:"api_key_id,omitempty" db:"api_key_id"`
+	Status       string     `json:"status" db:"status"`
+	ExpiresAt    time.Time  `json:"expires_at" db:"expires_at"`
+	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty" db:"completed_at"`
+}
+
 // SummarizeAudioRequest is the request body for POST /api/v1/audio/transcriptions/:id/summarize
 type SummarizeAudioRequest struct {
 	ContentType string `json:"content_type,omitempty"` // phone_call, meeting, voice_memo, etc.
 	Model       string `json:"model,omitempty"`        // Override AI model
 	Length      string `json:"length,omitempty"`       // short, medium, detailed
+}
+
+type RenameAudioTranscriptionRequest struct {
+	Name string `json:"name" binding:"required"`
 }
 
 // AudioSearchParams for searching audio transcriptions (MTA-25).

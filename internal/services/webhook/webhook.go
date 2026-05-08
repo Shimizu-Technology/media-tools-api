@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
@@ -31,10 +32,8 @@ type Service struct {
 // New creates a new webhook service.
 func New(db *database.DB) *Service {
 	return &Service{
-		db: db,
-		client: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		db:         db,
+		client:     safeHTTPClient(),
 		shutdownCh: make(chan struct{}),
 	}
 }
@@ -63,8 +62,8 @@ func SignPayload(payload []byte, secret string) string {
 
 // NotifyEvent sends webhook notifications for a given event to all registered webhooks.
 // Delivery happens asynchronously with retry logic.
-func (s *Service) NotifyEvent(ctx context.Context, event string, data interface{}) {
-	webhooks, err := s.db.GetActiveWebhooksForEvent(ctx, event)
+func (s *Service) NotifyEvent(ctx context.Context, event string, apiKeyID string, data interface{}) {
+	webhooks, err := s.db.GetActiveWebhooksForEvent(ctx, event, apiKeyID)
 	if err != nil {
 		log.Printf("⚠️  Failed to get webhooks for event %s: %v", event, err)
 		return
@@ -256,4 +255,50 @@ func isBlockedIP(ip net.IP) bool {
 		ip.IsLinkLocalMulticast() ||
 		ip.IsMulticast() ||
 		ip.IsUnspecified()
+}
+
+func safeHTTPClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(address)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil || len(ips) == 0 {
+				return nil, fmt.Errorf("failed to resolve host")
+			}
+			var lastErr error
+			for _, resolved := range ips {
+				if isBlockedIP(resolved.IP) {
+					lastErr = fmt.Errorf("private or local network destinations are not allowed")
+					continue
+				}
+				conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(resolved.IP.String(), port))
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
+			}
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, syscall.EHOSTUNREACH
+		},
+	}
+	return &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if err := ValidateWebhookURL(req.Context(), req.URL.String()); err != nil {
+				return err
+			}
+			if len(via) >= 3 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
 }

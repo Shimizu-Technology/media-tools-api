@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 /**
  * Custom hook for polling an async function at intervals.
@@ -15,39 +15,42 @@ export function usePolling<T>(
   const { interval = 2000, enabled = true, shouldStop } = options;
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<Error | null>(null);
-  const [isPolling, setIsPolling] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stoppedRef = useRef(false);
+  const fetcherRef = useRef(fetcher);
+  const shouldStopRef = useRef(shouldStop);
 
-  const poll = useCallback(async () => {
-    if (stoppedRef.current) return;
-
-    try {
-      const result = await fetcher();
-      setData(result);
-      setError(null);
-
-      // Check if we should stop polling
-      if (shouldStop?.(result)) {
-        stoppedRef.current = true;
-        setIsPolling(false);
-        return;
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
-    }
-
-    // Schedule next poll
-    if (!stoppedRef.current) {
-      timerRef.current = setTimeout(poll, interval);
-    }
-  }, [fetcher, interval, shouldStop]);
+  useEffect(() => {
+    fetcherRef.current = fetcher;
+    shouldStopRef.current = shouldStop;
+  }, [fetcher, shouldStop]);
 
   useEffect(() => {
     if (!enabled) return;
 
     stoppedRef.current = false;
-    setIsPolling(true);
+
+    const poll = async () => {
+      if (stoppedRef.current) return;
+
+      try {
+        const result = await fetcherRef.current();
+        setData(result);
+        setError(null);
+
+        if (shouldStopRef.current?.(result)) {
+          stoppedRef.current = true;
+          return;
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err : new Error(String(err)));
+      }
+
+      if (!stoppedRef.current) {
+        timerRef.current = setTimeout(poll, interval);
+      }
+    };
+
     poll();
 
     return () => {
@@ -56,7 +59,7 @@ export function usePolling<T>(
         clearTimeout(timerRef.current);
       }
     };
-  }, [enabled, poll]);
+  }, [enabled, interval]);
 
-  return { data, error, isPolling };
+  return { data, error, isPolling: enabled };
 }

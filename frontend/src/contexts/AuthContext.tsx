@@ -6,26 +6,8 @@
  * - Manages token getter for the API client
  * - Works with or without Clerk
  */
-import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
-
-interface AuthContextType {
-  isClerkEnabled: boolean;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  canUseWorkspace: boolean;
-}
-
-const AuthContext = createContext<AuthContextType>({
-  isClerkEnabled: false,
-  isAuthenticated: false,
-  isLoading: true,
-  canUseWorkspace: false,
-});
-
-export function useAuthContext() {
-  return useContext(AuthContext);
-}
+import { AuthContext } from './authContextValue';
 
 interface AuthProviderProps {
   children: ReactNode;

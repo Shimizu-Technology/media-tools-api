@@ -92,6 +92,8 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		return
 	}
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAudioSize)
+
 	// Get the uploaded file
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
@@ -314,7 +316,11 @@ func (h *Handler) PresignAudioUpload(c *gin.Context) {
 
 	storedFilename := uuid.New().String() + ext
 	objectKey := h.AudioStorage.BuildKey(storedFilename)
-	putURL, err := h.AudioStorage.PresignedPutURL(objectKey, req.ContentType)
+	contentType := req.ContentType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	putURL, err := h.AudioStorage.PresignedPutURL(objectKey, contentType)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, models.ErrorResponse{
 			Error:   "storage_error",
@@ -324,10 +330,29 @@ func (h *Handler) PresignAudioUpload(c *gin.Context) {
 		return
 	}
 
+	session := &models.AudioUploadSession{
+		ObjectKey:    objectKey,
+		OriginalName: filepath.Base(req.Filename),
+		ContentType:  contentType,
+		SizeBytes:    req.SizeBytes,
+		UserID:       actor.UserID,
+		APIKeyID:     actor.APIKeyID,
+		ExpiresAt:    time.Now().UTC().Add(time.Hour),
+	}
+	if err := h.DB.CreateAudioUploadSession(c.Request.Context(), session); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "database_error",
+			Message: "Failed to create upload session",
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"upload_url":  putURL,
 		"object_key":  objectKey,
 		"stored_name": storedFilename,
+		"upload_id":   session.ID,
 		"expires_in":  "60m",
 	})
 }
@@ -373,6 +398,52 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		})
 		return
 	}
+	if req.SizeBytes <= 0 || req.SizeBytes > maxAudioSize {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "file_too_large",
+			Message: "size_bytes must be between 1 byte and 2GB",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	session, err := h.DB.GetAudioUploadSessionForActor(c.Request.Context(), req.ObjectKey, actor.UserID, actor.APIKeyID)
+	if err != nil {
+		c.JSON(http.StatusForbidden, models.ErrorResponse{
+			Error:   "forbidden",
+			Message: "Upload session not found, expired, or not owned by you",
+			Code:    http.StatusForbidden,
+		})
+		return
+	}
+	if session.OriginalName != filepath.Base(req.OriginalName) || session.SizeBytes != req.SizeBytes {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_upload_completion",
+			Message: "Upload completion does not match the presigned upload session",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+	objectInfo, err := h.AudioStorage.HeadObject(c.Request.Context(), req.ObjectKey)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse{
+			Error:   "storage_error",
+			Message: "Uploaded object could not be verified",
+			Code:    http.StatusBadGateway,
+		})
+		return
+	}
+	if objectInfo.Size != req.SizeBytes {
+		if deleteErr := h.AudioStorage.DeleteObject(c.Request.Context(), req.ObjectKey); deleteErr != nil {
+			log.Printf("⚠️  Failed to delete rejected oversized upload %s: %v", req.ObjectKey, deleteErr)
+		}
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_upload_size",
+			Message: "Uploaded object size does not match the presigned upload",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
 
 	at := &models.AudioTranscription{
 		Filename:           filepath.Base(req.ObjectKey),
@@ -385,6 +456,14 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		ProcessingProgress: 0,
 		UserID:             actor.UserID,
 		APIKeyID:           actor.APIKeyID,
+	}
+	if err := h.DB.CompleteAudioUploadSession(c.Request.Context(), session.ID); err != nil {
+		c.JSON(http.StatusConflict, models.ErrorResponse{
+			Error:   "upload_already_completed",
+			Message: "Upload session has already been completed",
+			Code:    http.StatusConflict,
+		})
+		return
 	}
 	if err := h.DB.CreateAudioTranscription(c.Request.Context(), at); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -450,6 +529,44 @@ func (h *Handler) GetAudioTranscription(c *gin.Context) {
 	actor := getActorOwnership(c)
 
 	at, err := h.DB.GetAudioTranscriptionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error:   "not_found",
+			Message: "Audio transcription not found",
+			Code:    http.StatusNotFound,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, at)
+}
+
+// RenameAudioTranscription updates the display name for a recording.
+// PATCH /api/v1/audio/transcriptions/:id
+func (h *Handler) RenameAudioTranscription(c *gin.Context) {
+	id := c.Param("id")
+	actor := getActorOwnership(c)
+
+	var req models.RenameAudioTranscriptionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "name is required",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" || len(name) > 500 {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_name",
+			Message: "name must be between 1 and 500 characters",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	at, err := h.DB.RenameAudioTranscriptionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID, name)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
@@ -822,20 +939,23 @@ func (h *Handler) ExportAudioTranscription(c *gin.Context) {
 		return
 	}
 
-	baseName := strings.TrimSuffix(at.OriginalName, filepath.Ext(at.OriginalName))
+	baseName := sanitizeFilename(strings.TrimSuffix(at.OriginalName, filepath.Ext(at.OriginalName)))
+	if baseName == "" {
+		baseName = "audio-transcription"
+	}
 
 	switch format {
 	case "txt":
-		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s_transcript.txt", baseName))
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s_transcript.txt"`, baseName))
 		c.Data(http.StatusOK, "text/plain", []byte(at.TranscriptText))
 
 	case "md":
 		md := buildMarkdownExport(at)
-		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s_summary.md", baseName))
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s_summary.md"`, baseName))
 		c.Data(http.StatusOK, "text/markdown", []byte(md))
 
 	case "json":
-		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s_data.json", baseName))
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s_data.json"`, baseName))
 		c.JSON(http.StatusOK, at)
 
 	default:

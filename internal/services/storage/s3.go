@@ -30,6 +30,11 @@ type S3 struct {
 	client     *http.Client
 }
 
+type ObjectInfo struct {
+	Size        int64
+	ContentType string
+}
+
 func NewS3(accessKey, secretKey, sessionTok, region, bucket, prefix string, expiryMinutes int) *S3 {
 	if expiryMinutes <= 0 {
 		expiryMinutes = 60
@@ -122,6 +127,29 @@ func (s *S3) DownloadFile(ctx context.Context, key, localPath string) error {
 		return fmt.Errorf("save output file: %w", err)
 	}
 	return nil
+}
+
+func (s *S3) HeadObject(ctx context.Context, key string) (*ObjectInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, s.objectURL(key), nil)
+	if err != nil {
+		return nil, fmt.Errorf("create head request: %w", err)
+	}
+	if err := s.signRequest(req, key, "UNSIGNED-PAYLOAD"); err != nil {
+		return nil, err
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("head request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("head failed: status %d", resp.StatusCode)
+	}
+	return &ObjectInfo{
+		Size:        resp.ContentLength,
+		ContentType: resp.Header.Get("Content-Type"),
+	}, nil
 }
 
 func (s *S3) DeleteObject(ctx context.Context, key string) error {

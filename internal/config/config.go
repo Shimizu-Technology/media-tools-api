@@ -32,12 +32,12 @@ type Config struct {
 	YouTubeProxy       string // Optional: Residential proxy for YouTube (format: http://user:pass@host:port)
 
 	// AWS S3 (raw audio persistence)
-	AWSAccessKeyID               string
-	AWSSecretAccessKey           string
-	AWSSessionToken              string
-	AWSRegion                    string
-	AWSS3Bucket                  string
-	AWSS3Prefix                  string
+	AWSAccessKeyID                string
+	AWSSecretAccessKey            string
+	AWSSessionToken               string
+	AWSRegion                     string
+	AWSS3Bucket                   string
+	AWSS3Prefix                   string
 	AudioPlaybackURLExpiryMinutes int
 
 	// OpenRouter AI settings
@@ -51,9 +51,12 @@ type Config struct {
 	JWTSecret string
 
 	// Clerk Authentication
-	ClerkPublishableKey string
-	ClerkSecretKey      string
-	ClerkJWKSURL        string
+	ClerkPublishableKey  string
+	ClerkSecretKey       string
+	ClerkJWKSURL         string
+	ClerkIssuer          string
+	ClerkAudience        string
+	ClerkAuthorizedParty string
 
 	// Admin API key for bootstrap operations (creating first API keys)
 	// This protects the API key creation endpoint in production.
@@ -64,8 +67,8 @@ type Config struct {
 	OwnerAPIKeyPrefix string
 
 	// Worker settings
-	WorkerCount    int // Number of background worker goroutines
-	JobQueueSize   int // Size of the in-memory job queue buffer
+	WorkerCount  int // Number of background worker goroutines
+	JobQueueSize int // Size of the in-memory job queue buffer
 
 	// Rate limiting
 	DefaultRateLimit int // Requests per hour per API key
@@ -96,12 +99,12 @@ func Load() (*Config, error) {
 		YouTubeProxy:       getEnv("YOUTUBE_PROXY", ""), // Optional: residential proxy for YouTube
 
 		// AWS S3 (raw audio persistence)
-		AWSAccessKeyID:               getEnv("AWS_ACCESS_KEY_ID", ""),
-		AWSSecretAccessKey:           getEnv("AWS_SECRET_ACCESS_KEY", ""),
-		AWSSessionToken:              getEnv("AWS_SESSION_TOKEN", ""),
-		AWSRegion:                    getEnv("AWS_REGION", ""),
-		AWSS3Bucket:                  getEnv("AWS_S3_BUCKET", ""),
-		AWSS3Prefix:                  getEnv("AWS_S3_PREFIX", "audio"),
+		AWSAccessKeyID:                getEnv("AWS_ACCESS_KEY_ID", ""),
+		AWSSecretAccessKey:            getEnv("AWS_SECRET_ACCESS_KEY", ""),
+		AWSSessionToken:               getEnv("AWS_SESSION_TOKEN", ""),
+		AWSRegion:                     getEnv("AWS_REGION", ""),
+		AWSS3Bucket:                   getEnv("AWS_S3_BUCKET", ""),
+		AWSS3Prefix:                   getEnv("AWS_S3_PREFIX", "audio"),
 		AudioPlaybackURLExpiryMinutes: getEnvInt("AUDIO_PLAYBACK_URL_EXPIRY_MINUTES", 60),
 
 		// OpenRouter AI
@@ -115,9 +118,12 @@ func Load() (*Config, error) {
 		JWTSecret: getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),
 
 		// Clerk Authentication
-		ClerkPublishableKey: getEnv("CLERK_PUBLISHABLE_KEY", ""),
-		ClerkSecretKey:      getEnv("CLERK_SECRET_KEY", ""),
-		ClerkJWKSURL:        getEnv("CLERK_JWKS_URL", ""),
+		ClerkPublishableKey:  getEnv("CLERK_PUBLISHABLE_KEY", ""),
+		ClerkSecretKey:       getEnv("CLERK_SECRET_KEY", ""),
+		ClerkJWKSURL:         getEnv("CLERK_JWKS_URL", ""),
+		ClerkIssuer:          getEnv("CLERK_ISSUER", ""),
+		ClerkAudience:        getEnv("CLERK_AUDIENCE", ""),
+		ClerkAuthorizedParty: getEnv("CLERK_AUTHORIZED_PARTY", ""),
 
 		// Admin API key for bootstrap — optional in dev, required in production
 		AdminAPIKey: getEnv("ADMIN_API_KEY", ""),
@@ -163,6 +169,9 @@ func Load() (*Config, error) {
 	// This protects the API key creation endpoint from unauthorized access.
 	if cfg.GinMode == "release" && cfg.AdminAPIKey == "" {
 		return nil, fmt.Errorf("ADMIN_API_KEY must be set in production; this protects API key creation")
+	}
+	if cfg.GinMode == "release" && cfg.ClerkJWKSURL != "" && cfg.ClerkAudience == "" && cfg.ClerkAuthorizedParty == "" {
+		return nil, fmt.Errorf("CLERK_AUDIENCE or CLERK_AUTHORIZED_PARTY must be set in production when Clerk auth is enabled")
 	}
 
 	return cfg, nil

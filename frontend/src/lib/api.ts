@@ -202,6 +202,7 @@ export interface AudioUploadPresignResponse {
   upload_url: string;
   object_key: string;
   stored_name: string;
+  upload_id: string;
   expires_in: string;
 }
 
@@ -515,6 +516,15 @@ export async function completeAudioUpload(params: {
 
 export async function getAudioTranscription(id: string): Promise<AudioTranscription> {
   const res = await fetch(`${API_BASE}/audio/transcriptions/${id}`, { headers: getHeaders() });
+  return handleResponse<AudioTranscription>(res);
+}
+
+export async function renameAudioTranscription(id: string, name: string): Promise<AudioTranscription> {
+  const res = await fetch(`${API_BASE}/audio/transcriptions/${id}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify({ name }),
+  });
   return handleResponse<AudioTranscription>(res);
 }
 

@@ -4,7 +4,6 @@ package middleware
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -131,18 +130,9 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 
 			// Try Clerk JWT first (RS256 via JWKS) if configured
 			if jwksCache != nil {
-				token, err := jwt.ParseWithClaims(tokenString, &ClerkClaims{}, func(token *jwt.Token) (interface{}, error) {
-					if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-						return nil, fmt.Errorf("not RSA")
-					}
-					kid, ok := token.Header["kid"].(string)
-					if !ok {
-						return nil, fmt.Errorf("missing kid")
-					}
-					return jwksCache.GetKey(kid)
-				})
-				if err == nil && token.Valid {
-					if claims, ok := token.Claims.(*ClerkClaims); ok && claims.Subject != "" {
+				claims, err := jwksCache.ParseToken(tokenString)
+				if err == nil {
+					if claims.Subject != "" {
 						user, err := db.GetUserByClerkID(c.Request.Context(), claims.Subject)
 						if err != nil {
 							// Find or create via email migration flow
