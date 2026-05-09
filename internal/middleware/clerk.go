@@ -69,7 +69,15 @@ func NewJWKSCache(jwksURL, issuer, audience, authorizedParty string) *JWKSCache 
 }
 
 func inferClerkIssuer(jwksURL string) string {
-	return strings.TrimSuffix(strings.TrimSuffix(jwksURL, "/.well-known/jwks.json"), "/")
+	u, err := url.Parse(jwksURL)
+	if err != nil {
+		return strings.TrimSuffix(strings.TrimSuffix(jwksURL, "/.well-known/jwks.json"), "/")
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	u.Path = strings.TrimSuffix(u.Path, "/")
+	u.Path = strings.TrimSuffix(u.Path, "/.well-known/jwks.json")
+	return strings.TrimSuffix(u.String(), "/")
 }
 
 // ParseToken validates a Clerk JWT against signature, expiry, issuer, and

@@ -48,23 +48,6 @@ func (db *DB) GetAudioUploadSessionForActor(ctx context.Context, objectKey strin
 	return &session, nil
 }
 
-func (db *DB) CompleteAudioUploadSession(ctx context.Context, id string) error {
-	result, err := db.ExecContext(ctx, `
-		UPDATE audio_upload_sessions
-		SET status = 'completed', completed_at = $2
-		WHERE id = $1 AND status = 'pending'`,
-		id, time.Now().UTC(),
-	)
-	if err != nil {
-		return fmt.Errorf("complete audio upload session: %w", err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return ErrAudioUploadSessionNotPending
-	}
-	return nil
-}
-
 // CompleteAudioUploadAndCreateTranscription atomically burns an upload session
 // and creates the transcription record that owns the uploaded S3 object.
 func (db *DB) CompleteAudioUploadAndCreateTranscription(ctx context.Context, sessionID string, at *models.AudioTranscription) error {
