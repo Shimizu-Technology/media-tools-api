@@ -26,6 +26,8 @@ import {
   CheckCircle2,
   Square,
   History,
+  Pencil,
+  Save,
 } from 'lucide-react';
 import {
   transcribeAudio,
@@ -33,6 +35,7 @@ import {
   uploadAudioToPresignedUrl,
   completeAudioUpload,
   getAudioTranscription,
+  renameAudioTranscription,
   retryAudioTranscription,
   summarizeAudio,
   downloadAudioExport,
@@ -71,6 +74,8 @@ const CONTENT_TYPES: { value: AudioContentType; label: string; icon: React.React
 const PENDING_AUDIO_DB = 'media-tools-audio';
 const PENDING_AUDIO_STORE = 'pending-recordings';
 const PENDING_AUDIO_KEY = 'latest';
+const ALLOWED_AUDIO_EXTENSIONS = ['.mp3', '.wav', '.m4a', '.mp4', '.ogg', '.flac', '.webm'];
+const MAX_AUDIO_SIZE_MB = 2048;
 
 interface PendingRecording {
   blob: Blob;
@@ -203,15 +208,15 @@ export function AudioPage() {
   const [showPlayback, setShowPlayback] = useState(false);
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [isSavingRename, setIsSavingRename] = useState(false);
   const [isDirectUploading, setIsDirectUploading] = useState(false);
   const [recoveredDraft, setRecoveredDraft] = useState(false);
   const [draftAudioUrl, setDraftAudioUrl] = useState('');
 
   // Tab state: 'upload' | 'record'
   const [activeTab, setActiveTab] = useState<'upload' | 'record'>('upload');
-
-  const allowedExtensions = ['.mp3', '.wav', '.m4a', '.mp4', '.ogg', '.flac', '.webm'];
-  const maxSizeMB = 2048;
 
   // Cleanup on unmount
   useEffect(() => {
@@ -259,16 +264,16 @@ export function AudioPage() {
     }
   }, [searchParams, result]);
 
-  const validateFile = (f: File): string | null => {
+  const validateFile = useCallback((f: File): string | null => {
     const ext = '.' + f.name.split('.').pop()?.toLowerCase();
-    if (!allowedExtensions.includes(ext)) {
-      return `Unsupported format "${ext}". Supported: ${allowedExtensions.join(', ')}`;
+    if (!ALLOWED_AUDIO_EXTENSIONS.includes(ext)) {
+      return `Unsupported format "${ext}". Supported: ${ALLOWED_AUDIO_EXTENSIONS.join(', ')}`;
     }
-    if (f.size > maxSizeMB * 1024 * 1024) {
-      return `File too large (${(f.size / 1024 / 1024).toFixed(1)}MB). Max: ${maxSizeMB}MB`;
+    if (f.size > MAX_AUDIO_SIZE_MB * 1024 * 1024) {
+      return `File too large (${(f.size / 1024 / 1024).toFixed(1)}MB). Max: ${MAX_AUDIO_SIZE_MB}MB`;
     }
     return null;
-  };
+  }, []);
 
   const handleFile = useCallback((f: File) => {
     const validationError = validateFile(f);
@@ -281,7 +286,7 @@ export function AudioPage() {
     setResult(null);
     setRecordedBlob(null);
     setRecordingCaptureWarning('');
-  }, []);
+  }, [validateFile]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -359,7 +364,7 @@ export function AudioPage() {
           return next;
         });
       }, 1000);
-    } catch (err) {
+    } catch {
       setError('Microphone access denied. Please allow microphone access and try again.');
     }
   };
@@ -569,6 +574,33 @@ export function AudioPage() {
       setError(apiErr.message || 'Retry failed. Please try again.');
     } finally {
       setIsRetrying(false);
+    }
+  };
+
+  const startRename = () => {
+    if (!result) return;
+    setRenameValue(result.original_name);
+    setIsRenaming(true);
+  };
+
+  const saveRename = async () => {
+    if (!result) return;
+    const nextName = renameValue.trim();
+    if (!nextName || nextName === result.original_name) {
+      setIsRenaming(false);
+      return;
+    }
+    setIsSavingRename(true);
+    setError('');
+    try {
+      const updated = await renameAudioTranscription(result.id, nextName);
+      setResult(updated);
+      setIsRenaming(false);
+    } catch (err: unknown) {
+      const apiErr = err as APIError;
+      setError(apiErr.message || 'Rename failed. Please try again.');
+    } finally {
+      setIsSavingRename(false);
     }
   };
 
@@ -823,7 +855,7 @@ export function AudioPage() {
                   backgroundColor: isDragging ? 'var(--color-brand-50)' : 'var(--color-surface-elevated)',
                 }}
               >
-                <input ref={inputRef} type="file" accept={allowedExtensions.join(',')}
+                <input ref={inputRef} type="file" accept={ALLOWED_AUDIO_EXTENSIONS.join(',')}
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} className="hidden" />
                 <Upload className="w-12 h-12 mx-auto mb-4"
                   style={{ color: isDragging ? 'var(--color-brand-500)' : 'var(--color-text-muted)' }} />
@@ -831,7 +863,7 @@ export function AudioPage() {
                   {isDragging ? 'Drop your recording here' : 'Drag and drop, or click to browse'}
                 </p>
                 <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  MP3, WAV, M4A, MP4, OGG, FLAC, WebM — Max {maxSizeMB}MB
+                  MP3, WAV, M4A, MP4, OGG, FLAC, WebM, Zoom MP4 — Max {MAX_AUDIO_SIZE_MB}MB
                 </p>
               </div>
 
@@ -1168,11 +1200,53 @@ export function AudioPage() {
             {/* Metadata card */}
             <div className="p-6 rounded-2xl border mb-4"
               style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-              <h2 className="text-xl font-semibold mb-4 tracking-tight flex items-center gap-2"
-                style={{ color: 'var(--color-text-primary)' }}>
-                <FileAudio className="w-5 h-5" style={{ color: 'var(--color-brand-500)' }} />
-                {result.original_name}
-              </h2>
+              <div className="mb-4 flex items-center gap-3">
+                <FileAudio className="w-5 h-5 shrink-0" style={{ color: 'var(--color-brand-500)' }} />
+                {isRenaming ? (
+                  <div className="flex flex-1 flex-col gap-2 sm:flex-row">
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void saveRename();
+                        if (e.key === 'Escape') setIsRenaming(false);
+                      }}
+                      className="min-w-0 flex-1 rounded-xl border px-3 py-2 text-base font-semibold outline-none"
+                      style={{
+                        backgroundColor: 'var(--color-surface)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-primary)',
+                        minHeight: '44px',
+                      }}
+                    />
+                    <button
+                      onClick={() => void saveRename()}
+                      disabled={isSavingRename}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                      style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
+                    >
+                      {isSavingRename ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      Save
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <h2 className="min-w-0 flex-1 text-xl font-semibold tracking-tight truncate"
+                      style={{ color: 'var(--color-text-primary)' }}>
+                      {result.original_name}
+                    </h2>
+                    <button
+                      onClick={startRename}
+                      className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium"
+                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', minHeight: '40px' }}
+                    >
+                      <Pencil className="w-4 h-4" />
+                      Rename
+                    </button>
+                  </>
+                )}
+              </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <MetaItem icon={<Clock className="w-4 h-4" />} label="Duration" value={formatDuration(result.duration)} />
                 <MetaItem icon={<Type className="w-4 h-4" />} label="Words" value={result.word_count.toLocaleString()} />

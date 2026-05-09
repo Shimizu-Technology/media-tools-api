@@ -70,7 +70,9 @@ export function HistoryPage() {
   }, [page, statusFilter, searchQuery]);
 
   useEffect(() => {
-    fetchTranscripts();
+    queueMicrotask(() => {
+      void fetchTranscripts();
+    });
   }, [fetchTranscripts]);
 
   // Client-side sorting (API supports it too but we sort what we have for responsiveness)

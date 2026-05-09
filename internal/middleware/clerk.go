@@ -28,11 +28,14 @@ import (
 
 // JWKSCache caches Clerk's public keys to avoid fetching on every request.
 type JWKSCache struct {
-	mu       sync.RWMutex
-	keys     map[string]*rsa.PublicKey
-	url      string
-	lastFetch time.Time
-	ttl      time.Duration
+	mu              sync.RWMutex
+	keys            map[string]*rsa.PublicKey
+	url             string
+	issuer          string
+	audience        string
+	authorizedParty string
+	lastFetch       time.Time
+	ttl             time.Duration
 }
 
 // JWKSet represents the JWKS response format.
@@ -51,12 +54,67 @@ type JWK struct {
 }
 
 // NewJWKSCache creates a new JWKS cache for the given URL.
-func NewJWKSCache(jwksURL string) *JWKSCache {
-	return &JWKSCache{
-		url:  jwksURL,
-		keys: make(map[string]*rsa.PublicKey),
-		ttl:  1 * time.Hour,
+func NewJWKSCache(jwksURL, issuer, audience, authorizedParty string) *JWKSCache {
+	if issuer == "" {
+		issuer = inferClerkIssuer(jwksURL)
 	}
+	return &JWKSCache{
+		url:             jwksURL,
+		issuer:          issuer,
+		audience:        audience,
+		authorizedParty: authorizedParty,
+		keys:            make(map[string]*rsa.PublicKey),
+		ttl:             1 * time.Hour,
+	}
+}
+
+func inferClerkIssuer(jwksURL string) string {
+	u, err := url.Parse(jwksURL)
+	if err != nil {
+		return strings.TrimSuffix(strings.TrimSuffix(jwksURL, "/.well-known/jwks.json"), "/")
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	u.Path = strings.TrimSuffix(u.Path, "/")
+	u.Path = strings.TrimSuffix(u.Path, "/.well-known/jwks.json")
+	return strings.TrimSuffix(u.String(), "/")
+}
+
+// ParseToken validates a Clerk JWT against signature, expiry, issuer, and
+// optional audience/authorized-party constraints.
+func (c *JWKSCache) ParseToken(tokenString string) (*ClerkClaims, error) {
+	opts := []jwt.ParserOption{jwt.WithExpirationRequired()}
+	if c.issuer != "" {
+		opts = append(opts, jwt.WithIssuer(c.issuer))
+	}
+	if c.audience != "" {
+		opts = append(opts, jwt.WithAudience(c.audience))
+	}
+
+	token, err := jwt.ParseWithClaims(tokenString, &ClerkClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+
+		kid, ok := token.Header["kid"].(string)
+		if !ok {
+			return nil, fmt.Errorf("missing kid in token header")
+		}
+
+		return c.GetKey(kid)
+	}, opts...)
+	if err != nil || !token.Valid {
+		return nil, fmt.Errorf("invalid Clerk token: %w", err)
+	}
+
+	claims, ok := token.Claims.(*ClerkClaims)
+	if !ok {
+		return nil, fmt.Errorf("failed to parse Clerk claims")
+	}
+	if c.authorizedParty != "" && claims.AuthorizedParty != c.authorizedParty {
+		return nil, fmt.Errorf("unexpected authorized party")
+	}
+	return claims, nil
 }
 
 // GetKey returns the RSA public key for the given key ID, fetching from JWKS if needed.
@@ -174,6 +232,7 @@ func jwkToRSAPublicKey(jwk JWK) (*rsa.PublicKey, error) {
 
 // ClerkClaims represents the JWT claims from a Clerk-issued token.
 type ClerkClaims struct {
+	AuthorizedParty string `json:"azp,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -194,36 +253,11 @@ func ClerkAuth(db *database.DB, jwksCache *JWKSCache, clerkSecretKey string) gin
 
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
-		// Parse the token header to get the kid
-		token, err := jwt.ParseWithClaims(tokenString, &ClerkClaims{}, func(token *jwt.Token) (interface{}, error) {
-			// Ensure the signing method is RSA
-			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-			}
-
-			kid, ok := token.Header["kid"].(string)
-			if !ok {
-				return nil, fmt.Errorf("missing kid in token header")
-			}
-
-			return jwksCache.GetKey(kid)
-		})
-
-		if err != nil || !token.Valid {
+		claims, err := jwksCache.ParseToken(tokenString)
+		if err != nil {
 			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 				Error:   "unauthorized",
 				Message: "Invalid or expired Clerk token",
-				Code:    http.StatusUnauthorized,
-			})
-			c.Abort()
-			return
-		}
-
-		claims, ok := token.Claims.(*ClerkClaims)
-		if !ok {
-			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-				Error:   "unauthorized",
-				Message: "Failed to parse token claims",
 				Code:    http.StatusUnauthorized,
 			})
 			c.Abort()

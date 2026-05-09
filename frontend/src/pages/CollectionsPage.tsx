@@ -74,7 +74,7 @@ function CollectionsList() {
       setLoading(true);
       const data = await listCollections();
       setCollections(data);
-    } catch (err) {
+    } catch {
       setError('Failed to load collections');
     } finally {
       setLoading(false);

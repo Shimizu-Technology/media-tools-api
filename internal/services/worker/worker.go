@@ -121,7 +121,10 @@ func (p *Pool) SetAudioStorage(as *storage.S3) {
 // notifyWebhook fires a webhook event asynchronously if the service is configured.
 // BUG FIX: Previously synchronous — slow webhook delivery would block workers.
 // Now fires in a goroutine with its own timeout context.
-func (p *Pool) notifyWebhook(event string, data interface{}) {
+func (p *Pool) notifyWebhook(event string, apiKeyID *string, data interface{}) {
+	if apiKeyID == nil || *apiKeyID == "" {
+		return
+	}
 	if p.webhooks != nil {
 		// Acquire semaphore slot (non-blocking: drop webhook if at capacity)
 		select {
@@ -130,7 +133,7 @@ func (p *Pool) notifyWebhook(event string, data interface{}) {
 				defer func() { <-p.webhookSem }()
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
-				p.webhooks.NotifyEvent(ctx, event, data)
+				p.webhooks.NotifyEvent(ctx, event, *apiKeyID, data)
 			}()
 		default:
 			log.Printf("⚠️ Webhook semaphore full, dropping %s event", event)
@@ -417,7 +420,7 @@ func (p *Pool) processTranscript(job Job) error {
 		t.Status = models.StatusFailed
 		t.ErrorMessage = err.Error()
 		p.db.UpdateTranscript(ctx, t)
-		p.notifyWebhook("transcript.failed", t) // MTA-18
+		p.notifyWebhook("transcript.failed", t.APIKeyID, t) // MTA-18
 		if t.BatchID != nil {
 			p.db.UpdateBatchCounts(ctx, *t.BatchID)
 		}
@@ -436,7 +439,7 @@ func (p *Pool) processTranscript(job Job) error {
 		return fmt.Errorf("failed to save transcript: %w", err)
 	}
 
-	p.notifyWebhook("transcript.completed", t) // MTA-18
+	p.notifyWebhook("transcript.completed", t.APIKeyID, t) // MTA-18
 
 	if t.BatchID != nil {
 		if err := p.db.UpdateBatchCounts(ctx, *t.BatchID); err != nil {
@@ -445,7 +448,7 @@ func (p *Pool) processTranscript(job Job) error {
 		// Check if batch completed
 		batch, batchErr := p.db.GetBatch(ctx, *t.BatchID)
 		if batchErr == nil && batch.Status == models.StatusCompleted {
-			p.notifyWebhook("batch.completed", batch)
+			p.notifyWebhook("batch.completed", batch.APIKeyID, batch)
 		}
 	}
 
@@ -484,7 +487,7 @@ func (p *Pool) processSummary(job Job) error {
 	if err != nil {
 		// BUG FIX: Notify via webhook so users know the summary failed
 		// (Summary model has no status field, so failure was previously silent)
-		p.notifyWebhook("summary.failed", map[string]interface{}{
+		p.notifyWebhook("summary.failed", t.APIKeyID, map[string]interface{}{
 			"transcript_id": payload.TranscriptID,
 			"summary_id":    payload.SummaryID,
 			"error":         err.Error(),
@@ -519,7 +522,7 @@ func (p *Pool) processSummary(job Job) error {
 		}
 	}
 
-	p.notifyWebhook("summary.completed", s)
+	p.notifyWebhook("summary.completed", t.APIKeyID, s)
 	return nil
 }
 
@@ -692,7 +695,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 			at.Status = "failed"
 			at.ErrorMessage = err.Error()
 			p.db.UpdateAudioTranscription(ctx, at)
-			p.notifyWebhook("audio.failed", at)
+			p.notifyWebhook("audio.failed", at.APIKeyID, at)
 			return fmt.Errorf("transcription failed: %w", err)
 		}
 		transcriptText = result.Text
@@ -713,7 +716,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 				at.Status = "failed"
 				at.ErrorMessage = err.Error()
 				p.db.UpdateAudioTranscription(ctx, at)
-				p.notifyWebhook("audio.failed", at)
+				p.notifyWebhook("audio.failed", at.APIKeyID, at)
 				return fmt.Errorf("chunk transcription failed (%s): %w", partName, err)
 			}
 			partTexts = append(partTexts, strings.TrimSpace(result.Text))
@@ -743,7 +746,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		if err := p.db.UpdateAudioTranscription(ctx, at); err != nil {
 			return fmt.Errorf("failed to save empty-transcript failure status: %w", err)
 		}
-		p.notifyWebhook("audio.failed", at)
+		p.notifyWebhook("audio.failed", at.APIKeyID, at)
 		return fmt.Errorf("empty transcription result for %s", payload.OriginalName)
 	}
 
@@ -756,7 +759,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		return fmt.Errorf("failed to save transcription: %w", err)
 	}
 
-	p.notifyWebhook("audio.completed", at)
+	p.notifyWebhook("audio.completed", at.APIKeyID, at)
 	log.Printf("✅ Audio transcription completed: %s (%s, %.0fs, %d words)",
 		payload.OriginalName, language, duration, at.WordCount)
 

@@ -103,6 +103,25 @@ func (db *DB) DeleteAudioTranscriptionForActor(ctx context.Context, id string, u
 	return nil
 }
 
+func (db *DB) RenameAudioTranscriptionForActor(ctx context.Context, id string, userID, apiKeyID *string, name string) (*models.AudioTranscription, error) {
+	if userID == nil && apiKeyID == nil {
+		return nil, fmt.Errorf("actor is required")
+	}
+	query := fmt.Sprintf(`
+		UPDATE audio_transcriptions
+		SET original_name = $4
+		WHERE id = $1
+		  AND (($2::uuid IS NOT NULL AND user_id = $2)
+		    OR ($3::uuid IS NOT NULL AND api_key_id = $3))
+		RETURNING %s`, audioTranscriptionSelectColumns)
+
+	var at models.AudioTranscription
+	if err := db.GetContext(ctx, &at, query, id, userID, apiKeyID, name); err != nil {
+		return nil, fmt.Errorf("audio transcription not found: %w", err)
+	}
+	return &at, nil
+}
+
 func (db *DB) GetPDFExtractionForActor(ctx context.Context, id string, userID, apiKeyID *string) (*models.PDFExtraction, error) {
 	if userID == nil && apiKeyID == nil {
 		return nil, fmt.Errorf("actor is required")

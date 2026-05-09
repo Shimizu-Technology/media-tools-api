@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   Webhook as WebhookIcon, Plus, Trash2, ToggleLeft, ToggleRight,
@@ -31,9 +31,7 @@ export function WebhooksPage() {
   const [createdSecret, setCreatedSecret] = useState('');
   const [error, setError] = useState('');
 
-  useEffect(() => { loadData(); }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setError('');
     try {
       const [wh, del] = await Promise.all([listWebhooks(), listWebhookDeliveries()]);
@@ -44,7 +42,13 @@ export function WebhooksPage() {
       setError(apiErr.message || 'Failed to load webhooks');
     }
     setLoading(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      void loadData();
+    });
+  }, [loadData]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();

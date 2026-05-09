@@ -32,7 +32,7 @@ export function HomePage() {
     }
     // If URL has no id but we have a transcript from submission, keep it
     // If URL has no id and no transcript, show the input form (normal state)
-  }, [urlId]) // Only depend on urlId, not transcript
+  }, [urlId, transcript])
 
   // Poll for updates
   const shouldPoll = transcript?.status === 'pending' || transcript?.status === 'processing'
@@ -46,7 +46,7 @@ export function HomePage() {
         addTranscriptToHistory(updated.id)
       }
       return updated
-    }, [transcript?.id]),
+    }, [transcript]),
     {
       enabled: shouldPoll,
       interval: 2000,

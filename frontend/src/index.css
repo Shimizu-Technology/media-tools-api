@@ -1,5 +1,5 @@
-@import "tailwindcss";
 @import url("https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap");
+@import "tailwindcss";
 
 /* Design tokens */
 :root {
@@ -14,6 +14,7 @@
   --color-surface-elevated: #15181c;
   --color-surface-card: #1b1f24;
   --color-surface-overlay: #20252b;
+  --color-surface-subtle: #11151a;
   
   /* Text */
   --color-text-primary: #e7e9ee;
@@ -27,6 +28,15 @@
   /* Success/Error */
   --color-success: #18b985;
   --color-error: #ef4444;
+
+  /* Compatibility aliases for newer screens that use compact token names. */
+  --bg: var(--color-surface);
+  --surface: var(--color-surface-elevated);
+  --brand: var(--color-brand-500);
+  --border: var(--color-border);
+  --text-primary: var(--color-text-primary);
+  --text-secondary: var(--color-text-secondary);
+  --text-tertiary: var(--color-text-muted);
 }
 
 /* Base styles */

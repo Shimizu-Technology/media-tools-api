@@ -20,7 +20,6 @@ export function ClerkTokenSync({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isSignedIn) {
       localStorage.removeItem(TOKEN_KEY);
-      setReady(true);
       return;
     }
 
@@ -50,7 +49,7 @@ export function ClerkTokenSync({ children }: { children: ReactNode }) {
   }, [getToken, isSignedIn]);
 
   // Block rendering until first token sync completes
-  if (!ready) return null;
+  if (isSignedIn && !ready) return null;
 
   return <>{children}</>;
 }

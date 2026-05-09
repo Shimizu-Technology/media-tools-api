@@ -22,19 +22,22 @@ import (
 // RouterConfig holds all dependencies for the router setup.
 // Avoids a fragile 13-parameter function signature.
 type RouterConfig struct {
-	DB              *database.DB
-	WorkerPool      *worker.Pool
-	AudioTranscriber *audio.Transcriber
-	AudioStorage    *storage.S3
-	Webhooks        *webhookservice.Service
-	Summarizer      *summary.Service
-	JWTSecret       string
-	AdminAPIKey     string
-	OwnerKeyID      string
-	OwnerKeyPrefix  string
-	ClerkJWKSURL    string
-	ClerkSecretKey  string
-	AllowedOrigins  []string
+	DB                     *database.DB
+	WorkerPool             *worker.Pool
+	AudioTranscriber       *audio.Transcriber
+	AudioStorage           *storage.S3
+	Webhooks               *webhookservice.Service
+	Summarizer             *summary.Service
+	JWTSecret              string
+	AdminAPIKey            string
+	OwnerKeyID             string
+	OwnerKeyPrefix         string
+	ClerkJWKSURL           string
+	ClerkSecretKey         string
+	ClerkIssuer            string
+	ClerkAudience          string
+	ClerkAuthorizedParty   string
+	AllowedOrigins         []string
 	YtDlpCookiesConfigured bool
 }
 
@@ -53,7 +56,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	// Initialize Clerk JWKS cache if configured
 	var jwksCache *middleware.JWKSCache
 	if cfg.ClerkJWKSURL != "" {
-		jwksCache = middleware.NewJWKSCache(cfg.ClerkJWKSURL)
+		jwksCache = middleware.NewJWKSCache(cfg.ClerkJWKSURL, cfg.ClerkIssuer, cfg.ClerkAudience, cfg.ClerkAuthorizedParty)
 	}
 
 	// --- Public Routes (no auth required) ---
@@ -115,6 +118,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		protected.POST("/audio/uploads/complete", h.CompleteAudioUpload)
 		protected.GET("/audio/transcriptions/search", h.SearchAudioTranscriptions) // MTA-25: must be before :id
 		protected.GET("/audio/transcriptions/:id", h.GetAudioTranscription)
+		protected.PATCH("/audio/transcriptions/:id", h.RenameAudioTranscription)
 		protected.POST("/audio/transcriptions/:id/retry", h.RetryAudioTranscription)
 		protected.GET("/audio/transcriptions/:id/audio", h.GetAudioPlaybackURL)
 		protected.DELETE("/audio/transcriptions/:id", h.DeleteAudioTranscription)

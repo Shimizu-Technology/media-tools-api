@@ -37,7 +37,7 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
 
   useEffect(() => {
     if (!open) return;
-    setAdded(new Set());
+    queueMicrotask(() => setAdded(new Set()));
     (async () => {
       setLoading(true);
       try {

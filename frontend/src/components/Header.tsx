@@ -40,11 +40,6 @@ export function Header() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Close dropdown on route change
-  useEffect(() => {
-    setShowSettings(false)
-  }, [location.pathname])
-
   const handleApiKeySet = (key: string) => {
     setHasApiKey(!!key)
     setShowApiKeyModal(false)
@@ -89,6 +84,7 @@ export function Header() {
                 <Link
                   key={link.to}
                   to={link.to}
+                  onClick={() => setShowSettings(false)}
                   className="flex items-center justify-center gap-1.5 px-2 sm:px-3 py-2.5 rounded-lg text-sm font-medium transition-colors hover:opacity-80"
                   style={{
                     color: isActive ? 'var(--color-brand-500)' : 'var(--color-text-secondary)',
@@ -167,6 +163,7 @@ export function Header() {
                       <Link
                         key={link.to}
                         to={link.to}
+                        onClick={() => setShowSettings(false)}
                         className="flex items-center gap-3 px-4 py-3 text-sm transition-colors hover:opacity-80"
                         style={{
                           color: isActive ? 'var(--color-brand-500)' : 'var(--color-text-primary)',

@@ -162,6 +162,9 @@ func main() {
 		OwnerKeyPrefix:         cfg.OwnerAPIKeyPrefix,
 		ClerkJWKSURL:           cfg.ClerkJWKSURL,
 		ClerkSecretKey:         cfg.ClerkSecretKey,
+		ClerkIssuer:            cfg.ClerkIssuer,
+		ClerkAudience:          cfg.ClerkAudience,
+		ClerkAuthorizedParty:   cfg.ClerkAuthorizedParty,
 		AllowedOrigins:         cfg.AllowedOrigins,
 		YtDlpCookiesConfigured: ytDlpCookiesConfigured,
 	})
