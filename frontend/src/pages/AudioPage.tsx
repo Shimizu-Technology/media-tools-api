@@ -758,6 +758,16 @@ export function AudioPage() {
     return 'Transcribing recording...';
   })();
 
+  const processingDetail = (() => {
+    const stage = result?.processing_stage || '';
+    if (stage === 'transcoding') return 'Extracting and compressing audio. Large Zoom recordings can take several minutes.';
+    if (stage === 'chunking') return 'Breaking a long recording into safe transcription chunks.';
+    if (stage === 'transcribing') return 'Sending audio to Whisper and collecting transcript text.';
+    if (result?.status === 'processing' || result?.status === 'pending') return 'Processing in background — long recordings may take several minutes.';
+    if (isDirectUploading) return 'Keep this page open while the upload finishes. If it stalls, we will retry through the API.';
+    return 'This may take a moment';
+  })();
+
   const hasSubmittable = (activeTab === 'upload' && file) || (activeTab === 'record' && recordedBlob);
   const canEditInput = (!result || result.status === 'failed') && !isProcessing;
 
@@ -1205,11 +1215,7 @@ export function AudioPage() {
             {processingLabel}
           </p>
           <p className="text-sm mt-2" style={{ color: 'var(--color-text-secondary)' }}>
-            {(result?.status === 'processing' || result?.status === 'pending')
-              ? 'Processing in background — long recordings may take several minutes.'
-              : isDirectUploading
-                ? 'Keep this page open while the upload finishes. If it stalls, we will retry through the API.'
-                : 'This may take a moment'}
+            {processingDetail}
           </p>
           {isDirectUploading && directUploadProgress > 0 && (
             <div className="mt-4 max-w-md mx-auto">
