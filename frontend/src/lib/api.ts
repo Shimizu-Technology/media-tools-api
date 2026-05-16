@@ -590,6 +590,14 @@ export async function retryAudioTranscription(id: string): Promise<AudioTranscri
   return handleResponse<AudioTranscription>(res);
 }
 
+export async function cancelAudioTranscription(id: string): Promise<AudioTranscription> {
+  const res = await fetch(`${API_BASE}/audio/transcriptions/${id}/cancel`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+  return handleResponse<AudioTranscription>(res);
+}
+
 export async function getAudioPlaybackUrl(id: string): Promise<AudioPlaybackResponse> {
   const res = await fetch(`${API_BASE}/audio/transcriptions/${id}/audio`, { headers: getHeaders() });
   return handleResponse<AudioPlaybackResponse>(res);

@@ -683,6 +683,41 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 	c.JSON(http.StatusAccepted, at)
 }
 
+// CancelAudioTranscription stops the UI from polling a pending/processing job.
+// It marks the record failed so the user can retry from durable audio or start over.
+// POST /api/v1/audio/transcriptions/:id/cancel
+func (h *Handler) CancelAudioTranscription(c *gin.Context) {
+	id := c.Param("id")
+
+	actor := getActorOwnership(c)
+	at, err := h.DB.CancelAudioTranscriptionForActor(
+		c.Request.Context(),
+		id,
+		actor.UserID,
+		actor.APIKeyID,
+		"Processing was stopped by the user.",
+	)
+	if err != nil {
+		c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error:   "not_found",
+			Message: "Audio transcription not found",
+			Code:    http.StatusNotFound,
+		})
+		return
+	}
+
+	if at.Status == "completed" {
+		c.JSON(http.StatusConflict, models.ErrorResponse{
+			Error:   "already_completed",
+			Message: "Completed transcriptions cannot be canceled.",
+			Code:    http.StatusConflict,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, at)
+}
+
 // GetAudioPlaybackURL returns a short-lived URL for replaying the stored recording.
 // GET /api/v1/audio/transcriptions/:id/audio
 func (h *Handler) GetAudioPlaybackURL(c *gin.Context) {

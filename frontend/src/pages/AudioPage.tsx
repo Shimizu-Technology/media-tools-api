@@ -37,6 +37,7 @@ import {
   getAudioTranscription,
   renameAudioTranscription,
   retryAudioTranscription,
+  cancelAudioTranscription,
   summarizeAudio,
   downloadAudioExport,
   listAudioTranscriptions,
@@ -248,6 +249,7 @@ export function AudioPage() {
   const [showPlayback, setShowPlayback] = useState(false);
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isCanceling, setIsCanceling] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const [isSavingRename, setIsSavingRename] = useState(false);
@@ -667,6 +669,24 @@ export function AudioPage() {
       setError(apiErr.message || 'Retry failed. Please try again.');
     } finally {
       setIsRetrying(false);
+    }
+  };
+
+  const handleCancelTranscription = async () => {
+    if (!result) return;
+    setIsCanceling(true);
+    setError('');
+    try {
+      const updated = await cancelAudioTranscription(result.id);
+      setResult(updated);
+      syncActiveTranscription(updated);
+      setIsProcessing(false);
+      setError('');
+    } catch (err: unknown) {
+      const apiErr = err as APIError;
+      setError(apiErr.message || 'Stop failed. Please try again.');
+    } finally {
+      setIsCanceling(false);
     }
   };
 
@@ -1222,6 +1242,20 @@ export function AudioPage() {
                 {result.processing_progress}% complete
               </p>
             </div>
+          )}
+          {result && (result.status === 'pending' || result.status === 'processing') && (
+            <button
+              onClick={handleCancelTranscription}
+              disabled={isCanceling}
+              className="mt-5 px-4 py-2 rounded-lg text-sm font-medium border"
+              style={{
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-secondary)',
+                minHeight: '40px',
+              }}
+            >
+              {isCanceling ? 'Stopping...' : 'Stop processing'}
+            </button>
           )}
         </motion.div>
       )}

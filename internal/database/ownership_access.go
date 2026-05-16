@@ -2,6 +2,8 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
@@ -120,6 +122,37 @@ func (db *DB) RenameAudioTranscriptionForActor(ctx context.Context, id string, u
 		return nil, fmt.Errorf("audio transcription not found: %w", err)
 	}
 	return &at, nil
+}
+
+func (db *DB) CancelAudioTranscriptionForActor(ctx context.Context, id string, userID, apiKeyID *string, message string) (*models.AudioTranscription, error) {
+	if userID == nil && apiKeyID == nil {
+		return nil, fmt.Errorf("actor is required")
+	}
+
+	query := fmt.Sprintf(`
+		UPDATE audio_transcriptions
+		SET status = 'failed',
+			error_message = $4,
+			processing_stage = 'failed',
+			processing_progress = 100
+		WHERE id = $1
+		  AND status IN ('pending', 'processing')
+		  AND (($2::uuid IS NOT NULL AND user_id = $2)
+		    OR ($3::uuid IS NOT NULL AND api_key_id = $3))
+		RETURNING %s`, audioTranscriptionSelectColumns)
+
+	var at models.AudioTranscription
+	err := db.GetContext(ctx, &at, query, id, userID, apiKeyID, message)
+	if err == nil {
+		return &at, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("failed to cancel audio transcription: %w", err)
+	}
+
+	// No rows updated can mean not found, already failed, or completed in a race.
+	// Return the latest row so the handler can respond without overwriting payload fields.
+	return db.GetAudioTranscriptionForActor(ctx, id, userID, apiKeyID)
 }
 
 func (db *DB) GetPDFExtractionForActor(ctx context.Context, id string, userID, apiKeyID *string) (*models.PDFExtraction, error) {

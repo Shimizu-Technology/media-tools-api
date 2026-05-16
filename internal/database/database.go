@@ -577,6 +577,27 @@ func (db *DB) UpdateAudioTranscription(ctx context.Context, at *models.AudioTran
 	return err
 }
 
+// UpdateAudioTranscriptionIfActive saves terminal worker results only while a job is still active.
+func (db *DB) UpdateAudioTranscriptionIfActive(ctx context.Context, at *models.AudioTranscription) (bool, error) {
+	query := `
+		UPDATE audio_transcriptions
+		SET duration = $2, language = $3, transcript_text = $4, word_count = $5,
+			status = $6, error_message = $7,
+			processing_stage = $8, processing_progress = $9, retry_count = $10
+		WHERE id = $1
+		  AND status IN ('pending', 'processing')`
+
+	result, err := db.ExecContext(ctx, query,
+		at.ID, at.Duration, at.Language, at.TranscriptText,
+		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
+}
+
 // UpdateAudioProcessing updates processing stage/progress without changing transcript payload.
 func (db *DB) UpdateAudioProcessing(ctx context.Context, id, stage string, progress int) error {
 	if progress < 0 {
