@@ -26,6 +26,9 @@ func TestLoadInfersClerkAuthorizedPartyFromCORSOrigin(t *testing.T) {
 	if cfg.ClerkAuthorizedParty != "https://media-tools-gu.netlify.app" {
 		t.Fatalf("ClerkAuthorizedParty = %q, want frontend origin without trailing slash", cfg.ClerkAuthorizedParty)
 	}
+	if got := cfg.AllowedOrigins[0]; got != "https://media-tools-gu.netlify.app" {
+		t.Fatalf("AllowedOrigins[0] = %q, want frontend origin without trailing slash", got)
+	}
 }
 
 func TestLoadRequiresClerkAudienceAuthorizedPartyOrCORSOriginInRelease(t *testing.T) {

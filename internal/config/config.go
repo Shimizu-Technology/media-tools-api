@@ -142,7 +142,7 @@ func Load() (*Config, error) {
 
 		// CORS — in production, set this to your frontend URL
 		AllowedOrigins: []string{
-			getEnv("CORS_ORIGIN", "http://localhost:5173"), // Vite dev server default
+			normalizeOrigin(getEnv("CORS_ORIGIN", "http://localhost:5173")), // Vite dev server default
 		},
 	}
 
