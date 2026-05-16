@@ -74,6 +74,7 @@ const CONTENT_TYPES: { value: AudioContentType; label: string; icon: React.React
 const PENDING_AUDIO_DB = 'media-tools-audio';
 const PENDING_AUDIO_STORE = 'pending-recordings';
 const PENDING_AUDIO_KEY = 'latest';
+const ACTIVE_AUDIO_TRANSCRIPTION_KEY = 'mta_active_audio_transcription_id';
 const ALLOWED_AUDIO_EXTENSIONS = ['.mp3', '.wav', '.m4a', '.mp4', '.ogg', '.flac', '.webm'];
 const MAX_AUDIO_SIZE_MB = 2048;
 
@@ -82,6 +83,45 @@ interface PendingRecording {
   mimeType: string;
   durationSeconds: number;
   createdAt: number;
+}
+
+function isActiveTranscription(transcription: AudioTranscription | null | undefined): boolean {
+  return transcription?.status === 'pending' || transcription?.status === 'processing';
+}
+
+function getStoredActiveTranscriptionID(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_AUDIO_TRANSCRIPTION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function storeActiveTranscriptionID(id: string): void {
+  try {
+    localStorage.setItem(ACTIVE_AUDIO_TRANSCRIPTION_KEY, id);
+  } catch {
+    // Best-effort resume only; polling still works while this page is mounted.
+  }
+}
+
+function clearStoredActiveTranscriptionID(id?: string): void {
+  try {
+    const current = localStorage.getItem(ACTIVE_AUDIO_TRANSCRIPTION_KEY);
+    if (!id || current === id) {
+      localStorage.removeItem(ACTIVE_AUDIO_TRANSCRIPTION_KEY);
+    }
+  } catch {
+    // Nothing to clean up if storage is unavailable.
+  }
+}
+
+function syncActiveTranscription(transcription: AudioTranscription): void {
+  if (isActiveTranscription(transcription)) {
+    storeActiveTranscriptionID(transcription.id);
+  } else {
+    clearStoredActiveTranscriptionID(transcription.id);
+  }
 }
 
 function pickRecordingMimeType(): string {
@@ -230,7 +270,7 @@ export function AudioPage() {
     let cancelled = false;
     loadPendingRecording()
       .then((saved) => {
-        if (cancelled || !saved || result) return;
+        if (cancelled || !saved || result || searchParams.get('id') || getStoredActiveTranscriptionID()) return;
         setActiveTab('record');
         setRecordedBlob(saved.blob);
         setRecordedMimeType(saved.mimeType || 'audio/webm');
@@ -244,7 +284,7 @@ export function AudioPage() {
     return () => {
       cancelled = true;
     };
-  }, [result]);
+  }, [result, searchParams]);
 
   useEffect(() => {
     return () => {
@@ -254,15 +294,47 @@ export function AudioPage() {
     };
   }, [draftAudioUrl]);
 
-  // Load transcription from URL param (when coming from My Library)
+  // Restore active transcription progress after navigation, refresh, or returning to this page.
   useEffect(() => {
+    if (result) return;
+
+    let cancelled = false;
     const id = searchParams.get('id');
-    if (id && !result) {
-      getAudioTranscription(id)
-        .then((t) => setResult(t))
-        .catch(() => setError('Transcription not found'));
-    }
-  }, [searchParams, result]);
+    const storedID = getStoredActiveTranscriptionID();
+
+    const restore = async () => {
+      if (!id && storedID) {
+        setSearchParams({ id: storedID }, { replace: true });
+        return;
+      }
+
+      if (id) {
+        try {
+          const transcription = await getAudioTranscription(id);
+          if (cancelled) return;
+          setResult(transcription);
+          setIsProcessing(isActiveTranscription(transcription));
+          syncActiveTranscription(transcription);
+        } catch {
+          if (!cancelled) {
+            clearStoredActiveTranscriptionID(id);
+            setError('Transcription not found');
+          }
+        }
+        return;
+      }
+
+      // No URL or stored active ID means there is no explicit job to restore.
+      // This keeps "Start over" from being undone by discovering the same
+      // still-running backend job in history.
+    };
+
+    void restore();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, result, setSearchParams]);
 
   const validateFile = useCallback((f: File): string | null => {
     const ext = '.' + f.name.split('.').pop()?.toLowerCase();
@@ -389,6 +461,7 @@ export function AudioPage() {
       if (!result?.id) throw new Error('No result');
       const updated = await getAudioTranscription(result.id);
       setResult(updated);
+      syncActiveTranscription(updated);
       // Update processing state based on status
       if (updated.status === 'completed' || updated.status === 'failed') {
         setIsProcessing(false);
@@ -448,6 +521,8 @@ export function AudioPage() {
         setIsDirectUploading(false);
       }
       setResult(transcription);
+      syncActiveTranscription(transcription);
+      setSearchParams({ id: transcription.id }, { replace: true });
       if (activeTab === 'record') {
         clearPendingRecording().catch(() => {});
       }
@@ -531,6 +606,9 @@ export function AudioPage() {
 
   const loadFromHistory = (item: AudioTranscription) => {
     setResult(item);
+    setIsProcessing(isActiveTranscription(item));
+    syncActiveTranscription(item);
+    setSearchParams({ id: item.id }, { replace: true });
     setPlaybackUrl('');
     setShowPlayback(false);
     setShowHistory(false);
@@ -553,6 +631,7 @@ export function AudioPage() {
     setShowPlayback(false);
     setIsLoadingPlayback(false);
     setRecoveredDraft(false);
+    clearStoredActiveTranscriptionID();
     if (draftAudioUrl) {
       URL.revokeObjectURL(draftAudioUrl);
       setDraftAudioUrl('');
@@ -568,6 +647,8 @@ export function AudioPage() {
     try {
       const updated = await retryAudioTranscription(result.id);
       setResult(updated);
+      syncActiveTranscription(updated);
+      setSearchParams({ id: updated.id }, { replace: true });
       setIsProcessing(true);
     } catch (err: unknown) {
       const apiErr = err as APIError;
