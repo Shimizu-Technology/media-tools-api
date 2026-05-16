@@ -252,6 +252,8 @@ export function AudioPage() {
   const [renameValue, setRenameValue] = useState('');
   const [isSavingRename, setIsSavingRename] = useState(false);
   const [isDirectUploading, setIsDirectUploading] = useState(false);
+  const [isServerUploading, setIsServerUploading] = useState(false);
+  const [directUploadProgress, setDirectUploadProgress] = useState(0);
   const [recoveredDraft, setRecoveredDraft] = useState(false);
   const [draftAudioUrl, setDraftAudioUrl] = useState('');
 
@@ -502,13 +504,16 @@ export function AudioPage() {
     setIsProcessing(true);
     setError('');
     setRecoveredDraft(false);
+    setDirectUploadProgress(0);
 
     try {
       let transcription: AudioTranscription;
       try {
         setIsDirectUploading(true);
         const presign = await presignAudioUpload(uploadFile);
-        await uploadAudioToPresignedUrl(presign.upload_url, uploadFile);
+        await uploadAudioToPresignedUrl(presign.upload_url, uploadFile, {
+          onProgress: setDirectUploadProgress,
+        });
         transcription = await completeAudioUpload({
           object_key: presign.object_key,
           original_name: uploadFile.name,
@@ -516,10 +521,14 @@ export function AudioPage() {
         });
       } catch {
         // Fallback to server-upload flow for environments without S3 direct upload.
+        setIsDirectUploading(false);
+        setIsServerUploading(true);
         transcription = await transcribeAudio(uploadFile);
       } finally {
         setIsDirectUploading(false);
+        setIsServerUploading(false);
       }
+      setDirectUploadProgress(0);
       setResult(transcription);
       syncActiveTranscription(transcription);
       setSearchParams({ id: transcription.id }, { replace: true });
@@ -536,6 +545,7 @@ export function AudioPage() {
       const apiErr = err as APIError;
       setError(apiErr.message || 'Transcription failed. Please try again.');
       setIsProcessing(false);
+      setDirectUploadProgress(0);
     }
   };
 
@@ -631,6 +641,8 @@ export function AudioPage() {
     setShowPlayback(false);
     setIsLoadingPlayback(false);
     setRecoveredDraft(false);
+    setIsServerUploading(false);
+    setDirectUploadProgress(0);
     clearStoredActiveTranscriptionID();
     if (draftAudioUrl) {
       URL.revokeObjectURL(draftAudioUrl);
@@ -716,6 +728,7 @@ export function AudioPage() {
   const processingLabel = (() => {
     const stage = result?.processing_stage || '';
     if (isDirectUploading) return 'Uploading directly to secure storage...';
+    if (isServerUploading) return 'Uploading through the API...';
     if (stage === 'downloading') return 'Preparing source audio...';
     if (stage === 'transcoding') return 'Preparing recording for transcription...';
     if (stage === 'chunking') return 'Splitting long audio into chunks...';
@@ -1174,8 +1187,26 @@ export function AudioPage() {
           <p className="text-sm mt-2" style={{ color: 'var(--color-text-secondary)' }}>
             {(result?.status === 'processing' || result?.status === 'pending')
               ? 'Processing in background — long recordings may take several minutes.'
-              : 'This may take a moment'}
+              : isDirectUploading
+                ? 'Keep this page open while the upload finishes. If it stalls, we will retry through the API.'
+                : 'This may take a moment'}
           </p>
+          {isDirectUploading && directUploadProgress > 0 && (
+            <div className="mt-4 max-w-md mx-auto">
+              <div className="h-2 rounded-full" style={{ backgroundColor: 'var(--color-surface-subtle)' }}>
+                <div
+                  className="h-2 rounded-full transition-all"
+                  style={{
+                    width: `${Math.min(100, Math.max(0, directUploadProgress))}%`,
+                    backgroundColor: 'var(--color-brand-500)',
+                  }}
+                />
+              </div>
+              <p className="text-xs mt-2" style={{ color: 'var(--color-text-muted)' }}>
+                {directUploadProgress}% uploaded
+              </p>
+            </div>
+          )}
           {typeof result?.processing_progress === 'number' && result.processing_progress > 0 && (
             <div className="mt-4 max-w-md mx-auto">
               <div className="h-2 rounded-full" style={{ backgroundColor: 'var(--color-surface-subtle)' }}>

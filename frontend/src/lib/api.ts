@@ -490,15 +490,69 @@ export async function presignAudioUpload(file: File): Promise<AudioUploadPresign
   return handleResponse<AudioUploadPresignResponse>(res);
 }
 
-export async function uploadAudioToPresignedUrl(url: string, file: File): Promise<void> {
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': file.type || 'application/octet-stream' },
-    body: file,
+export function uploadAudioToPresignedUrl(
+  url: string,
+  file: File,
+  options: {
+    onProgress?: (percent: number) => void;
+    stallTimeoutMs?: number;
+  } = {}
+): Promise<void> {
+  const stallTimeoutMs = options.stallTimeoutMs ?? 60000;
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let settled = false;
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (stallTimer) clearTimeout(stallTimer);
+      if (err) {
+        reject(err);
+      } else {
+        resolve();
+      }
+    };
+
+    const resetStallTimer = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        xhr.abort();
+        finish(new Error('Storage upload stalled. Retrying through the API.'));
+      }, stallTimeoutMs);
+    };
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        const percent = Math.round((event.loaded / event.total) * 100);
+        options.onProgress?.(percent);
+        if (event.loaded >= event.total) {
+          if (stallTimer) clearTimeout(stallTimer);
+          stallTimer = null;
+          return;
+        }
+      }
+      resetStallTimer();
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        options.onProgress?.(100);
+        finish();
+      } else {
+        finish(new Error(`Storage upload failed: ${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => finish(new Error('Storage upload failed. Retrying through the API.'));
+    xhr.onabort = () => finish(new Error('Storage upload was interrupted. Retrying through the API.'));
+
+    xhr.open('PUT', url);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    resetStallTimer();
+    xhr.send(file);
   });
-  if (!res.ok) {
-    throw new Error(`Storage upload failed: ${res.status}`);
-  }
 }
 
 export async function completeAudioUpload(params: {
