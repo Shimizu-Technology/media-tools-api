@@ -304,7 +304,7 @@ export function MyLibraryPage() {
   const tabs: { value: ContentType; label: string; icon: React.ReactNode }[] = [
     { value: 'all', label: 'All', icon: <Library className="w-4 h-4" /> },
     { value: 'youtube', label: 'Video', icon: <Youtube className="w-4 h-4" /> },
-    { value: 'audio', label: 'Audio', icon: <Mic className="w-4 h-4" /> },
+    { value: 'audio', label: 'Recordings', icon: <Mic className="w-4 h-4" /> },
     { value: 'pdf', label: 'PDF', icon: <FileType2 className="w-4 h-4" /> },
   ];
 
@@ -530,7 +530,7 @@ export function MyLibraryPage() {
               : activeTab === 'youtube'
               ? 'Extract a video transcript to see it here'
               : activeTab === 'audio'
-              ? 'Upload or record audio to see it here'
+              ? 'Upload audio or Zoom recordings to see them here'
               : activeTab === 'pdf'
               ? 'Upload a PDF to see it here'
               : 'Start by extracting a transcript, recording audio, or uploading a PDF'}
@@ -542,7 +542,7 @@ export function MyLibraryPage() {
               style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
             >
               {activeTab === 'audio' ? <Mic className="w-4 h-4" /> : activeTab === 'pdf' ? <FileType2 className="w-4 h-4" /> : <Youtube className="w-4 h-4" />}
-              {activeTab === 'audio' ? 'Record or upload audio' : activeTab === 'pdf' ? 'Upload a PDF' : 'Extract a transcript'}
+              {activeTab === 'audio' ? 'Upload audio or recording' : activeTab === 'pdf' ? 'Upload a PDF' : 'Extract a transcript'}
             </button>
           )}
         </motion.div>

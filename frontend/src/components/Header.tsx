@@ -10,7 +10,7 @@ import { ApiKeySetup } from './ApiKeySetup'
 
 const mainNavLinks = [
   { to: '/', label: 'Video', icon: FileText },
-  { to: '/audio', label: 'Audio', icon: Mic },
+  { to: '/audio', label: 'Recordings', icon: Mic },
   { to: '/pdf', label: 'PDF', icon: FileType2 },
   { to: '/library', label: 'My Library', icon: Library },
   { to: '/collections', label: 'Collections', icon: FolderOpen },

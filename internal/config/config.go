@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds all application configuration.
@@ -141,8 +142,16 @@ func Load() (*Config, error) {
 
 		// CORS — in production, set this to your frontend URL
 		AllowedOrigins: []string{
-			getEnv("CORS_ORIGIN", "http://localhost:5173"), // Vite dev server default
+			normalizeOrigin(getEnv("CORS_ORIGIN", "http://localhost:5173")), // Vite dev server default
 		},
+	}
+
+	if cfg.GinMode == "release" && cfg.ClerkJWKSURL != "" && cfg.ClerkAudience == "" && cfg.ClerkAuthorizedParty == "" {
+		if origin, ok := os.LookupEnv("CORS_ORIGIN"); ok && strings.TrimSpace(origin) != "" {
+			cfg.ClerkAuthorizedParty = normalizeOrigin(origin)
+		} else {
+			return nil, fmt.Errorf("CLERK_AUDIENCE, CLERK_AUTHORIZED_PARTY, or CORS_ORIGIN must be set in production when Clerk auth is enabled")
+		}
 	}
 
 	// Validate required configuration
@@ -170,10 +179,6 @@ func Load() (*Config, error) {
 	if cfg.GinMode == "release" && cfg.AdminAPIKey == "" {
 		return nil, fmt.Errorf("ADMIN_API_KEY must be set in production; this protects API key creation")
 	}
-	if cfg.GinMode == "release" && cfg.ClerkJWKSURL != "" && cfg.ClerkAudience == "" && cfg.ClerkAuthorizedParty == "" {
-		return nil, fmt.Errorf("CLERK_AUDIENCE or CLERK_AUTHORIZED_PARTY must be set in production when Clerk auth is enabled")
-	}
-
 	return cfg, nil
 }
 
@@ -185,6 +190,10 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func normalizeOrigin(origin string) string {
+	return strings.TrimRight(strings.TrimSpace(origin), "/")
 }
 
 // getEnvInt reads an integer environment variable with a fallback.

@@ -660,7 +660,7 @@ export function AudioPage() {
             style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
           >
             <Mic className="w-4 h-4" />
-            Powered by OpenAI Whisper + AI Summary
+            Supports audio, meetings, and Zoom MP4 recordings
           </motion.div>
 
           <motion.h1
@@ -670,7 +670,7 @@ export function AudioPage() {
             className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight mb-4"
             style={{ color: 'var(--color-text-primary)' }}
           >
-            Audio{' '}
+            Recording{' '}
             <span className="bg-clip-text text-transparent"
               style={{ backgroundImage: 'linear-gradient(135deg, var(--color-brand-400), var(--color-brand-600))' }}>
               Intelligence
@@ -684,7 +684,7 @@ export function AudioPage() {
             className="text-lg max-w-xl mx-auto mb-2"
             style={{ color: 'var(--color-text-secondary)' }}
           >
-            Upload a recording or record live. Get accurate transcriptions and AI-powered summaries with key points, action items, and decisions.
+            Upload audio files, meeting recordings, or Zoom MP4/M4A exports. Get accurate transcriptions and AI-powered summaries with key points, action items, and decisions.
           </motion.p>
 
           {/* History toggle */}
@@ -860,10 +860,10 @@ export function AudioPage() {
                 <Upload className="w-12 h-12 mx-auto mb-4"
                   style={{ color: isDragging ? 'var(--color-brand-500)' : 'var(--color-text-muted)' }} />
                 <p className="text-base font-medium mb-2" style={{ color: 'var(--color-text-primary)' }}>
-                  {isDragging ? 'Drop your recording here' : 'Drag and drop, or click to browse'}
+                  {isDragging ? 'Drop your recording here' : 'Drag and drop a recording, or click to browse'}
                 </p>
                 <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  MP3, WAV, M4A, MP4, OGG, FLAC, WebM, Zoom MP4 — Max {MAX_AUDIO_SIZE_MB}MB
+                  Zoom MP4/M4A, MP3, WAV, OGG, FLAC, WebM — Max {MAX_AUDIO_SIZE_MB}MB
                 </p>
               </div>
 

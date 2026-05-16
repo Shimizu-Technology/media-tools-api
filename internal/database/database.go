@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
@@ -32,9 +34,28 @@ type DB struct {
 
 // New creates a new database connection with connection pooling configured.
 func New(databaseURL string) (*DB, error) {
-	// sqlx.Connect both opens the connection and pings the database
-	db, err := sqlx.Connect("postgres", databaseURL)
+	return NewWithSimpleProtocol(databaseURL, true)
+}
+
+// NewWithSimpleProtocol creates a database connection and optionally disables
+// prepared statements for PgBouncer-compatible pooled connections.
+func NewWithSimpleProtocol(databaseURL string, useSimpleProtocol bool) (*DB, error) {
+	cfg, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
+		return nil, fmt.Errorf("failed to parse database URL: %w", err)
+	}
+	if useSimpleProtocol {
+		// Neon pooled connections sit behind PgBouncer. Prepared statements can
+		// intermittently fail there with "bind message supplies N parameters"
+		// when a pooled server connection has stale statement state, so use pgx's
+		// simple protocol for maximum pooler compatibility.
+		cfg.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+	}
+
+	sqlDB := stdlib.OpenDB(*cfg)
+	db := sqlx.NewDb(sqlDB, "pgx")
+	if err := db.Ping(); err != nil {
+		sqlDB.Close()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 

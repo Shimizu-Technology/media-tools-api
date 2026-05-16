@@ -44,11 +44,13 @@ func main() {
 
 	// Step 2: Connect to Database
 	dbURL := cfg.DatabaseURL
+	useSimpleProtocol := true
 	if cfg.DatabaseURLDirect != "" {
 		dbURL = cfg.DatabaseURLDirect
+		useSimpleProtocol = false
 		log.Println("✅ Using direct database connection (no pooler)")
 	}
-	db, err := database.New(dbURL)
+	db, err := database.NewWithSimpleProtocol(dbURL, useSimpleProtocol)
 	if err != nil {
 		log.Fatalf("❌ Failed to connect to database: %v", err)
 	}
