@@ -732,6 +732,10 @@ func (p *Pool) processAudioTranscription(job Job) error {
 
 	// Update the record with results
 	_ = p.db.UpdateAudioProcessing(ctx, at.ID, "stitching", 95)
+	latest, err := p.db.GetAudioTranscription(ctx, at.ID)
+	if err == nil && latest.Status == "failed" {
+		return fmt.Errorf("audio transcription stopped before completion")
+	}
 	at.TranscriptText = transcriptText
 	at.Language = language
 	at.Duration = duration
@@ -744,8 +748,12 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		at.ErrorMessage = "No speech was detected in this audio. Please re-record or upload a clearer recording and try again."
 		at.ProcessingStage = "failed"
 		at.ProcessingProgress = 100
-		if err := p.db.UpdateAudioTranscription(ctx, at); err != nil {
+		updated, err := p.db.UpdateAudioTranscriptionIfActive(ctx, at)
+		if err != nil {
 			return fmt.Errorf("failed to save empty-transcript failure status: %w", err)
+		}
+		if !updated {
+			return fmt.Errorf("audio transcription stopped before completion")
 		}
 		p.notifyWebhook("audio.failed", at.APIKeyID, at)
 		return fmt.Errorf("empty transcription result for %s", payload.OriginalName)
@@ -755,9 +763,13 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	at.ProcessingStage = "completed"
 	at.ProcessingProgress = 100
 
-	if err := p.db.UpdateAudioTranscription(ctx, at); err != nil {
+	updated, err := p.db.UpdateAudioTranscriptionIfActive(ctx, at)
+	if err != nil {
 		log.Printf("⚠️  Failed to save audio transcription result: %v", err)
 		return fmt.Errorf("failed to save transcription: %w", err)
+	}
+	if !updated {
+		return fmt.Errorf("audio transcription stopped before completion")
 	}
 
 	p.notifyWebhook("audio.completed", at.APIKeyID, at)

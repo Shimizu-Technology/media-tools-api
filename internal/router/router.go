@@ -119,6 +119,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		protected.GET("/audio/transcriptions/search", h.SearchAudioTranscriptions) // MTA-25: must be before :id
 		protected.GET("/audio/transcriptions/:id", h.GetAudioTranscription)
 		protected.PATCH("/audio/transcriptions/:id", h.RenameAudioTranscription)
+		protected.POST("/audio/transcriptions/:id/cancel", h.CancelAudioTranscription)
 		protected.POST("/audio/transcriptions/:id/retry", h.RetryAudioTranscription)
 		protected.GET("/audio/transcriptions/:id/audio", h.GetAudioPlaybackURL)
 		protected.DELETE("/audio/transcriptions/:id", h.DeleteAudioTranscription)
