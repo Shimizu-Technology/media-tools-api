@@ -15,6 +15,8 @@
 package worker
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,6 +26,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +52,7 @@ const (
 const whisperTargetBytes = 24 << 20 // Keep below 25MB hard limit to account for multipart overhead
 const whisperInitialSegmentSeconds = 1800
 const whisperFFmpegTimeout = 30 * time.Minute
+const whisperProbeTimeout = 30 * time.Second
 
 func requiresWhisperTranscode(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
@@ -546,6 +550,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	if retryCount, err := p.db.IncrementAudioRetryCount(ctx, at.ID); err == nil {
 		at.RetryCount = retryCount
 	}
+	log.Printf("🎙️  Audio job %s started: %s (retry=%d, s3=%t)", at.ID, payload.OriginalName, at.RetryCount, payload.AudioS3Key != "")
 
 	// Update status to processing
 	at.Status = "processing"
@@ -568,6 +573,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 			return fmt.Errorf("no local temp file or durable S3 key available")
 		}
 		_ = p.db.UpdateAudioProcessing(ctx, at.ID, "downloading", 10)
+		log.Printf("⬇️  Audio job %s downloading source from storage key %s", at.ID, payload.AudioS3Key)
 		ext := filepath.Ext(at.Filename)
 		if ext == "" {
 			ext = ".webm"
@@ -581,6 +587,9 @@ func (p *Pool) processAudioTranscription(job Job) error {
 			_ = p.db.UpdateAudioTranscription(ctx, at)
 			return fmt.Errorf("failed to download source audio: %w", err)
 		}
+		log.Printf("✅ Audio job %s downloaded source to %s", at.ID, payload.TempFilePath)
+	} else {
+		log.Printf("📁 Audio job %s using local upload file %s", at.ID, payload.TempFilePath)
 	}
 
 	// Ensure temp file is always cleaned up
@@ -609,12 +618,22 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		p.db.UpdateAudioTranscription(ctx, at)
 		return fmt.Errorf("failed to stat temp file: %w", err)
 	}
+	log.Printf("📊 Audio job %s source ready: %s (%.1fMB)", at.ID, filepath.Ext(payload.TempFilePath), bytesToMB(fileInfo.Size()))
 
 	var transcriptionParts []string
 	if fileInfo.Size() > whisperTargetBytes || requiresWhisperTranscode(payload.TempFilePath) {
 		_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcoding", 25)
 		compressedPath := payload.TempFilePath + ".whisper.ogg"
-		if err := transcodeForWhisper(ctx, payload.TempFilePath, compressedPath); err != nil {
+		log.Printf("🎚️  Audio job %s preparing recording for Whisper: %s (%.1fMB)", at.ID, payload.OriginalName, bytesToMB(fileInfo.Size()))
+		lastLoggedTranscodeProgress := 25
+		transcodeProgress := func(progress int) {
+			_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcoding", progress)
+			if progress >= lastLoggedTranscodeProgress+3 || progress >= 34 {
+				lastLoggedTranscodeProgress = progress
+				log.Printf("🎚️  Audio job %s transcode progress: %d%%", at.ID, progress)
+			}
+		}
+		if err := transcodeForWhisper(ctx, payload.TempFilePath, compressedPath, transcodeProgress); err != nil {
 			at.Status = "failed"
 			at.ErrorMessage = "Failed to compress audio for transcription: " + err.Error()
 			p.db.UpdateAudioTranscription(ctx, at)
@@ -632,14 +651,15 @@ func (p *Pool) processAudioTranscription(job Job) error {
 
 		log.Printf("🎚️  Transcoded recording for Whisper: %s %.1fMB -> %.1fMB",
 			payload.OriginalName,
-			float64(fileInfo.Size())/(1024*1024),
-			float64(compressedInfo.Size())/(1024*1024),
+			bytesToMB(fileInfo.Size()),
+			bytesToMB(compressedInfo.Size()),
 		)
 
 		if compressedInfo.Size() > whisperTargetBytes {
 			segmentSeconds := whisperInitialSegmentSeconds
 			for {
 				_ = p.db.UpdateAudioProcessing(ctx, at.ID, "chunking", 35)
+				log.Printf("🧩 Audio job %s splitting compressed audio into %ds segments", at.ID, segmentSeconds)
 				segmentPaths, err := splitAudioForWhisper(ctx, compressedPath, segmentSeconds)
 				if err != nil {
 					at.Status = "failed"
@@ -650,6 +670,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 				cleanupPaths = append(cleanupPaths, segmentPaths...)
 
 				oversized := false
+				largestSegmentBytes := int64(0)
 				for _, segmentPath := range segmentPaths {
 					info, err := os.Stat(segmentPath)
 					if err != nil {
@@ -660,16 +681,19 @@ func (p *Pool) processAudioTranscription(job Job) error {
 					}
 					if info.Size() > whisperTargetBytes {
 						oversized = true
-						break
+					}
+					if info.Size() > largestSegmentBytes {
+						largestSegmentBytes = info.Size()
 					}
 				}
 
 				if !oversized {
 					transcriptionParts = segmentPaths
-					log.Printf("🧩 Split long audio into %d segment(s) at %ds each for Whisper", len(segmentPaths), segmentSeconds)
+					log.Printf("🧩 Audio job %s split into %d segment(s) at %ds each for Whisper (largest %.1fMB)", at.ID, len(segmentPaths), segmentSeconds, bytesToMB(largestSegmentBytes))
 					break
 				}
 
+				log.Printf("🧩 Audio job %s segments still too large at %ds (largest %.1fMB); retrying smaller segments", at.ID, segmentSeconds, bytesToMB(largestSegmentBytes))
 				segmentSeconds /= 2
 				if segmentSeconds < 120 {
 					at.Status = "failed"
@@ -681,6 +705,8 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		} else {
 			transcriptionPath = compressedPath
 		}
+	} else {
+		log.Printf("🎙️  Audio job %s source can be sent directly to Whisper without transcoding", at.ID)
 	}
 
 	var transcriptText string
@@ -689,6 +715,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 
 	if len(transcriptionParts) == 0 {
 		_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcribing", 70)
+		log.Printf("📝 Audio job %s sending single file to Whisper: %s", at.ID, filepath.Base(transcriptionPath))
 		// Single-file transcription
 		result, err := p.transcribeFile(ctx, transcriptionPath, payload.OriginalName)
 		if err != nil {
@@ -711,6 +738,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 				_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcribing", progress)
 			}
 			partName := fmt.Sprintf("%s.part.%03d", payload.OriginalName, idx+1)
+			log.Printf("📝 Audio job %s sending chunk %d/%d to Whisper", at.ID, idx+1, len(transcriptionParts))
 			result, err := p.transcribeFile(ctx, partPath, partName)
 			if err != nil {
 				log.Printf("❌ Whisper chunk transcription failed (%s): %v", partName, err)
@@ -732,6 +760,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 
 	// Update the record with results
 	_ = p.db.UpdateAudioProcessing(ctx, at.ID, "stitching", 95)
+	log.Printf("🧵 Audio job %s stitching transcription result", at.ID)
 	latest, err := p.db.GetAudioTranscription(ctx, at.ID)
 	if err == nil && latest.Status == "failed" {
 		return fmt.Errorf("audio transcription stopped before completion")
@@ -873,6 +902,10 @@ func pickDominantLanguage(counts map[string]int) string {
 	return bestLang
 }
 
+func bytesToMB(bytes int64) float64 {
+	return float64(bytes) / (1024 * 1024)
+}
+
 func splitAudioForWhisper(ctx context.Context, inputPath string, segmentSeconds int) ([]string, error) {
 	baseDir := filepath.Dir(inputPath)
 	baseName := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
@@ -918,9 +951,11 @@ func splitAudioForWhisper(ctx context.Context, inputPath string, segmentSeconds 
 	return parts, nil
 }
 
-func transcodeForWhisper(ctx context.Context, inputPath, outputPath string) error {
+func transcodeForWhisper(ctx context.Context, inputPath, outputPath string, onProgress func(int)) error {
 	cmdCtx, cancel := context.WithTimeout(ctx, whisperFFmpegTimeout)
 	defer cancel()
+
+	durationSeconds, _ := probeMediaDuration(ctx, inputPath)
 
 	cmd := exec.CommandContext(
 		cmdCtx,
@@ -928,6 +963,8 @@ func transcodeForWhisper(ctx context.Context, inputPath, outputPath string) erro
 		"-nostdin",
 		"-hide_banner",
 		"-loglevel", "error",
+		"-progress", "pipe:1",
+		"-nostats",
 		"-y",
 		"-i", inputPath,
 		"-ac", "1",
@@ -936,12 +973,85 @@ func transcodeForWhisper(ctx context.Context, inputPath, outputPath string) erro
 		"-b:a", "24k",
 		outputPath,
 	)
-	out, err := cmd.CombinedOutput()
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("ffmpeg progress pipe failed: %w", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("ffmpeg transcode failed to start: %w", err)
+	}
+
+	progressDone := make(chan struct{})
+	lastProgress := 25
+	go func() {
+		defer close(progressDone)
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			if onProgress == nil || durationSeconds <= 0 {
+				continue
+			}
+			line := scanner.Text()
+			value, ok := strings.CutPrefix(line, "out_time_ms=")
+			if !ok {
+				// ffmpeg progress historically reports microseconds under both key names.
+				value, ok = strings.CutPrefix(line, "out_time_us=")
+			}
+			if !ok {
+				continue
+			}
+			microseconds, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+			if err != nil {
+				continue
+			}
+			fraction := (microseconds / 1_000_000) / durationSeconds
+			progress := 25 + int(fraction*9)
+			if progress > 34 {
+				progress = 34
+			}
+			if progress > lastProgress {
+				lastProgress = progress
+				onProgress(progress)
+			}
+		}
+	}()
+
+	<-progressDone
+	err = cmd.Wait()
 	if err != nil {
 		if errors.Is(cmdCtx.Err(), context.DeadlineExceeded) && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("ffmpeg transcode timed out after %s", whisperFFmpegTimeout)
 		}
-		return fmt.Errorf("ffmpeg transcode failed: %v (%s)", err, string(out))
+		return fmt.Errorf("ffmpeg transcode failed: %v (%s)", err, stderr.String())
+	}
+	if onProgress != nil && lastProgress < 34 {
+		onProgress(34)
 	}
 	return nil
+}
+
+func probeMediaDuration(ctx context.Context, inputPath string) (float64, error) {
+	cmdCtx, cancel := context.WithTimeout(ctx, whisperProbeTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(
+		cmdCtx,
+		"ffprobe",
+		"-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		inputPath,
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	duration, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if err != nil || duration <= 0 {
+		return 0, err
+	}
+	return duration, nil
 }
