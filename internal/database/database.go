@@ -34,15 +34,23 @@ type DB struct {
 
 // New creates a new database connection with connection pooling configured.
 func New(databaseURL string) (*DB, error) {
+	return NewWithSimpleProtocol(databaseURL, true)
+}
+
+// NewWithSimpleProtocol creates a database connection and optionally disables
+// prepared statements for PgBouncer-compatible pooled connections.
+func NewWithSimpleProtocol(databaseURL string, useSimpleProtocol bool) (*DB, error) {
 	cfg, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse database URL: %w", err)
 	}
-	// Neon pooled connections sit behind PgBouncer. Prepared statements can
-	// intermittently fail there with "bind message supplies N parameters"
-	// when a pooled server connection has stale statement state, so use pgx's
-	// simple protocol for maximum pooler compatibility.
-	cfg.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+	if useSimpleProtocol {
+		// Neon pooled connections sit behind PgBouncer. Prepared statements can
+		// intermittently fail there with "bind message supplies N parameters"
+		// when a pooled server connection has stale statement state, so use pgx's
+		// simple protocol for maximum pooler compatibility.
+		cfg.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+	}
 
 	sqlDB := stdlib.OpenDB(*cfg)
 	db := sqlx.NewDb(sqlDB, "pgx")

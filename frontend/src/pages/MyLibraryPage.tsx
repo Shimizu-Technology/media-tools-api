@@ -542,7 +542,7 @@ export function MyLibraryPage() {
               style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
             >
               {activeTab === 'audio' ? <Mic className="w-4 h-4" /> : activeTab === 'pdf' ? <FileType2 className="w-4 h-4" /> : <Youtube className="w-4 h-4" />}
-              {activeTab === 'audio' ? 'Record or upload recording' : activeTab === 'pdf' ? 'Upload a PDF' : 'Extract a transcript'}
+              {activeTab === 'audio' ? 'Upload audio or recording' : activeTab === 'pdf' ? 'Upload a PDF' : 'Extract a transcript'}
             </button>
           )}
         </motion.div>

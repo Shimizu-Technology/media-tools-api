@@ -39,19 +39,18 @@ func main() {
 
 	log.Printf("📋 Config loaded: port=%s, workers=%d, gin_mode=%s", cfg.Port, cfg.WorkerCount, cfg.GinMode)
 	log.Printf("🔧 yt-dlp path: %s", cfg.YtDlpPath)
-	if cfg.ClerkJWKSURL != "" && cfg.GinMode == "release" && cfg.ClerkAudience == "" && cfg.ClerkAuthorizedParty == "" {
-		log.Println("⚠️  Clerk auth enabled without CLERK_AUDIENCE or CLERK_AUTHORIZED_PARTY; validating issuer, signature, and expiry only")
-	}
 
 	os.Setenv("GIN_MODE", cfg.GinMode)
 
 	// Step 2: Connect to Database
 	dbURL := cfg.DatabaseURL
+	useSimpleProtocol := true
 	if cfg.DatabaseURLDirect != "" {
 		dbURL = cfg.DatabaseURLDirect
+		useSimpleProtocol = false
 		log.Println("✅ Using direct database connection (no pooler)")
 	}
-	db, err := database.New(dbURL)
+	db, err := database.NewWithSimpleProtocol(dbURL, useSimpleProtocol)
 	if err != nil {
 		log.Fatalf("❌ Failed to connect to database: %v", err)
 	}
