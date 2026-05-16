@@ -48,6 +48,7 @@ const (
 
 const whisperTargetBytes = 24 << 20 // Keep below 25MB hard limit to account for multipart overhead
 const whisperInitialSegmentSeconds = 1800
+const whisperFFmpegTimeout = 30 * time.Minute
 
 func requiresWhisperTranscode(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
@@ -865,9 +866,15 @@ func splitAudioForWhisper(ctx context.Context, inputPath string, segmentSeconds 
 	baseName := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
 	pattern := filepath.Join(baseDir, fmt.Sprintf("%s.part-%%04d.ogg", baseName))
 
+	cmdCtx, cancel := context.WithTimeout(ctx, whisperFFmpegTimeout)
+	defer cancel()
+
 	cmd := exec.CommandContext(
-		ctx,
+		cmdCtx,
 		"ffmpeg",
+		"-nostdin",
+		"-hide_banner",
+		"-loglevel", "error",
 		"-y",
 		"-i", inputPath,
 		"-ac", "1",
@@ -881,6 +888,9 @@ func splitAudioForWhisper(ctx context.Context, inputPath string, segmentSeconds 
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if errors.Is(cmdCtx.Err(), context.DeadlineExceeded) && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("ffmpeg segment timed out after %s", whisperFFmpegTimeout)
+		}
 		return nil, fmt.Errorf("ffmpeg segment failed: %v (%s)", err, string(out))
 	}
 
@@ -897,9 +907,15 @@ func splitAudioForWhisper(ctx context.Context, inputPath string, segmentSeconds 
 }
 
 func transcodeForWhisper(ctx context.Context, inputPath, outputPath string) error {
+	cmdCtx, cancel := context.WithTimeout(ctx, whisperFFmpegTimeout)
+	defer cancel()
+
 	cmd := exec.CommandContext(
-		ctx,
+		cmdCtx,
 		"ffmpeg",
+		"-nostdin",
+		"-hide_banner",
+		"-loglevel", "error",
 		"-y",
 		"-i", inputPath,
 		"-ac", "1",
@@ -910,6 +926,9 @@ func transcodeForWhisper(ctx context.Context, inputPath, outputPath string) erro
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if errors.Is(cmdCtx.Err(), context.DeadlineExceeded) && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("ffmpeg transcode timed out after %s", whisperFFmpegTimeout)
+		}
 		return fmt.Errorf("ffmpeg transcode failed: %v (%s)", err, string(out))
 	}
 	return nil
