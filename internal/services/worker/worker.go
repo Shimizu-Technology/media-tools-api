@@ -955,7 +955,10 @@ func transcodeForWhisper(ctx context.Context, inputPath, outputPath string, onPr
 	cmdCtx, cancel := context.WithTimeout(ctx, whisperFFmpegTimeout)
 	defer cancel()
 
-	durationSeconds, _ := probeMediaDuration(ctx, inputPath)
+	durationSeconds, probeErr := probeMediaDuration(ctx, inputPath)
+	if probeErr != nil || durationSeconds <= 0 {
+		log.Printf("⚠️  ffprobe duration unavailable for %s; using elapsed transcode progress fallback", filepath.Base(inputPath))
+	}
 
 	cmd := exec.CommandContext(
 		cmdCtx,
@@ -985,13 +988,33 @@ func transcodeForWhisper(ctx context.Context, inputPath, outputPath string, onPr
 		return fmt.Errorf("ffmpeg transcode failed to start: %w", err)
 	}
 
-	progressDone := make(chan struct{})
 	lastProgress := 25
+	progressMu := sync.Mutex{}
+	recordProgress := func(progress int) {
+		if onProgress == nil {
+			return
+		}
+		if progress > 34 {
+			progress = 34
+		}
+		shouldNotify := false
+		progressMu.Lock()
+		if progress > lastProgress {
+			lastProgress = progress
+			shouldNotify = true
+		}
+		progressMu.Unlock()
+		if shouldNotify {
+			onProgress(progress)
+		}
+	}
+
+	progressDone := make(chan struct{})
 	go func() {
 		defer close(progressDone)
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
-			if onProgress == nil || durationSeconds <= 0 {
+			if durationSeconds <= 0 {
 				continue
 			}
 			line := scanner.Text()
@@ -1009,17 +1032,37 @@ func transcodeForWhisper(ctx context.Context, inputPath, outputPath string, onPr
 			}
 			fraction := (microseconds / 1_000_000) / durationSeconds
 			progress := 25 + int(fraction*9)
-			if progress > 34 {
-				progress = 34
-			}
-			if progress > lastProgress {
-				lastProgress = progress
-				onProgress(progress)
+			recordProgress(progress)
+		}
+	}()
+
+	heartbeatDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		if durationSeconds > 0 {
+			return
+		}
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-progressDone:
+				return
+			case <-cmdCtx.Done():
+				return
+			case <-ticker.C:
+				progressMu.Lock()
+				nextProgress := lastProgress + 1
+				progressMu.Unlock()
+				if nextProgress < 34 {
+					recordProgress(nextProgress)
+				}
 			}
 		}
 	}()
 
 	<-progressDone
+	<-heartbeatDone
 	err = cmd.Wait()
 	if err != nil {
 		if errors.Is(cmdCtx.Err(), context.DeadlineExceeded) && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -1027,8 +1070,11 @@ func transcodeForWhisper(ctx context.Context, inputPath, outputPath string, onPr
 		}
 		return fmt.Errorf("ffmpeg transcode failed: %v (%s)", err, stderr.String())
 	}
-	if onProgress != nil && lastProgress < 34 {
-		onProgress(34)
+	progressMu.Lock()
+	needsFinalProgress := lastProgress < 34
+	progressMu.Unlock()
+	if needsFinalProgress {
+		recordProgress(34)
 	}
 	return nil
 }
