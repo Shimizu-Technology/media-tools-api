@@ -278,13 +278,9 @@ Add:
 10. Billing/usage limits.
 11. Browser extension and external integrations.
 
-## Next Recommended Branch
+## Next Recommended Milestone
 
-Recommended next branch:
-
-```bash
-codex/unified-library-item-pages
-```
+The next milestone should be unified library item detail pages.
 
 Suggested scope:
 
