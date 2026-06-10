@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, Check, Copy, ExternalLink, KeyRound, Loader2, Plus, RefreshCw, ShieldCheck, Trash2, Webhook } from 'lucide-react';
 import { ApiKeySetup } from '../components/ApiKeySetup';
@@ -15,18 +15,35 @@ export function DeveloperPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState('');
   const [localKeyConfigured, setLocalKeyConfigured] = useState(() => !!localStorage.getItem('mta_api_key'));
+  const isMountedRef = useRef(false);
+  const copyResetTimeoutRef = useRef<number | null>(null);
 
-  const loadKeys = async () => {
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (copyResetTimeoutRef.current !== null) {
+        window.clearTimeout(copyResetTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const loadKeys = useCallback(async () => {
     setIsLoading(true);
     setError('');
     try {
-      setApiKeys(await listAPIKeys());
+      const keys = await listAPIKeys();
+      if (!isMountedRef.current) return;
+      setApiKeys(keys);
     } catch (err) {
+      if (!isMountedRef.current) return;
       setError(getErrorMessage(err));
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (isClerkEnabled || localKeyConfigured) {
@@ -34,30 +51,43 @@ export function DeveloperPage() {
     } else {
       setIsLoading(false);
     }
-  }, [isClerkEnabled, localKeyConfigured]);
+  }, [isClerkEnabled, localKeyConfigured, loadKeys]);
 
   const handleCreate = async () => {
-    if (!name.trim()) return;
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
     setIsCreating(true);
     setError('');
     setCreatedKey('');
     try {
-      const key = await createUserAPIKey(name.trim());
+      const key = await createUserAPIKey(trimmedName);
+      if (!isMountedRef.current) return;
       if (key.raw_key) setCreatedKey(key.raw_key);
       setName('media-tools-app');
       await loadKeys();
     } catch (err) {
+      if (!isMountedRef.current) return;
       setError(getErrorMessage(err));
     } finally {
-      setIsCreating(false);
+      if (isMountedRef.current) {
+        setIsCreating(false);
+      }
     }
   };
 
   const handleCopy = async () => {
     if (!createdKey) return;
     await navigator.clipboard.writeText(createdKey);
+    if (!isMountedRef.current) return;
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (copyResetTimeoutRef.current !== null) {
+      window.clearTimeout(copyResetTimeoutRef.current);
+    }
+    copyResetTimeoutRef.current = window.setTimeout(() => {
+      if (isMountedRef.current) {
+        setCopied(false);
+      }
+    }, 2000);
   };
 
   const handleRevoke = async (id: string) => {
@@ -65,8 +95,10 @@ export function DeveloperPage() {
     setError('');
     try {
       await revokeAPIKey(id);
+      if (!isMountedRef.current) return;
       await loadKeys();
     } catch (err) {
+      if (!isMountedRef.current) return;
       setError(getErrorMessage(err));
     }
   };

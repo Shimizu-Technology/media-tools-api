@@ -129,6 +129,16 @@ func (h *Handler) CreateUserAPIKey(c *gin.Context) {
 		return
 	}
 
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "name is required",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
 	rawKey, err := generateAPIKey()
 	if err != nil {
 		log.Printf("❌ Failed to generate user API key: %v", err)
@@ -136,16 +146,6 @@ func (h *Handler) CreateUserAPIKey(c *gin.Context) {
 			Error:   "generation_error",
 			Message: "Failed to generate API key",
 			Code:    http.StatusInternalServerError,
-		})
-		return
-	}
-
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "invalid_request",
-			Message: "name is required",
-			Code:    http.StatusBadRequest,
 		})
 		return
 	}

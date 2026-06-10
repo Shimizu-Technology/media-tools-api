@@ -16,7 +16,7 @@ interface ProtectedRouteProps {
  */
 export function ProtectedRoute({ children, requireOwner = false }: ProtectedRouteProps) {
   const location = useLocation();
-  const { isClerkEnabled, isAuthenticated, isLoading, user } = useAuthContext();
+  const { isClerkEnabled, isAuthenticated, isLoading } = useAuthContext();
   const [hasLocalApiKey, setHasLocalApiKey] = useState(() => !!localStorage.getItem('mta_api_key'));
 
   if (isLoading) {
@@ -41,7 +41,7 @@ export function ProtectedRoute({ children, requireOwner = false }: ProtectedRout
   // Placeholder for future owner/admin roles. Until backend roles exist, keep ops
   // gated by API-key auth in the API client itself instead of pretending every
   // Clerk user is an owner.
-  if (requireOwner && isClerkEnabled && user) {
+  if (requireOwner && isClerkEnabled) {
     return <Navigate to="/app/developer" replace />;
   }
 
