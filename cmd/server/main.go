@@ -168,15 +168,19 @@ func main() {
 		ClerkAudience:          cfg.ClerkAudience,
 		ClerkAuthorizedParty:   cfg.ClerkAuthorizedParty,
 		AllowedOrigins:         cfg.AllowedOrigins,
+		DefaultRateLimit:       cfg.DefaultRateLimit,
 		YtDlpCookiesConfigured: ytDlpCookiesConfigured,
 	})
 
 	// Step 6: Start the HTTP Server
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%s", cfg.Port),
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 60 * time.Second,
+		Addr:              fmt.Sprintf(":%s", cfg.Port),
+		Handler:           r,
+		ReadHeaderTimeout: 15 * time.Second,
+		// Do not set ReadTimeout: large recording uploads may legitimately take
+		// longer than 15s on mobile networks. MaxBytesReader and auth still bound
+		// upload risk, while direct-to-S3 remains the preferred large-file path.
+		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 

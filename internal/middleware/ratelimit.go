@@ -28,6 +28,9 @@ type RateLimiter struct {
 	// reads vastly outnumber writes (which is true for rate limiting).
 	mu      sync.RWMutex
 	buckets map[string]*bucket
+	// Authenticated Clerk/JWT users do not have an APIKey.RateLimit row, so give
+	// them the same default hourly budget as newly-created API keys.
+	defaultUserRateLimit int
 	// Owner override (optional)
 	ownerKeyID     string
 	ownerKeyPrefix string
@@ -50,11 +53,15 @@ type allowResult struct {
 }
 
 // NewRateLimiter creates a new rate limiter.
-func NewRateLimiter(ownerKeyID, ownerKeyPrefix string) *RateLimiter {
+func NewRateLimiter(ownerKeyID, ownerKeyPrefix string, defaultUserRateLimit int) *RateLimiter {
+	if defaultUserRateLimit <= 0 {
+		defaultUserRateLimit = 100
+	}
 	rl := &RateLimiter{
-		buckets:        make(map[string]*bucket),
-		ownerKeyID:     ownerKeyID,
-		ownerKeyPrefix: ownerKeyPrefix,
+		buckets:              make(map[string]*bucket),
+		defaultUserRateLimit: defaultUserRateLimit,
+		ownerKeyID:           ownerKeyID,
+		ownerKeyPrefix:       ownerKeyPrefix,
 	}
 
 	// Start background cleanup goroutine
@@ -66,22 +73,31 @@ func NewRateLimiter(ownerKeyID, ownerKeyPrefix string) *RateLimiter {
 // RateLimit returns Gin middleware that enforces per-key rate limits.
 func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Get the API key from context (set by auth middleware)
-		apiKey := GetAPIKey(c)
-		if apiKey == nil {
-			// No API key = no rate limiting (auth middleware handles rejection)
-			c.Next()
-			return
-		}
+		// Get the actor from context (set by auth middleware). API keys carry their
+		// own configured limit; Clerk/legacy JWT users share the default limit so
+		// browser auth cannot bypass protection for expensive endpoints.
+		bucketID := ""
+		rateLimit := rl.defaultUserRateLimit
 
-		// Owner override: bypass limits for personal key
-		if IsOwnerAPIKey(apiKey, rl.ownerKeyID, rl.ownerKeyPrefix) {
+		apiKey := GetAPIKey(c)
+		if apiKey != nil {
+			// Owner override: bypass limits for personal key
+			if IsOwnerAPIKey(apiKey, rl.ownerKeyID, rl.ownerKeyPrefix) {
+				c.Next()
+				return
+			}
+			bucketID = "api_key:" + apiKey.ID
+			rateLimit = apiKey.RateLimit
+		} else if user := GetUser(c); user != nil {
+			bucketID = "user:" + user.ID
+		} else {
+			// No actor = no rate limiting (auth middleware handles rejection)
 			c.Next()
 			return
 		}
 
 		// Check rate limit — this returns all info atomically to avoid race conditions
-		result := rl.allow(apiKey.ID, apiKey.RateLimit)
+		result := rl.allow(bucketID, rateLimit)
 		if !result.allowed {
 			// Add headers even for rejected requests so clients know their limits
 			c.Header("X-RateLimit-Limit", formatFloat(result.limit))

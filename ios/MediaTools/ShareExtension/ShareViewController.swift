@@ -128,7 +128,7 @@ class ShareViewController: UIViewController {
                 if provider.hasItemConformingToTypeIdentifier(UTType.audio.identifier) {
                     provider.loadItem(forTypeIdentifier: UTType.audio.identifier) { [weak self] item, _ in
                         if let url = item as? URL {
-                            Task { await self?.uploadFile(url, endpoint: "/audio/transcriptions", mimeType: "audio/m4a") }
+                            Task { await self?.uploadFile(url, endpoint: "/audio/transcribe", mimeType: "audio/m4a") }
                         }
                     }
                     return
@@ -138,7 +138,7 @@ class ShareViewController: UIViewController {
                 if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
                     provider.loadItem(forTypeIdentifier: UTType.pdf.identifier) { [weak self] item, _ in
                         if let url = item as? URL {
-                            Task { await self?.uploadFile(url, endpoint: "/pdf/extractions", mimeType: "application/pdf") }
+                            Task { await self?.uploadFile(url, endpoint: "/pdf/extract", mimeType: "application/pdf") }
                         }
                     }
                     return

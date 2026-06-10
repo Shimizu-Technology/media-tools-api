@@ -108,7 +108,7 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
   }, [transcript.transcript_text]);
 
   const handleShareLink = useCallback(async () => {
-    const shareUrl = `${window.location.origin}?transcript=${transcript.id}`;
+    const shareUrl = `${window.location.origin}?id=${transcript.id}`;
     await navigator.clipboard.writeText(shareUrl);
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 2000);

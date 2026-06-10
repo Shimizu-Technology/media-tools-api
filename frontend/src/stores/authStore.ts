@@ -1,8 +1,8 @@
 /**
  * Auth store — helpers for API key management.
  *
- * With Clerk, auth tokens are managed via ClerkTokenSync → localStorage.
- * This file only handles API key storage for backward compatibility.
+ * With Clerk, auth tokens are fetched just-in-time by apiAuth.
+ * This file only handles API key storage for developer/API-key flows.
  */
 
 const API_KEY_STORAGE_KEY = 'mta_api_key';

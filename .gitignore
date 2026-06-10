@@ -31,6 +31,10 @@ frontend/.vite/
 .DS_Store
 Thumbs.db
 
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+
 # Docker
 *.log
 

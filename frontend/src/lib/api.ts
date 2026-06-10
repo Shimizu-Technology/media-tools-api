@@ -4,6 +4,7 @@
  * In development, Vite proxies /api requests to localhost:8080.
  * In production, VITE_API_URL points to the Render backend.
  */
+import { getAuthHeadersAsync, getAuthUploadHeadersAsync } from './apiAuth';
 
 const API_BASE = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api/v1`
@@ -265,21 +266,18 @@ export type ExportFormat = 'txt' | 'md' | 'srt' | 'json';
 
 // ── Helpers ──
 
-function getHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const token = localStorage.getItem('mta_jwt_token');
-  if (token) { headers['Authorization'] = `Bearer ${token}`; return headers; }
-  const apiKey = localStorage.getItem('mta_api_key');
-  if (apiKey) { headers['X-API-Key'] = apiKey; }
-  return headers;
+async function getHeaders(): Promise<Record<string, string>> {
+  return getAuthHeadersAsync();
 }
 
-function getUploadHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-  const token = localStorage.getItem('mta_jwt_token');
-  if (token) { headers['Authorization'] = `Bearer ${token}`; return headers; }
+async function getUploadHeaders(): Promise<Record<string, string>> {
+  return getAuthUploadHeadersAsync();
+}
+
+function getAPIKeyHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const apiKey = localStorage.getItem('mta_api_key');
-  if (apiKey) { headers['X-API-Key'] = apiKey; }
+  if (apiKey) headers['X-API-Key'] = apiKey;
   return headers;
 }
 
@@ -322,14 +320,14 @@ export async function createAPIKey(name: string, options?: { rateLimit?: number;
 export async function createTranscript(url: string): Promise<Transcript> {
   const res = await fetch(`${API_BASE}/transcripts`, {
     method: 'POST',
-    headers: getHeaders(),
+    headers: await getHeaders(),
     body: JSON.stringify({ url }),
   });
   return handleResponse<Transcript>(res);
 }
 
 export async function getTranscript(id: string): Promise<Transcript> {
-  const res = await fetch(`${API_BASE}/transcripts/${id}`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/transcripts/${id}`, { headers: await getHeaders() });
   return handleResponse<Transcript>(res);
 }
 
@@ -344,7 +342,7 @@ export async function listTranscripts(params?: {
   if (params?.per_page) searchParams.set('per_page', String(params.per_page));
   if (params?.status) searchParams.set('status', params.status);
   if (params?.search) searchParams.set('search', params.search);
-  const res = await fetch(`${API_BASE}/transcripts?${searchParams}`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/transcripts?${searchParams}`, { headers: await getHeaders() });
   return handleResponse<PaginatedResponse<Transcript>>(res);
 }
 
@@ -365,7 +363,7 @@ function getChatPath(itemType: ChatItemType, itemId: string): string {
 }
 
 export async function getChat(itemType: ChatItemType, itemId: string): Promise<ChatResponse> {
-  const res = await fetch(getChatPath(itemType, itemId), { headers: getHeaders() });
+  const res = await fetch(getChatPath(itemType, itemId), { headers: await getHeaders() });
   return handleResponse<ChatResponse>(res);
 }
 
@@ -377,14 +375,14 @@ export async function sendChatMessage(
 ): Promise<ChatResponse> {
   const res = await fetch(getChatPath(itemType, itemId), {
     method: 'POST',
-    headers: getHeaders(),
+    headers: await getHeaders(),
     body: JSON.stringify({ message, model: options?.model }),
   });
   return handleResponse<ChatResponse>(res);
 }
 
 export async function deleteTranscript(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/transcripts/${id}`, { method: 'DELETE', headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/transcripts/${id}`, { method: 'DELETE', headers: await getHeaders() });
   if (!res.ok && res.status !== 404) {
     const error: APIError = await res.json().catch(() => ({
       error: 'unknown', message: `HTTP ${res.status}: ${res.statusText}`, code: res.status,
@@ -401,14 +399,14 @@ export async function createSummary(
 ): Promise<{ message: string; transcript_id: string }> {
   const res = await fetch(`${API_BASE}/summaries`, {
     method: 'POST',
-    headers: getHeaders(),
+    headers: await getHeaders(),
     body: JSON.stringify({ transcript_id: transcriptId, ...options }),
   });
   return handleResponse(res);
 }
 
 export async function getSummaries(transcriptId: string): Promise<Summary[]> {
-  const res = await fetch(`${API_BASE}/transcripts/${transcriptId}/summaries`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/transcripts/${transcriptId}/summaries`, { headers: await getHeaders() });
   return handleResponse<Summary[]>(res);
 }
 
@@ -417,14 +415,14 @@ export async function getSummaries(transcriptId: string): Promise<Summary[]> {
 export async function createBatch(urls: string[]): Promise<BatchResponse> {
   const res = await fetch(`${API_BASE}/transcripts/batch`, {
     method: 'POST',
-    headers: getHeaders(),
+    headers: await getHeaders(),
     body: JSON.stringify({ urls }),
   });
   return handleResponse<BatchResponse>(res);
 }
 
 export async function getBatch(batchId: string): Promise<BatchResponse> {
-  const res = await fetch(`${API_BASE}/batches/${batchId}`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/batches/${batchId}`, { headers: await getHeaders() });
   return handleResponse<BatchResponse>(res);
 }
 
@@ -435,7 +433,7 @@ export function getExportUrl(transcriptId: string, format: ExportFormat): string
 }
 
 export async function downloadExport(transcriptId: string, format: ExportFormat): Promise<Blob> {
-  const res = await fetch(getExportUrl(transcriptId, format), { headers: getHeaders() });
+  const res = await fetch(getExportUrl(transcriptId, format), { headers: await getHeaders() });
   if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);
   return res.blob();
 }
@@ -472,7 +470,7 @@ export async function transcribeAudio(file: File): Promise<AudioTranscription> {
   const formData = new FormData();
   formData.append('file', file);
   const res = await fetch(`${API_BASE}/audio/transcribe`, {
-    method: 'POST', headers: getUploadHeaders(), body: formData,
+    method: 'POST', headers: await getUploadHeaders(), body: formData,
   });
   return handleResponse<AudioTranscription>(res);
 }
@@ -480,7 +478,7 @@ export async function transcribeAudio(file: File): Promise<AudioTranscription> {
 export async function presignAudioUpload(file: File): Promise<AudioUploadPresignResponse> {
   const res = await fetch(`${API_BASE}/audio/uploads/presign`, {
     method: 'POST',
-    headers: getHeaders(),
+    headers: await getHeaders(),
     body: JSON.stringify({
       filename: file.name,
       content_type: file.type || 'application/octet-stream',
@@ -562,21 +560,21 @@ export async function completeAudioUpload(params: {
 }): Promise<AudioTranscription> {
   const res = await fetch(`${API_BASE}/audio/uploads/complete`, {
     method: 'POST',
-    headers: getHeaders(),
+    headers: await getHeaders(),
     body: JSON.stringify(params),
   });
   return handleResponse<AudioTranscription>(res);
 }
 
 export async function getAudioTranscription(id: string): Promise<AudioTranscription> {
-  const res = await fetch(`${API_BASE}/audio/transcriptions/${id}`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/audio/transcriptions/${id}`, { headers: await getHeaders() });
   return handleResponse<AudioTranscription>(res);
 }
 
 export async function renameAudioTranscription(id: string, name: string): Promise<AudioTranscription> {
   const res = await fetch(`${API_BASE}/audio/transcriptions/${id}`, {
     method: 'PATCH',
-    headers: getHeaders(),
+    headers: await getHeaders(),
     body: JSON.stringify({ name }),
   });
   return handleResponse<AudioTranscription>(res);
@@ -585,7 +583,7 @@ export async function renameAudioTranscription(id: string, name: string): Promis
 export async function retryAudioTranscription(id: string): Promise<AudioTranscription> {
   const res = await fetch(`${API_BASE}/audio/transcriptions/${id}/retry`, {
     method: 'POST',
-    headers: getHeaders(),
+    headers: await getHeaders(),
   });
   return handleResponse<AudioTranscription>(res);
 }
@@ -593,28 +591,28 @@ export async function retryAudioTranscription(id: string): Promise<AudioTranscri
 export async function cancelAudioTranscription(id: string): Promise<AudioTranscription> {
   const res = await fetch(`${API_BASE}/audio/transcriptions/${id}/cancel`, {
     method: 'POST',
-    headers: getHeaders(),
+    headers: await getHeaders(),
   });
   return handleResponse<AudioTranscription>(res);
 }
 
 export async function getAudioPlaybackUrl(id: string): Promise<AudioPlaybackResponse> {
-  const res = await fetch(`${API_BASE}/audio/transcriptions/${id}/audio`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/audio/transcriptions/${id}/audio`, { headers: await getHeaders() });
   return handleResponse<AudioPlaybackResponse>(res);
 }
 
 export async function getAudioOpsHealth(): Promise<AudioOpsHealth> {
-  const res = await fetch(`${API_BASE}/ops/audio/health`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/ops/audio/health`, { headers: getAPIKeyHeaders() });
   return handleResponse<AudioOpsHealth>(res);
 }
 
 export async function listAudioTranscriptions(): Promise<AudioTranscription[]> {
-  const res = await fetch(`${API_BASE}/audio/transcriptions`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/audio/transcriptions`, { headers: await getHeaders() });
   return handleResponse<AudioTranscription[]>(res);
 }
 
 export async function deleteAudioTranscription(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/audio/transcriptions/${id}`, { method: 'DELETE', headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/audio/transcriptions/${id}`, { method: 'DELETE', headers: await getHeaders() });
   if (!res.ok && res.status !== 404) {
     const error: APIError = await res.json().catch(() => ({
       error: 'unknown', message: `HTTP ${res.status}: ${res.statusText}`, code: res.status,
@@ -630,7 +628,7 @@ export async function summarizeAudio(
 ): Promise<AudioTranscription> {
   const res = await fetch(`${API_BASE}/audio/transcriptions/${id}/summarize`, {
     method: 'POST',
-    headers: getHeaders(),
+    headers: await getHeaders(),
     body: JSON.stringify(options || {}),
   });
   return handleResponse<AudioTranscription>(res);
@@ -648,7 +646,7 @@ export async function searchAudioTranscriptions(params?: {
   if (params?.content_type) searchParams.set('content_type', params.content_type);
   if (params?.page) searchParams.set('page', String(params.page));
   if (params?.per_page) searchParams.set('per_page', String(params.per_page));
-  const res = await fetch(`${API_BASE}/audio/transcriptions/search?${searchParams}`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/audio/transcriptions/search?${searchParams}`, { headers: await getHeaders() });
   return handleResponse<PaginatedResponse<AudioTranscription>>(res);
 }
 
@@ -658,7 +656,7 @@ export function getAudioExportUrl(id: string, format: 'txt' | 'md' | 'json'): st
 }
 
 export async function downloadAudioExport(id: string, format: 'txt' | 'md' | 'json'): Promise<Blob> {
-  const res = await fetch(getAudioExportUrl(id, format), { headers: getHeaders() });
+  const res = await fetch(getAudioExportUrl(id, format), { headers: await getHeaders() });
   if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);
   return res.blob();
 }
@@ -669,23 +667,23 @@ export async function extractPDF(file: File): Promise<PDFExtraction> {
   const formData = new FormData();
   formData.append('file', file);
   const res = await fetch(`${API_BASE}/pdf/extract`, {
-    method: 'POST', headers: getUploadHeaders(), body: formData,
+    method: 'POST', headers: await getUploadHeaders(), body: formData,
   });
   return handleResponse<PDFExtraction>(res);
 }
 
 export async function getPDFExtraction(id: string): Promise<PDFExtraction> {
-  const res = await fetch(`${API_BASE}/pdf/extractions/${id}`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/pdf/extractions/${id}`, { headers: await getHeaders() });
   return handleResponse<PDFExtraction>(res);
 }
 
 export async function listPDFExtractions(): Promise<PDFExtraction[]> {
-  const res = await fetch(`${API_BASE}/pdf/extractions`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/pdf/extractions`, { headers: await getHeaders() });
   return handleResponse<PDFExtraction[]>(res);
 }
 
 export async function deletePDFExtraction(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/pdf/extractions/${id}`, { method: 'DELETE', headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/pdf/extractions/${id}`, { method: 'DELETE', headers: await getHeaders() });
   if (!res.ok && res.status !== 404) {
     const error: APIError = await res.json().catch(() => ({
       error: 'unknown', message: `HTTP ${res.status}: ${res.statusText}`, code: res.status,
@@ -717,7 +715,7 @@ export async function login(email: string, password: string): Promise<AuthRespon
 export async function refreshToken(): Promise<AuthResponse> {
   const res = await fetch(`${API_BASE}/auth/refresh`, {
     method: 'POST',
-    headers: getHeaders(),
+    headers: await getHeaders(),
   });
   return handleResponse<AuthResponse>(res);
 }
@@ -725,14 +723,14 @@ export async function refreshToken(): Promise<AuthResponse> {
 // ── Workspace (MTA-20) ──
 
 export async function getWorkspace(): Promise<WorkspaceResponse> {
-  const res = await fetch(`${API_BASE}/workspace`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/workspace`, { headers: await getHeaders() });
   return handleResponse<WorkspaceResponse>(res);
 }
 
 export async function saveToWorkspace(itemType: string, itemId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/workspace`, {
     method: 'POST',
-    headers: getHeaders(),
+    headers: await getHeaders(),
     body: JSON.stringify({ item_type: itemType, item_id: itemId }),
   });
   if (!res.ok) {
@@ -745,7 +743,7 @@ export async function saveToWorkspace(itemType: string, itemId: string): Promise
 
 export async function removeFromWorkspace(itemType: string, itemId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/workspace/${itemType}/${itemId}`, {
-    method: 'DELETE', headers: getHeaders(),
+    method: 'DELETE', headers: await getHeaders(),
   });
   if (!res.ok) {
     const error: APIError = await res.json().catch(() => ({
@@ -759,30 +757,30 @@ export async function removeFromWorkspace(itemType: string, itemId: string): Pro
 
 export async function createWebhook(url: string, events: string[]): Promise<Webhook> {
   const res = await fetch(`${API_BASE}/webhooks`, {
-    method: 'POST', headers: getHeaders(), body: JSON.stringify({ url, events }),
+    method: 'POST', headers: getAPIKeyHeaders(), body: JSON.stringify({ url, events }),
   });
   return handleResponse<Webhook>(res);
 }
 
 export async function listWebhooks(): Promise<Webhook[]> {
-  const res = await fetch(`${API_BASE}/webhooks`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/webhooks`, { headers: getAPIKeyHeaders() });
   return handleResponse<Webhook[]>(res);
 }
 
 export async function updateWebhook(id: string, active: boolean): Promise<void> {
   const res = await fetch(`${API_BASE}/webhooks/${id}`, {
-    method: 'PATCH', headers: getHeaders(), body: JSON.stringify({ active }),
+    method: 'PATCH', headers: getAPIKeyHeaders(), body: JSON.stringify({ active }),
   });
   if (!res.ok) throw new Error('Failed to update webhook');
 }
 
 export async function deleteWebhook(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/webhooks/${id}`, { method: 'DELETE', headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/webhooks/${id}`, { method: 'DELETE', headers: getAPIKeyHeaders() });
   if (!res.ok) throw new Error('Failed to delete webhook');
 }
 
 export async function listWebhookDeliveries(): Promise<WebhookDelivery[]> {
-  const res = await fetch(`${API_BASE}/webhooks/deliveries`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/webhooks/deliveries`, { headers: getAPIKeyHeaders() });
   return handleResponse<WebhookDelivery[]>(res);
 }
 
@@ -815,42 +813,42 @@ export interface CollectionWithItems extends Collection {
 }
 
 export async function listCollections(): Promise<Collection[]> {
-  const res = await fetch(`${API_BASE}/collections`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/collections`, { headers: await getHeaders() });
   return handleResponse<Collection[]>(res);
 }
 
 export async function createCollection(name: string, description?: string): Promise<Collection> {
   const res = await fetch(`${API_BASE}/collections`, {
-    method: 'POST', headers: getHeaders(), body: JSON.stringify({ name, description: description || '' }),
+    method: 'POST', headers: await getHeaders(), body: JSON.stringify({ name, description: description || '' }),
   });
   return handleResponse<Collection>(res);
 }
 
 export async function getCollection(id: string): Promise<CollectionWithItems> {
-  const res = await fetch(`${API_BASE}/collections/${id}`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/collections/${id}`, { headers: await getHeaders() });
   return handleResponse<CollectionWithItems>(res);
 }
 
 export async function updateCollection(id: string, data: { name?: string; description?: string }): Promise<Collection> {
   const res = await fetch(`${API_BASE}/collections/${id}`, {
-    method: 'PATCH', headers: getHeaders(), body: JSON.stringify(data),
+    method: 'PATCH', headers: await getHeaders(), body: JSON.stringify(data),
   });
   return handleResponse<Collection>(res);
 }
 
 export async function deleteCollection(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${id}`, { method: 'DELETE', headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/collections/${id}`, { method: 'DELETE', headers: await getHeaders() });
   if (!res.ok) throw new Error('Failed to delete collection');
 }
 
 export async function addCollectionItems(id: string, items: { item_type: string; item_id: string }[]): Promise<{ added: number }> {
   const res = await fetch(`${API_BASE}/collections/${id}/items`, {
-    method: 'POST', headers: getHeaders(), body: JSON.stringify({ items }),
+    method: 'POST', headers: await getHeaders(), body: JSON.stringify({ items }),
   });
   return handleResponse<{ added: number }>(res);
 }
 
 export async function removeCollectionItem(collectionId: string, itemId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/items/${itemId}`, { method: 'DELETE', headers: getHeaders() });
+  const res = await fetch(`${API_BASE}/collections/${collectionId}/items/${itemId}`, { method: 'DELETE', headers: await getHeaders() });
   if (!res.ok) throw new Error('Failed to remove item from collection');
 }

@@ -31,6 +31,25 @@ func TestLoadInfersClerkAuthorizedPartyFromCORSOrigin(t *testing.T) {
 	}
 }
 
+func TestLoadParsesMultipleCORSOrigins(t *testing.T) {
+	t.Setenv("YT_DLP_PATH", "/bin/true")
+	t.Setenv("CORS_ORIGIN", "https://app.example.com/, https://preview.example.com")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	want := []string{"https://app.example.com", "https://preview.example.com"}
+	if len(cfg.AllowedOrigins) != len(want) {
+		t.Fatalf("AllowedOrigins = %#v, want %#v", cfg.AllowedOrigins, want)
+	}
+	for i := range want {
+		if cfg.AllowedOrigins[i] != want[i] {
+			t.Fatalf("AllowedOrigins = %#v, want %#v", cfg.AllowedOrigins, want)
+		}
+	}
+}
+
 func TestLoadRequiresClerkAudienceAuthorizedPartyOrCORSOriginInRelease(t *testing.T) {
 	setRequiredReleaseEnv(t)
 	t.Setenv("CORS_ORIGIN", "")
@@ -39,7 +58,7 @@ func TestLoadRequiresClerkAudienceAuthorizedPartyOrCORSOriginInRelease(t *testin
 	if err == nil {
 		t.Fatal("Load succeeded, want missing Clerk token-boundary config error")
 	}
-	if !strings.Contains(err.Error(), "CLERK_AUDIENCE, CLERK_AUTHORIZED_PARTY, or CORS_ORIGIN") {
+	if !strings.Contains(err.Error(), "CLERK_AUDIENCE, CLERK_AUTHORIZED_PARTY, or single CORS_ORIGIN") {
 		t.Fatalf("Load error = %q, want Clerk token-boundary config error", err.Error())
 	}
 }

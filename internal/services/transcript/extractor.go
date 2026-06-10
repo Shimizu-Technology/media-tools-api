@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,13 +34,13 @@ type Extractor interface {
 
 // Result holds the extracted transcript and video metadata.
 type Result struct {
-	VideoID      string
-	Title        string
-	ChannelName  string
-	Duration     int    // seconds
-	Language     string
-	Transcript   string
-	WordCount    int
+	VideoID     string
+	Title       string
+	ChannelName string
+	Duration    int // seconds
+	Language    string
+	Transcript  string
+	WordCount   int
 }
 
 // WhisperResult holds the output from a Whisper API call.
@@ -93,8 +95,8 @@ func (e *YtDlpExtractor) SetWhisperFallback(w WhisperTranscriber) {
 // buildBaseArgs returns the common yt-dlp arguments including proxy if configured.
 func (e *YtDlpExtractor) buildBaseArgs() []string {
 	args := []string{
-		"--js-runtimes", "node",              // Required for YouTube extraction
-		"--remote-components", "ejs:github",  // Download JS challenge solver from GitHub
+		"--js-runtimes", "node", // Required for YouTube extraction
+		"--remote-components", "ejs:github", // Download JS challenge solver from GitHub
 	}
 	if e.cookiesFile != "" {
 		args = append(args, "--cookies", e.cookiesFile)
@@ -110,17 +112,17 @@ func (e *YtDlpExtractor) buildBaseArgs() []string {
 
 // ytDlpMetadata represents the JSON output from yt-dlp --dump-json.
 type ytDlpMetadata struct {
-	ID          string  `json:"id"`
-	Title       string  `json:"title"`
-	Channel     string  `json:"channel"`
-	Duration    float64 `json:"duration"`
-	Subtitles   map[string][]subtitle `json:"subtitles"`
+	ID           string                `json:"id"`
+	Title        string                `json:"title"`
+	Channel      string                `json:"channel"`
+	Duration     float64               `json:"duration"`
+	Subtitles    map[string][]subtitle `json:"subtitles"`
 	AutoCaptions map[string][]subtitle `json:"automatic_captions"`
 }
 
 type subtitle struct {
-	URL  string `json:"url"`
-	Ext  string `json:"ext"`
+	URL string `json:"url"`
+	Ext string `json:"ext"`
 }
 
 // ExtractFromURL downloads the transcript for any yt-dlp-supported video URL (YouTube, Vimeo, etc.).
@@ -265,9 +267,9 @@ func (e *YtDlpExtractor) getMetadata(ctx context.Context, url string) (*ytDlpMet
 	// Build command with base args (includes proxy if configured)
 	args := e.buildBaseArgs()
 	args = append(args,
-		"--dump-json",    // Output video info as JSON
-		"--no-download",  // Don't download the video itself
-		"--no-warnings",  // Suppress warning messages
+		"--dump-json",   // Output video info as JSON
+		"--no-download", // Don't download the video itself
+		"--no-warnings", // Suppress warning messages
 		url,
 	)
 
@@ -324,7 +326,7 @@ func (e *YtDlpExtractor) getTranscript(ctx context.Context, url string) (string,
 			"--skip-download",        // Don't download video
 			subType,                  // Which subtitle type to get
 			"--sub-langs", "en.*,en", // Prefer English
-			"--sub-format", "vtt",    // WebVTT format (easiest to parse)
+			"--sub-format", "vtt", // WebVTT format (easiest to parse)
 			"--output", filepath.Join(tmpDir, "%(id)s"),
 			"--no-warnings",
 			url,
@@ -471,9 +473,25 @@ const (
 
 // ParsedVideo holds the parsed video URL, identifier, and source platform.
 type ParsedVideo struct {
-	URL      string
-	VideoID  string
-	Source   VideoSource
+	URL     string
+	VideoID string
+	Source  VideoSource
+}
+
+func parseAbsoluteVideoURL(input string) (bool, string) {
+	u, err := url.Parse(input)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return false, ""
+	}
+	return true, strings.ToLower(u.Hostname())
+}
+
+func isYouTubeHost(host string) bool {
+	return host == "youtube.com" || strings.HasSuffix(host, ".youtube.com") || host == "youtu.be"
+}
+
+func isVimeoHost(host string) bool {
+	return host == "vimeo.com" || strings.HasSuffix(host, ".vimeo.com")
 }
 
 // ParseVideoURL parses a video URL from YouTube, Vimeo, or any yt-dlp-supported site.
@@ -498,31 +516,40 @@ func ParseVideoURL(input string) (*ParsedVideo, error) {
 		}, nil
 	}
 
-	// YouTube URL patterns
-	for _, pattern := range ytURLPatterns {
-		matches := pattern.FindStringSubmatch(input)
-		if len(matches) >= 2 {
-			return &ParsedVideo{
-				URL:     fmt.Sprintf("https://www.youtube.com/watch?v=%s", matches[1]),
-				VideoID: matches[1],
-				Source:  SourceYouTube,
-			}, nil
+	absURL, absHost := parseAbsoluteVideoURL(input)
+
+	// YouTube URL patterns. For absolute URLs, only trust matches from real
+	// YouTube hosts; otherwise an internal URL containing "youtube.com/watch" in
+	// a path/query could bypass generic URL SSRF validation.
+	if !absURL || isYouTubeHost(absHost) {
+		for _, pattern := range ytURLPatterns {
+			matches := pattern.FindStringSubmatch(input)
+			if len(matches) >= 2 {
+				return &ParsedVideo{
+					URL:     fmt.Sprintf("https://www.youtube.com/watch?v=%s", matches[1]),
+					VideoID: matches[1],
+					Source:  SourceYouTube,
+				}, nil
+			}
 		}
 	}
 
-	// Vimeo URL patterns (anchored to avoid matching manage/settings paths)
-	for _, pattern := range vimeoURLPatterns {
-		matches := pattern.FindStringSubmatch(input)
-		if len(matches) >= 2 {
-			// Preserve original URL for yt-dlp — private/unlisted Vimeo videos
-			// use URLs like vimeo.com/123456789/abc123def where the trailing
-			// segment is a privacy hash required for access. Constructing a
-			// canonical URL would strip this hash and break private video access.
-			return &ParsedVideo{
-				URL:     input,
-				VideoID: matches[1],
-				Source:  SourceVimeo,
-			}, nil
+	// Vimeo URL patterns. For absolute URLs, only trust matches from real Vimeo
+	// hosts for the same SSRF reason described above.
+	if !absURL || isVimeoHost(absHost) {
+		for _, pattern := range vimeoURLPatterns {
+			matches := pattern.FindStringSubmatch(input)
+			if len(matches) >= 2 {
+				// Preserve original URL for yt-dlp — private/unlisted Vimeo videos
+				// use URLs like vimeo.com/123456789/abc123def where the trailing
+				// segment is a privacy hash required for access. Constructing a
+				// canonical URL would strip this hash and break private video access.
+				return &ParsedVideo{
+					URL:     input,
+					VideoID: matches[1],
+					Source:  SourceVimeo,
+				}, nil
+			}
 		}
 	}
 
@@ -563,6 +590,65 @@ func ParseYouTubeURL(input string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid YouTube URL or video ID: %s", input)
 	}
 	return parsed.URL, parsed.VideoID, nil
+}
+
+// ValidateExternalVideoURL blocks obvious SSRF targets before a generic URL is
+// handed to yt-dlp. yt-dlp itself performs its own network requests and resolves
+// hostnames again, so this is a defense-in-depth preflight for user-supplied
+// non-YouTube/Vimeo URLs. Production should still pair this with network egress
+// controls/sandboxing around yt-dlp for full DNS-rebinding protection.
+func ValidateExternalVideoURL(ctx context.Context, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("malformed URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("only http and https video URLs are allowed")
+	}
+	if u.Host == "" {
+		return fmt.Errorf("missing host")
+	}
+	hostname := strings.ToLower(u.Hostname())
+	if hostname == "" || hostname == "localhost" {
+		return fmt.Errorf("localhost is not allowed")
+	}
+
+	if ip := net.ParseIP(hostname); ip != nil {
+		if isBlockedVideoIP(ip) {
+			return fmt.Errorf("private or local network video URLs are not allowed")
+		}
+		return nil
+	}
+
+	resolveCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ips, err := net.DefaultResolver.LookupIPAddr(resolveCtx, hostname)
+	if err != nil || len(ips) == 0 {
+		return fmt.Errorf("failed to resolve video host")
+	}
+	for _, resolved := range ips {
+		if isBlockedVideoIP(resolved.IP) {
+			return fmt.Errorf("private or local network video URLs are not allowed")
+		}
+	}
+	return nil
+}
+
+func isBlockedVideoIP(ip net.IP) bool {
+	return ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		isCarrierGradeNAT(ip) ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsMulticast() ||
+		ip.IsUnspecified()
+}
+
+// isCarrierGradeNAT blocks the IANA Shared Address Space (RFC 6598) used for
+// carrier-grade NAT. net.IP.IsPrivate only covers RFC 1918 IPv4 and IPv6 ULA.
+func isCarrierGradeNAT(ip net.IP) bool {
+	ipv4 := ip.To4()
+	return ipv4 != nil && ipv4[0] == 100 && ipv4[1]&0xc0 == 64
 }
 
 func ytDlpError(prefix, details string, cause error) error {

@@ -72,8 +72,8 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 	}
 	parsed := make([]parsedURL, 0, len(req.URLs))
 
-	for i, url := range req.URLs {
-		video, err := transcript.ParseVideoURL(url)
+	for i, rawURL := range req.URLs {
+		video, err := transcript.ParseVideoURL(rawURL)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, models.ErrorResponse{
 				Error:   "invalid_url",
@@ -81,6 +81,16 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 				Code:    http.StatusBadRequest,
 			})
 			return
+		}
+		if video.Source == transcript.SourceOther {
+			if err := transcript.ValidateExternalVideoURL(c.Request.Context(), video.URL); err != nil {
+				c.JSON(http.StatusBadRequest, models.ErrorResponse{
+					Error:   "invalid_url",
+					Message: "Invalid video URL at index " + intToStr(i) + ": " + err.Error(),
+					Code:    http.StatusBadRequest,
+				})
+				return
+			}
 		}
 		parsed = append(parsed, parsedURL{fullURL: video.URL, videoID: video.VideoID})
 	}
@@ -172,6 +182,9 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 					}
 				}
 				log.Printf("Failed to queue extraction job for %s: %v", t.ID, err)
+				t.Status = models.StatusFailed
+				t.ErrorMessage = "Job queue is full, please try again later"
+				_ = h.DB.UpdateTranscript(c.Request.Context(), t)
 			}
 		}
 

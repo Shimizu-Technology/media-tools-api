@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
+import { SignInButton } from '@clerk/clerk-react'
 import { useSearchParams, Link, useNavigate } from 'react-router-dom'
-import { Sparkles, ArrowLeft, History, MessageCircle, Wand2, PlayCircle } from 'lucide-react'
+import { Sparkles, ArrowLeft, History, MessageCircle, Wand2, PlayCircle, LogIn } from 'lucide-react'
 import { ApiKeySetup } from '../components/ApiKeySetup'
 import { TranscriptInput } from '../components/TranscriptInput'
 import { TranscriptDisplay } from '../components/TranscriptDisplay'
@@ -13,17 +14,21 @@ import {
   addTranscriptToHistory,
   type Transcript,
 } from '../lib/api'
+import { useAuthContext } from '../contexts/useAuthContext'
 
 export function HomePage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const { isClerkEnabled, isAuthenticated, isLoading: isAuthLoading } = useAuthContext()
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('mta_api_key') || '')
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
 
+  const canSubmit = isAuthenticated || !!apiKey
+
   // Load transcript from URL param
-  const urlId = searchParams.get('id')
+  const urlId = searchParams.get('id') || searchParams.get('transcript')
   useEffect(() => {
     if (urlId && !transcript) {
       getTranscript(urlId)
@@ -183,15 +188,48 @@ export function HomePage() {
         </button>
       )}
 
-      {/* API Key Setup */}
-      {!apiKey && (
+      {/* Auth / API Key Setup */}
+      {!transcript && isClerkEnabled && !isAuthLoading && !isAuthenticated && (
+        <div
+          className="max-w-md mx-auto mb-8 p-6 rounded-2xl border text-center"
+          style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}
+        >
+          <div
+            className="w-10 h-10 mx-auto mb-3 rounded-xl flex items-center justify-center"
+            style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
+          >
+            <LogIn className="w-5 h-5" />
+          </div>
+          <h3 className="text-base font-semibold mb-1" style={{ color: 'var(--color-text-primary)' }}>
+            Sign in to extract transcripts
+          </h3>
+          <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>
+            Your videos, recordings, PDFs, chats, and collections stay tied to your account.
+          </p>
+          <SignInButton mode="modal">
+            <button
+              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90"
+              style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
+            >
+              <LogIn className="w-4 h-4" />
+              Sign in
+            </button>
+          </SignInButton>
+        </div>
+      )}
+
+      {!transcript && isClerkEnabled && isAuthLoading && (
+        <div className="max-w-2xl mx-auto h-16 rounded-2xl animate-pulse" style={{ backgroundColor: 'var(--color-surface-elevated)' }} />
+      )}
+
+      {!transcript && !isClerkEnabled && !apiKey && (
         <div className="mb-8">
           <ApiKeySetup onKeySet={setApiKey} hasKey={!!apiKey} />
         </div>
       )}
 
       {/* URL Input */}
-      {apiKey && !transcript && (
+      {canSubmit && !transcript && (
         <TranscriptInput onSubmit={handleSubmit} isLoading={isSubmitting} />
       )}
 

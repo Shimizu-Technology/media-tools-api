@@ -13,7 +13,6 @@ import { CollectionsPage } from './pages/CollectionsPage'
 import { PrivacyPage } from './pages/PrivacyPage'
 import { AuthProvider } from './contexts/AuthContext'
 import { setAuthTokenGetter } from './lib/apiAuth'
-import { ClerkTokenSync } from './components/ClerkTokenSync'
 
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 const isClerkEnabled = Boolean(CLERK_PUBLISHABLE_KEY && CLERK_PUBLISHABLE_KEY !== 'YOUR_PUBLISHABLE_KEY')
@@ -64,8 +63,9 @@ function ClerkAppContent() {
   const { getToken, isLoaded, isSignedIn } = useAuth()
 
   useEffect(() => {
-    // Wire Clerk's getToken into the API auth system
-    // getToken() automatically handles token refresh (Brain Dump guide pattern)
+    // Wire Clerk's getToken into the API auth system.
+    // getToken() automatically handles token refresh, so we do not mirror
+    // short-lived Clerk tokens into localStorage.
     setAuthTokenGetter(async () => {
       try {
         return await getToken()
@@ -75,6 +75,12 @@ function ClerkAppContent() {
     })
   }, [getToken])
 
+  useEffect(() => {
+    if (isLoaded && !isSignedIn) {
+      localStorage.removeItem('mta_jwt_token')
+    }
+  }, [isLoaded, isSignedIn])
+
   return (
     <AuthProvider
       isClerkEnabled={true}
@@ -82,13 +88,11 @@ function ClerkAppContent() {
       isLoading={!isLoaded}
       canUseWorkspace={true}
     >
-      <ClerkTokenSync>
-        <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
-          <Header />
-          <AppRoutes />
-          <AppFooter />
-        </div>
-      </ClerkTokenSync>
+      <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
+        <Header />
+        <AppRoutes />
+        <AppFooter />
+      </div>
     </AuthProvider>
   )
 }

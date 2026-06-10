@@ -84,6 +84,10 @@ final class MediaToolsService {
         }
     }
 
+    func getPDF(_ id: String) async throws -> PDFExtraction {
+        try await api.get("/pdf/extractions/\(id)")
+    }
+
     func deletePDF(_ id: String) async throws {
         try await api.delete("/pdf/extractions/\(id)")
     }
@@ -153,13 +157,53 @@ final class MediaToolsService {
 
     // MARK: - Summary
 
+    func getSummaries(transcriptId: String) async throws -> [Summary] {
+        try await api.get("/transcripts/\(transcriptId)/summaries")
+    }
+
     func getSummary(transcriptId: String, contentType: String? = nil) async throws -> Summary {
-        try await api.post("/summaries", body: SummaryRequest(
+        let _: EmptyResponse = try await api.post("/summaries", body: SummaryRequest(
             transcriptId: transcriptId,
             contentType: contentType,
             length: "medium",
             style: "bullet"
         ))
+
+        return try await pollTranscriptSummary(transcriptId: transcriptId)
+    }
+
+    func summarizeAudio(audioId: String, contentType: String? = nil) async throws -> Summary {
+        let audio: AudioTranscription = try await api.post(
+            "/audio/transcriptions/\(audioId)/summarize",
+            body: SummarizeAudioRequest(contentType: contentType, model: nil, length: "medium")
+        )
+        return Summary(
+            id: audio.id,
+            transcriptId: nil,
+            summaryText: audio.summaryText,
+            keyPoints: audio.keyPoints,
+            actionItems: audio.actionItems,
+            topics: nil,
+            status: audio.summaryStatus,
+            message: nil,
+            errorMessage: nil
+        )
+    }
+
+    private func pollTranscriptSummary(transcriptId: String) async throws -> Summary {
+        for _ in 0..<30 {
+            let summaries = try await getSummaries(transcriptId: transcriptId)
+            if let latest = summaries.first {
+                if latest.isFailed {
+                    throw APIError.httpError(statusCode: 500, message: latest.failureMessage)
+                }
+                if latest.summaryText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                    return latest
+                }
+            }
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+        throw APIError.httpError(statusCode: 408, message: "Summary generation timed out")
     }
 
     // MARK: - Refresh All
