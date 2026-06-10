@@ -185,15 +185,21 @@ final class MediaToolsService {
             actionItems: audio.actionItems,
             topics: nil,
             status: audio.summaryStatus,
-            message: nil
+            message: nil,
+            errorMessage: nil
         )
     }
 
     private func pollTranscriptSummary(transcriptId: String) async throws -> Summary {
         for _ in 0..<30 {
             let summaries = try await getSummaries(transcriptId: transcriptId)
-            if let latest = summaries.first, latest.summaryText?.isEmpty == false {
-                return latest
+            if let latest = summaries.first {
+                if latest.isFailed {
+                    throw APIError.httpError(statusCode: 500, message: latest.failureMessage)
+                }
+                if latest.summaryText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                    return latest
+                }
             }
             try await Task.sleep(nanoseconds: 2_000_000_000)
         }

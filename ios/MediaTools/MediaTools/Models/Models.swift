@@ -143,8 +143,18 @@ struct Summary: Codable {
     let topics: [String]?
     let status: String?
     let message: String? // for async "accepted" responses
+    let errorMessage: String?
 
     var summary: String? { summaryText }
+
+    var isFailed: Bool {
+        guard let status else { return false }
+        return ["failed", "error"].contains(status.lowercased())
+    }
+
+    var failureMessage: String {
+        errorMessage ?? message ?? "Summary generation failed"
+    }
 }
 
 struct SummaryRequest: Codable {

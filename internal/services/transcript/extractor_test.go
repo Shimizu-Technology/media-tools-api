@@ -44,6 +44,8 @@ func TestValidateExternalVideoURLBlocksUnsafeTargets(t *testing.T) {
 		"http://10.0.0.5/video",
 		"http://172.16.0.1/video",
 		"http://192.168.1.10/video",
+		"http://100.64.0.1/video",
+		"http://100.127.255.254/video",
 		"http://[::1]/video",
 	}
 

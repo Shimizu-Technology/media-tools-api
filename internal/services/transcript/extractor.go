@@ -593,8 +593,10 @@ func ParseYouTubeURL(input string) (string, string, error) {
 }
 
 // ValidateExternalVideoURL blocks obvious SSRF targets before a generic URL is
-// handed to yt-dlp. yt-dlp itself performs its own network requests, so this is
-// a defense-in-depth preflight for user-supplied non-YouTube/Vimeo URLs.
+// handed to yt-dlp. yt-dlp itself performs its own network requests and resolves
+// hostnames again, so this is a defense-in-depth preflight for user-supplied
+// non-YouTube/Vimeo URLs. Production should still pair this with network egress
+// controls/sandboxing around yt-dlp for full DNS-rebinding protection.
 func ValidateExternalVideoURL(ctx context.Context, raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -635,10 +637,18 @@ func ValidateExternalVideoURL(ctx context.Context, raw string) error {
 func isBlockedVideoIP(ip net.IP) bool {
 	return ip.IsLoopback() ||
 		ip.IsPrivate() ||
+		isCarrierGradeNAT(ip) ||
 		ip.IsLinkLocalUnicast() ||
 		ip.IsLinkLocalMulticast() ||
 		ip.IsMulticast() ||
 		ip.IsUnspecified()
+}
+
+// isCarrierGradeNAT blocks the IANA Shared Address Space (RFC 6598) used for
+// carrier-grade NAT. net.IP.IsPrivate only covers RFC 1918 IPv4 and IPv6 ULA.
+func isCarrierGradeNAT(ip net.IP) bool {
+	ipv4 := ip.To4()
+	return ipv4 != nil && ipv4[0] == 100 && ipv4[1]&0xc0 == 64
 }
 
 func ytDlpError(prefix, details string, cause error) error {
