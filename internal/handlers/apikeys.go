@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -96,6 +97,82 @@ func (h *Handler) CreateAPIKey(c *gin.Context) {
 	}
 
 	// Return the key WITH the raw value — this is the ONLY time it's shown
+	c.JSON(http.StatusCreated, models.CreateAPIKeyResponse{
+		APIKey: *key,
+		RawKey: rawKey,
+	})
+}
+
+// CreateUserAPIKey generates a new API key owned by the signed-in Clerk/JWT user.
+// POST /api/v1/user/keys
+//
+// This is the app-facing developer flow. The public POST /keys endpoint remains
+// an admin-key-protected bootstrap path for production operators.
+func (h *Handler) CreateUserAPIKey(c *gin.Context) {
+	actor := getActorOwnership(c)
+	if actor.UserID == nil {
+		c.JSON(http.StatusForbidden, models.ErrorResponse{
+			Error:   "forbidden",
+			Message: "Sign in with a user account to create developer API keys",
+			Code:    http.StatusForbidden,
+		})
+		return
+	}
+
+	var req models.CreateAPIKeyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "name is required",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "name is required",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	rawKey, err := generateAPIKey()
+	if err != nil {
+		log.Printf("❌ Failed to generate user API key: %v", err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "generation_error",
+			Message: "Failed to generate API key",
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+
+	// Account-scoped keys use the standard public rate limit. Unlike the admin
+	// bootstrap endpoint, browser users cannot mint elevated-limit keys.
+	rateLimit := 100
+
+	key := &models.APIKey{
+		KeyHash:   middleware.HashAPIKey(rawKey),
+		KeyPrefix: rawKey[:8] + "...",
+		Name:      name,
+		Active:    true,
+		RateLimit: rateLimit,
+		UserID:    actor.UserID,
+	}
+
+	if err := h.DB.CreateAPIKey(c.Request.Context(), key); err != nil {
+		log.Printf("❌ Failed to create user API key: %v", err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "database_error",
+			Message: "Failed to create API key",
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+
 	c.JSON(http.StatusCreated, models.CreateAPIKeyResponse{
 		APIKey: *key,
 		RawKey: rawKey,

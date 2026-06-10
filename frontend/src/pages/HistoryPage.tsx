@@ -510,7 +510,7 @@ export function HistoryPage() {
           </p>
           {!hasHistory && (
             <button
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/app/video')}
               className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-white font-medium text-sm transition-all duration-200 hover:opacity-90"
               style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
             >

@@ -252,7 +252,7 @@ function CollectionsList() {
               ) : (
                 <div
                   className="p-4 cursor-pointer flex items-center gap-4"
-                  onClick={() => navigate(`/collections/${col.id}`)}
+                  onClick={() => navigate(`/app/collections/${col.id}`)}
                 >
                   <div className="w-10 h-10 rounded-lg bg-[var(--brand)]/10 flex items-center justify-center shrink-0">
                     <FolderOpen className="w-5 h-5 text-[var(--brand)]" />
@@ -327,10 +327,10 @@ function CollectionDetail({ id }: { id: string }) {
 
   const getItemLink = (item: CollectionItem) => {
     switch (item.item_type) {
-      case 'transcript': return `/library?type=youtube`;
-      case 'audio': return `/library?type=audio`;
-      case 'pdf': return `/library?type=pdf`;
-      default: return '/library';
+      case 'transcript': return `/app/library?type=youtube`;
+      case 'audio': return `/app/library?type=audio`;
+      case 'pdf': return `/app/library?type=pdf`;
+      default: return '/app/library';
     }
   };
 
@@ -347,7 +347,7 @@ function CollectionDetail({ id }: { id: string }) {
       <div className="max-w-4xl mx-auto text-center py-20">
         <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
         <p className="text-[var(--text-secondary)]">{error || 'Not found'}</p>
-        <Link to="/collections" className="text-sm text-[var(--brand)] mt-2 inline-block hover:underline">
+        <Link to="/app/collections" className="text-sm text-[var(--brand)] mt-2 inline-block hover:underline">
           Back to collections
         </Link>
       </div>
@@ -358,7 +358,7 @@ function CollectionDetail({ id }: { id: string }) {
     <div className="max-w-4xl mx-auto">
       {/* Back + header */}
       <Link
-        to="/collections"
+        to="/app/collections"
         className="inline-flex items-center gap-1.5 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)] mb-4 transition-colors"
       >
         <ArrowLeft className="w-4 h-4" />

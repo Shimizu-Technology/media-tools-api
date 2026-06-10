@@ -29,6 +29,7 @@ type RouterConfig struct {
 	Webhooks               *webhookservice.Service
 	Summarizer             *summary.Service
 	JWTSecret              string
+	LegacyAuthEnabled      bool
 	AdminAPIKey            string
 	OwnerKeyID             string
 	OwnerKeyPrefix         string
@@ -69,9 +70,14 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	r.GET("/api/docs", h.ServeSwaggerUI)
 	r.GET("/api/docs/openapi.yaml", h.ServeOpenAPISpec)
 
-	// --- Auth Routes (MTA-20) — public ---
-	r.POST("/api/v1/auth/register", h.Register)
-	r.POST("/api/v1/auth/login", h.Login)
+	// --- Legacy Auth Routes (MTA-20) ---
+	// Browser auth is Clerk-first. Legacy email/password auth is kept only when
+	// explicitly enabled (local/dev compatibility) so production cannot bypass
+	// Clerk by registering directly against the API.
+	if cfg.LegacyAuthEnabled {
+		r.POST("/api/v1/auth/register", h.Register)
+		r.POST("/api/v1/auth/login", h.Login)
+	}
 
 	// --- JWT-protected routes (MTA-20) — accepts Clerk or legacy JWT ---
 	jwtProtected := r.Group("/api/v1")
@@ -82,7 +88,9 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	}
 	{
 		jwtProtected.GET("/auth/me", h.GetMe)
-		jwtProtected.POST("/auth/refresh", h.RefreshToken)
+		if cfg.LegacyAuthEnabled {
+			jwtProtected.POST("/auth/refresh", h.RefreshToken)
+		}
 		jwtProtected.GET("/workspace", h.GetWorkspace)
 		jwtProtected.POST("/workspace", h.SaveToWorkspace)
 		jwtProtected.DELETE("/workspace/:type/:id", h.RemoveFromWorkspace)
@@ -112,6 +120,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 
 		// API key management
 		protected.GET("/keys", h.ListAPIKeys)
+		protected.POST("/user/keys", h.CreateUserAPIKey)
 		protected.DELETE("/keys/:id", h.RevokeAPIKey)
 
 		// Audio transcription endpoints (MTA-16, MTA-22, MTA-25, MTA-26)

@@ -27,7 +27,9 @@
   
   /* Success/Error */
   --color-success: #18b985;
+  --color-warning: #f59e0b;
   --color-error: #ef4444;
+  --color-danger: var(--color-error);
 
   /* Compatibility aliases for newer screens that use compact token names. */
   --bg: var(--color-surface);

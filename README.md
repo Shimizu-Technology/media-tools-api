@@ -104,11 +104,11 @@ curl -H "X-API-Key: mta_your_key_here" http://localhost:8080/api/v1/transcripts
 curl -H "Authorization: Bearer eyJ..." http://localhost:8080/api/v1/transcripts
 ```
 
-When using the React frontend, Clerk handles authentication automatically. See `GETTING_STARTED.md` for setup instructions.
+When using the React frontend, Clerk protects `/app/*` routes automatically. Public docs stay at `/docs`; legacy web URLs such as `/audio`, `/pdf`, `/library`, and `/collections` redirect into the signed-in app shell.
 
 ### Create an API Key
 
-In production, API key creation requires an admin key:
+Browser users can create account-scoped developer keys from **App → Developer**. Production operators can still bootstrap keys with the admin endpoint:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/keys \
@@ -208,7 +208,11 @@ Options:
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `JWT_SECRET` | Yes | 32+ char random string |
-| `ADMIN_API_KEY` | Yes | Secret key for creating API keys |
+| `ADMIN_API_KEY` | Yes | Secret key for bootstrap API key creation |
+| `CLERK_SECRET_KEY` | Browser auth | Clerk Backend API key for syncing signed-in users |
+| `CLERK_JWKS_URL` | Browser auth | Clerk JWKS URL for validating signed-in users |
+| `CLERK_AUTHORIZED_PARTY` | Browser auth | Frontend origin allowed in Clerk token `azp` claim |
+| `LEGACY_AUTH_ENABLED` | Optional | Enable legacy email/password auth routes; defaults off in release |
 | `OPENROUTER_API_KEY` | For summaries | OpenRouter API key |
 | `OPENAI_API_KEY` | For audio | OpenAI API key (Whisper) |
 | `CORS_ORIGIN` | Yes | Frontend URL (e.g., https://your-app.netlify.app) |

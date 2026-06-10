@@ -105,7 +105,7 @@ export function WebhooksPage() {
   };
 
   return (
-    <main className="relative pt-24 pb-16 px-4 sm:px-6">
+    <main className="relative pb-16">
       <div className="max-w-5xl mx-auto">
         {/* Header */}
         <motion.div

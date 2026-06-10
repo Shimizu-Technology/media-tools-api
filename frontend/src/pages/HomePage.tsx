@@ -79,7 +79,7 @@ export function HomePage() {
     setError('')
     // Use navigate instead of setSearchParams to ensure a clean reset
     // This prevents the useEffect from re-loading the old transcript
-    navigate('/', { replace: true })
+    navigate('/app/video', { replace: true })
   }
 
   return (
@@ -116,7 +116,7 @@ export function HomePage() {
 
             <div className="flex flex-wrap items-center gap-3">
               <Link
-                to="/library?type=youtube"
+                to="/app/library?type=youtube"
                 className="inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
                 style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
               >

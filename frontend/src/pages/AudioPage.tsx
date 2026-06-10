@@ -772,7 +772,7 @@ export function AudioPage() {
   const canEditInput = (!result || result.status === 'failed') && !isProcessing;
 
   return (
-    <main className="relative pt-20 sm:pt-28 pb-12 sm:pb-16 px-4 sm:px-6">
+    <main className="relative pb-12 sm:pb-16">
       {/* Hero */}
       {!result && !isProcessing && (
         <div className="text-center mb-8">

@@ -28,7 +28,7 @@ export function OpsPage() {
   }, []);
 
   return (
-    <main className="pt-20 sm:pt-28 pb-12 sm:pb-16 px-4 sm:px-6">
+    <main className="pb-12 sm:pb-16">
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
