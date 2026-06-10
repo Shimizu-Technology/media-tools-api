@@ -1,83 +1,20 @@
 # Future Improvements
 
-Ideas and enhancements to consider for future development.
+This file is kept as a lightweight idea inbox.
 
----
+For the current product direction and prioritized roadmap, see:
 
-## Access Control Options
+- [`PRODUCT_ROADMAP.md`](PRODUCT_ROADMAP.md)
 
-Currently, API key creation requires an admin key. Consider these alternatives for more open access:
+## Idea Inbox
 
-### Option A: Public Key Creation with Aggressive Rate Limits
-- Remove admin key requirement
-- Add captcha to prevent bots
-- Strict per-key rate limits (e.g., 10 transcriptions/day)
-- Risk: Potential cost abuse
+Add quick ideas here as they come up, then promote them into the roadmap when they become concrete.
 
-### Option B: Shared Demo Key
-- Pre-create a "demo" API key with low quotas
-- Embed in app or share publicly
-- Everyone shares the same rate limit pool
-- Good for: Demos, trials
-
-### Option C: User Accounts with Quotas
-- Email/password registration
-- Each account gets X free transcriptions/month
-- Requires: Email verification, password reset flow
-- More infrastructure but better accountability
-
-### Option D: Hosted Auth (Clerk / WorkOS)
-- Replace or augment API keys with a hosted auth provider
-- Clerk: fast setup + UI components + social login
-- WorkOS: enterprise SSO (SAML/SCIM) for future B2B
-- Could keep API keys for server-to-server use
-
----
-
-## High Priority
-
-- [x] **API Key Ownership** (DONE)
-  - Each transcript is linked to the API key that created it
-  - History page shows only your own transcripts
-  - No user accounts needed for personal use
-
-- [ ] **User Accounts** (if sharing with others)
-  - Sign up / sign in flow (email + password)
-  - Associate each transcript with a user ID
-  - Password reset via email
-
-- [ ] **AI Chat About Transcripts**
-  - Simple version: "Ask a question about this transcript" single input
-  - Advanced version: Full chat interface with conversation history
-  - Consider token limits for very long transcripts
-
-- [ ] **Unlimited Usage for Admin/Owner**
-  - Allowlist the owner account or API key
-  - Bypass rate limits and queue caps for that account
-  - Keep limits for everyone else to control cost
-
-- [ ] **YouTube "Open Video" Button**
-  - Store original video URL or ID
-  - Add a button/link on transcript cards and detail view
-
----
-
-## Other Ideas
-
-- [ ] **S3 Storage for Audio Files**
-  - Store original audio files in S3/R2 instead of temp directory
-  - Enables: re-processing, download original, multi-server scaling
-  - Required for: load balancers, horizontal scaling
-  - Consider: Cloudflare R2 (no egress fees) or AWS S3
-- [ ] Batch audio uploads
-- [ ] Longer audio file support (chunked uploads for files > 25MB)
-- [ ] Speaker diarization (who said what)
-- [ ] Real-time transcription via WebSocket
-- [ ] Export to Google Docs / Notion
-- [ ] Mobile app (React Native or PWA enhancements)
-- [ ] Usage dashboard / analytics
-- [ ] Stripe integration for paid tiers
-
----
-
-*Add your ideas here as they come up!*
+- Browser extension for saving videos directly from YouTube/Vimeo.
+- Google Drive import/export.
+- Gmail attachment import.
+- More export formats such as `.docx` and `.pdf`.
+- Team workspaces and shared collections.
+- Stripe billing and usage limits.
+- Speaker diarization for meetings and calls.
+- Semantic search across transcripts, PDFs, summaries, and chat history.
