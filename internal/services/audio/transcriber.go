@@ -161,8 +161,12 @@ func (t *Transcriber) Transcribe(ctx context.Context, audioData io.Reader, filen
 func whisperContentType(filename string) string {
 	lower := strings.ToLower(filename)
 	switch {
-	case strings.HasSuffix(lower, ".mp3") || strings.HasSuffix(lower, ".mpga") || strings.HasSuffix(lower, ".mpeg"):
+	case strings.HasSuffix(lower, ".mp3") || strings.HasSuffix(lower, ".mpga"):
 		return "audio/mpeg"
+	case strings.HasSuffix(lower, ".mpeg"):
+		return "video/mpeg"
+	case strings.HasSuffix(lower, ".aac"):
+		return "audio/aac"
 	case strings.HasSuffix(lower, ".m4a"):
 		return "audio/mp4"
 	case strings.HasSuffix(lower, ".mp4"):

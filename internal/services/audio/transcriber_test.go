@@ -8,6 +8,9 @@ func TestWhisperContentType(t *testing.T) {
 		want     string
 	}{
 		{filename: "recording.mp3", want: "audio/mpeg"},
+		{filename: "audio.mpga", want: "audio/mpeg"},
+		{filename: "program.mpeg", want: "video/mpeg"},
+		{filename: "raw.aac", want: "audio/aac"},
 		{filename: "clip.M4A", want: "audio/mp4"},
 		{filename: "video.mp4", want: "video/mp4"},
 		{filename: "voice.ogg", want: "audio/ogg"},
