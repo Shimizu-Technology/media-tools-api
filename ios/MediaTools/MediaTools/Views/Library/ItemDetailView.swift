@@ -4,6 +4,7 @@ struct ItemDetailView: View {
     let item: LibraryItem
     @State private var transcript: Transcript?
     @State private var audio: AudioTranscription?
+    @State private var pdf: PDFExtraction?
     @State private var showChat = false
     @State private var showAddToCollection = false
     @State private var summary: Summary?
@@ -149,8 +150,13 @@ struct ItemDetailView: View {
             }
             .buttonStyle(.bordered)
             .tint(Theme.brand400)
-            .disabled(isLoadingSummary)
+            .disabled(isLoadingSummary || !canSummarize)
         }
+    }
+
+    private var canSummarize: Bool {
+        if case .pdf = item { return false }
+        return true
     }
 
     // MARK: - Summary Content Type
@@ -348,7 +354,7 @@ struct ItemDetailView: View {
     }
 
     private var contentText: String? {
-        transcript?.transcriptText ?? audio?.transcriptText ?? nil
+        transcript?.transcriptText ?? audio?.transcriptText ?? pdf?.textContent ?? nil
     }
 
     private func formatDuration(_ seconds: Double) -> String {
@@ -364,8 +370,8 @@ struct ItemDetailView: View {
                 transcript = try await service.getTranscript(t.id)
             case .audio(let a):
                 audio = try await service.getAudioItem(a.id)
-            case .pdf:
-                break
+            case .pdf(let p):
+                pdf = try await service.getPDF(p.id)
             }
         } catch {
             print("Failed to load detail: \(error)")
@@ -377,10 +383,16 @@ struct ItemDetailView: View {
         Haptics.light()
         defer { isLoadingSummary = false }
         do {
-            let result = try await service.getSummary(
-                transcriptId: itemId,
-                contentType: summaryContentType == "general" ? nil : summaryContentType
-            )
+            let selectedContentType = summaryContentType == "general" ? nil : summaryContentType
+            let result: Summary
+            switch item {
+            case .transcript:
+                result = try await service.getSummary(transcriptId: itemId, contentType: selectedContentType)
+            case .audio:
+                result = try await service.summarizeAudio(audioId: itemId, contentType: selectedContentType)
+            case .pdf:
+                throw APIError.httpError(statusCode: 400, message: "PDF summaries are not available yet")
+            }
             withAnimation(Theme.springGentle) {
                 summary = result
             }

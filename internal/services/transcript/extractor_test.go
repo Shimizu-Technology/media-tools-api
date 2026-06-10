@@ -8,6 +8,7 @@
 package transcript
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -17,6 +18,50 @@ import (
 // Go Pattern: Table-driven tests are the standard Go pattern for testing
 // multiple inputs. Define a slice of test cases, then loop through them.
 // This is cleaner than writing separate test functions for each case.
+func TestParseVideoURLDoesNotTrustPlatformNamesOnOtherHosts(t *testing.T) {
+	tests := []string{
+		"http://127.0.0.1/youtube.com/watch?v=dQw4w9WgXcQ",
+		"http://127.0.0.1/vimeo.com/123456789",
+	}
+
+	for _, raw := range tests {
+		t.Run(raw, func(t *testing.T) {
+			parsed, err := ParseVideoURL(raw)
+			if err != nil {
+				t.Fatalf("ParseVideoURL(%q) unexpected error: %v", raw, err)
+			}
+			if parsed.Source != SourceOther {
+				t.Fatalf("ParseVideoURL(%q) source = %q, want %q", raw, parsed.Source, SourceOther)
+			}
+		})
+	}
+}
+
+func TestValidateExternalVideoURLBlocksUnsafeTargets(t *testing.T) {
+	tests := []string{
+		"http://localhost/video",
+		"http://127.0.0.1/video",
+		"http://10.0.0.5/video",
+		"http://172.16.0.1/video",
+		"http://192.168.1.10/video",
+		"http://[::1]/video",
+	}
+
+	for _, raw := range tests {
+		t.Run(raw, func(t *testing.T) {
+			if err := ValidateExternalVideoURL(context.Background(), raw); err == nil {
+				t.Fatalf("ValidateExternalVideoURL(%q) expected error, got nil", raw)
+			}
+		})
+	}
+}
+
+func TestValidateExternalVideoURLAllowsPublicLiteralIP(t *testing.T) {
+	if err := ValidateExternalVideoURL(context.Background(), "https://93.184.216.34/video"); err != nil {
+		t.Fatalf("ValidateExternalVideoURL() unexpected error: %v", err)
+	}
+}
+
 func TestParseYouTubeURL(t *testing.T) {
 	// Define test cases as a slice of anonymous structs
 	tests := []struct {

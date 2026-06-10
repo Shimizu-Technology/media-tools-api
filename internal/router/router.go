@@ -38,6 +38,7 @@ type RouterConfig struct {
 	ClerkAudience          string
 	ClerkAuthorizedParty   string
 	AllowedOrigins         []string
+	DefaultRateLimit       int
 	YtDlpCookiesConfigured bool
 }
 
@@ -51,7 +52,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	r.Use(middleware.CORS(cfg.AllowedOrigins))
 
 	h := handlers.NewHandler(cfg.DB, cfg.WorkerPool, cfg.AudioTranscriber, cfg.AudioStorage, cfg.Webhooks, cfg.Summarizer, cfg.JWTSecret, cfg.AdminAPIKey, cfg.OwnerKeyID, cfg.OwnerKeyPrefix, cfg.YtDlpCookiesConfigured)
-	rateLimiter := middleware.NewRateLimiter(cfg.OwnerKeyID, cfg.OwnerKeyPrefix)
+	rateLimiter := middleware.NewRateLimiter(cfg.OwnerKeyID, cfg.OwnerKeyPrefix, cfg.DefaultRateLimit)
 
 	// Initialize Clerk JWKS cache if configured
 	var jwksCache *middleware.JWKSCache
@@ -60,6 +61,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	}
 
 	// --- Public Routes (no auth required) ---
+	r.GET("/health", h.HealthCheck) // Render-style health check alias
 	r.GET("/api/v1/health", h.HealthCheck)
 	r.POST("/api/v1/keys", h.CreateAPIKey)
 
@@ -170,14 +172,28 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		// Serve static assets (JS, CSS, images)
 		r.Static("/assets", filepath.Join(frontendDir, "assets"))
 
-		// Serve the SPA index.html for all non-API routes
-		// This lets React Router handle client-side routing (/audio, /history, etc.)
+		// Serve the SPA index.html for all non-API routes.
+		// If the request maps to a built root asset (manifest, icons, robots.txt,
+		// sitemap.xml, etc.), serve that file instead of returning index.html.
+		// This keeps Docker-hosted PWA/SEO assets working the same way Netlify does.
 		r.NoRoute(func(c *gin.Context) {
 			// Don't serve index.html for API routes — return proper 404
 			if strings.HasPrefix(c.Request.URL.Path, "/api/") {
 				c.JSON(http.StatusNotFound, gin.H{"error": "not_found", "message": "API endpoint not found"})
 				return
 			}
+
+			cleanPath := strings.TrimPrefix(filepath.Clean(c.Request.URL.Path), string(filepath.Separator))
+			if cleanPath != "." && cleanPath != "" {
+				candidate := filepath.Join(frontendDir, cleanPath)
+				if rel, err := filepath.Rel(frontendDir, candidate); err == nil && !strings.HasPrefix(rel, "..") {
+					if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+						c.File(candidate)
+						return
+					}
+				}
+			}
+
 			c.File(filepath.Join(frontendDir, "index.html"))
 		})
 	}

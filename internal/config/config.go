@@ -140,17 +140,16 @@ func Load() (*Config, error) {
 		// Rate limiting
 		DefaultRateLimit: getEnvInt("DEFAULT_RATE_LIMIT", 100),
 
-		// CORS — in production, set this to your frontend URL
-		AllowedOrigins: []string{
-			normalizeOrigin(getEnv("CORS_ORIGIN", "http://localhost:5173")), // Vite dev server default
-		},
+		// CORS — in production, set this to your frontend URL. Multiple origins can
+		// be comma-separated for preview deployments.
+		AllowedOrigins: parseAllowedOrigins(getEnv("CORS_ORIGIN", "http://localhost:5173")),
 	}
 
 	if cfg.GinMode == "release" && cfg.ClerkJWKSURL != "" && cfg.ClerkAudience == "" && cfg.ClerkAuthorizedParty == "" {
-		if origin, ok := os.LookupEnv("CORS_ORIGIN"); ok && strings.TrimSpace(origin) != "" {
+		if origin, ok := os.LookupEnv("CORS_ORIGIN"); ok && strings.TrimSpace(origin) != "" && !strings.Contains(origin, ",") {
 			cfg.ClerkAuthorizedParty = normalizeOrigin(origin)
 		} else {
-			return nil, fmt.Errorf("CLERK_AUDIENCE, CLERK_AUTHORIZED_PARTY, or CORS_ORIGIN must be set in production when Clerk auth is enabled")
+			return nil, fmt.Errorf("CLERK_AUDIENCE, CLERK_AUTHORIZED_PARTY, or single CORS_ORIGIN must be set in production when Clerk auth is enabled")
 		}
 	}
 
@@ -194,6 +193,21 @@ func getEnv(key, fallback string) string {
 
 func normalizeOrigin(origin string) string {
 	return strings.TrimRight(strings.TrimSpace(origin), "/")
+}
+
+func parseAllowedOrigins(raw string) []string {
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	for _, part := range parts {
+		origin := normalizeOrigin(part)
+		if origin != "" {
+			origins = append(origins, origin)
+		}
+	}
+	if len(origins) == 0 {
+		return []string{"http://localhost:5173"}
+	}
+	return origins
 }
 
 // getEnvInt reads an integer environment variable with a fallback.

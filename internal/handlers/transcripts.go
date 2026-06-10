@@ -58,6 +58,16 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 		})
 		return
 	}
+	if parsed.Source == transcript.SourceOther {
+		if err := transcript.ValidateExternalVideoURL(c.Request.Context(), parsed.URL); err != nil {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse{
+				Error:   "invalid_url",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+			return
+		}
+	}
 
 	youtubeURL := parsed.URL
 	videoID := parsed.VideoID
@@ -119,8 +129,15 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 			}
 		}
 		log.Printf("⚠️  Failed to queue extraction job: %v", err)
-		// The transcript record exists but extraction didn't start.
-		// The client can retry or the transcript will stay "pending".
+		t.Status = models.StatusFailed
+		t.ErrorMessage = "Job queue is full, please try again later"
+		_ = h.DB.UpdateTranscript(c.Request.Context(), t)
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
+			Error:   "queue_full",
+			Message: "Server is busy. Please try again in a moment.",
+			Code:    http.StatusServiceUnavailable,
+		})
+		return
 	}
 
 	// Return 202 Accepted — the work is happening in the background
@@ -254,7 +271,7 @@ func (h *Handler) CreateSummary(c *gin.Context) {
 	payload, _ := json.Marshal(worker.SummaryPayload{
 		TranscriptID: req.TranscriptID,
 		Model:        req.Model,
-		Length:        req.Length,
+		Length:       req.Length,
 		Style:        req.Style,
 		ContentType:  req.ContentType,
 	})

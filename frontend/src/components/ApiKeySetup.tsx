@@ -24,14 +24,10 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCreate = async () => {
-    if (!adminKey.trim()) {
-      setError('Admin key is required to create API keys');
-      return;
-    }
     setIsLoading(true);
     setError('');
     try {
-      const result = await createAPIKey(name, { adminKey: adminKey.trim() });
+      const result = await createAPIKey(name, { adminKey: adminKey.trim() || undefined });
       if (result.raw_key) {
         setCreatedKey(result.raw_key);
         localStorage.setItem('mta_api_key', result.raw_key);
@@ -116,7 +112,7 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
                     type="password"
                     value={adminKey}
                     onChange={(e) => setAdminKey(e.target.value)}
-                    placeholder="Admin key (from environment)"
+                    placeholder="Admin key (production only)"
                     className="w-full px-4 py-3 rounded-xl border text-sm outline-none transition-colors duration-200"
                     style={{
                       backgroundColor: 'var(--color-surface)',
@@ -140,14 +136,14 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
                   />
                   <button
                     onClick={handleCreate}
-                    disabled={isLoading || !name.trim() || !adminKey.trim()}
+                    disabled={isLoading || !name.trim()}
                     className="w-full mt-3 py-3 rounded-xl text-white font-medium text-sm transition-opacity duration-200 disabled:opacity-50"
                     style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
                   >
                     {isLoading ? 'Creating...' : 'Create API Key'}
                   </button>
                   <p className="text-xs mt-2 text-center" style={{ color: 'var(--color-text-muted)' }}>
-                    Admin key is set in your Render environment variables
+                    Production requires the admin key from your Render environment variables
                   </p>
                 </>
               ) : (

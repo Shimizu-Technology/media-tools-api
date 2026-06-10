@@ -3,6 +3,8 @@
 # Common commands for development
 # ═══════════════════════════════════════════════
 
+GO_PACKAGES := $(shell go list ./... | grep -v '/frontend/node_modules/')
+
 .PHONY: help build run test clean docker docker-up docker-down migrate lint fmt vet frontend dev
 
 # Default target — show help
@@ -25,23 +27,23 @@ dev: ## Run with live reload (requires air: go install github.com/air-verse/air@
 # ── Testing ──
 
 test: ## Run all Go tests
-	go test -v ./...
+	go test -v $(GO_PACKAGES)
 
 test-cover: ## Run tests with coverage report
-	go test -coverprofile=coverage.out ./...
+	go test -coverprofile=coverage.out $(GO_PACKAGES)
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
 
 # ── Code Quality ──
 
 lint: ## Run Go linter (requires golangci-lint)
-	golangci-lint run ./...
+	golangci-lint run $(GO_PACKAGES)
 
 fmt: ## Format Go code
-	go fmt ./...
+	go fmt $(GO_PACKAGES)
 
 vet: ## Run Go vet (catch common mistakes)
-	go vet ./...
+	go vet $(GO_PACKAGES)
 
 # ── Docker ──
 

@@ -51,7 +51,7 @@ media-tools-api/              ← Root IS the backend (Go convention)
 │   │   ├── pages/            ← Page components (Home, Audio, History, etc.)
 │   │   ├── components/       ← Shared components
 │   │   ├── lib/api.ts        ← API client (all fetch calls)
-│   │   └── stores/           ← Zustand state management
+│   │   └── stores/           ← Small storage helpers
 │   ├── package.json
 │   └── vite.config.ts        ← Proxies /api → localhost:8080
 ├── go.mod                    ← Go dependencies (like Gemfile)
@@ -94,9 +94,9 @@ In Go, the convention is that the repository root IS the Go module. The `fronten
 
 ### Prerequisites
 
-- **Go 1.21+** — Check: `go version`
+- **Go 1.25+** — Check: `go version`
 - **PostgreSQL** — Check: `psql --version`
-- **Node.js 18+** — Check: `node --version`
+- **Node.js 22+** — Check: `node --version`
 - **yt-dlp** (optional, for YouTube transcripts) — `brew install yt-dlp`
 
 ### 1. Clone and Configure

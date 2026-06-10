@@ -40,8 +40,8 @@ A media processing API for YouTube transcripts, recording transcription, PDF ext
 ```
 
 **Tech Stack:**
-- **Backend:** Go 1.21+ with Gin framework
-- **Frontend:** React 18 + Vite + TypeScript + Tailwind CSS v4 + Framer Motion
+- **Backend:** Go 1.25+ with Gin framework
+- **Frontend:** React 19 + Vite + TypeScript + Tailwind CSS v4 + Framer Motion
 - **Database:** PostgreSQL 16
 - **AI Summaries:** OpenRouter API (GPT-4o, Claude, Gemini, etc.)
 - **Audio Transcription:** OpenAI Whisper API
@@ -62,14 +62,14 @@ cp .env.example .env
 # Start everything
 docker compose up --build -d
 
-# API running at http://localhost:8080
-# Frontend at http://localhost:5173
+# Go serves the built frontend and API at http://localhost:8080
+# For hot-reload frontend development, run `make frontend-dev` separately at http://localhost:5173
 ```
 
 ## Quick Start (Manual)
 
 ```bash
-# Prerequisites: Go 1.21+, PostgreSQL, Node.js 18+, yt-dlp
+# Prerequisites: Go 1.25+, PostgreSQL, Node.js 22+, yt-dlp
 
 # 1. Clone and setup
 git clone https://github.com/Shimizu-Technology/media-tools-api.git

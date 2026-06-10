@@ -737,7 +737,11 @@ func (p *Pool) processAudioTranscription(job Job) error {
 				progress := 40 + int(float64(idx)/float64(len(transcriptionParts))*50)
 				_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcribing", progress)
 			}
-			partName := fmt.Sprintf("%s.part.%03d", payload.OriginalName, idx+1)
+			partName := fmt.Sprintf("%s.part.%03d%s",
+				strings.TrimSuffix(payload.OriginalName, filepath.Ext(payload.OriginalName)),
+				idx+1,
+				filepath.Ext(partPath),
+			)
 			log.Printf("📝 Audio job %s sending chunk %d/%d to Whisper", at.ID, idx+1, len(transcriptionParts))
 			result, err := p.transcribeFile(ctx, partPath, partName)
 			if err != nil {
@@ -812,6 +816,22 @@ func (p *Pool) transcribeFile(ctx context.Context, path, originalName string) (*
 	return p.transcribeFileWithRetry(ctx, path, originalName, 4)
 }
 
+// whisperUploadFilename ensures the multipart filename extension matches the
+// actual file being uploaded. OpenAI validates the uploaded media container; if
+// we transcode a WhatsApp .mp4 to Ogg but still send the original .mp4 filename,
+// Whisper rejects it as an invalid format.
+func whisperUploadFilename(path, originalName string) string {
+	actualExt := strings.ToLower(filepath.Ext(path))
+	if actualExt == "" {
+		return filepath.Base(originalName)
+	}
+	base := strings.TrimSuffix(filepath.Base(originalName), filepath.Ext(originalName))
+	if strings.TrimSpace(base) == "" {
+		base = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	}
+	return base + actualExt
+}
+
 // isRetryableError checks if a Whisper API error is transient and worth retrying.
 // Retryable: 5xx server errors, 429 rate limits, timeouts, network errors.
 // Non-retryable: 4xx client errors (bad format, bad API key, etc).
@@ -867,7 +887,8 @@ func (p *Pool) transcribeFileWithRetry(ctx context.Context, path, originalName s
 		if err != nil {
 			return nil, fmt.Errorf("failed to open audio file: %w", err)
 		}
-		result, err := p.audioTranscriber.Transcribe(ctx, file, originalName)
+		uploadName := whisperUploadFilename(path, originalName)
+		result, err := p.audioTranscriber.Transcribe(ctx, file, uploadName)
 		file.Close()
 		if err == nil {
 			if attempt > 0 {
@@ -927,6 +948,7 @@ func splitAudioForWhisper(ctx context.Context, inputPath string, segmentSeconds 
 		"-c:a", "libopus",
 		"-b:a", "24k",
 		"-f", "segment",
+		"-segment_format", "ogg",
 		"-segment_time", fmt.Sprintf("%d", segmentSeconds),
 		"-reset_timestamps", "1",
 		pattern,
@@ -974,6 +996,7 @@ func transcodeForWhisper(ctx context.Context, inputPath, outputPath string, onPr
 		"-ar", "16000",
 		"-c:a", "libopus",
 		"-b:a", "24k",
+		"-f", "ogg",
 		outputPath,
 	)
 

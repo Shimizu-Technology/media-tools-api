@@ -46,9 +46,13 @@ struct AudioTranscription: Identifiable, Codable {
     let filename: String?
     let originalName: String?
     let errorMessage: String?
+    let summaryText: String?
+    let keyPoints: [String]?
+    let actionItems: [String]?
+    let summaryStatus: String?
 
     var displayTitle: String {
-        title ?? "(Untitled Recording)"
+        title ?? originalName ?? filename ?? "(Untitled Recording)"
     }
 
     var isComplete: Bool {
@@ -61,14 +65,16 @@ struct AudioTranscription: Identifiable, Codable {
 struct PDFExtraction: Identifiable, Codable {
     let id: String
     let filename: String?
+    let originalName: String?
     let status: String
-    let extractedText: String?
+    let textContent: String?
     let pageCount: Int?
     let wordCount: Int?
     let createdAt: Date?
+    let errorMessage: String?
 
     var displayTitle: String {
-        filename ?? "(Untitled PDF)"
+        originalName ?? filename ?? "(Untitled PDF)"
     }
 }
 
@@ -131,12 +137,14 @@ struct ChatResponse: Codable {
 struct Summary: Codable {
     let id: String?
     let transcriptId: String?
-    let summary: String?
+    let summaryText: String?
     let keyPoints: [String]?
     let actionItems: [String]?
     let topics: [String]?
     let status: String?
     let message: String? // for async "accepted" responses
+
+    var summary: String? { summaryText }
 }
 
 struct SummaryRequest: Codable {
@@ -145,6 +153,14 @@ struct SummaryRequest: Codable {
     let length: String?
     let style: String?
 }
+
+struct SummarizeAudioRequest: Codable {
+    let contentType: String?
+    let model: String?
+    let length: String?
+}
+
+struct EmptyResponse: Codable {}
 
 // MARK: - Health
 

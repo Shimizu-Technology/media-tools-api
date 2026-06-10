@@ -5,11 +5,8 @@
  * The auth provider sets a token getter function, and the API client
  * calls it before each request to get a fresh token.
  *
- * NOTE: The actual API client (lib/api.ts) uses synchronous getHeaders()
- * reading from localStorage. ClerkTokenSync bridges Clerk tokens into
- * localStorage to make this work. The async helpers below exist as the
- * "correct" pattern for future migration if api.ts is ever converted to
- * async, and are used by setAuthTokenGetter wiring in App.tsx.
+ * The API client calls these helpers before each request so Clerk tokens are
+ * fetched just-in-time and do not need to be mirrored into localStorage.
  */
 
 let authTokenGetter: (() => Promise<string | null>) | null = null;

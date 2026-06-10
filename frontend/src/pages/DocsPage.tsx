@@ -17,7 +17,10 @@ import {
   Zap,
   Shield,
 } from 'lucide-react';
-import { createAPIKey, createTranscript, type Transcript } from '../lib/api';
+import { createAPIKey, type Transcript } from '../lib/api';
+
+const API_ORIGIN = import.meta.env.VITE_API_URL || window.location.origin;
+const API_BASE_EXAMPLE = `${API_ORIGIN}/api/v1`;
 
 /**
  * MTA-15: API Documentation Page.
@@ -95,7 +98,7 @@ export function DocsPage() {
 
       {/* Base URL */}
       <Section title="Base URL" delay={0.15}>
-        <CodeBlock code={`${window.location.origin}/api/v1`} language="text" />
+        <CodeBlock code={API_BASE_EXAMPLE} language="text" />
         <p className="text-sm mt-3" style={{ color: 'var(--color-text-secondary)' }}>
           All endpoints are prefixed with <code className="px-1.5 py-0.5 rounded text-xs font-mono" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-brand-500)' }}>/api/v1</code>.
           Authentication is via the <code className="px-1.5 py-0.5 rounded text-xs font-mono" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-brand-500)' }}>X-API-Key</code> header.
@@ -510,22 +513,23 @@ function CodeExamples() {
       label: 'cURL',
       icon: <Terminal className="w-4 h-4" />,
       code: `# Create an API key
-curl -X POST ${window.location.origin}/api/v1/keys \\
+curl -X POST ${API_ORIGIN}/api/v1/keys \\
   -H "Content-Type: application/json" \\
+  -H "X-Admin-Key: YOUR_ADMIN_KEY" \\
   -d '{"name": "my-app"}'
 
 # Extract a transcript
-curl -X POST ${window.location.origin}/api/v1/transcripts \\
+curl -X POST ${API_ORIGIN}/api/v1/transcripts \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: YOUR_API_KEY" \\
   -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
 
 # Check transcript status
-curl ${window.location.origin}/api/v1/transcripts/TRANSCRIPT_ID \\
+curl ${API_ORIGIN}/api/v1/transcripts/TRANSCRIPT_ID \\
   -H "X-API-Key: YOUR_API_KEY"
 
 # Generate AI summary
-curl -X POST ${window.location.origin}/api/v1/summaries \\
+curl -X POST ${API_ORIGIN}/api/v1/summaries \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: YOUR_API_KEY" \\
   -d '{"transcript_id": "TRANSCRIPT_ID", "length": "medium"}'`,
@@ -533,7 +537,7 @@ curl -X POST ${window.location.origin}/api/v1/summaries \\
     javascript: {
       label: 'JavaScript',
       icon: <Code className="w-4 h-4" />,
-      code: `const API_BASE = '${window.location.origin}/api/v1';
+      code: `const API_BASE = '${API_ORIGIN}/api/v1';
 const API_KEY = 'YOUR_API_KEY';
 
 // Extract a transcript
@@ -572,7 +576,7 @@ console.log('Transcript:', completed.transcript_text);`,
       code: `import requests
 import time
 
-API_BASE = '${window.location.origin}/api/v1'
+API_BASE = '${API_ORIGIN}/api/v1'
 API_KEY = 'YOUR_API_KEY'
 headers = {
     'Content-Type': 'application/json',
@@ -638,6 +642,7 @@ print(f'Transcript: {transcript["transcript_text"][:200]}...')`,
 
 function APIKeySignup() {
   const [name, setName] = useState('my-app');
+  const [adminKey, setAdminKey] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [createdKey, setCreatedKey] = useState('');
   const [error, setError] = useState('');
@@ -647,7 +652,7 @@ function APIKeySignup() {
     setIsCreating(true);
     setError('');
     try {
-      const result = await createAPIKey(name);
+      const result = await createAPIKey(name, { adminKey: adminKey.trim() || undefined });
       if (result.raw_key) {
         setCreatedKey(result.raw_key);
       }
@@ -708,10 +713,23 @@ function APIKeySignup() {
       <div className="flex items-center gap-3 mb-3">
         <Key className="w-5 h-5" style={{ color: 'var(--color-brand-500)' }} />
         <span className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-          Create a free API key to get started
+          Create a developer API key
         </span>
       </div>
-      <div className="flex gap-3">
+      <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+        <input
+          type="password"
+          value={adminKey}
+          onChange={(e) => setAdminKey(e.target.value)}
+          placeholder="Admin key (production)"
+          className="px-4 py-2.5 rounded-xl border text-sm outline-none transition-colors duration-200"
+          style={{
+            backgroundColor: 'var(--color-surface)',
+            borderColor: 'var(--color-border)',
+            color: 'var(--color-text-primary)',
+            minHeight: '44px',
+          }}
+        />
         <input
           type="text"
           value={name}
@@ -735,6 +753,9 @@ function APIKeySignup() {
           Create Key
         </button>
       </div>
+      <p className="text-xs mt-2" style={{ color: 'var(--color-text-muted)' }}>
+        Production requires an admin key; local development can leave it blank.
+      </p>
       {error && (
         <p className="flex items-center gap-1.5 text-xs text-red-500 mt-2">
           <AlertCircle className="w-3 h-3" />
@@ -758,24 +779,26 @@ function TryItSection() {
     setError('');
     setResult(null);
 
-    // Temporarily set the API key
-    const prevKey = localStorage.getItem('mta_api_key');
-    localStorage.setItem('mta_api_key', apiKey);
-
     try {
-      const transcript = await createTranscript(url);
+      const res = await fetch(`${API_ORIGIN}/api/v1/transcripts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apiKey.trim(),
+        },
+        body: JSON.stringify({ url: url.trim() }),
+      });
+      if (!res.ok) {
+        const apiErr = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+        throw apiErr;
+      }
+      const transcript = await res.json() as Transcript;
       setResult(transcript);
     } catch (err: unknown) {
       const apiErr = err as { message?: string };
       setError(apiErr.message || 'Request failed');
     }
 
-    // Restore previous key
-    if (prevKey) {
-      localStorage.setItem('mta_api_key', prevKey);
-    } else {
-      localStorage.removeItem('mta_api_key');
-    }
     setIsLoading(false);
   };
 

@@ -56,8 +56,8 @@ export function SummaryPanel({ transcriptId, transcriptText }: SummaryPanelProps
       try {
         const summaries = await getSummaries(transcriptId);
         if (summaries.length > 0) {
-          // Use the most recent summary
-          const latest = summaries[summaries.length - 1];
+          // Backend returns newest first (ORDER BY created_at DESC).
+          const latest = summaries[0];
           setSummary(latest);
         }
       } catch {
@@ -134,7 +134,7 @@ export function SummaryPanel({ transcriptId, transcriptText }: SummaryPanelProps
         try {
           const summaries = await getSummaries(transcriptId);
           if (summaries.length > 0) {
-            const latest = summaries[summaries.length - 1];
+            const latest = summaries[0];
             if (latest.summary_text) {
               setSummary(latest);
               setIsGenerating(false);

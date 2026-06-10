@@ -5,16 +5,21 @@ import Foundation
 enum Configuration {
     /// Clerk publishable key — set via CLERK_PUBLISHABLE_KEY in xcconfig or Info.plist.
     static let clerkPublishableKey: String = {
-        if let key = Bundle.main.infoDictionary?["CLERK_PUBLISHABLE_KEY"] as? String, !key.isEmpty {
+        if let key = configuredValue("CLERK_PUBLISHABLE_KEY") {
             return key
         }
-        // Development fallback — media-tools-api Clerk instance
+        #if DEBUG
+        // Development fallback — media-tools-api Clerk instance. Release builds
+        // should inject this through xcconfig/Info.plist instead of source.
         return "pk_test_d2VsY29tZWQtZWFyd2lnLTg2LmNsZXJrLmFjY291bnRzLmRldiQ"
+        #else
+        return ""
+        #endif
     }()
 
     /// Media Tools API base URL.
     static let apiBaseURL: String = {
-        if let url = Bundle.main.infoDictionary?["API_BASE_URL"] as? String, !url.isEmpty {
+        if let url = configuredValue("API_BASE_URL") {
             return url
         }
         // Point to production Render API (localhost won't work on device)
@@ -26,4 +31,13 @@ enum Configuration {
 
     /// App Group identifier for sharing data with extensions.
     static let appGroupIdentifier = "group.com.shimizu-technology.media-tools"
+
+    private static func configuredValue(_ key: String) -> String? {
+        guard let value = Bundle.main.infoDictionary?[key] as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || (trimmed.hasPrefix("$(") && trimmed.hasSuffix(")")) {
+            return nil
+        }
+        return trimmed
+    }
 }

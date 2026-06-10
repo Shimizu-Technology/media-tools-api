@@ -285,7 +285,7 @@ paths:
       summary: Create a new API key
       description: |
         Generates a new API key. The raw key is only shown once in the response -- save it!
-        This endpoint is intentionally public (no auth required) for bootstrapping.
+        In production this endpoint requires `X-Admin-Key`; in local development it can be left open for bootstrapping.
       security: []
       requestBody:
         required: true

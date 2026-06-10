@@ -120,7 +120,7 @@ struct PDFUploadView: View {
         do {
             let data = try Data(contentsOf: url)
             let extraction: PDFExtraction = try await APIClient.shared.upload(
-                "/pdf/extractions",
+                "/pdf/extract",
                 fileData: data,
                 filename: url.lastPathComponent,
                 mimeType: "application/pdf"
