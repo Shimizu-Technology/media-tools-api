@@ -54,6 +54,13 @@ const whisperInitialSegmentSeconds = 1800
 const whisperFFmpegTimeout = 30 * time.Minute
 const whisperProbeTimeout = 30 * time.Second
 
+// Normalize tricky browser/video uploads to MP3 for Whisper. OpenAI accepts Ogg
+// by extension, but production WhatsApp MP4 → Ogg/Opus transcodes were still
+// rejected as "Invalid file format". MP3 is less compact but is the most
+// consistently accepted container/codec combination for speech uploads.
+const whisperPreparedExtension = ".mp3"
+const whisperPreparedBitrate = "48k"
+
 func requiresWhisperTranscode(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
 	// We accept these uploads at the API boundary, but normalize them before
@@ -623,7 +630,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	var transcriptionParts []string
 	if fileInfo.Size() > whisperTargetBytes || requiresWhisperTranscode(payload.TempFilePath) {
 		_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcoding", 25)
-		compressedPath := payload.TempFilePath + ".whisper.ogg"
+		compressedPath := payload.TempFilePath + ".whisper" + whisperPreparedExtension
 		log.Printf("🎚️  Audio job %s preparing recording for Whisper: %s (%.1fMB)", at.ID, payload.OriginalName, bytesToMB(fileInfo.Size()))
 		lastLoggedTranscodeProgress := 25
 		transcodeProgress := func(progress int) {
@@ -818,8 +825,8 @@ func (p *Pool) transcribeFile(ctx context.Context, path, originalName string) (*
 
 // whisperUploadFilename ensures the multipart filename extension matches the
 // actual file being uploaded. OpenAI validates the uploaded media container; if
-// we transcode a WhatsApp .mp4 to Ogg but still send the original .mp4 filename,
-// Whisper rejects it as an invalid format.
+// we transcode a WhatsApp .mp4 to MP3 but still send the original .mp4 filename,
+// Whisper can reject it as an invalid format.
 func whisperUploadFilename(path, originalName string) string {
 	actualExt := strings.ToLower(filepath.Ext(path))
 	if actualExt == "" {
@@ -888,6 +895,9 @@ func (p *Pool) transcribeFileWithRetry(ctx context.Context, path, originalName s
 			return nil, fmt.Errorf("failed to open audio file: %w", err)
 		}
 		uploadName := whisperUploadFilename(path, originalName)
+		if attempt == 0 {
+			log.Printf("📝 Whisper upload prepared: %s as %s", filepath.Base(path), uploadName)
+		}
 		result, err := p.audioTranscriber.Transcribe(ctx, file, uploadName)
 		file.Close()
 		if err == nil {
@@ -930,7 +940,7 @@ func bytesToMB(bytes int64) float64 {
 func splitAudioForWhisper(ctx context.Context, inputPath string, segmentSeconds int) ([]string, error) {
 	baseDir := filepath.Dir(inputPath)
 	baseName := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
-	pattern := filepath.Join(baseDir, fmt.Sprintf("%s.part-%%04d.ogg", baseName))
+	pattern := filepath.Join(baseDir, fmt.Sprintf("%s.part-%%04d%s", baseName, whisperPreparedExtension))
 
 	cmdCtx, cancel := context.WithTimeout(ctx, whisperFFmpegTimeout)
 	defer cancel()
@@ -943,12 +953,13 @@ func splitAudioForWhisper(ctx context.Context, inputPath string, segmentSeconds 
 		"-loglevel", "error",
 		"-y",
 		"-i", inputPath,
+		"-map", "0:a:0",
 		"-ac", "1",
 		"-ar", "16000",
-		"-c:a", "libopus",
-		"-b:a", "24k",
+		"-c:a", "libmp3lame",
+		"-b:a", whisperPreparedBitrate,
 		"-f", "segment",
-		"-segment_format", "ogg",
+		"-segment_format", "mp3",
 		"-segment_time", fmt.Sprintf("%d", segmentSeconds),
 		"-reset_timestamps", "1",
 		pattern,
@@ -961,7 +972,7 @@ func splitAudioForWhisper(ctx context.Context, inputPath string, segmentSeconds 
 		return nil, fmt.Errorf("ffmpeg segment failed: %v (%s)", err, string(out))
 	}
 
-	globPattern := filepath.Join(baseDir, fmt.Sprintf("%s.part-*.ogg", baseName))
+	globPattern := filepath.Join(baseDir, fmt.Sprintf("%s.part-*%s", baseName, whisperPreparedExtension))
 	parts, err := filepath.Glob(globPattern)
 	if err != nil {
 		return nil, fmt.Errorf("glob segment outputs failed: %w", err)
@@ -992,11 +1003,12 @@ func transcodeForWhisper(ctx context.Context, inputPath, outputPath string, onPr
 		"-nostats",
 		"-y",
 		"-i", inputPath,
+		"-map", "0:a:0",
 		"-ac", "1",
 		"-ar", "16000",
-		"-c:a", "libopus",
-		"-b:a", "24k",
-		"-f", "ogg",
+		"-c:a", "libmp3lame",
+		"-b:a", whisperPreparedBitrate,
+		"-f", "mp3",
 		outputPath,
 	)
 
