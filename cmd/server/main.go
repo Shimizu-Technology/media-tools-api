@@ -143,6 +143,12 @@ func main() {
 		log.Printf("♻️  Requeued %d recoverable audio job(s) on startup", requeued)
 	}
 
+	if cfg.LegacyAuthEnabled {
+		log.Println("⚠️  Legacy email/password auth routes are enabled")
+	} else {
+		log.Println("✅ Legacy email/password auth routes disabled (Clerk-first browser auth)")
+	}
+
 	// Log admin API key status
 	if cfg.AdminAPIKey != "" {
 		log.Println("✅ Admin API key configured (API key creation protected)")
@@ -159,6 +165,7 @@ func main() {
 		Webhooks:               webhookService,
 		Summarizer:             summarizer,
 		JWTSecret:              cfg.JWTSecret,
+		LegacyAuthEnabled:      cfg.LegacyAuthEnabled,
 		AdminAPIKey:            cfg.AdminAPIKey,
 		OwnerKeyID:             cfg.OwnerAPIKeyID,
 		OwnerKeyPrefix:         cfg.OwnerAPIKeyPrefix,

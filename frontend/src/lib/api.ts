@@ -72,6 +72,7 @@ export interface APIKey {
   name: string;
   active: boolean;
   rate_limit: number;
+  user_id?: string;
   created_at: string;
   last_used_at?: string;
   raw_key?: string;
@@ -230,9 +231,17 @@ export interface PDFExtraction {
   created_at: string;
 }
 
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  clerk_id?: string;
+  created_at: string;
+}
+
 export interface AuthResponse {
   token: string;
-  user: { id: string; email: string; name: string; created_at: string };
+  user: User;
 }
 
 export interface WorkspaceResponse {
@@ -301,6 +310,35 @@ export async function getHealth(): Promise<HealthResponse> {
 }
 
 // ── API Keys ──
+
+export async function getCurrentUser(): Promise<User> {
+  const res = await fetch(`${API_BASE}/auth/me`, { headers: await getHeaders() });
+  return handleResponse<User>(res);
+}
+
+export async function listAPIKeys(): Promise<APIKey[]> {
+  const res = await fetch(`${API_BASE}/keys`, { headers: await getHeaders() });
+  return handleResponse<APIKey[]>(res);
+}
+
+export async function createUserAPIKey(name: string): Promise<APIKey> {
+  const res = await fetch(`${API_BASE}/user/keys`, {
+    method: 'POST',
+    headers: await getHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  return handleResponse<APIKey>(res);
+}
+
+export async function revokeAPIKey(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/keys/${id}`, { method: 'DELETE', headers: await getHeaders() });
+  if (!res.ok) {
+    const error: APIError = await res.json().catch(() => ({
+      error: 'unknown', message: `HTTP ${res.status}: ${res.statusText}`, code: res.status,
+    }));
+    throw error;
+  }
+}
 
 export async function createAPIKey(name: string, options?: { rateLimit?: number; adminKey?: string }): Promise<APIKey> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };

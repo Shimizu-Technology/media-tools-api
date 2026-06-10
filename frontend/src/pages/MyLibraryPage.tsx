@@ -207,13 +207,13 @@ export function MyLibraryPage() {
     }
     switch (item.type) {
       case 'youtube':
-        navigate(`/?id=${item.id}`);
+        navigate(`/app/video?id=${item.id}`);
         break;
       case 'audio':
-        navigate(`/audio?id=${item.id}`);
+        navigate(`/app/audio?id=${item.id}`);
         break;
       case 'pdf':
-        navigate(`/pdf?id=${item.id}`);
+        navigate(`/app/pdf?id=${item.id}`);
         break;
     }
   };
@@ -537,7 +537,7 @@ export function MyLibraryPage() {
           </p>
           {!searchInput && (
             <button
-              onClick={() => navigate(activeTab === 'audio' ? '/audio' : activeTab === 'pdf' ? '/pdf' : '/')}
+              onClick={() => navigate(activeTab === 'audio' ? '/app/audio' : activeTab === 'pdf' ? '/app/pdf' : '/app/video')}
               className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-white font-medium text-sm"
               style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
             >

@@ -408,12 +408,12 @@ func (db *DB) CreateChatMessage(ctx context.Context, msg *models.TranscriptChatM
 // CreateAPIKey inserts a new API key record.
 func (db *DB) CreateAPIKey(ctx context.Context, key *models.APIKey) error {
 	query := `
-		INSERT INTO api_keys (key_hash, key_prefix, name, active, rate_limit)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO api_keys (key_hash, key_prefix, name, active, rate_limit, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, created_at`
 
 	return db.QueryRowContext(ctx, query,
-		key.KeyHash, key.KeyPrefix, key.Name, key.Active, key.RateLimit,
+		key.KeyHash, key.KeyPrefix, key.Name, key.Active, key.RateLimit, key.UserID,
 	).Scan(&key.ID, &key.CreatedAt)
 }
 

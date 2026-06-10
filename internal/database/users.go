@@ -51,15 +51,17 @@ func (db *DB) GetUserByClerkID(ctx context.Context, clerkID string) (*models.Use
 	return &u, nil
 }
 
-// CreateUserFromClerk creates a new user from Clerk authentication (no password).
+// CreateUserFromClerk creates a new user from Clerk authentication.
+// Clerk users do not have a local password; password_hash is stored as an empty
+// string to preserve the legacy NOT NULL schema and keep SELECT * scans simple.
 func (db *DB) CreateUserFromClerk(ctx context.Context, u *models.User) error {
 	if u.ClerkID == nil || *u.ClerkID == "" {
 		return fmt.Errorf("clerk_id is required for CreateUserFromClerk")
 	}
 
 	query := `
-		INSERT INTO users (email, name, clerk_id)
-		VALUES ($1, $2, $3)
+		INSERT INTO users (email, password_hash, name, clerk_id)
+		VALUES ($1, '', $2, $3)
 		RETURNING id, created_at`
 
 	return db.QueryRowContext(ctx, query,

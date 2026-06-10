@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ClerkProvider, useAuth } from '@clerk/clerk-react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { Header } from './components/Header'
+import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { FileText } from 'lucide-react'
+import { AppShell } from './components/AppShell'
+import { ProtectedRoute } from './components/ProtectedRoute'
 import { HomePage } from './pages/HomePage'
 import { MyLibraryPage } from './pages/MyLibraryPage'
 import { AudioPage } from './pages/AudioPage'
@@ -11,61 +13,127 @@ import { WebhooksPage } from './pages/WebhooksPage'
 import { OpsPage } from './pages/OpsPage'
 import { CollectionsPage } from './pages/CollectionsPage'
 import { PrivacyPage } from './pages/PrivacyPage'
+import { LandingPage } from './pages/LandingPage'
+import { DashboardPage } from './pages/DashboardPage'
+import { DeveloperPage } from './pages/DeveloperPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { AuthProvider } from './contexts/AuthContext'
+import { getCurrentUser, type User } from './lib/api'
 import { setAuthTokenGetter } from './lib/apiAuth'
 
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 const isClerkEnabled = Boolean(CLERK_PUBLISHABLE_KEY && CLERK_PUBLISHABLE_KEY !== 'YOUR_PUBLISHABLE_KEY')
 
-// Log warning if Clerk is not configured (per Brain Dump guide)
 if (!isClerkEnabled) {
-  console.warn('⚠️ Clerk not configured — running without authentication. Add VITE_CLERK_PUBLISHABLE_KEY to .env.local')
+  console.warn('Clerk not configured — using local API-key development mode. Add VITE_CLERK_PUBLISHABLE_KEY to .env.local for browser auth.')
 }
 
-/** Routes shared between Clerk and non-Clerk modes. */
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route path="/library" element={<MyLibraryPage />} />
-      <Route path="/audio" element={<AudioPage />} />
-      <Route path="/pdf" element={<PdfPage />} />
-      <Route path="/docs" element={<DocsPage />} />
-      <Route path="/webhooks" element={<WebhooksPage />} />
-      <Route path="/collections" element={<CollectionsPage />} />
-      <Route path="/collections/:collectionId" element={<CollectionsPage />} />
-      <Route path="/ops" element={<OpsPage />} />
-      <Route path="/privacy" element={<PrivacyPage />} />
-      <Route path="/history" element={<Navigate to="/library?type=youtube" replace />} />
+      <Route path="/" element={<LandingPage />} />
+
+      <Route element={<PublicLayout />}>
+        <Route path="/docs" element={<DocsPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+      </Route>
+
+      <Route path="/audio" element={<LegacyRedirect to="/app/audio" />} />
+      <Route path="/pdf" element={<LegacyRedirect to="/app/pdf" />} />
+      <Route path="/library" element={<LegacyRedirect to="/app/library" />} />
+      <Route path="/collections" element={<LegacyRedirect to="/app/collections" />} />
+      <Route path="/collections/:collectionId" element={<LegacyRedirect to="/app/collections" includePathTail />} />
+      <Route path="/history" element={<LegacyRedirect to="/app/library?type=youtube" />} />
+      <Route path="/webhooks" element={<LegacyRedirect to="/app/developer/webhooks" />} />
+      <Route path="/ops" element={<LegacyRedirect to="/app/admin/ops" />} />
+
+      <Route
+        path="/app"
+        element={
+          <ProtectedRoute>
+            <AppShell />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<DashboardPage />} />
+        <Route path="video" element={<HomePage />} />
+        <Route path="audio" element={<AudioPage />} />
+        <Route path="pdf" element={<PdfPage />} />
+        <Route path="library" element={<MyLibraryPage />} />
+        <Route path="collections" element={<CollectionsPage />} />
+        <Route path="collections/:collectionId" element={<CollectionsPage />} />
+        <Route path="developer" element={<DeveloperPage />} />
+        <Route path="developer/webhooks" element={<WebhooksPage />} />
+        <Route path="admin/ops" element={<OpsPage />} />
+        <Route path="settings" element={<SettingsPage />} />
+      </Route>
+
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }
 
-/** Footer shared between modes. */
+function LegacyRedirect({ to, includePathTail = false }: { to: string; includePathTail?: boolean }) {
+  const location = useLocation()
+  const [targetPath, targetSearch = ''] = to.split('?')
+  const tail = includePathTail ? location.pathname.replace(/^\/collections/, '') : ''
+  const search = mergeSearch(targetSearch, location.search)
+  return <Navigate to={`${targetPath}${tail}${search}`} replace />
+}
+
+function mergeSearch(baseSearch: string, currentSearch: string) {
+  const params = new URLSearchParams(baseSearch)
+  const current = new URLSearchParams(currentSearch)
+  current.forEach((value, key) => {
+    if (!params.has(key)) params.set(key, value)
+  })
+  const serialized = params.toString()
+  return serialized ? `?${serialized}` : ''
+}
+
+function PublicLayout() {
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
+      <header className="sticky top-0 z-50 border-b backdrop-blur" style={{ backgroundColor: 'rgba(11, 13, 16, 0.86)', borderColor: 'var(--color-border)' }}>
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
+          <Link to="/" className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+              <FileText className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <div className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>Media Tools</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>AI media workspace</div>
+            </div>
+          </Link>
+          <nav className="flex items-center gap-2">
+            <Link to="/docs" className="min-h-11 rounded-xl px-4 py-3 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ color: 'var(--color-text-secondary)' }}>API docs</Link>
+            <Link to="/app" className="min-h-11 rounded-xl px-4 py-3 text-sm font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)' }}>Open app</Link>
+          </nav>
+        </div>
+      </header>
+      <Outlet />
+      <AppFooter />
+    </div>
+  )
+}
+
 function AppFooter() {
   return (
     <footer className="py-8 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
       Built with Go + React by{' '}
-      <a href="https://github.com/Shimizu-Technology" target="_blank" rel="noopener noreferrer"
-        style={{ color: 'var(--color-brand-500)' }}>
+      <a href="https://github.com/Shimizu-Technology" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-brand-500)' }}>
         Shimizu Technology
       </a>
     </footer>
   )
 }
 
-/**
- * ClerkAppContent — rendered inside ClerkProvider.
- * Uses Clerk hooks safely since ClerkProvider is an ancestor.
- * Wires up token getter for authenticated API calls.
- */
 function ClerkAppContent() {
   const { getToken, isLoaded, isSignedIn } = useAuth()
+  const [user, setUser] = useState<User | null>(null)
+  const [isUserLoading, setIsUserLoading] = useState(false)
 
   useEffect(() => {
-    // Wire Clerk's getToken into the API auth system.
-    // getToken() automatically handles token refresh, so we do not mirror
-    // short-lived Clerk tokens into localStorage.
     setAuthTokenGetter(async () => {
       try {
         return await getToken()
@@ -75,40 +143,51 @@ function ClerkAppContent() {
     })
   }, [getToken])
 
+  const refreshUser = useCallback(async () => {
+    if (!isSignedIn) {
+      setUser(null)
+      return
+    }
+    setIsUserLoading(true)
+    try {
+      setUser(await getCurrentUser())
+    } catch {
+      setUser(null)
+    } finally {
+      setIsUserLoading(false)
+    }
+  }, [isSignedIn])
+
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
       localStorage.removeItem('mta_jwt_token')
+      setUser(null)
     }
-  }, [isLoaded, isSignedIn])
+    if (isLoaded && isSignedIn) {
+      void refreshUser()
+    }
+  }, [isLoaded, isSignedIn, refreshUser])
 
   return (
     <AuthProvider
       isClerkEnabled={true}
       isAuthenticated={isSignedIn ?? false}
-      isLoading={!isLoaded}
+      isLoading={!isLoaded || isUserLoading}
       canUseWorkspace={true}
+      user={user}
+      refreshUser={refreshUser}
     >
-      <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
-        <Header />
-        <AppRoutes />
-        <AppFooter />
-      </div>
+      <AppRoutes />
     </AuthProvider>
   )
 }
 
-/**
- * NoClerkAppContent — rendered when Clerk is not configured.
- * No auth gates — full access for development / API-key mode.
- */
 function NoClerkAppContent() {
   const [hasApiKey, setHasApiKey] = useState(!!localStorage.getItem('mta_api_key'))
 
-  // Listen for storage changes (e.g., API key set in another component)
   useEffect(() => {
     const check = () => setHasApiKey(!!localStorage.getItem('mta_api_key'))
     window.addEventListener('storage', check)
-    // Also poll briefly in case same-tab writes don't fire 'storage'
     const interval = setInterval(check, 2000)
     return () => {
       window.removeEventListener('storage', check)
@@ -122,12 +201,10 @@ function NoClerkAppContent() {
       isAuthenticated={hasApiKey}
       isLoading={false}
       canUseWorkspace={false}
+      user={null}
+      refreshUser={async () => undefined}
     >
-      <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
-        <Header />
-        <AppRoutes />
-        <AppFooter />
-      </div>
+      <AppRoutes />
     </AuthProvider>
   )
 }
@@ -142,7 +219,7 @@ function App() {
   }
 
   return (
-    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} afterSignOutUrl="/">
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} afterSignOutUrl="/" signInFallbackRedirectUrl="/app" signUpFallbackRedirectUrl="/app">
       <BrowserRouter>
         <ClerkAppContent />
       </BrowserRouter>

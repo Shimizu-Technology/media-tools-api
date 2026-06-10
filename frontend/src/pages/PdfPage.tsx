@@ -147,7 +147,7 @@ export function PdfPage() {
     : [];
 
   return (
-    <main className="relative pt-20 sm:pt-28 pb-12 sm:pb-16 px-4 sm:px-6">
+    <main className="relative pb-12 sm:pb-16">
       {/* Hero */}
       {!result && (
         <div className="text-center mb-12">
@@ -200,7 +200,7 @@ export function PdfPage() {
             transition={{ delay: 0.3 }}
           >
             <Link
-              to="/library?type=pdf"
+              to="/app/library?type=pdf"
               className="inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
               style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
             >

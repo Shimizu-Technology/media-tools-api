@@ -179,7 +179,7 @@ Open **http://localhost:5173** — you're in!
 
 ### 6. (Optional) Enable Clerk Authentication
 
-Without Clerk keys, the app runs in **API-key-only mode** — the same way it worked before. This is fine for local development and testing.
+Without Clerk keys, the app runs in **API-key-only development mode**. The `/app/*` workspace prompts for a local API key, while public docs remain available.
 
 To enable **user sign-in via Clerk** (Google/email login, user accounts):
 
@@ -220,10 +220,10 @@ make run
 make frontend-dev
 ```
 
-You should now see a **Sign In** button in the header. When a user signs in via Clerk, the app automatically:
-- Creates a local user record linked to their Clerk ID
-- Issues JWT tokens for API authentication
-- Shows their profile in the header dropdown
+You should now see a signed-out landing page and a protected `/app/*` workspace. When a user signs in via Clerk, the app automatically:
+- Creates or updates a local user record linked to their Clerk ID
+- Sends fresh Clerk bearer tokens just-in-time on API requests
+- Shows their account controls inside the app shell
 
 #### How Auth Works (Dual Mode)
 
@@ -234,9 +234,9 @@ The app supports **two auth modes simultaneously**:
 | **API Key** | `X-API-Key` header | Scripts, automation, CI/CD |
 | **Clerk JWT** | `Authorization: Bearer <token>` header | Browser users, the React UI |
 
-Both modes work on all endpoints. Clerk auth additionally gives you user-scoped features (workspace, library, etc.).
+Most media endpoints accept both modes. Developer-only webhook/ops flows still use API keys because webhooks fire for API-key-owned jobs.
 
-**Without Clerk keys configured**, the frontend hides the sign-in UI and everything works via API keys only. No code changes needed — it's automatic.
+**Without Clerk keys configured**, the frontend hides sign-in UI and protects `/app/*` with the local API-key prompt. No code changes needed — it's automatic.
 
 ---
 
@@ -442,7 +442,7 @@ This is the fastest way to test the new Audio Intelligence features:
 
 1. Start the server: `make run`
 2. Start the frontend: `make frontend-dev`
-3. Open **http://localhost:5173/audio**
+3. Open **http://localhost:5173/app/audio**
 4. **Upload tab**: Drag an `.m4a` audio file or `.mp4` Zoom recording onto the page
 5. Select content type (e.g., "Phone Call")
 6. Hit **Transcribe**

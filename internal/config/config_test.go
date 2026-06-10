@@ -31,6 +31,33 @@ func TestLoadInfersClerkAuthorizedPartyFromCORSOrigin(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultsLegacyAuthOffInRelease(t *testing.T) {
+	setRequiredReleaseEnv(t)
+	t.Setenv("CORS_ORIGIN", "https://media-tools-gu.netlify.app")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.LegacyAuthEnabled {
+		t.Fatal("LegacyAuthEnabled = true, want false by default in release mode")
+	}
+}
+
+func TestLoadAllowsLegacyAuthOverride(t *testing.T) {
+	setRequiredReleaseEnv(t)
+	t.Setenv("CORS_ORIGIN", "https://media-tools-gu.netlify.app")
+	t.Setenv("LEGACY_AUTH_ENABLED", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if !cfg.LegacyAuthEnabled {
+		t.Fatal("LegacyAuthEnabled = false, want true when explicitly enabled")
+	}
+}
+
 func TestLoadParsesMultipleCORSOrigins(t *testing.T) {
 	t.Setenv("YT_DLP_PATH", "/bin/true")
 	t.Setenv("CORS_ORIGIN", "https://app.example.com/, https://preview.example.com")

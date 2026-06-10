@@ -50,6 +50,9 @@ type Config struct {
 
 	// JWT Authentication (MTA-20)
 	JWTSecret string
+	// Legacy email/password auth is kept for local/dev compatibility but should
+	// be disabled in production when Clerk is the browser auth source of truth.
+	LegacyAuthEnabled bool
 
 	// Clerk Authentication
 	ClerkPublishableKey  string
@@ -84,10 +87,11 @@ type Config struct {
 // alternative to exceptions — the caller MUST handle the error. You'll see
 // this pattern everywhere in Go: `result, err := doSomething()`.
 func Load() (*Config, error) {
+	ginMode := getEnv("GIN_MODE", "debug")
 	cfg := &Config{
 		// Server defaults
 		Port:    getEnv("PORT", "8080"),
-		GinMode: getEnv("GIN_MODE", "debug"),
+		GinMode: ginMode,
 
 		// Database — required in production, has a default for local dev
 		DatabaseURL:       getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/media_tools?sslmode=disable"),
@@ -116,7 +120,8 @@ func Load() (*Config, error) {
 		OpenAIAPIKey: getEnv("OPENAI_API_KEY", ""),
 
 		// JWT Authentication
-		JWTSecret: getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),
+		JWTSecret:         getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),
+		LegacyAuthEnabled: getEnvBool("LEGACY_AUTH_ENABLED", ginMode != "release"),
 
 		// Clerk Authentication
 		ClerkPublishableKey:  getEnv("CLERK_PUBLISHABLE_KEY", ""),
@@ -211,6 +216,21 @@ func parseAllowedOrigins(raw string) []string {
 }
 
 // getEnvInt reads an integer environment variable with a fallback.
+func getEnvBool(key string, fallback bool) bool {
+	str := strings.ToLower(strings.TrimSpace(getEnv(key, "")))
+	if str == "" {
+		return fallback
+	}
+	switch str {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
 func getEnvInt(key string, fallback int) int {
 	str := getEnv(key, "")
 	if str == "" {

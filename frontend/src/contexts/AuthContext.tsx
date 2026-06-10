@@ -7,6 +7,7 @@
  * - Works with or without Clerk
  */
 import type { ReactNode } from 'react';
+import type { User } from '../lib/api';
 import { AuthContext } from './authContextValue';
 
 interface AuthProviderProps {
@@ -15,15 +16,25 @@ interface AuthProviderProps {
   isAuthenticated: boolean;
   isLoading: boolean;
   canUseWorkspace: boolean;
+  user?: User | null;
+  refreshUser?: () => Promise<void>;
 }
 
 /**
  * Generic auth provider — receives auth state from parent.
  * This decouples the context from Clerk hooks so it works outside ClerkProvider.
  */
-export function AuthProvider({ children, isClerkEnabled, isAuthenticated, isLoading, canUseWorkspace }: AuthProviderProps) {
+export function AuthProvider({
+  children,
+  isClerkEnabled,
+  isAuthenticated,
+  isLoading,
+  canUseWorkspace,
+  user = null,
+  refreshUser = async () => undefined,
+}: AuthProviderProps) {
   return (
-    <AuthContext.Provider value={{ isClerkEnabled, isAuthenticated, isLoading, canUseWorkspace }}>
+    <AuthContext.Provider value={{ isClerkEnabled, isAuthenticated, isLoading, canUseWorkspace, user, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );
