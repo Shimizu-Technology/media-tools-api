@@ -17,6 +17,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"strings"
 	"time"
 
@@ -86,8 +87,13 @@ func (t *Transcriber) Transcribe(ctx context.Context, audioData io.Reader, filen
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
-	// Add the audio file
-	part, err := writer.CreateFormFile("file", filename)
+	// Add the audio file. Include a concrete part MIME type because some audio
+	// APIs inspect both the multipart filename and Content-Type when validating
+	// media formats.
+	partHeader := make(textproto.MIMEHeader)
+	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, escapeQuotes(filename)))
+	partHeader.Set("Content-Type", whisperContentType(filename))
+	part, err := writer.CreatePart(partHeader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create form file: %w", err)
 	}
@@ -150,6 +156,32 @@ func (t *Transcriber) Transcribe(ctx context.Context, audioData io.Reader, filen
 		Language: whisperResp.Language,
 		Duration: whisperResp.Duration,
 	}, nil
+}
+
+func whisperContentType(filename string) string {
+	lower := strings.ToLower(filename)
+	switch {
+	case strings.HasSuffix(lower, ".mp3") || strings.HasSuffix(lower, ".mpga") || strings.HasSuffix(lower, ".mpeg"):
+		return "audio/mpeg"
+	case strings.HasSuffix(lower, ".m4a"):
+		return "audio/mp4"
+	case strings.HasSuffix(lower, ".mp4"):
+		return "video/mp4"
+	case strings.HasSuffix(lower, ".ogg") || strings.HasSuffix(lower, ".oga"):
+		return "audio/ogg"
+	case strings.HasSuffix(lower, ".wav"):
+		return "audio/wav"
+	case strings.HasSuffix(lower, ".flac"):
+		return "audio/flac"
+	case strings.HasSuffix(lower, ".webm"):
+		return "audio/webm"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+func escapeQuotes(s string) string {
+	return strings.NewReplacer("\\", "\\\\", "\"", "\\\"").Replace(s)
 }
 
 // CountWords counts the number of words in a text string.

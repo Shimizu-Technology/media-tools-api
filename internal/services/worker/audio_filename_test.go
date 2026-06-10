@@ -10,10 +10,10 @@ func TestWhisperUploadFilenameUsesActualExtension(t *testing.T) {
 		want         string
 	}{
 		{
-			name:         "transcoded WhatsApp mp4 uploads as ogg",
-			path:         "/tmp/9e4ccf2a.mp4.whisper.ogg",
+			name:         "transcoded WhatsApp mp4 uploads as mp3",
+			path:         "/tmp/9e4ccf2a.mp4.whisper.mp3",
 			originalName: "WhatsApp Video 2026-06-09 at 21.36.42.mp4",
-			want:         "WhatsApp Video 2026-06-09 at 21.36.42.ogg",
+			want:         "WhatsApp Video 2026-06-09 at 21.36.42.mp3",
 		},
 		{
 			name:         "already supported mp3 stays mp3",
@@ -23,9 +23,9 @@ func TestWhisperUploadFilenameUsesActualExtension(t *testing.T) {
 		},
 		{
 			name:         "missing original base falls back to path",
-			path:         "/tmp/upload.whisper.ogg",
+			path:         "/tmp/upload.whisper.mp3",
 			originalName: ".mp4",
-			want:         "upload.whisper.ogg",
+			want:         "upload.whisper.mp3",
 		},
 	}
 
