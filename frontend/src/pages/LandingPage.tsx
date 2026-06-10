@@ -102,7 +102,7 @@ export function LandingPage() {
             </Link>
           </div>
           <div className="mt-8 grid gap-3 text-sm sm:grid-cols-3" style={{ color: 'var(--color-text-secondary)' }}>
-            {['Clerk-secured app routes', 'API keys for developers', 'No emoji UI, production-grade UX'].map((item) => (
+            {['Private signed-in workspace', 'API access when you need it', 'Summaries, chat, and collections'].map((item) => (
               <div key={item} className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-success)' }} />
                 {item}
