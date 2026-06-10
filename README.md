@@ -194,6 +194,10 @@ Options:
 - `style`: bullet, narrative, academic
 - `model`: Any OpenRouter model
 
+## Product Roadmap
+
+See [`PRODUCT_ROADMAP.md`](PRODUCT_ROADMAP.md) for the planned direction now that Media Tools is a Clerk-authenticated media workspace: unified item pages, global search, processing center, exports/sharing, AI templates, collection intelligence, team workspaces, billing, and integrations.
+
 ## Production Deployment
 
 ### Recommended Stack
