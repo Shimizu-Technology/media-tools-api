@@ -804,6 +804,11 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	}
 
 	if qualityErr := validateTranscriptionQuality(at.TranscriptText, at.Duration, transcriptionSegments); qualityErr != nil {
+		// Do not persist known-bad hallucinated text. Failed records are still
+		// retriable from saved audio, and keeping transcript_text empty prevents
+		// accidental export/API/UI exposure of junk output.
+		at.TranscriptText = ""
+		at.WordCount = 0
 		at.Status = "failed"
 		at.ErrorMessage = "Transcription quality check failed: " + qualityErr.Error() + ". The original recording was saved, so you can re-transcribe it from the same audio."
 		at.ProcessingStage = "failed"
