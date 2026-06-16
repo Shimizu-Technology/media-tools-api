@@ -659,7 +659,7 @@ func (db *DB) PrepareAudioRetranscriptionForActor(ctx context.Context, at *model
 			WHERE a.id = p.id
 			RETURNING a.id
 		)
-		SELECT p.* FROM previous AS p INNER JOIN updated AS u ON true`
+		SELECT p.* FROM previous AS p INNER JOIN updated AS u ON p.id = u.id`
 
 	var query string
 	var ownerArg string
