@@ -15,6 +15,15 @@ func TestValidateTranscriptionQualityRejectsRepetitiveHallucination(t *testing.T
 	}
 }
 
+func TestValidateTranscriptionQualityRejectsMixedRepeatedPatterns(t *testing.T) {
+	pattern := "alpha beta gamma delta flour sugar salt oil monday tuesday wednesday thursday red blue green yellow north south east west one two three four "
+	bad := strings.Repeat(pattern, 10)
+
+	if err := validateTranscriptionQuality(bad, 12*60, nil); err == nil {
+		t.Fatal("expected mixed repeated hallucination patterns to fail quality check")
+	}
+}
+
 func TestValidateTranscriptionQualityAllowsNaturalMeetingText(t *testing.T) {
 	text := strings.Join([]string{
 		"Leon walked through the updated authentication flow and explained how Clerk should own the browser session.",

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -96,11 +97,18 @@ func main() {
 		Prompt:   cfg.OpenAITranscriptionPrompt,
 	})
 	if audioTranscriber.IsConfigured() {
-		languageHint := cfg.OpenAITranscriptionLanguage
-		if languageHint == "" {
-			languageHint = "en"
+		modelHint := strings.TrimSpace(cfg.OpenAITranscriptionModel)
+		if modelHint == "" {
+			modelHint = "whisper-1"
 		}
-		log.Printf("✅ Audio transcription enabled (model=%s, language=%s)", cfg.OpenAITranscriptionModel, languageHint)
+		languageHint := strings.TrimSpace(cfg.OpenAITranscriptionLanguage)
+		switch {
+		case languageHint == "":
+			languageHint = "en"
+		case strings.EqualFold(languageHint, "auto") || strings.EqualFold(languageHint, "detect"):
+			languageHint = "auto-detect"
+		}
+		log.Printf("✅ Audio transcription enabled (model=%s, language=%s)", modelHint, languageHint)
 		// Enable Whisper as fallback for YouTube transcripts when subtitles fail
 		whisperAdapter := audio.NewWhisperAdapter(audioTranscriber)
 		extractor.SetWhisperFallback(whisperAdapter)

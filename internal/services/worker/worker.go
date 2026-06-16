@@ -1009,15 +1009,28 @@ func repeatedNGramCoverage(words []string, n int) float64 {
 		return 0
 	}
 	counts := make(map[string]int, len(words)-n+1)
-	maxCount := 0
+	for i := 0; i <= len(words)-n; i++ {
+		counts[strings.Join(words[i:i+n], " ")]++
+	}
+
+	// Measure all words covered by any repeated n-gram, not only the single most
+	// common phrase. Hallucinations can rotate between a few repeated patterns,
+	// so max-count-only coverage can under-report obvious repetitive output.
+	covered := make([]bool, len(words))
+	coveredCount := 0
 	for i := 0; i <= len(words)-n; i++ {
 		gram := strings.Join(words[i:i+n], " ")
-		counts[gram]++
-		if counts[gram] > maxCount {
-			maxCount = counts[gram]
+		if counts[gram] <= 1 {
+			continue
+		}
+		for j := i; j < i+n; j++ {
+			if !covered[j] {
+				covered[j] = true
+				coveredCount++
+			}
 		}
 	}
-	return float64(maxCount*n) / float64(len(words))
+	return float64(coveredCount) / float64(len(words))
 }
 
 func pickDominantLanguage(counts map[string]int) string {
