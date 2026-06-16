@@ -656,20 +656,6 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 		CreatedAt: time.Now(),
 	}
 
-	// Preserve the completed/failed result until we know the worker can be queued.
-	// If the in-memory queue is full, we restore this snapshot so a re-transcribe
-	// click cannot destroy a good transcript or summary.
-	previous := *at
-	restorePrevious := func() error {
-		restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer restoreCancel()
-
-		if err := h.DB.UpdateAudioTranscriptionWithSummary(restoreCtx, &previous); err != nil {
-			log.Printf("Warning: failed to restore audio transcription %s after queue failure: %v", previous.ID, err)
-			return fmt.Errorf("failed to restore previous audio state: %w", err)
-		}
-		return nil
-	}
 	clearStaleChat := func() {
 		chatCtx, chatCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer chatCancel()
@@ -692,7 +678,12 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 	at.Decisions = json.RawMessage("[]")
 	at.SummaryModel = ""
 	at.SummaryStatus = "none"
-	if err := h.DB.UpdateAudioTranscriptionWithSummary(c.Request.Context(), at); err != nil {
+
+	// Atomically swap from completed/failed to pending. The DB status predicate
+	// closes the concurrent-request window where two re-transcribe clicks could
+	// otherwise enqueue duplicate Whisper jobs.
+	previous, prepared, err := h.DB.PrepareAudioRetranscriptionForActor(c.Request.Context(), at, actor.UserID, actor.APIKeyID)
+	if err != nil {
 		os.Remove(tempFilePath)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
@@ -700,6 +691,25 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 			Code:    http.StatusInternalServerError,
 		})
 		return
+	}
+	if !prepared {
+		os.Remove(tempFilePath)
+		c.JSON(http.StatusConflict, models.ErrorResponse{
+			Error:   "already_processing",
+			Message: "This recording is already being transcribed.",
+			Code:    http.StatusConflict,
+		})
+		return
+	}
+	restorePrevious := func() error {
+		restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer restoreCancel()
+
+		if err := h.DB.UpdateAudioTranscriptionWithSummary(restoreCtx, previous); err != nil {
+			log.Printf("Warning: failed to restore audio transcription %s after queue failure: %v", previous.ID, err)
+			return fmt.Errorf("failed to restore previous audio state: %w", err)
+		}
+		return nil
 	}
 
 	if err := h.Worker.Submit(job); err != nil {

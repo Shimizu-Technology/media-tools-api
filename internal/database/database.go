@@ -622,12 +622,89 @@ func (db *DB) UpdateAudioTranscriptionWithSummary(ctx context.Context, at *model
 			summary_status = $17
 		WHERE id = $1`
 
-	_, err := db.ExecContext(ctx, query,
+	result, err := db.ExecContext(ctx, query,
 		at.ID, at.Duration, at.Language, at.TranscriptText,
 		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
 		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryStatus,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("audio transcription not found")
+	}
+	return nil
+}
+
+// PrepareAudioRetranscriptionForActor atomically swaps a completed/failed audio
+// row to the provided pending state and returns the prior row for rollback.
+// The status predicate is part of the UPDATE transaction so simultaneous
+// re-transcribe clicks cannot enqueue multiple jobs for the same recording.
+func (db *DB) PrepareAudioRetranscriptionForActor(ctx context.Context, at *models.AudioTranscription, userID, apiKeyID *string) (*models.AudioTranscription, bool, error) {
+	if at == nil {
+		return nil, false, fmt.Errorf("audio transcription is required")
+	}
+
+	const updateSQL = `
+		updated AS (
+			UPDATE audio_transcriptions AS a
+			SET duration = $3, language = $4, transcript_text = $5, word_count = $6,
+				status = $7, error_message = $8,
+				processing_stage = $9, processing_progress = $10, retry_count = $11,
+				content_type = $12, summary_text = $13, key_points = $14,
+				action_items = $15, decisions = $16, summary_model = $17,
+				summary_status = $18
+			FROM previous AS p
+			WHERE a.id = p.id
+			RETURNING a.id
+		)
+		SELECT p.* FROM previous AS p INNER JOIN updated AS u ON true`
+
+	var query string
+	var ownerArg string
+	switch {
+	case userID != nil:
+		query = `
+			WITH previous AS (
+				SELECT ` + audioTranscriptionSelectColumns + ` FROM audio_transcriptions
+				WHERE id = $1
+				  AND user_id = $2
+				  AND api_key_id IS NULL
+				  AND status IN ('completed', 'failed')
+				FOR UPDATE
+			),
+			` + updateSQL
+		ownerArg = *userID
+	case apiKeyID != nil:
+		query = `
+			WITH previous AS (
+				SELECT ` + audioTranscriptionSelectColumns + ` FROM audio_transcriptions
+				WHERE id = $1
+				  AND api_key_id = $2
+				  AND user_id IS NULL
+				  AND status IN ('completed', 'failed')
+				FOR UPDATE
+			),
+			` + updateSQL
+		ownerArg = *apiKeyID
+	default:
+		return nil, false, fmt.Errorf("actor is required")
+	}
+
+	var previous models.AudioTranscription
+	err := db.GetContext(ctx, &previous, query,
+		at.ID, ownerArg, at.Duration, at.Language, at.TranscriptText,
+		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
+		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryStatus,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return &previous, true, nil
 }
 
 // UpdateAudioTranscriptionIfActive saves terminal worker results only while a job is still active.
