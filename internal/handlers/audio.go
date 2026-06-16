@@ -660,15 +660,23 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 	// If the in-memory queue is full, we restore this snapshot so a re-transcribe
 	// click cannot destroy a good transcript or summary.
 	previous := *at
-	restorePrevious := func() {
+	restorePrevious := func() error {
 		restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer restoreCancel()
+
+		var restoreErrs []string
 		if err := h.DB.UpdateAudioTranscription(restoreCtx, &previous); err != nil {
 			log.Printf("Warning: failed to restore audio transcription %s after queue failure: %v", previous.ID, err)
+			restoreErrs = append(restoreErrs, "transcript")
 		}
 		if err := h.DB.UpdateAudioSummary(restoreCtx, &previous); err != nil {
 			log.Printf("Warning: failed to restore audio summary %s after queue failure: %v", previous.ID, err)
+			restoreErrs = append(restoreErrs, "summary")
 		}
+		if len(restoreErrs) > 0 {
+			return fmt.Errorf("failed to restore %s", strings.Join(restoreErrs, " and "))
+		}
+		return nil
 	}
 	clearStaleChat := func() {
 		chatCtx, chatCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -703,10 +711,13 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 	}
 	if err := h.DB.UpdateAudioSummary(c.Request.Context(), at); err != nil {
 		os.Remove(tempFilePath)
-		restorePrevious()
+		message := "Failed to prepare re-transcription. Your previous transcript was preserved."
+		if restoreErr := restorePrevious(); restoreErr != nil {
+			message = "Failed to prepare re-transcription and could not verify that the previous transcript was fully restored. The original recording is still saved; please refresh before trying again."
+		}
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
-			Message: "Failed to reset previous summary",
+			Message: message,
 			Code:    http.StatusInternalServerError,
 		})
 		return
@@ -723,7 +734,14 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 			}
 		}
 		os.Remove(tempFilePath)
-		restorePrevious()
+		if restoreErr := restorePrevious(); restoreErr != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error:   "restore_failed",
+				Message: "Server is busy and could not verify that your previous transcript was fully restored. The original recording is still saved; please refresh before trying again.",
+				Code:    http.StatusInternalServerError,
+			})
+			return
+		}
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
 			Error:   "queue_full",
 			Message: "Server is busy. Your previous transcript was preserved. Please try again in a moment.",
