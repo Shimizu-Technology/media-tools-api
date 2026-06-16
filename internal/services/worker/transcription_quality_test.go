@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -21,6 +22,29 @@ func TestValidateTranscriptionQualityRejectsMixedRepeatedPatterns(t *testing.T) 
 
 	if err := validateTranscriptionQuality(bad, 12*60, nil); err == nil {
 		t.Fatal("expected mixed repeated hallucination patterns to fail quality check")
+	}
+}
+
+func TestValidateTranscriptionQualityAllowsLongMeetingWithRecurringPhrases(t *testing.T) {
+	topics := []string{
+		"timeline", "budget", "design", "implementation", "testing", "deployment",
+		"feedback", "training", "support", "reporting", "integration", "migration",
+	}
+	verbs := []string{
+		"review", "clarify", "prioritize", "document", "schedule", "confirm",
+		"compare", "prepare", "share", "update", "validate", "coordinate",
+	}
+	parts := make([]string, 0, 240)
+	for i := 0; i < 240; i++ {
+		parts = append(parts, fmt.Sprintf(
+			"I think we should %s the %s with the team because the client asked about requirements, blockers, ownership, risks, decisions, follow up, and next steps during the meeting.",
+			verbs[i%len(verbs)],
+			topics[(i*5)%len(topics)],
+		))
+	}
+
+	if err := validateTranscriptionQuality(strings.Join(parts, " "), 2*60*60, nil); err != nil {
+		t.Fatalf("expected long natural meeting with recurring phrases to pass quality check, got %v", err)
 	}
 }
 

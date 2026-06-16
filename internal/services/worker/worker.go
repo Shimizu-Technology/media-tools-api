@@ -51,7 +51,7 @@ const (
 )
 
 const whisperTargetBytes = 24 << 20 // Keep below 25MB hard limit to account for multipart overhead
-const whisperInitialSegmentSeconds = 1800
+const whisperInitialSegmentSeconds = 900
 const whisperFFmpegTimeout = 30 * time.Minute
 const whisperProbeTimeout = 30 * time.Second
 
@@ -946,10 +946,13 @@ func (p *Pool) transcribeFileWithRetry(ctx context.Context, path, originalName s
 func validateTranscriptionQuality(text string, duration float64, segments []audio.TranscriptionSegment) error {
 	words := normalizedTranscriptWords(text)
 	if len(words) >= 80 {
-		uniqueRatio := uniqueWordRatio(words)
-		fourGramCoverage := repeatedNGramCoverage(words, 4)
-		sixGramCoverage := repeatedNGramCoverage(words, 6)
-		if uniqueRatio < 0.12 && (fourGramCoverage >= 0.32 || sixGramCoverage >= 0.28) {
+		// Check for local repetition instead of whole-transcript repetition. Long,
+		// real meetings naturally reuse phrases across hours, but hallucinations tend
+		// to loop the same words within a short window.
+		minLocalUniqueRatio := minWindowUniqueRatio(words, 220)
+		fourGramCoverage := maxWindowRepeatedNGramCoverage(words, 4, 220)
+		sixGramCoverage := maxWindowRepeatedNGramCoverage(words, 6, 220)
+		if minLocalUniqueRatio < 0.16 && (fourGramCoverage >= 0.50 || sixGramCoverage >= 0.45) {
 			return fmt.Errorf("the output looked highly repetitive/hallucinated instead of like natural speech")
 		}
 	}
@@ -1007,6 +1010,62 @@ func uniqueWordRatio(words []string) float64 {
 		seen[word] = struct{}{}
 	}
 	return float64(len(seen)) / float64(len(words))
+}
+
+func minWindowUniqueRatio(words []string, windowSize int) float64 {
+	if len(words) == 0 {
+		return 0
+	}
+	minRatio := 1.0
+	forEachWordWindow(words, windowSize, func(window []string) {
+		if len(window) < 80 {
+			return
+		}
+		if ratio := uniqueWordRatio(window); ratio < minRatio {
+			minRatio = ratio
+		}
+	})
+	return minRatio
+}
+
+func maxWindowRepeatedNGramCoverage(words []string, n, windowSize int) float64 {
+	maxCoverage := 0.0
+	forEachWordWindow(words, windowSize, func(window []string) {
+		if len(window) < 80 {
+			return
+		}
+		if coverage := repeatedNGramCoverage(window, n); coverage > maxCoverage {
+			maxCoverage = coverage
+		}
+	})
+	return maxCoverage
+}
+
+func forEachWordWindow(words []string, windowSize int, visit func([]string)) {
+	if windowSize <= 0 || len(words) <= windowSize {
+		visit(words)
+		return
+	}
+
+	step := windowSize / 2
+	if step <= 0 {
+		step = windowSize
+	}
+	visitedFinal := false
+	for start := 0; start < len(words); start += step {
+		end := start + windowSize
+		if end >= len(words) {
+			end = len(words)
+			visitedFinal = true
+		}
+		visit(words[start:end])
+		if end == len(words) {
+			break
+		}
+	}
+	if !visitedFinal {
+		visit(words[len(words)-windowSize:])
+	}
 }
 
 func repeatedNGramCoverage(words []string, n int) float64 {
