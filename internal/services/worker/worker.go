@@ -1051,20 +1051,15 @@ func forEachWordWindow(words []string, windowSize int, visit func([]string)) {
 	if step <= 0 {
 		step = windowSize
 	}
-	visitedFinal := false
 	for start := 0; start < len(words); start += step {
 		end := start + windowSize
 		if end >= len(words) {
-			end = len(words)
-			visitedFinal = true
+			// Always evaluate the final full-size tail window. A short partial
+			// tail under-represents repetition density near the end of long audio.
+			visit(words[len(words)-windowSize:])
+			return
 		}
 		visit(words[start:end])
-		if end == len(words) {
-			break
-		}
-	}
-	if !visitedFinal {
-		visit(words[len(words)-windowSize:])
 	}
 }
 
