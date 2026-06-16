@@ -664,17 +664,9 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 		restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer restoreCancel()
 
-		var restoreErrs []string
-		if err := h.DB.UpdateAudioTranscription(restoreCtx, &previous); err != nil {
+		if err := h.DB.UpdateAudioTranscriptionWithSummary(restoreCtx, &previous); err != nil {
 			log.Printf("Warning: failed to restore audio transcription %s after queue failure: %v", previous.ID, err)
-			restoreErrs = append(restoreErrs, "transcript")
-		}
-		if err := h.DB.UpdateAudioSummary(restoreCtx, &previous); err != nil {
-			log.Printf("Warning: failed to restore audio summary %s after queue failure: %v", previous.ID, err)
-			restoreErrs = append(restoreErrs, "summary")
-		}
-		if len(restoreErrs) > 0 {
-			return fmt.Errorf("failed to restore %s", strings.Join(restoreErrs, " and "))
+			return fmt.Errorf("failed to restore previous audio state: %w", err)
 		}
 		return nil
 	}
@@ -700,24 +692,11 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 	at.Decisions = json.RawMessage("[]")
 	at.SummaryModel = ""
 	at.SummaryStatus = "none"
-	if err := h.DB.UpdateAudioTranscription(c.Request.Context(), at); err != nil {
+	if err := h.DB.UpdateAudioTranscriptionWithSummary(c.Request.Context(), at); err != nil {
 		os.Remove(tempFilePath)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
-			Message: "Failed to prepare retry",
-			Code:    http.StatusInternalServerError,
-		})
-		return
-	}
-	if err := h.DB.UpdateAudioSummary(c.Request.Context(), at); err != nil {
-		os.Remove(tempFilePath)
-		message := "Failed to prepare re-transcription. Your previous transcript was preserved."
-		if restoreErr := restorePrevious(); restoreErr != nil {
-			message = "Failed to prepare re-transcription and could not verify that the previous transcript was fully restored. The original recording is still saved; please refresh before trying again."
-		}
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
-			Message: message,
+			Message: "Failed to prepare re-transcription. Please refresh before trying again.",
 			Code:    http.StatusInternalServerError,
 		})
 		return

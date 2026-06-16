@@ -609,6 +609,27 @@ func (db *DB) UpdateAudioTranscription(ctx context.Context, at *models.AudioTran
 	return err
 }
 
+// UpdateAudioTranscriptionWithSummary atomically updates transcription and summary fields.
+// Use this when re-transcription needs to clear or restore both payloads as one row mutation.
+func (db *DB) UpdateAudioTranscriptionWithSummary(ctx context.Context, at *models.AudioTranscription) error {
+	query := `
+		UPDATE audio_transcriptions
+		SET duration = $2, language = $3, transcript_text = $4, word_count = $5,
+			status = $6, error_message = $7,
+			processing_stage = $8, processing_progress = $9, retry_count = $10,
+			content_type = $11, summary_text = $12, key_points = $13,
+			action_items = $14, decisions = $15, summary_model = $16,
+			summary_status = $17
+		WHERE id = $1`
+
+	_, err := db.ExecContext(ctx, query,
+		at.ID, at.Duration, at.Language, at.TranscriptText,
+		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
+		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryStatus,
+	)
+	return err
+}
+
 // UpdateAudioTranscriptionIfActive saves terminal worker results only while a job is still active.
 func (db *DB) UpdateAudioTranscriptionIfActive(ctx context.Context, at *models.AudioTranscription) (bool, error) {
 	query := `
