@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -21,6 +22,49 @@ func TestValidateTranscriptionQualityRejectsMixedRepeatedPatterns(t *testing.T) 
 
 	if err := validateTranscriptionQuality(bad, 12*60, nil); err == nil {
 		t.Fatal("expected mixed repeated hallucination patterns to fail quality check")
+	}
+}
+
+func TestValidateTranscriptionQualityAllowsLongMeetingWithRecurringPhrases(t *testing.T) {
+	topics := []string{
+		"timeline", "budget", "design", "implementation", "testing", "deployment",
+		"feedback", "training", "support", "reporting", "integration", "migration",
+	}
+	verbs := []string{
+		"review", "clarify", "prioritize", "document", "schedule", "confirm",
+		"compare", "prepare", "share", "update", "validate", "coordinate",
+	}
+	parts := make([]string, 0, 240)
+	for i := 0; i < 240; i++ {
+		parts = append(parts, fmt.Sprintf(
+			"I think we should %s the %s with the team because the client asked about requirements, blockers, ownership, risks, decisions, follow up, and next steps during the meeting.",
+			verbs[i%len(verbs)],
+			topics[(i*5)%len(topics)],
+		))
+	}
+
+	if err := validateTranscriptionQuality(strings.Join(parts, " "), 2*60*60, nil); err != nil {
+		t.Fatalf("expected long natural meeting with recurring phrases to pass quality check, got %v", err)
+	}
+}
+
+func TestForEachWordWindowVisitsFullTailWindow(t *testing.T) {
+	words := []string{"w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8", "w9", "w10"}
+	var windows [][]string
+	forEachWordWindow(words, 4, func(window []string) {
+		copied := append([]string(nil), window...)
+		windows = append(windows, copied)
+	})
+
+	if len(windows) == 0 {
+		t.Fatal("expected at least one visited window")
+	}
+	last := windows[len(windows)-1]
+	if len(last) != 4 {
+		t.Fatalf("last window length = %d, want full window length 4", len(last))
+	}
+	if got, want := strings.Join(last, " "), "w7 w8 w9 w10"; got != want {
+		t.Fatalf("last window = %q, want %q", got, want)
 	}
 }
 
