@@ -30,6 +30,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
@@ -54,18 +55,18 @@ const whisperInitialSegmentSeconds = 1800
 const whisperFFmpegTimeout = 30 * time.Minute
 const whisperProbeTimeout = 30 * time.Second
 
-// Normalize tricky browser/video uploads to MP3 for Whisper. OpenAI accepts Ogg
-// by extension, but production WhatsApp MP4 → Ogg/Opus transcodes were still
-// rejected as "Invalid file format". MP3 is less compact but is the most
-// consistently accepted container/codec combination for speech uploads.
+// Normalize tricky browser/video uploads to MP3 for Whisper. Playable browser
+// MediaRecorder M4A/WebM files can still decode poorly in Whisper and trigger
+// hallucinated transcripts. MP3 is less compact, but it is the most consistently
+// accepted container/codec combination for speech uploads.
 const whisperPreparedExtension = ".mp3"
-const whisperPreparedBitrate = "48k"
+const whisperPreparedBitrate = "64k"
 
 func requiresWhisperTranscode(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
 	// We accept these uploads at the API boundary, but normalize them before
 	// transcription so the worker feeds Whisper a predictable audio format.
-	case ".mp4", ".flac", ".ogg":
+	case ".mp4", ".m4a", ".webm", ".flac", ".ogg":
 		return true
 	default:
 		return false
@@ -719,6 +720,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	var transcriptText string
 	var language string
 	var duration float64
+	var transcriptionSegments []audio.TranscriptionSegment
 
 	if len(transcriptionParts) == 0 {
 		_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcribing", 70)
@@ -736,6 +738,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		transcriptText = result.Text
 		language = result.Language
 		duration = result.Duration
+		transcriptionSegments = append(transcriptionSegments, result.Segments...)
 	} else {
 		partTexts := make([]string, 0, len(transcriptionParts))
 		languageCounts := map[string]int{}
@@ -761,6 +764,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 			}
 			partTexts = append(partTexts, strings.TrimSpace(result.Text))
 			duration += result.Duration
+			transcriptionSegments = append(transcriptionSegments, result.Segments...)
 			if result.Language != "" {
 				languageCounts[result.Language]++
 			}
@@ -797,6 +801,27 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		}
 		p.notifyWebhook("audio.failed", at.APIKeyID, at)
 		return fmt.Errorf("empty transcription result for %s", payload.OriginalName)
+	}
+
+	if qualityErr := validateTranscriptionQuality(at.TranscriptText, at.Duration, transcriptionSegments); qualityErr != nil {
+		// Do not persist known-bad hallucinated text. Failed records are still
+		// retriable from saved audio, and keeping transcript_text empty prevents
+		// accidental export/API/UI exposure of junk output.
+		at.TranscriptText = ""
+		at.WordCount = 0
+		at.Status = "failed"
+		at.ErrorMessage = "Transcription quality check failed: " + qualityErr.Error() + ". The original recording was saved, so you can re-transcribe it from the same audio."
+		at.ProcessingStage = "failed"
+		at.ProcessingProgress = 100
+		updated, err := p.db.UpdateAudioTranscriptionIfActive(ctx, at)
+		if err != nil {
+			return fmt.Errorf("failed to save low-quality transcription failure status: %w", err)
+		}
+		if !updated {
+			return fmt.Errorf("audio transcription stopped before completion")
+		}
+		p.notifyWebhook("audio.failed", at.APIKeyID, at)
+		return fmt.Errorf("transcription quality check failed for %s: %w", payload.OriginalName, qualityErr)
 	}
 
 	at.Status = "completed"
@@ -916,6 +941,101 @@ func (p *Pool) transcribeFileWithRetry(ctx context.Context, path, originalName s
 		}
 	}
 	return nil, fmt.Errorf("all %d Whisper attempts failed: %w", maxAttempts, lastErr)
+}
+
+func validateTranscriptionQuality(text string, duration float64, segments []audio.TranscriptionSegment) error {
+	words := normalizedTranscriptWords(text)
+	if len(words) >= 80 {
+		uniqueRatio := uniqueWordRatio(words)
+		fourGramCoverage := repeatedNGramCoverage(words, 4)
+		sixGramCoverage := repeatedNGramCoverage(words, 6)
+		if uniqueRatio < 0.12 && (fourGramCoverage >= 0.32 || sixGramCoverage >= 0.28) {
+			return fmt.Errorf("the output looked highly repetitive/hallucinated instead of like natural speech")
+		}
+	}
+
+	if duration >= 5*60 && len(words) < 15 {
+		return fmt.Errorf("almost no speech was detected in a long recording")
+	}
+
+	checkedSegments := 0
+	badCompression := 0
+	badLogprob := 0
+	badNoSpeech := 0
+	for _, segment := range segments {
+		if strings.TrimSpace(segment.Text) == "" {
+			continue
+		}
+		checkedSegments++
+		if segment.CompressionRatio > 2.4 {
+			badCompression++
+		}
+		if segment.AvgLogprob < -1.0 {
+			badLogprob++
+		}
+		if segment.NoSpeechProb > 0.8 && segment.AvgLogprob < -1.0 {
+			badNoSpeech++
+		}
+	}
+	if checkedSegments >= 3 {
+		if badCompression*2 >= checkedSegments {
+			return fmt.Errorf("Whisper reported unstable compression on most transcript segments")
+		}
+		if badLogprob*3 >= checkedSegments*2 {
+			return fmt.Errorf("Whisper reported low confidence on most transcript segments")
+		}
+		if badNoSpeech*2 >= checkedSegments {
+			return fmt.Errorf("Whisper treated most segments as likely silence")
+		}
+	}
+
+	return nil
+}
+
+func normalizedTranscriptWords(text string) []string {
+	return strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+func uniqueWordRatio(words []string) float64 {
+	if len(words) == 0 {
+		return 0
+	}
+	seen := make(map[string]struct{}, len(words))
+	for _, word := range words {
+		seen[word] = struct{}{}
+	}
+	return float64(len(seen)) / float64(len(words))
+}
+
+func repeatedNGramCoverage(words []string, n int) float64 {
+	if n <= 0 || len(words) < n {
+		return 0
+	}
+	counts := make(map[string]int, len(words)-n+1)
+	for i := 0; i <= len(words)-n; i++ {
+		counts[strings.Join(words[i:i+n], " ")]++
+	}
+
+	// Measure all words covered by any repeated n-gram, not only the single most
+	// common phrase. Hallucinations can rotate between a few repeated patterns,
+	// so max-count-only coverage can under-report obvious repetitive output.
+	covered := make([]bool, len(words))
+	coveredCount := 0
+	for i := 0; i <= len(words)-n; i++ {
+		gram := strings.Join(words[i:i+n], " ")
+		if counts[gram] <= 1 {
+			continue
+		}
+		for j := i; j < i+n; j++ {
+			if !covered[j] {
+				covered[j] = true
+				coveredCount++
+			}
+		}
+	}
+	return float64(coveredCount) / float64(len(words))
 }
 
 func pickDominantLanguage(counts map[string]int) string {

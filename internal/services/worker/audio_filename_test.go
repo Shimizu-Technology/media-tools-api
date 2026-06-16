@@ -2,6 +2,27 @@ package worker
 
 import "testing"
 
+func TestRequiresWhisperTranscodeNormalizesBrowserContainers(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{path: "/tmp/recording.m4a", want: true},
+		{path: "/tmp/recording.webm", want: true},
+		{path: "/tmp/zoom.mp4", want: true},
+		{path: "/tmp/audio.mp3", want: false},
+		{path: "/tmp/audio.wav", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := requiresWhisperTranscode(tt.path); got != tt.want {
+				t.Fatalf("requiresWhisperTranscode(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWhisperUploadFilenameUsesActualExtension(t *testing.T) {
 	tests := []struct {
 		name         string

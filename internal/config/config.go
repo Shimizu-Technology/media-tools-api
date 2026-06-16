@@ -45,8 +45,11 @@ type Config struct {
 	OpenRouterAPIKey string
 	OpenRouterModel  string // Default model for summaries
 
-	// OpenAI settings (for Whisper audio transcription)
-	OpenAIAPIKey string
+	// OpenAI settings (for Whisper/audio transcription)
+	OpenAIAPIKey                string
+	OpenAITranscriptionModel    string
+	OpenAITranscriptionLanguage string
+	OpenAITranscriptionPrompt   string
 
 	// JWT Authentication (MTA-20)
 	JWTSecret string
@@ -116,8 +119,11 @@ func Load() (*Config, error) {
 		OpenRouterAPIKey: getEnv("OPENROUTER_API_KEY", ""),
 		OpenRouterModel:  getEnv("OPENROUTER_MODEL", "anthropic/claude-4.5-sonnet-20250929"),
 
-		// OpenAI (Whisper API for audio transcription)
-		OpenAIAPIKey: getEnv("OPENAI_API_KEY", ""),
+		// OpenAI (Whisper/API for audio transcription)
+		OpenAIAPIKey:                getEnv("OPENAI_API_KEY", ""),
+		OpenAITranscriptionModel:    getEnv("OPENAI_TRANSCRIPTION_MODEL", "whisper-1"),
+		OpenAITranscriptionLanguage: getEnv("OPENAI_TRANSCRIPTION_LANGUAGE", "en"),
+		OpenAITranscriptionPrompt:   getEnv("OPENAI_TRANSCRIPTION_PROMPT", ""),
 
 		// JWT Authentication
 		JWTSecret:         getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),

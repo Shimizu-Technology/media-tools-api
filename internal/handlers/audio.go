@@ -581,7 +581,8 @@ func (h *Handler) RenameAudioTranscription(c *gin.Context) {
 	c.JSON(http.StatusOK, at)
 }
 
-// RetryAudioTranscription re-queues a failed transcription from durable S3 audio.
+// RetryAudioTranscription re-queues a failed or completed transcription from durable S3 audio.
+// This powers both "retry failed job" and "re-transcribe bad transcript" UX.
 // POST /api/v1/audio/transcriptions/:id/retry
 func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 	id := c.Param("id")
@@ -593,6 +594,15 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 			Error:   "not_found",
 			Message: "Audio transcription not found",
 			Code:    http.StatusNotFound,
+		})
+		return
+	}
+
+	if at.Status == "pending" || at.Status == "processing" {
+		c.JSON(http.StatusConflict, models.ErrorResponse{
+			Error:   "already_processing",
+			Message: "This recording is already being transcribed.",
+			Code:    http.StatusConflict,
 		})
 		return
 	}
@@ -623,20 +633,6 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 		return
 	}
 
-	at.Status = "pending"
-	at.ErrorMessage = ""
-	at.ProcessingStage = "queued"
-	at.ProcessingProgress = 0
-	if err := h.DB.UpdateAudioTranscription(c.Request.Context(), at); err != nil {
-		os.Remove(tempFilePath)
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
-			Message: "Failed to prepare retry",
-			Code:    http.StatusInternalServerError,
-		})
-		return
-	}
-
 	payload := worker.AudioPayload{
 		AudioID:      at.ID,
 		TempFilePath: tempFilePath,
@@ -659,27 +655,91 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 		Payload:   payloadJSON,
 		CreatedAt: time.Now(),
 	}
+
+	clearStaleChat := func() {
+		chatCtx, chatCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer chatCancel()
+		if err := h.DB.DeleteChatSessionForActor(chatCtx, "audio", at.ID, actor.UserID, actor.APIKeyID); err != nil {
+			log.Printf("Warning: failed to clear stale audio chat session for %s before re-transcribe: %v", at.ID, err)
+		}
+	}
+
+	at.Duration = 0
+	at.Language = ""
+	at.TranscriptText = ""
+	at.WordCount = 0
+	at.Status = "pending"
+	at.ErrorMessage = ""
+	at.ProcessingStage = "queued"
+	at.ProcessingProgress = 0
+	at.SummaryText = ""
+	at.KeyPoints = json.RawMessage("[]")
+	at.ActionItems = json.RawMessage("[]")
+	at.Decisions = json.RawMessage("[]")
+	at.SummaryModel = ""
+	at.SummaryStatus = "none"
+
+	// Atomically swap from completed/failed to pending. The DB status predicate
+	// closes the concurrent-request window where two re-transcribe clicks could
+	// otherwise enqueue duplicate Whisper jobs.
+	previous, prepared, err := h.DB.PrepareAudioRetranscriptionForActor(c.Request.Context(), at, actor.UserID, actor.APIKeyID)
+	if err != nil {
+		os.Remove(tempFilePath)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "database_error",
+			Message: "Failed to prepare re-transcription. Please refresh before trying again.",
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+	if !prepared {
+		os.Remove(tempFilePath)
+		c.JSON(http.StatusConflict, models.ErrorResponse{
+			Error:   "already_processing",
+			Message: "This recording is already being transcribed.",
+			Code:    http.StatusConflict,
+		})
+		return
+	}
+	restorePrevious := func() error {
+		restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer restoreCancel()
+
+		if err := h.DB.UpdateAudioTranscriptionWithSummary(restoreCtx, previous); err != nil {
+			log.Printf("Warning: failed to restore audio transcription %s after queue failure: %v", previous.ID, err)
+			return fmt.Errorf("failed to restore previous audio state: %w", err)
+		}
+		return nil
+	}
+
 	if err := h.Worker.Submit(job); err != nil {
 		if h.isOwnerRequest(c) {
 			ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 			defer cancel()
 			if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
+				clearStaleChat()
 				c.JSON(http.StatusAccepted, at)
 				return
 			}
 		}
 		os.Remove(tempFilePath)
-		at.Status = "failed"
-		at.ErrorMessage = "Retry queue is full, please try again later"
-		_ = h.DB.UpdateAudioTranscription(c.Request.Context(), at)
+		if restoreErr := restorePrevious(); restoreErr != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error:   "restore_failed",
+				Message: "Server is busy and could not verify that your previous transcript was fully restored. The original recording is still saved; please refresh before trying again.",
+				Code:    http.StatusInternalServerError,
+			})
+			return
+		}
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
 			Error:   "queue_full",
-			Message: "Server is busy. Please try again in a moment.",
+			Message: "Server is busy. Your previous transcript was preserved. Please try again in a moment.",
 			Code:    http.StatusServiceUnavailable,
 		})
 		return
 	}
 
+	clearStaleChat()
 	c.JSON(http.StatusAccepted, at)
 }
 
