@@ -581,7 +581,8 @@ func (h *Handler) RenameAudioTranscription(c *gin.Context) {
 	c.JSON(http.StatusOK, at)
 }
 
-// RetryAudioTranscription re-queues a failed transcription from durable S3 audio.
+// RetryAudioTranscription re-queues a failed or completed transcription from durable S3 audio.
+// This powers both "retry failed job" and "re-transcribe bad transcript" UX.
 // POST /api/v1/audio/transcriptions/:id/retry
 func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 	id := c.Param("id")
@@ -593,6 +594,15 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 			Error:   "not_found",
 			Message: "Audio transcription not found",
 			Code:    http.StatusNotFound,
+		})
+		return
+	}
+
+	if at.Status == "pending" || at.Status == "processing" {
+		c.JSON(http.StatusConflict, models.ErrorResponse{
+			Error:   "already_processing",
+			Message: "This recording is already being transcribed.",
+			Code:    http.StatusConflict,
 		})
 		return
 	}
@@ -623,10 +633,20 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 		return
 	}
 
+	at.Duration = 0
+	at.Language = ""
+	at.TranscriptText = ""
+	at.WordCount = 0
 	at.Status = "pending"
 	at.ErrorMessage = ""
 	at.ProcessingStage = "queued"
 	at.ProcessingProgress = 0
+	at.SummaryText = ""
+	at.KeyPoints = json.RawMessage("[]")
+	at.ActionItems = json.RawMessage("[]")
+	at.Decisions = json.RawMessage("[]")
+	at.SummaryModel = ""
+	at.SummaryStatus = "none"
 	if err := h.DB.UpdateAudioTranscription(c.Request.Context(), at); err != nil {
 		os.Remove(tempFilePath)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -636,7 +656,18 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 		})
 		return
 	}
-
+	if err := h.DB.UpdateAudioSummary(c.Request.Context(), at); err != nil {
+		os.Remove(tempFilePath)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "database_error",
+			Message: "Failed to reset previous summary",
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+	if err := h.DB.DeleteChatSessionForActor(c.Request.Context(), "audio", at.ID, actor.UserID, actor.APIKeyID); err != nil {
+		log.Printf("Warning: failed to clear stale audio chat session for %s before re-transcribe: %v", at.ID, err)
+	}
 	payload := worker.AudioPayload{
 		AudioID:      at.ID,
 		TempFilePath: tempFilePath,

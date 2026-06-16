@@ -36,31 +36,85 @@ func (e *WhisperAPIError) Error() string {
 	return fmt.Sprintf("Whisper API returned status %d: %s", e.StatusCode, e.Body)
 }
 
+// TranscriptionSegment is returned by Whisper's verbose_json response.
+// The quality fields are useful for catching classic Whisper hallucinations:
+// repeated text, high compression ratios, or low-confidence/no-speech segments.
+type TranscriptionSegment struct {
+	Text             string  `json:"text"`
+	AvgLogprob       float64 `json:"avg_logprob"`
+	CompressionRatio float64 `json:"compression_ratio"`
+	NoSpeechProb     float64 `json:"no_speech_prob"`
+}
+
 // TranscriptionResult holds the output from a Whisper API call.
 type TranscriptionResult struct {
-	Text     string  `json:"text"`
-	Language string  `json:"language"`
-	Duration float64 `json:"duration"`
+	Text     string                 `json:"text"`
+	Language string                 `json:"language"`
+	Duration float64                `json:"duration"`
+	Segments []TranscriptionSegment `json:"segments,omitempty"`
 }
 
 // whisperResponse is the JSON shape returned by the Whisper API
 // when response_format is "verbose_json".
 type whisperResponse struct {
-	Text     string  `json:"text"`
-	Language string  `json:"language"`
-	Duration float64 `json:"duration"`
+	Text     string                 `json:"text"`
+	Language string                 `json:"language"`
+	Duration float64                `json:"duration"`
+	Segments []TranscriptionSegment `json:"segments"`
+}
+
+// TranscriberOptions controls OpenAI transcription behavior.
+// Language defaults to English because this app's browser recordings are mostly
+// English meetings, and Whisper auto-detection can hallucinate badly on long,
+// quiet, or browser-container audio. Set Language to "auto" to opt back into
+// model language detection.
+type TranscriberOptions struct {
+	Model    string
+	Language string
+	Prompt   string
 }
 
 // Transcriber handles media transcription via OpenAI's transcription API.
 type Transcriber struct {
 	apiKey     string
+	model      string
+	language   string
+	prompt     string
 	httpClient *http.Client
 }
 
+const (
+	defaultTranscriptionModel    = "whisper-1"
+	defaultTranscriptionLanguage = "en"
+)
+
 // NewTranscriber creates a new Transcriber with the given OpenAI API key.
 func NewTranscriber(apiKey string) *Transcriber {
+	return NewTranscriberWithOptions(apiKey, TranscriberOptions{})
+}
+
+// NewTranscriberWithOptions creates a new Transcriber with explicit options.
+func NewTranscriberWithOptions(apiKey string, opts TranscriberOptions) *Transcriber {
+	model := strings.TrimSpace(opts.Model)
+	if model == "" {
+		model = defaultTranscriptionModel
+	}
+
+	language := strings.TrimSpace(opts.Language)
+	if language == "" {
+		language = defaultTranscriptionLanguage
+	}
+	if strings.EqualFold(language, "auto") || strings.EqualFold(language, "detect") {
+		language = ""
+	}
+
+	prompt := strings.TrimSpace(opts.Prompt)
+
 	return &Transcriber{
-		apiKey: apiKey,
+		apiKey:   apiKey,
+		model:    model,
+		language: language,
+		prompt:   prompt,
 		httpClient: &http.Client{
 			// Transcription can take a while for long recordings.
 			Timeout: 5 * time.Minute,
@@ -102,13 +156,25 @@ func (t *Transcriber) Transcribe(ctx context.Context, audioData io.Reader, filen
 		return nil, fmt.Errorf("failed to copy audio data: %w", err)
 	}
 
-	// Keep the existing model choice for now; Phase 1 Zoom support is only about
-	// input compatibility, not changing transcription models.
-	if err := writer.WriteField("model", "whisper-1"); err != nil {
+	if err := writer.WriteField("model", t.model); err != nil {
 		return nil, fmt.Errorf("failed to write model field: %w", err)
 	}
+	if t.language != "" {
+		if err := writer.WriteField("language", t.language); err != nil {
+			return nil, fmt.Errorf("failed to write language field: %w", err)
+		}
+	}
+	if t.prompt != "" {
+		if err := writer.WriteField("prompt", t.prompt); err != nil {
+			return nil, fmt.Errorf("failed to write prompt field: %w", err)
+		}
+	}
+	// Make hallucination-prone retries deterministic instead of sampling.
+	if err := writer.WriteField("temperature", "0"); err != nil {
+		return nil, fmt.Errorf("failed to write temperature field: %w", err)
+	}
 
-	// Request verbose JSON for language detection and duration
+	// Request verbose JSON for language, duration, and segment-level quality data.
 	if err := writer.WriteField("response_format", "verbose_json"); err != nil {
 		return nil, fmt.Errorf("failed to write response_format field: %w", err)
 	}
@@ -155,6 +221,7 @@ func (t *Transcriber) Transcribe(ctx context.Context, audioData io.Reader, filen
 		Text:     whisperResp.Text,
 		Language: whisperResp.Language,
 		Duration: whisperResp.Duration,
+		Segments: whisperResp.Segments,
 	}, nil
 }
 

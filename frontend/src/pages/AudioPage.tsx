@@ -28,6 +28,7 @@ import {
   History,
   Pencil,
   Save,
+  RefreshCw,
 } from 'lucide-react';
 import {
   transcribeAudio,
@@ -1173,7 +1174,7 @@ export function AudioPage() {
           }}
         >
           <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            Transcription failed. You can retry with the same recording.
+            Transcription failed. You can re-transcribe from the saved recording.
           </p>
           <div className="flex items-center gap-2">
             {result.audio_s3_key && (
@@ -1187,7 +1188,10 @@ export function AudioPage() {
                   minHeight: '40px',
                 }}
               >
-                {isRetrying ? 'Retrying...' : 'Retry from saved audio'}
+                <span className="inline-flex items-center gap-1.5">
+                  <RefreshCw className={`w-4 h-4 ${isRetrying ? 'animate-spin' : ''}`} />
+                  {isRetrying ? 'Re-transcribing...' : 'Re-transcribe'}
+                </span>
               </button>
             )}
             <button
@@ -1300,6 +1304,19 @@ export function AudioPage() {
                 <FileAudio className="w-4 h-4" />
                 {isLoadingPlayback ? 'Loading audio...' : showPlayback ? 'Hide recording' : 'Replay recording'}
               </button>
+
+              {result.audio_s3_key && (
+                <button
+                  onClick={handleRetryStoredAudio}
+                  disabled={isRetrying}
+                  className="flex items-center gap-1.5 text-sm font-medium transition-colors disabled:opacity-60"
+                  style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
+                  title="Run transcription again from the saved original recording"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isRetrying ? 'animate-spin' : ''}`} />
+                  {isRetrying ? 'Re-transcribing...' : 'Re-transcribe'}
+                </button>
+              )}
 
               {/* Export dropdown (MTA-26) */}
               <div className="relative">

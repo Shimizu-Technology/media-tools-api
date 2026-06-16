@@ -90,9 +90,17 @@ func main() {
 	}
 	ytDlpCookiesConfigured := cookiesPath != ""
 
-	audioTranscriber := audio.NewTranscriber(cfg.OpenAIAPIKey)
+	audioTranscriber := audio.NewTranscriberWithOptions(cfg.OpenAIAPIKey, audio.TranscriberOptions{
+		Model:    cfg.OpenAITranscriptionModel,
+		Language: cfg.OpenAITranscriptionLanguage,
+		Prompt:   cfg.OpenAITranscriptionPrompt,
+	})
 	if audioTranscriber.IsConfigured() {
-		log.Println("✅ Audio transcription enabled (Whisper API)")
+		languageHint := cfg.OpenAITranscriptionLanguage
+		if languageHint == "" {
+			languageHint = "en"
+		}
+		log.Printf("✅ Audio transcription enabled (model=%s, language=%s)", cfg.OpenAITranscriptionModel, languageHint)
 		// Enable Whisper as fallback for YouTube transcripts when subtitles fail
 		whisperAdapter := audio.NewWhisperAdapter(audioTranscriber)
 		extractor.SetWhisperFallback(whisperAdapter)
