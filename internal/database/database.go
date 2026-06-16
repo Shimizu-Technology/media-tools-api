@@ -372,20 +372,29 @@ func (db *DB) GetOrCreateChatSession(ctx context.Context, itemType, itemID strin
 // DeleteChatSessionForActor removes a chat session for an owned item.
 // Messages are deleted by the transcript_chat_messages ON DELETE CASCADE FK.
 func (db *DB) DeleteChatSessionForActor(ctx context.Context, itemType, itemID string, userID, apiKeyID *string) error {
-	var ownerClause string
-	var ownerArg interface{}
-	if userID != nil {
-		ownerClause = "user_id = $3 AND api_key_id IS NULL"
-		ownerArg = *userID
-	} else if apiKeyID != nil {
-		ownerClause = "api_key_id = $3 AND user_id IS NULL"
-		ownerArg = *apiKeyID
-	} else {
+	var err error
+	switch {
+	case userID != nil:
+		_, err = db.ExecContext(ctx, `
+			DELETE FROM transcript_chat_sessions
+			WHERE item_type = $1
+			  AND item_id = $2
+			  AND user_id = $3
+			  AND api_key_id IS NULL`,
+			itemType, itemID, *userID,
+		)
+	case apiKeyID != nil:
+		_, err = db.ExecContext(ctx, `
+			DELETE FROM transcript_chat_sessions
+			WHERE item_type = $1
+			  AND item_id = $2
+			  AND api_key_id = $3
+			  AND user_id IS NULL`,
+			itemType, itemID, *apiKeyID,
+		)
+	default:
 		return fmt.Errorf("chat session owner is required")
 	}
-
-	query := fmt.Sprintf(`DELETE FROM transcript_chat_sessions WHERE item_type = $1 AND item_id = $2 AND %s`, ownerClause)
-	_, err := db.ExecContext(ctx, query, itemType, itemID, ownerArg)
 	if err != nil {
 		return fmt.Errorf("failed to delete chat session: %w", err)
 	}
