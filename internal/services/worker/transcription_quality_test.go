@@ -82,6 +82,95 @@ func TestValidateTranscriptionQualityAllowsNaturalMeetingText(t *testing.T) {
 	}
 }
 
+func TestSanitizeTranscriptionResultRemovesRepeatedWhisperLoop(t *testing.T) {
+	segments := []audio.TranscriptionSegment{
+		{Text: "Before the loop we discussed the school."},
+	}
+	for i := 0; i < 35; i++ {
+		segments = append(segments, audio.TranscriptionSegment{
+			Text:             "We're at Harvest.",
+			CompressionRatio: 12,
+			NoSpeechProb:     0.85,
+		})
+	}
+	segments = append(segments, audio.TranscriptionSegment{Text: "After the loop the conversation continued."})
+
+	text, cleanedSegments, removed := sanitizeTranscriptionResult(&audio.TranscriptionResult{
+		Text:     transcriptionTextFromSegments(segments),
+		Segments: segments,
+	})
+
+	if removed != 34 {
+		t.Fatalf("removed segments = %d, want 34", removed)
+	}
+	if len(cleanedSegments) != 3 {
+		t.Fatalf("cleaned segment count = %d, want 3", len(cleanedSegments))
+	}
+	if strings.Count(text, "We're at Harvest.") != 1 {
+		t.Fatalf("expected repeated phrase to be kept once, got text %q", text)
+	}
+	if err := validateTranscriptionQuality(text, 15*60, cleanedSegments); err != nil {
+		t.Fatalf("expected cleaned transcript to pass quality check, got %v", err)
+	}
+}
+
+func TestSanitizeStitchedTranscriptionCollapsesCrossChunkLengthOnlyLoop(t *testing.T) {
+	chunkA := []audio.TranscriptionSegment{{Text: "Before the boundary loop we discussed the meeting.", Start: 270, End: 275}}
+	for i := 0; i < 10; i++ {
+		chunkA = append(chunkA, audio.TranscriptionSegment{Text: "I know.", Start: float64(280 + i), End: float64(281 + i)})
+	}
+	chunkB := make([]audio.TranscriptionSegment, 0, 11)
+	for i := 0; i < 10; i++ {
+		chunkB = append(chunkB, audio.TranscriptionSegment{Text: "I know.", Start: float64(i), End: float64(i + 1)})
+	}
+	chunkB = append(chunkB, audio.TranscriptionSegment{Text: "After the loop the call continued.", Start: 10, End: 15})
+
+	if _, _, removed := sanitizeTranscriptionResult(&audio.TranscriptionResult{Text: transcriptionTextFromSegments(chunkA), Segments: chunkA}); removed != 0 {
+		t.Fatalf("first chunk removed %d segment(s), want 0", removed)
+	}
+	if _, _, removed := sanitizeTranscriptionResult(&audio.TranscriptionResult{Text: transcriptionTextFromSegments(chunkB), Segments: chunkB}); removed != 0 {
+		t.Fatalf("second chunk removed %d segment(s), want 0", removed)
+	}
+
+	stitchedSegments := append(append([]audio.TranscriptionSegment{}, chunkA...), chunkB...)
+	text, cleanedSegments, removed := sanitizeStitchedTranscription(transcriptionTextFromSegments(stitchedSegments), stitchedSegments)
+
+	if removed != 19 {
+		t.Fatalf("stitched removed segments = %d, want 19", removed)
+	}
+	if len(cleanedSegments) != 3 {
+		t.Fatalf("cleaned stitched segment count = %d, want 3", len(cleanedSegments))
+	}
+	if strings.Count(text, "I know.") != 1 {
+		t.Fatalf("expected length-only repeated phrase to be kept once, got text %q", text)
+	}
+	if !strings.Contains(text, "I know.\n\nAfter the loop") {
+		t.Fatalf("expected chunk paragraph break to be preserved after post-stitch cleanup, got text %q", text)
+	}
+}
+
+func TestSanitizeTranscriptionResultKeepsNormalAcknowledgements(t *testing.T) {
+	segments := []audio.TranscriptionSegment{
+		{Text: "Yeah."},
+		{Text: "Yeah."},
+		{Text: "Yeah."},
+		{Text: "That makes sense."},
+		{Text: "Let's move on to the next topic."},
+	}
+
+	_, cleanedSegments, removed := sanitizeTranscriptionResult(&audio.TranscriptionResult{
+		Text:     transcriptionTextFromSegments(segments),
+		Segments: segments,
+	})
+
+	if removed != 0 {
+		t.Fatalf("removed segments = %d, want 0", removed)
+	}
+	if len(cleanedSegments) != len(segments) {
+		t.Fatalf("cleaned segment count = %d, want %d", len(cleanedSegments), len(segments))
+	}
+}
+
 func TestValidateTranscriptionQualityRejectsBadSegments(t *testing.T) {
 	segments := []audio.TranscriptionSegment{
 		{Text: "bad one", CompressionRatio: 3.1, AvgLogprob: -0.2},

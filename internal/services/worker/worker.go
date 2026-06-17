@@ -51,9 +51,13 @@ const (
 )
 
 const whisperTargetBytes = 24 << 20 // Keep below 25MB hard limit to account for multipart overhead
-const whisperInitialSegmentSeconds = 900
+const whisperInitialSegmentSeconds = 300
 const whisperFFmpegTimeout = 30 * time.Minute
 const whisperProbeTimeout = 30 * time.Second
+
+const repeatedSegmentRunMin = 8
+const repeatedSegmentLongRunMin = 16
+const repeatedSegmentPhraseWordLimit = 8
 
 // Normalize tricky browser/video uploads to MP3 for Whisper. Playable browser
 // MediaRecorder M4A/WebM files can still decode poorly in Whisper and trigger
@@ -735,10 +739,14 @@ func (p *Pool) processAudioTranscription(job Job) error {
 			p.notifyWebhook("audio.failed", at.APIKeyID, at)
 			return fmt.Errorf("transcription failed: %w", err)
 		}
-		transcriptText = result.Text
+		cleanedText, cleanedSegments, removedSegments := sanitizeTranscriptionResult(result)
+		if removedSegments > 0 {
+			log.Printf("🧹 Audio job %s removed %d repeated Whisper segment(s) from transcription output", at.ID, removedSegments)
+		}
+		transcriptText = cleanedText
 		language = result.Language
 		duration = result.Duration
-		transcriptionSegments = append(transcriptionSegments, result.Segments...)
+		transcriptionSegments = append(transcriptionSegments, cleanedSegments...)
 	} else {
 		partTexts := make([]string, 0, len(transcriptionParts))
 		languageCounts := map[string]int{}
@@ -762,9 +770,13 @@ func (p *Pool) processAudioTranscription(job Job) error {
 				p.notifyWebhook("audio.failed", at.APIKeyID, at)
 				return fmt.Errorf("chunk transcription failed (%s): %w", partName, err)
 			}
-			partTexts = append(partTexts, strings.TrimSpace(result.Text))
+			cleanedText, cleanedSegments, removedSegments := sanitizeTranscriptionResult(result)
+			if removedSegments > 0 {
+				log.Printf("🧹 Audio job %s removed %d repeated Whisper segment(s) from chunk %d/%d", at.ID, removedSegments, idx+1, len(transcriptionParts))
+			}
+			partTexts = append(partTexts, cleanedText)
 			duration += result.Duration
-			transcriptionSegments = append(transcriptionSegments, result.Segments...)
+			transcriptionSegments = append(transcriptionSegments, cleanedSegments...)
 			if result.Language != "" {
 				languageCounts[result.Language]++
 			}
@@ -780,6 +792,13 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	if err == nil && latest.Status == "failed" {
 		return fmt.Errorf("audio transcription stopped before completion")
 	}
+	stitchedText, stitchedSegments, stitchedRemovedSegments := sanitizeStitchedTranscription(transcriptText, transcriptionSegments)
+	if stitchedRemovedSegments > 0 {
+		log.Printf("🧹 Audio job %s removed %d repeated Whisper segment(s) after stitching", at.ID, stitchedRemovedSegments)
+	}
+	transcriptText = stitchedText
+	transcriptionSegments = stitchedSegments
+
 	at.TranscriptText = transcriptText
 	at.Language = language
 	at.Duration = duration
@@ -941,6 +960,134 @@ func (p *Pool) transcribeFileWithRetry(ctx context.Context, path, originalName s
 		}
 	}
 	return nil, fmt.Errorf("all %d Whisper attempts failed: %w", maxAttempts, lastErr)
+}
+
+func sanitizeTranscriptionResult(result *audio.TranscriptionResult) (string, []audio.TranscriptionSegment, int) {
+	if result == nil {
+		return "", nil, 0
+	}
+	return sanitizeStitchedTranscription(result.Text, result.Segments)
+}
+
+func sanitizeStitchedTranscription(text string, segments []audio.TranscriptionSegment) (string, []audio.TranscriptionSegment, int) {
+	if len(segments) == 0 {
+		return strings.TrimSpace(text), nil, 0
+	}
+
+	cleanedSegments, removed := removeRepeatedSegmentRuns(segments)
+	if removed == 0 {
+		return strings.TrimSpace(text), segments, 0
+	}
+	return transcriptionTextFromSegments(cleanedSegments), cleanedSegments, removed
+}
+
+func removeRepeatedSegmentRuns(segments []audio.TranscriptionSegment) ([]audio.TranscriptionSegment, int) {
+	if len(segments) == 0 {
+		return nil, 0
+	}
+
+	cleaned := make([]audio.TranscriptionSegment, 0, len(segments))
+	removed := 0
+	for i := 0; i < len(segments); {
+		key := normalizedSegmentKey(segments[i].Text)
+		if key == "" {
+			cleaned = append(cleaned, segments[i])
+			i++
+			continue
+		}
+
+		j := i + 1
+		for j < len(segments) && normalizedSegmentKey(segments[j].Text) == key {
+			j++
+		}
+
+		run := segments[i:j]
+		if shouldCollapseRepeatedSegmentRun(run, key) {
+			// Keep one occurrence so the transcript still reflects that the phrase was
+			// heard, but remove the synthetic loop that Whisper often emits over
+			// unclear/silent audio.
+			cleaned = append(cleaned, run[0])
+			removed += len(run) - 1
+		} else {
+			cleaned = append(cleaned, run...)
+		}
+		i = j
+	}
+
+	return cleaned, removed
+}
+
+func shouldCollapseRepeatedSegmentRun(run []audio.TranscriptionSegment, key string) bool {
+	if len(run) < repeatedSegmentRunMin {
+		return false
+	}
+
+	phraseWords := strings.Fields(key)
+	if len(phraseWords) == 0 {
+		return false
+	}
+
+	highCompression := 0
+	highNoSpeech := 0
+	for _, segment := range run {
+		if segment.CompressionRatio > 2.4 {
+			highCompression++
+		}
+		if segment.NoSpeechProb > 0.5 {
+			highNoSpeech++
+		}
+	}
+
+	// Exact short-phrase runs are the classic Whisper failure shape seen in
+	// long phone recordings: one phrase repeated once per second for tens of
+	// seconds, often with high compression/no-speech probabilities. Natural
+	// conversations can repeat a word a few times, so only collapse short runs
+	// when they are very long or carry clear Whisper instability signals.
+	if len(phraseWords) <= repeatedSegmentPhraseWordLimit {
+		return len(run) >= repeatedSegmentLongRunMin || highCompression*3 >= len(run) || highNoSpeech*3 >= len(run)
+	}
+
+	return highCompression*2 >= len(run) || highNoSpeech*2 >= len(run)
+}
+
+func normalizedSegmentKey(text string) string {
+	return strings.Join(normalizedTranscriptWords(text), " ")
+}
+
+func transcriptionTextFromSegments(segments []audio.TranscriptionSegment) string {
+	var builder strings.Builder
+	var previous audio.TranscriptionSegment
+	hasPrevious := false
+
+	for _, segment := range segments {
+		text := strings.TrimSpace(segment.Text)
+		if text == "" {
+			continue
+		}
+
+		if builder.Len() > 0 {
+			if hasPrevious && isLikelyChunkBoundary(previous, segment) {
+				builder.WriteString("\n\n")
+			} else {
+				builder.WriteByte(' ')
+			}
+		}
+		builder.WriteString(text)
+		previous = segment
+		hasPrevious = true
+	}
+
+	return strings.TrimSpace(builder.String())
+}
+
+func isLikelyChunkBoundary(previous, current audio.TranscriptionSegment) bool {
+	// Whisper segment timestamps restart from zero for each chunk. If the stitched
+	// segment stream jumps backward substantially, preserve the paragraph break
+	// that the multi-chunk transcript originally had between chunks.
+	if previous.End <= 0 || current.End <= current.Start {
+		return false
+	}
+	return current.Start+2 < previous.End
 }
 
 func validateTranscriptionQuality(text string, duration float64, segments []audio.TranscriptionSegment) error {
