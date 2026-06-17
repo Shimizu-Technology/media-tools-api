@@ -115,15 +115,15 @@ func TestSanitizeTranscriptionResultRemovesRepeatedWhisperLoop(t *testing.T) {
 }
 
 func TestSanitizeStitchedTranscriptionCollapsesCrossChunkLengthOnlyLoop(t *testing.T) {
-	chunkA := []audio.TranscriptionSegment{{Text: "Before the boundary loop we discussed the meeting."}}
+	chunkA := []audio.TranscriptionSegment{{Text: "Before the boundary loop we discussed the meeting.", Start: 270, End: 275}}
 	for i := 0; i < 10; i++ {
-		chunkA = append(chunkA, audio.TranscriptionSegment{Text: "I know."})
+		chunkA = append(chunkA, audio.TranscriptionSegment{Text: "I know.", Start: float64(280 + i), End: float64(281 + i)})
 	}
 	chunkB := make([]audio.TranscriptionSegment, 0, 11)
 	for i := 0; i < 10; i++ {
-		chunkB = append(chunkB, audio.TranscriptionSegment{Text: "I know."})
+		chunkB = append(chunkB, audio.TranscriptionSegment{Text: "I know.", Start: float64(i), End: float64(i + 1)})
 	}
-	chunkB = append(chunkB, audio.TranscriptionSegment{Text: "After the loop the call continued."})
+	chunkB = append(chunkB, audio.TranscriptionSegment{Text: "After the loop the call continued.", Start: 10, End: 15})
 
 	if _, _, removed := sanitizeTranscriptionResult(&audio.TranscriptionResult{Text: transcriptionTextFromSegments(chunkA), Segments: chunkA}); removed != 0 {
 		t.Fatalf("first chunk removed %d segment(s), want 0", removed)
@@ -143,6 +143,9 @@ func TestSanitizeStitchedTranscriptionCollapsesCrossChunkLengthOnlyLoop(t *testi
 	}
 	if strings.Count(text, "I know.") != 1 {
 		t.Fatalf("expected length-only repeated phrase to be kept once, got text %q", text)
+	}
+	if !strings.Contains(text, "I know.\n\nAfter the loop") {
+		t.Fatalf("expected chunk paragraph break to be preserved after post-stitch cleanup, got text %q", text)
 	}
 }
 

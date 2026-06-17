@@ -1055,14 +1055,39 @@ func normalizedSegmentKey(text string) string {
 }
 
 func transcriptionTextFromSegments(segments []audio.TranscriptionSegment) string {
-	parts := make([]string, 0, len(segments))
+	var builder strings.Builder
+	var previous audio.TranscriptionSegment
+	hasPrevious := false
+
 	for _, segment := range segments {
 		text := strings.TrimSpace(segment.Text)
-		if text != "" {
-			parts = append(parts, text)
+		if text == "" {
+			continue
 		}
+
+		if builder.Len() > 0 {
+			if hasPrevious && isLikelyChunkBoundary(previous, segment) {
+				builder.WriteString("\n\n")
+			} else {
+				builder.WriteByte(' ')
+			}
+		}
+		builder.WriteString(text)
+		previous = segment
+		hasPrevious = true
 	}
-	return strings.TrimSpace(strings.Join(parts, " "))
+
+	return strings.TrimSpace(builder.String())
+}
+
+func isLikelyChunkBoundary(previous, current audio.TranscriptionSegment) bool {
+	// Whisper segment timestamps restart from zero for each chunk. If the stitched
+	// segment stream jumps backward substantially, preserve the paragraph break
+	// that the multi-chunk transcript originally had between chunks.
+	if previous.End <= 0 || current.End <= current.Start {
+		return false
+	}
+	return current.Start+2 < previous.End
 }
 
 func validateTranscriptionQuality(text string, duration float64, segments []audio.TranscriptionSegment) error {
