@@ -41,6 +41,8 @@ func (e *WhisperAPIError) Error() string {
 // repeated text, high compression ratios, or low-confidence/no-speech segments.
 type TranscriptionSegment struct {
 	Text             string  `json:"text"`
+	Start            float64 `json:"start"`
+	End              float64 `json:"end"`
 	AvgLogprob       float64 `json:"avg_logprob"`
 	CompressionRatio float64 `json:"compression_ratio"`
 	NoSpeechProb     float64 `json:"no_speech_prob"`

@@ -82,6 +82,60 @@ func TestValidateTranscriptionQualityAllowsNaturalMeetingText(t *testing.T) {
 	}
 }
 
+func TestSanitizeTranscriptionResultRemovesRepeatedWhisperLoop(t *testing.T) {
+	segments := []audio.TranscriptionSegment{
+		{Text: "Before the loop we discussed the school."},
+	}
+	for i := 0; i < 35; i++ {
+		segments = append(segments, audio.TranscriptionSegment{
+			Text:             "We're at Harvest.",
+			CompressionRatio: 12,
+			NoSpeechProb:     0.85,
+		})
+	}
+	segments = append(segments, audio.TranscriptionSegment{Text: "After the loop the conversation continued."})
+
+	text, cleanedSegments, removed := sanitizeTranscriptionResult(&audio.TranscriptionResult{
+		Text:     transcriptionTextFromSegments(segments),
+		Segments: segments,
+	})
+
+	if removed != 34 {
+		t.Fatalf("removed segments = %d, want 34", removed)
+	}
+	if len(cleanedSegments) != 3 {
+		t.Fatalf("cleaned segment count = %d, want 3", len(cleanedSegments))
+	}
+	if strings.Count(text, "We're at Harvest.") != 1 {
+		t.Fatalf("expected repeated phrase to be kept once, got text %q", text)
+	}
+	if err := validateTranscriptionQuality(text, 15*60, cleanedSegments); err != nil {
+		t.Fatalf("expected cleaned transcript to pass quality check, got %v", err)
+	}
+}
+
+func TestSanitizeTranscriptionResultKeepsNormalAcknowledgements(t *testing.T) {
+	segments := []audio.TranscriptionSegment{
+		{Text: "Yeah."},
+		{Text: "Yeah."},
+		{Text: "Yeah."},
+		{Text: "That makes sense."},
+		{Text: "Let's move on to the next topic."},
+	}
+
+	_, cleanedSegments, removed := sanitizeTranscriptionResult(&audio.TranscriptionResult{
+		Text:     transcriptionTextFromSegments(segments),
+		Segments: segments,
+	})
+
+	if removed != 0 {
+		t.Fatalf("removed segments = %d, want 0", removed)
+	}
+	if len(cleanedSegments) != len(segments) {
+		t.Fatalf("cleaned segment count = %d, want %d", len(cleanedSegments), len(segments))
+	}
+}
+
 func TestValidateTranscriptionQualityRejectsBadSegments(t *testing.T) {
 	segments := []audio.TranscriptionSegment{
 		{Text: "bad one", CompressionRatio: 3.1, AvgLogprob: -0.2},
