@@ -792,6 +792,13 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	if err == nil && latest.Status == "failed" {
 		return fmt.Errorf("audio transcription stopped before completion")
 	}
+	stitchedText, stitchedSegments, stitchedRemovedSegments := sanitizeStitchedTranscription(transcriptText, transcriptionSegments)
+	if stitchedRemovedSegments > 0 {
+		log.Printf("🧹 Audio job %s removed %d repeated Whisper segment(s) after stitching", at.ID, stitchedRemovedSegments)
+	}
+	transcriptText = stitchedText
+	transcriptionSegments = stitchedSegments
+
 	at.TranscriptText = transcriptText
 	at.Language = language
 	at.Duration = duration
@@ -959,13 +966,17 @@ func sanitizeTranscriptionResult(result *audio.TranscriptionResult) (string, []a
 	if result == nil {
 		return "", nil, 0
 	}
-	if len(result.Segments) == 0 {
-		return strings.TrimSpace(result.Text), nil, 0
+	return sanitizeStitchedTranscription(result.Text, result.Segments)
+}
+
+func sanitizeStitchedTranscription(text string, segments []audio.TranscriptionSegment) (string, []audio.TranscriptionSegment, int) {
+	if len(segments) == 0 {
+		return strings.TrimSpace(text), nil, 0
 	}
 
-	cleanedSegments, removed := removeRepeatedSegmentRuns(result.Segments)
+	cleanedSegments, removed := removeRepeatedSegmentRuns(segments)
 	if removed == 0 {
-		return strings.TrimSpace(result.Text), result.Segments, 0
+		return strings.TrimSpace(text), segments, 0
 	}
 	return transcriptionTextFromSegments(cleanedSegments), cleanedSegments, removed
 }

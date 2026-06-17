@@ -114,6 +114,38 @@ func TestSanitizeTranscriptionResultRemovesRepeatedWhisperLoop(t *testing.T) {
 	}
 }
 
+func TestSanitizeStitchedTranscriptionCollapsesCrossChunkLengthOnlyLoop(t *testing.T) {
+	chunkA := []audio.TranscriptionSegment{{Text: "Before the boundary loop we discussed the meeting."}}
+	for i := 0; i < 10; i++ {
+		chunkA = append(chunkA, audio.TranscriptionSegment{Text: "I know."})
+	}
+	chunkB := make([]audio.TranscriptionSegment, 0, 11)
+	for i := 0; i < 10; i++ {
+		chunkB = append(chunkB, audio.TranscriptionSegment{Text: "I know."})
+	}
+	chunkB = append(chunkB, audio.TranscriptionSegment{Text: "After the loop the call continued."})
+
+	if _, _, removed := sanitizeTranscriptionResult(&audio.TranscriptionResult{Text: transcriptionTextFromSegments(chunkA), Segments: chunkA}); removed != 0 {
+		t.Fatalf("first chunk removed %d segment(s), want 0", removed)
+	}
+	if _, _, removed := sanitizeTranscriptionResult(&audio.TranscriptionResult{Text: transcriptionTextFromSegments(chunkB), Segments: chunkB}); removed != 0 {
+		t.Fatalf("second chunk removed %d segment(s), want 0", removed)
+	}
+
+	stitchedSegments := append(append([]audio.TranscriptionSegment{}, chunkA...), chunkB...)
+	text, cleanedSegments, removed := sanitizeStitchedTranscription(transcriptionTextFromSegments(stitchedSegments), stitchedSegments)
+
+	if removed != 19 {
+		t.Fatalf("stitched removed segments = %d, want 19", removed)
+	}
+	if len(cleanedSegments) != 3 {
+		t.Fatalf("cleaned stitched segment count = %d, want 3", len(cleanedSegments))
+	}
+	if strings.Count(text, "I know.") != 1 {
+		t.Fatalf("expected length-only repeated phrase to be kept once, got text %q", text)
+	}
+}
+
 func TestSanitizeTranscriptionResultKeepsNormalAcknowledgements(t *testing.T) {
 	segments := []audio.TranscriptionSegment{
 		{Text: "Yeah."},
