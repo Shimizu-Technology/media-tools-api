@@ -52,6 +52,8 @@ const (
 
 const whisperTargetBytes = 24 << 20 // Keep below 25MB hard limit to account for multipart overhead
 const whisperInitialSegmentSeconds = 300
+const whisperRecoverySegmentSeconds = 60
+const whisperDurationChunkThresholdSeconds = 90
 const whisperFFmpegTimeout = 30 * time.Minute
 const whisperProbeTimeout = 30 * time.Second
 
@@ -83,6 +85,12 @@ type Job struct {
 	Type      JobType
 	Payload   json.RawMessage // Flexible payload — different job types need different data
 	CreatedAt time.Time
+}
+
+type omittedAudioRange struct {
+	Start  float64 `json:"start"`
+	End    float64 `json:"end"`
+	Reason string  `json:"reason"`
 }
 
 // SummaryPayload is the data needed for a summary generation job.
@@ -716,9 +724,20 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		return fmt.Errorf("failed to stat temp file: %w", err)
 	}
 	log.Printf("📊 Audio job %s source ready: %s (%.1fMB)", at.ID, filepath.Ext(payload.TempFilePath), bytesToMB(fileInfo.Size()))
+	sourceDuration, probeErr := probeMediaDuration(ctx, payload.TempFilePath)
+	if probeErr != nil {
+		log.Printf("⚠️  Audio job %s could not probe source duration; using safe chunked recovery: %v", at.ID, probeErr)
+	} else {
+		log.Printf("⏱️  Audio job %s source duration: %.1fs", at.ID, sourceDuration)
+	}
 
 	var transcriptionParts []string
-	if fileInfo.Size() > whisperTargetBytes || requiresWhisperTranscode(payload.TempFilePath) {
+	chunkSeconds := 0
+	// If duration probing fails, prefer safe chunking. Splitting a short file into
+	// one part costs little, while silently reverting to a single Whisper request
+	// can recreate the long-silence hallucination this path is meant to contain.
+	shouldChunkForRecovery := probeErr != nil || sourceDuration >= whisperDurationChunkThresholdSeconds
+	if fileInfo.Size() > whisperTargetBytes || requiresWhisperTranscode(payload.TempFilePath) || shouldChunkForRecovery {
 		_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcoding", 25)
 		compressedPath := payload.TempFilePath + ".whisper" + whisperPreparedExtension
 		log.Printf("🎚️  Audio job %s preparing recording for Whisper: %s (%.1fMB)", at.ID, payload.OriginalName, bytesToMB(fileInfo.Size()))
@@ -752,8 +771,11 @@ func (p *Pool) processAudioTranscription(job Job) error {
 			bytesToMB(compressedInfo.Size()),
 		)
 
-		if compressedInfo.Size() > whisperTargetBytes {
+		if compressedInfo.Size() > whisperTargetBytes || shouldChunkForRecovery {
 			segmentSeconds := whisperInitialSegmentSeconds
+			if shouldChunkForRecovery {
+				segmentSeconds = whisperRecoverySegmentSeconds
+			}
 			for {
 				_ = p.db.UpdateAudioProcessing(ctx, at.ID, "chunking", 35)
 				log.Printf("🧩 Audio job %s splitting compressed audio into %ds segments", at.ID, segmentSeconds)
@@ -786,6 +808,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 
 				if !oversized {
 					transcriptionParts = segmentPaths
+					chunkSeconds = segmentSeconds
 					log.Printf("🧩 Audio job %s split into %d segment(s) at %ds each for Whisper (largest %.1fMB)", at.ID, len(segmentPaths), segmentSeconds, bytesToMB(largestSegmentBytes))
 					break
 				}
@@ -810,6 +833,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	var language string
 	var duration float64
 	var transcriptionSegments []audio.TranscriptionSegment
+	var omittedRanges []omittedAudioRange
 
 	if len(transcriptionParts) == 0 {
 		_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcribing", 70)
@@ -855,12 +879,27 @@ func (p *Pool) processAudioTranscription(job Job) error {
 				p.NotifyWebhook("audio.failed", at.UserID, at.APIKeyID, at)
 				return fmt.Errorf("chunk transcription failed (%s): %w", partName, err)
 			}
-			cleanedText, cleanedSegments, removedSegments := sanitizeTranscriptionResult(result)
+			cleanedText, cleanedSegments, removedSegments, chunkQualityErr := assessTranscriptionChunk(result)
 			if removedSegments > 0 {
 				log.Printf("🧹 Audio job %s removed %d repeated Whisper segment(s) from chunk %d/%d", at.ID, removedSegments, idx+1, len(transcriptionParts))
 			}
-			partTexts = append(partTexts, cleanedText)
+			chunkStart := float64(idx * chunkSeconds)
+			chunkEnd := chunkStart + result.Duration
 			duration += result.Duration
+			if sourceDuration > 0 && chunkEnd > sourceDuration {
+				chunkEnd = sourceDuration
+			}
+			if chunkQualityErr != nil {
+				omittedRanges = append(omittedRanges, omittedAudioRange{Start: chunkStart, End: chunkEnd, Reason: chunkQualityErr.Error()})
+				log.Printf("⚠️  Audio job %s omitted chunk %d/%d (%.1fs-%.1fs): %v", at.ID, idx+1, len(transcriptionParts), chunkStart, chunkEnd, chunkQualityErr)
+				continue
+			}
+
+			partTexts = append(partTexts, cleanedText)
+			for segmentIdx := range cleanedSegments {
+				cleanedSegments[segmentIdx].Start += chunkStart
+				cleanedSegments[segmentIdx].End += chunkStart
+			}
 			transcriptionSegments = append(transcriptionSegments, cleanedSegments...)
 			if result.Language != "" {
 				languageCounts[result.Language]++
@@ -868,6 +907,9 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		}
 		transcriptText = strings.TrimSpace(strings.Join(partTexts, "\n\n"))
 		language = pickDominantLanguage(languageCounts)
+		if sourceDuration > 0 {
+			duration = sourceDuration
+		}
 	}
 
 	// Update the record with results
@@ -888,12 +930,15 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	at.Language = language
 	at.Duration = duration
 	at.WordCount = audio.CountWords(transcriptText)
+	if err := applyOmittedAudioDiagnostics(at, omittedRanges); err != nil {
+		return err
+	}
 
 	// Treat empty transcripts as a processing failure so users can retry immediately
 	// instead of seeing a misleading "completed" state that cannot be chatted with.
 	if strings.TrimSpace(at.TranscriptText) == "" || at.WordCount == 0 {
 		at.Status = "failed"
-		at.ErrorMessage = "No speech was detected in this audio. Please re-record or upload a clearer recording and try again."
+		at.ErrorMessage = emptyTranscriptionErrorMessage(len(omittedRanges))
 		at.ProcessingStage = "failed"
 		at.ProcessingProgress = 100
 		updated, err := p.db.UpdateAudioTranscriptionIfActive(ctx, at)
@@ -1052,6 +1097,56 @@ func sanitizeTranscriptionResult(result *audio.TranscriptionResult) (string, []a
 		return "", nil, 0
 	}
 	return sanitizeStitchedTranscription(result.Text, result.Segments)
+}
+
+func assessTranscriptionChunk(result *audio.TranscriptionResult) (string, []audio.TranscriptionSegment, int, error) {
+	cleanedText, cleanedSegments, removed := sanitizeTranscriptionResult(result)
+	if strings.TrimSpace(cleanedText) == "" {
+		return cleanedText, cleanedSegments, removed, fmt.Errorf("no speech detected")
+	}
+	// A chunk made entirely from one Whisper loop can look harmless after the
+	// sanitizer collapses it to a single phrase. Treat that shape as unusable,
+	// while still allowing a chunk that has real speech before or after a loop.
+	if removed >= repeatedSegmentRunMin && len(cleanedSegments) <= 1 {
+		return cleanedText, cleanedSegments, removed, fmt.Errorf("the output consisted entirely of repeated/hallucinated speech")
+	}
+	if qualityErr := validateTranscriptionQuality(cleanedText, result.Duration, cleanedSegments); qualityErr != nil {
+		return cleanedText, cleanedSegments, removed, qualityErr
+	}
+	return cleanedText, cleanedSegments, removed, nil
+}
+
+func applyOmittedAudioDiagnostics(at *models.AudioTranscription, omittedRanges []omittedAudioRange) error {
+	at.QualityWarning = ""
+	at.OmittedRanges = json.RawMessage("[]")
+	if len(omittedRanges) == 0 {
+		return nil
+	}
+
+	omittedJSON, err := json.Marshal(omittedRanges)
+	if err != nil {
+		return fmt.Errorf("failed to encode omitted audio ranges: %w", err)
+	}
+	at.OmittedRanges = omittedJSON
+	if at.WordCount > 0 {
+		at.QualityWarning = fmt.Sprintf(
+			"Recovered the usable speech, but omitted %d low-confidence or silent section(s). Review the transcript alongside the saved recording if those sections matter.",
+			len(omittedRanges),
+		)
+	} else {
+		at.QualityWarning = fmt.Sprintf(
+			"Omitted all %d analyzed section(s) because none passed transcription quality checks.",
+			len(omittedRanges),
+		)
+	}
+	return nil
+}
+
+func emptyTranscriptionErrorMessage(omittedRangeCount int) string {
+	if omittedRangeCount > 0 {
+		return "Transcription quality checks rejected every audio section as silent, low-confidence, or likely hallucinated. The original recording was saved, so you can re-transcribe it from the same audio."
+	}
+	return "No speech was detected in this audio. Please re-record or upload a clearer recording and try again."
 }
 
 func sanitizeStitchedTranscription(text string, segments []audio.TranscriptionSegment) (string, []audio.TranscriptionSegment, int) {

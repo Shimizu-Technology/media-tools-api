@@ -670,6 +670,8 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 	at.WordCount = 0
 	at.Status = "pending"
 	at.ErrorMessage = ""
+	at.QualityWarning = ""
+	at.OmittedRanges = json.RawMessage("[]")
 	at.ProcessingStage = "queued"
 	at.ProcessingProgress = 0
 	at.SummaryText = ""

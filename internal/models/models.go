@@ -212,6 +212,8 @@ type AudioTranscription struct {
 	WordCount          int              `json:"word_count" db:"word_count"`
 	Status             string           `json:"status" db:"status"`
 	ErrorMessage       string           `json:"error_message,omitempty" db:"error_message"`
+	QualityWarning     string           `json:"quality_warning,omitempty" db:"quality_warning"`
+	OmittedRanges      json.RawMessage  `json:"omitted_ranges" db:"omitted_ranges"`
 	ContentType        AudioContentType `json:"content_type" db:"content_type"`
 	SummaryText        string           `json:"summary_text,omitempty" db:"summary_text"`
 	KeyPoints          json.RawMessage  `json:"key_points" db:"key_points"`

@@ -1,10 +1,12 @@
 package worker
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
 )
 
@@ -180,5 +182,110 @@ func TestValidateTranscriptionQualityRejectsBadSegments(t *testing.T) {
 
 	if err := validateTranscriptionQuality("This has enough text to avoid the empty transcript branch.", 90, segments); err == nil {
 		t.Fatal("expected bad segment compression to fail quality check")
+	}
+}
+
+func TestAssessTranscriptionChunkKeepsNaturalSpeech(t *testing.T) {
+	result := &audio.TranscriptionResult{
+		Text:     "Leon reviewed the deployment plan with the team. They agreed to verify the recording, share the notes, and follow up with the client tomorrow.",
+		Duration: 60,
+		Segments: []audio.TranscriptionSegment{
+			{Text: "Leon reviewed the deployment plan with the team.", Start: 0, End: 6, CompressionRatio: 1.1, AvgLogprob: -0.2},
+			{Text: "They agreed to verify the recording, share the notes, and follow up with the client tomorrow.", Start: 6, End: 15, CompressionRatio: 1.2, AvgLogprob: -0.25},
+		},
+	}
+
+	text, segments, _, err := assessTranscriptionChunk(result)
+	if err != nil {
+		t.Fatalf("expected natural speech chunk to pass, got %v", err)
+	}
+	if text == "" || len(segments) != 2 {
+		t.Fatalf("expected usable chunk content, got text=%q segments=%d", text, len(segments))
+	}
+}
+
+func TestAssessTranscriptionChunkRejectsHallucinatedTail(t *testing.T) {
+	phrases := []string{
+		"one tablespoon flour water monday tuesday",
+		"red blue green yellow north south",
+		"alpha beta gamma delta sugar salt",
+		"morning evening yesterday tomorrow left right",
+	}
+	segments := make([]audio.TranscriptionSegment, 0, 12)
+	for i := 0; i < 12; i++ {
+		segments = append(segments, audio.TranscriptionSegment{
+			Text:             phrases[i%len(phrases)],
+			Start:            float64(i * 4),
+			End:              float64(i*4 + 4),
+			CompressionRatio: 4.8,
+			AvgLogprob:       -1.4,
+			NoSpeechProb:     0.91,
+		})
+	}
+	result := &audio.TranscriptionResult{
+		Text:     transcriptionTextFromSegments(segments),
+		Duration: 60,
+		Segments: segments,
+	}
+
+	if _, _, _, err := assessTranscriptionChunk(result); err == nil {
+		t.Fatal("expected hallucinated silent-tail chunk to be rejected")
+	}
+}
+
+func TestAssessTranscriptionChunkRejectsCollapsedLoopOnlyChunk(t *testing.T) {
+	segments := make([]audio.TranscriptionSegment, 0, 20)
+	for i := 0; i < 20; i++ {
+		segments = append(segments, audio.TranscriptionSegment{
+			Text:             "We're at Harvest.",
+			Start:            float64(i * 2),
+			End:              float64(i*2 + 2),
+			CompressionRatio: 8,
+			NoSpeechProb:     0.9,
+		})
+	}
+	result := &audio.TranscriptionResult{
+		Text:     transcriptionTextFromSegments(segments),
+		Duration: 60,
+		Segments: segments,
+	}
+
+	if _, _, removed, err := assessTranscriptionChunk(result); err == nil {
+		t.Fatal("expected a loop-only chunk to be rejected after sanitization")
+	} else if removed != 19 {
+		t.Fatalf("removed segments = %d, want 19", removed)
+	}
+}
+
+func TestApplyOmittedAudioDiagnosticsPreservesAllRejectedRanges(t *testing.T) {
+	at := &models.AudioTranscription{WordCount: 0}
+	ranges := []omittedAudioRange{
+		{Start: 0, End: 60, Reason: "likely silence"},
+		{Start: 60, End: 95, Reason: "hallucinated speech"},
+	}
+
+	if err := applyOmittedAudioDiagnostics(at, ranges); err != nil {
+		t.Fatalf("apply omitted diagnostics: %v", err)
+	}
+	if at.QualityWarning == "" {
+		t.Fatal("expected an all-rejected quality warning")
+	}
+
+	var persisted []omittedAudioRange
+	if err := json.Unmarshal(at.OmittedRanges, &persisted); err != nil {
+		t.Fatalf("decode persisted omitted ranges: %v", err)
+	}
+	if len(persisted) != len(ranges) {
+		t.Fatalf("persisted omitted range count = %d, want %d", len(persisted), len(ranges))
+	}
+	if message := emptyTranscriptionErrorMessage(len(persisted)); !strings.Contains(message, "quality checks rejected every audio section") {
+		t.Fatalf("expected quality-specific failure message, got %q", message)
+	}
+}
+
+func TestEmptyTranscriptionErrorMessageKeepsNoSpeechCase(t *testing.T) {
+	message := emptyTranscriptionErrorMessage(0)
+	if !strings.Contains(message, "No speech was detected") {
+		t.Fatalf("expected no-speech failure message, got %q", message)
 	}
 }
