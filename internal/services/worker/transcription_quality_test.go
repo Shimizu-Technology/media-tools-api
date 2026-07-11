@@ -1,10 +1,12 @@
 package worker
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
 )
 
@@ -252,5 +254,38 @@ func TestAssessTranscriptionChunkRejectsCollapsedLoopOnlyChunk(t *testing.T) {
 		t.Fatal("expected a loop-only chunk to be rejected after sanitization")
 	} else if removed != 19 {
 		t.Fatalf("removed segments = %d, want 19", removed)
+	}
+}
+
+func TestApplyOmittedAudioDiagnosticsPreservesAllRejectedRanges(t *testing.T) {
+	at := &models.AudioTranscription{WordCount: 0}
+	ranges := []omittedAudioRange{
+		{Start: 0, End: 60, Reason: "likely silence"},
+		{Start: 60, End: 95, Reason: "hallucinated speech"},
+	}
+
+	if err := applyOmittedAudioDiagnostics(at, ranges); err != nil {
+		t.Fatalf("apply omitted diagnostics: %v", err)
+	}
+	if at.QualityWarning == "" {
+		t.Fatal("expected an all-rejected quality warning")
+	}
+
+	var persisted []omittedAudioRange
+	if err := json.Unmarshal(at.OmittedRanges, &persisted); err != nil {
+		t.Fatalf("decode persisted omitted ranges: %v", err)
+	}
+	if len(persisted) != len(ranges) {
+		t.Fatalf("persisted omitted range count = %d, want %d", len(persisted), len(ranges))
+	}
+	if message := emptyTranscriptionErrorMessage(len(persisted)); !strings.Contains(message, "quality checks rejected every audio section") {
+		t.Fatalf("expected quality-specific failure message, got %q", message)
+	}
+}
+
+func TestEmptyTranscriptionErrorMessageKeepsNoSpeechCase(t *testing.T) {
+	message := emptyTranscriptionErrorMessage(0)
+	if !strings.Contains(message, "No speech was detected") {
+		t.Fatalf("expected no-speech failure message, got %q", message)
 	}
 }

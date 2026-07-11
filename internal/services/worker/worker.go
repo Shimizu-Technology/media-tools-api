@@ -930,25 +930,15 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	at.Language = language
 	at.Duration = duration
 	at.WordCount = audio.CountWords(transcriptText)
-	at.QualityWarning = ""
-	at.OmittedRanges = json.RawMessage("[]")
-	if len(omittedRanges) > 0 && at.WordCount > 0 {
-		omittedJSON, marshalErr := json.Marshal(omittedRanges)
-		if marshalErr != nil {
-			return fmt.Errorf("failed to encode omitted audio ranges: %w", marshalErr)
-		}
-		at.OmittedRanges = omittedJSON
-		at.QualityWarning = fmt.Sprintf(
-			"Recovered the usable speech, but omitted %d low-confidence or silent section(s). Review the transcript alongside the saved recording if those sections matter.",
-			len(omittedRanges),
-		)
+	if err := applyOmittedAudioDiagnostics(at, omittedRanges); err != nil {
+		return err
 	}
 
 	// Treat empty transcripts as a processing failure so users can retry immediately
 	// instead of seeing a misleading "completed" state that cannot be chatted with.
 	if strings.TrimSpace(at.TranscriptText) == "" || at.WordCount == 0 {
 		at.Status = "failed"
-		at.ErrorMessage = "No speech was detected in this audio. Please re-record or upload a clearer recording and try again."
+		at.ErrorMessage = emptyTranscriptionErrorMessage(len(omittedRanges))
 		at.ProcessingStage = "failed"
 		at.ProcessingProgress = 100
 		updated, err := p.db.UpdateAudioTranscriptionIfActive(ctx, at)
@@ -1124,6 +1114,39 @@ func assessTranscriptionChunk(result *audio.TranscriptionResult) (string, []audi
 		return cleanedText, cleanedSegments, removed, qualityErr
 	}
 	return cleanedText, cleanedSegments, removed, nil
+}
+
+func applyOmittedAudioDiagnostics(at *models.AudioTranscription, omittedRanges []omittedAudioRange) error {
+	at.QualityWarning = ""
+	at.OmittedRanges = json.RawMessage("[]")
+	if len(omittedRanges) == 0 {
+		return nil
+	}
+
+	omittedJSON, err := json.Marshal(omittedRanges)
+	if err != nil {
+		return fmt.Errorf("failed to encode omitted audio ranges: %w", err)
+	}
+	at.OmittedRanges = omittedJSON
+	if at.WordCount > 0 {
+		at.QualityWarning = fmt.Sprintf(
+			"Recovered the usable speech, but omitted %d low-confidence or silent section(s). Review the transcript alongside the saved recording if those sections matter.",
+			len(omittedRanges),
+		)
+	} else {
+		at.QualityWarning = fmt.Sprintf(
+			"Omitted all %d analyzed section(s) because none passed transcription quality checks.",
+			len(omittedRanges),
+		)
+	}
+	return nil
+}
+
+func emptyTranscriptionErrorMessage(omittedRangeCount int) string {
+	if omittedRangeCount > 0 {
+		return "Transcription quality checks rejected every audio section as silent, low-confidence, or likely hallucinated. The original recording was saved, so you can re-transcribe it from the same audio."
+	}
+	return "No speech was detected in this audio. Please re-record or upload a clearer recording and try again."
 }
 
 func sanitizeStitchedTranscription(text string, segments []audio.TranscriptionSegment) (string, []audio.TranscriptionSegment, int) {
