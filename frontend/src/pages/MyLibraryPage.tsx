@@ -258,10 +258,10 @@ export function MyLibraryPage() {
   ];
 
   const statusColors: Record<string, { bg: string; text: string }> = {
-    completed: { bg: 'rgba(24, 185, 133, 0.12)', text: 'var(--color-success)' },
+    completed: { bg: 'var(--color-success-subtle)', text: 'var(--color-success)' },
     processing: { bg: 'var(--color-brand-50)', text: 'var(--color-brand-500)' },
-    pending: { bg: 'rgba(245, 158, 11, 0.1)', text: '#f59e0b' },
-    failed: { bg: 'rgba(239, 68, 68, 0.12)', text: 'var(--color-error)' },
+    pending: { bg: 'var(--color-warning-subtle)', text: 'var(--color-warning)' },
+    failed: { bg: 'var(--color-error-subtle)', text: 'var(--color-error)' },
   };
 
   const typeIcons: Record<string, React.ReactNode> = {
@@ -270,10 +270,10 @@ export function MyLibraryPage() {
     pdf: <FileType2 className="w-4 h-4" />,
   };
 
-  const typeColors: Record<string, string> = {
-    youtube: '#ef4444',
-    audio: 'var(--color-brand-500)',
-    pdf: '#f59e0b',
+  const typeColors: Record<string, { bg: string; text: string }> = {
+    youtube: { bg: 'var(--color-error-subtle)', text: 'var(--color-error)' },
+    audio: { bg: 'var(--color-brand-50)', text: 'var(--color-brand-500)' },
+    pdf: { bg: 'var(--color-warning-subtle)', text: 'var(--color-warning)' },
   };
 
   return (
@@ -315,7 +315,7 @@ export function MyLibraryPage() {
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           className="flex items-center justify-between gap-4 p-4 rounded-xl mb-6"
-          style={{ backgroundColor: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.24)' }}
+          style={{ backgroundColor: 'var(--color-error-subtle)', border: '1px solid var(--color-error-border)' }}
         >
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium" style={{ color: 'var(--color-error)' }}>
@@ -357,7 +357,7 @@ export function MyLibraryPage() {
             style={{
               backgroundColor: activeTab === tab.value ? 'var(--color-surface)' : 'transparent',
               color: activeTab === tab.value ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-              boxShadow: activeTab === tab.value ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              boxShadow: activeTab === tab.value ? 'var(--shadow-tab-active)' : 'none',
               minHeight: '44px',
             }}
           >
@@ -469,8 +469,8 @@ export function MyLibraryPage() {
           animate={{ opacity: 1, y: 0 }}
           className="flex items-center gap-3 p-6 rounded-2xl border"
           style={{
-            backgroundColor: 'rgba(239, 68, 68, 0.08)',
-            borderColor: 'rgba(239, 68, 68, 0.24)',
+            backgroundColor: 'var(--color-error-soft)',
+            borderColor: 'var(--color-error-border)',
           }}
         >
           <AlertCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--color-error)' }} />
@@ -559,7 +559,7 @@ export function MyLibraryPage() {
                 tabIndex={0}
                 className="group relative p-5 rounded-2xl border cursor-pointer transition-all duration-200 hover:scale-[1.01]"
                 style={{
-                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.05)' : 'var(--color-surface-elevated)',
+                  backgroundColor: isSelected ? 'var(--color-brand-50)' : 'var(--color-surface-elevated)',
                   borderColor: isSelected ? 'var(--color-brand-500)' : 'var(--color-border)',
                 }}
               >
@@ -597,7 +597,7 @@ export function MyLibraryPage() {
                   </button>
                   <div
                     className="p-1.5 rounded-lg"
-                    style={{ backgroundColor: `${typeColors[item.type]}15`, color: typeColors[item.type] }}
+                    style={{ backgroundColor: typeColors[item.type].bg, color: typeColors[item.type].text }}
                     title={item.type.charAt(0).toUpperCase() + item.type.slice(1)}
                   >
                     {typeIcons[item.type]}
@@ -634,7 +634,7 @@ export function MyLibraryPage() {
                   {item.hasSummary && (
                     <span
                       className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium"
-                      style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)', color: '#a855f7' }}
+                      style={{ backgroundColor: 'var(--color-summary-subtle)', color: 'var(--color-summary)' }}
                     >
                       <Sparkles className="w-3 h-3" />
                       Summarized

@@ -43,6 +43,7 @@ func (h *Handler) ListLibraryItems(c *gin.Context) {
 
 	items, total, err := h.DB.ListLibraryItems(c.Request.Context(), params)
 	if err != nil {
+		log.Printf("Failed to load library items: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error", Message: "Failed to load library items", Code: http.StatusInternalServerError})
 		return
 	}
@@ -145,6 +146,7 @@ func (h *Handler) GetLibraryStats(c *gin.Context) {
 	actor := getActorOwnership(c)
 	stats, err := h.DB.GetLibraryStats(c.Request.Context(), actor.UserID, actor.APIKeyID)
 	if err != nil {
+		log.Printf("Failed to load library stats: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error", Message: "Failed to load library stats", Code: http.StatusInternalServerError})
 		return
 	}

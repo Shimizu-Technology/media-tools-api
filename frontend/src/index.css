@@ -30,9 +30,17 @@
   
   /* Success/Error */
   --color-success: #18b985;
+  --color-success-subtle: rgba(24, 185, 133, 0.12);
   --color-warning: #f59e0b;
+  --color-warning-subtle: rgba(245, 158, 11, 0.1);
   --color-error: #ef4444;
+  --color-error-subtle: rgba(239, 68, 68, 0.12);
+  --color-error-soft: rgba(239, 68, 68, 0.08);
+  --color-error-border: rgba(239, 68, 68, 0.24);
   --color-danger: var(--color-error);
+  --color-summary: #a855f7;
+  --color-summary-subtle: rgba(168, 85, 247, 0.1);
+  --shadow-tab-active: 0 1px 3px rgba(0, 0, 0, 0.1);
 
   /* Compatibility aliases for newer screens that use compact token names. */
   --bg: var(--color-surface);
