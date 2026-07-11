@@ -205,13 +205,21 @@ func (s *Service) deliverWithRetry(wh models.Webhook, event string, payloadJSON 
 				log.Printf("⚠️  Webhook delivery aborted due to shutdown: %s → %s", event, wh.URL)
 				delivery.Status = "failed"
 				delivery.LastError = "shutdown during delivery"
-				s.db.UpdateWebhookDelivery(ctx, delivery)
+				if err := s.db.UpdateWebhookDelivery(ctx, delivery); err != nil {
+					log.Printf("⚠️  Failed to record webhook shutdown: %v", err)
+				}
 				return
 			case <-ctx.Done():
 				log.Printf("⚠️  Webhook delivery timed out: %s → %s", event, wh.URL)
 				delivery.Status = "failed"
 				delivery.LastError = "delivery timeout"
-				s.db.UpdateWebhookDelivery(ctx, delivery)
+				// The delivery context is already canceled here, so use a short fresh
+				// context to persist the terminal state instead of leaving it pending.
+				updateCtx, cancelUpdate := context.WithTimeout(context.Background(), 5*time.Second)
+				if err := s.db.UpdateWebhookDelivery(updateCtx, delivery); err != nil {
+					log.Printf("⚠️  Failed to record webhook timeout: %v", err)
+				}
+				cancelUpdate()
 				return
 			case <-time.After(retryDelays[attempt]):
 				// Continue with next attempt

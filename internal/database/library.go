@@ -71,7 +71,9 @@ func (db *DB) ListLibraryItems(ctx context.Context, params models.LibraryListPar
 		return nil, 0, fmt.Errorf("count library items: %w", err)
 	}
 
-	query := libraryItemsCTE + ` SELECT * FROM filtered ORDER BY created_at ` + params.SortDir + ` LIMIT $6 OFFSET $7`
+	// UUID is a deterministic tie-breaker for rows that share a timestamp. Without
+	// it, offset pagination can repeat or skip items between adjacent pages.
+	query := libraryItemsCTE + ` SELECT * FROM filtered ORDER BY created_at ` + params.SortDir + `, id ` + params.SortDir + ` LIMIT $6 OFFSET $7`
 	args = append(args, params.PerPage, (params.Page-1)*params.PerPage)
 	var items []models.LibraryItem
 	if err := db.SelectContext(ctx, &items, query, args...); err != nil {
