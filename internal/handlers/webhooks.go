@@ -15,11 +15,11 @@ import (
 // CreateWebhook registers a new webhook endpoint.
 // POST /api/v1/webhooks
 func (h *Handler) CreateWebhook(c *gin.Context) {
-	apiKey := middleware.GetAPIKey(c)
-	if apiKey == nil {
+	userID, apiKeyID := webhookPrincipal(c)
+	if userID == nil && apiKeyID == nil {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error:   "unauthorized",
-			Message: "Webhook management requires API key authentication",
+			Message: "Authentication is required",
 			Code:    http.StatusUnauthorized,
 		})
 		return
@@ -68,7 +68,8 @@ func (h *Handler) CreateWebhook(c *gin.Context) {
 	}
 
 	wh := &models.Webhook{
-		APIKeyID: apiKey.ID,
+		UserID:   userID,
+		APIKeyID: apiKeyID,
 		URL:      req.URL,
 		Events:   req.Events,
 		Secret:   secret,
@@ -99,17 +100,17 @@ func (h *Handler) CreateWebhook(c *gin.Context) {
 // ListWebhooks returns all webhooks for the authenticated API key.
 // GET /api/v1/webhooks
 func (h *Handler) ListWebhooks(c *gin.Context) {
-	apiKey := middleware.GetAPIKey(c)
-	if apiKey == nil {
+	userID, apiKeyID := webhookPrincipal(c)
+	if userID == nil && apiKeyID == nil {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error:   "unauthorized",
-			Message: "Webhook management requires API key authentication",
+			Message: "Authentication is required",
 			Code:    http.StatusUnauthorized,
 		})
 		return
 	}
 
-	webhooks, err := h.DB.ListWebhooksByAPIKey(c.Request.Context(), apiKey.ID)
+	webhooks, err := h.DB.ListWebhooksForActor(c.Request.Context(), userID, apiKeyID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
@@ -141,14 +142,15 @@ func (h *Handler) UpdateWebhook(c *gin.Context) {
 		return
 	}
 
-	if apiKey := middleware.GetAPIKey(c); apiKey == nil {
+	userID, apiKeyID := webhookPrincipal(c)
+	if userID == nil && apiKeyID == nil {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error:   "unauthorized",
-			Message: "Webhook management requires API key authentication",
+			Message: "Authentication is required",
 			Code:    http.StatusUnauthorized,
 		})
 		return
-	} else if err := h.DB.UpdateWebhookActive(c.Request.Context(), id, apiKey.ID, *req.Active); err != nil {
+	} else if err := h.DB.UpdateWebhookActive(c.Request.Context(), id, userID, apiKeyID, *req.Active); err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
 			Message: "Webhook not found",
@@ -164,17 +166,17 @@ func (h *Handler) UpdateWebhook(c *gin.Context) {
 // DELETE /api/v1/webhooks/:id
 func (h *Handler) DeleteWebhook(c *gin.Context) {
 	id := c.Param("id")
-	apiKey := middleware.GetAPIKey(c)
-	if apiKey == nil {
+	userID, apiKeyID := webhookPrincipal(c)
+	if userID == nil && apiKeyID == nil {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error:   "unauthorized",
-			Message: "Webhook management requires API key authentication",
+			Message: "Authentication is required",
 			Code:    http.StatusUnauthorized,
 		})
 		return
 	}
 
-	if err := h.DB.DeleteWebhook(c.Request.Context(), id, apiKey.ID); err != nil {
+	if err := h.DB.DeleteWebhook(c.Request.Context(), id, userID, apiKeyID); err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
 			Message: "Webhook not found",
@@ -189,17 +191,17 @@ func (h *Handler) DeleteWebhook(c *gin.Context) {
 // ListWebhookDeliveries returns recent delivery attempts for the authenticated API key.
 // GET /api/v1/webhooks/deliveries
 func (h *Handler) ListWebhookDeliveries(c *gin.Context) {
-	apiKey := middleware.GetAPIKey(c)
-	if apiKey == nil {
+	userID, apiKeyID := webhookPrincipal(c)
+	if userID == nil && apiKeyID == nil {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error:   "unauthorized",
-			Message: "Webhook management requires API key authentication",
+			Message: "Authentication is required",
 			Code:    http.StatusUnauthorized,
 		})
 		return
 	}
 
-	deliveries, err := h.DB.ListAllDeliveriesByAPIKey(c.Request.Context(), apiKey.ID, 50)
+	deliveries, err := h.DB.ListAllDeliveriesForActor(c.Request.Context(), userID, apiKeyID, 50)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
@@ -214,4 +216,17 @@ func (h *Handler) ListWebhookDeliveries(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, deliveries)
+}
+
+// webhookPrincipal intentionally returns one principal. A user-owned API key
+// remains an API-key caller here; it must not manage the user's browser-owned
+// webhooks merely because its content is visible in that workspace.
+func webhookPrincipal(c *gin.Context) (userID, apiKeyID *string) {
+	if key := middleware.GetAPIKey(c); key != nil {
+		return nil, &key.ID
+	}
+	if user := middleware.GetUser(c); user != nil {
+		return &user.ID, nil
+	}
+	return nil, nil
 }

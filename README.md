@@ -14,6 +14,10 @@ A media processing API for YouTube transcripts, recording transcription, PDF ext
 - **Dual Auth** — API keys for scripts + Clerk sign-in for browser users
 - **Universal Video URLs** — YouTube, Vimeo, and any yt-dlp-supported video platform
 - **Ownership** — Each transcript is linked to the user or API key that created it
+- **Unified Library** — Server-side search, pagination, and exact workspace metrics across all media
+- **Durable Jobs** — Transcript, audio, and summary work is recovered after server restarts
+- **Collections & Chat** — Organize mixed media and ask questions across individual items or collections
+- **Webhooks** — Account- or API-key-owned delivery subscriptions with signed payloads
 
 ## Architecture
 
@@ -76,7 +80,8 @@ git clone https://github.com/Shimizu-Technology/media-tools-api.git
 cd media-tools-api
 cp .env.example .env
 
-# 2. Configure .env with your DATABASE_URL and API keys
+# 2. Configure .env with your DATABASE_URL and API keys.
+#    `make run` loads this file into the server process.
 
 # 3. Run the API server
 make run
@@ -197,6 +202,14 @@ Options:
 ## Product Roadmap
 
 See [`PRODUCT_ROADMAP.md`](PRODUCT_ROADMAP.md) for the planned direction now that Media Tools is a Clerk-authenticated media workspace: unified item pages, global search, processing center, exports/sharing, AI templates, collection intelligence, team workspaces, billing, and integrations.
+
+### Migration history note
+
+Migration `029_claim_existing_media_for_shimizu_user` is an intentional,
+idempotent production backfill for the original single-user deployment. It is
+historical data migration—not a reusable tenant bootstrap pattern. New
+deployments should create users and ownership through the application and must
+not copy its hard-coded identity into future migrations.
 
 ## Production Deployment
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -24,14 +24,10 @@ import {
 } from 'lucide-react';
 import { AddToCollectionModal } from '../components/AddToCollectionModal';
 import {
-  listTranscripts,
-  listAudioTranscriptions,
-  listPDFExtractions,
+  listLibraryItems,
   deleteTranscript,
   deleteAudioTranscription,
   deletePDFExtraction,
-  type Transcript,
-  type PaginatedResponse,
 } from '../lib/api';
 
 type ContentType = 'all' | 'youtube' | 'audio' | 'pdf';
@@ -57,8 +53,11 @@ export function MyLibraryPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   
-  // Get initial tab from URL or default to 'all'
-  const initialTab = (searchParams.get('type') as ContentType) || 'all';
+  // Get a supported initial tab from the URL or default to all content.
+  const requestedTab = searchParams.get('type');
+  const initialTab: ContentType = requestedTab === 'youtube' || requestedTab === 'audio' || requestedTab === 'pdf'
+    ? requestedTab
+    : 'all';
   
   const [activeTab, setActiveTab] = useState<ContentType>(initialTab);
   const [items, setItems] = useState<UnifiedItem[]>([]);
@@ -68,9 +67,9 @@ export function MyLibraryPage() {
   const [searchInput, setSearchInput] = useState('');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   
-  // Pagination for YouTube (only type that supports it server-side)
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+	const [totalItems, setTotalItems] = useState(0);
   const perPage = 20;
 
   // Selection state for bulk delete
@@ -85,75 +84,39 @@ export function MyLibraryPage() {
     setSearchParams(tab === 'all' ? {} : { type: tab });
   };
 
-  // Fetch all content
+  // Fetch one server-side page across every content type.
   const fetchContent = useCallback(async () => {
     setIsLoading(true);
     setError('');
     
     try {
-      const tasks: Promise<UnifiedItem[]>[] = [];
-
-      if (activeTab === 'all' || activeTab === 'youtube') {
-        tasks.push(listTranscripts({
-          page: activeTab === 'youtube' ? page : 1,
-          per_page: activeTab === 'youtube' ? perPage : 50,
-          search: searchQuery || undefined,
-        }).then((ytResult: PaginatedResponse<Transcript>) => {
-          if (activeTab === 'youtube') {
-            setTotalPages(ytResult.total_pages);
-          }
-          return ytResult.data.map((t) => ({
-            id: t.id,
-            type: 'youtube',
-            title: t.title || 'Untitled Video',
-            subtitle: t.channel_name || 'Unknown channel',
-            wordCount: t.word_count,
-            status: t.status,
-            hasSummary: false, // YouTube summaries are separate
-            createdAt: t.created_at,
-            duration: t.duration,
-          }));
-        }));
-      }
-      
-      if (activeTab === 'all' || activeTab === 'audio') {
-        tasks.push(listAudioTranscriptions().then((audioResult) => audioResult.map((a) => ({
-            id: a.id,
-            type: 'audio',
-            title: a.original_name,
-            subtitle: a.language ? `${a.language.toUpperCase()} • ${formatDuration(a.duration)}` : formatDuration(a.duration),
-            wordCount: a.word_count,
-            status: a.status,
-            hasSummary: a.summary_status === 'completed',
-            createdAt: a.created_at,
-            duration: a.duration,
-          }))));
-      }
-      
-      if (activeTab === 'all' || activeTab === 'pdf') {
-        tasks.push(listPDFExtractions().then((pdfResult) => pdfResult.map((p) => ({
-            id: p.id,
-            type: 'pdf',
-            title: p.original_name,
-            subtitle: `${p.page_count} page${p.page_count !== 1 ? 's' : ''}`,
-            wordCount: p.word_count,
-            status: p.status,
-            hasSummary: false,
-            createdAt: p.created_at,
-            pageCount: p.page_count,
-          }))));
-      }
-
-      const settled = await Promise.allSettled(tasks);
-      const unified = settled.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
-      const failures = settled.filter((result) => result.status === 'rejected');
-      if (failures.length > 0 && unified.length === 0) {
-        throw new Error('Failed to load content');
-      }
-      if (failures.length > 0) {
-        setError('Some library items could not be loaded. Please refresh to try again.');
-      }
-      setItems(unified);
+		const result = await listLibraryItems({
+			page,
+			per_page: perPage,
+			type: activeTab === 'all' ? undefined : activeTab,
+			search: searchQuery || undefined,
+			sort_dir: sortDir,
+		});
+		if (result.total_pages > 0 && page > result.total_pages) {
+			setPage(result.total_pages);
+			return;
+		}
+		setTotalPages(result.total_pages);
+		setTotalItems(result.total_items);
+		setItems(result.data.map((item) => ({
+			id: item.id,
+			type: item.item_type,
+			title: item.title,
+			subtitle: item.item_type === 'audio' && item.duration > 0
+				? `${item.subtitle} • ${formatDuration(item.duration)}`
+				: item.subtitle,
+			wordCount: item.word_count,
+			status: item.status,
+			hasSummary: item.summary_status === 'completed',
+			createdAt: item.created_at,
+			duration: item.duration,
+			pageCount: item.page_count,
+		})));
     } catch (err: unknown) {
       const apiErr = err as { message?: string };
       setError(apiErr.message || 'Failed to load content');
@@ -161,10 +124,11 @@ export function MyLibraryPage() {
     }
     
     setIsLoading(false);
-  }, [activeTab, page, searchQuery]);
+	}, [activeTab, page, searchQuery, sortDir]);
 
   useEffect(() => {
-    fetchContent();
+		const timer = window.setTimeout(() => { void fetchContent(); }, 0);
+		return () => window.clearTimeout(timer);
   }, [fetchContent]);
 
   // Debounced search
@@ -176,28 +140,7 @@ export function MyLibraryPage() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  // Client-side filtering and sorting
-  const filteredItems = useMemo(() => {
-    let result = [...items];
-    
-    // Filter by search (client-side for audio/pdf, server-side for youtube)
-    if (searchInput && activeTab !== 'youtube') {
-      const q = searchInput.toLowerCase();
-      result = result.filter(
-        (item) =>
-          item.title.toLowerCase().includes(q) ||
-          item.subtitle.toLowerCase().includes(q)
-      );
-    }
-    
-    // Sort by date
-    result.sort((a, b) => {
-      const cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-      return sortDir === 'desc' ? -cmp : cmp;
-    });
-    
-    return result;
-  }, [items, searchInput, activeTab, sortDir]);
+	const filteredItems = items;
 
   const handleItemClick = (item: UnifiedItem) => {
     // Don't navigate if in selection mode
@@ -248,8 +191,7 @@ export function MyLibraryPage() {
           await deletePDFExtraction(item.id);
           break;
       }
-      // Remove from local state
-      setItems((prev) => prev.filter((i) => !(i.type === item.type && i.id === item.id)));
+		await fetchContent();
     } catch {
       setError('Failed to delete item');
     }
@@ -260,10 +202,13 @@ export function MyLibraryPage() {
     if (!confirm(`Delete ${selectedItems.size} item(s)?`)) return;
     
     setIsDeleting(true);
-    const toDelete = Array.from(selectedItems);
+	const toDelete = Array.from(selectedItems);
+	const failed = new Set<string>();
     
     for (const key of toDelete) {
-      const [type, id] = key.split('-');
+		const separator = key.indexOf('-');
+		const type = key.slice(0, separator);
+		const id = key.slice(separator + 1);
       try {
         switch (type) {
           case 'youtube':
@@ -278,12 +223,15 @@ export function MyLibraryPage() {
         }
       } catch (err) {
         console.error(`Failed to delete ${key}:`, err);
+		failed.add(key);
       }
     }
-    
-    // Remove deleted items from local state
-    setItems((prev) => prev.filter((item) => !selectedItems.has(`${item.type}-${item.id}`)));
-    setSelectedItems(new Set());
+
+	await fetchContent();
+	setSelectedItems(failed);
+	if (failed.size > 0) {
+		setError(`${failed.size} item${failed.size === 1 ? '' : 's'} could not be deleted. Please try again.`);
+	}
     setIsDeleting(false);
   };
 
@@ -419,7 +367,7 @@ export function MyLibraryPage() {
                 className="px-1.5 py-0.5 rounded text-xs"
                 style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
               >
-                {filteredItems.length}
+				{totalItems}
               </span>
             )}
           </button>
@@ -580,7 +528,7 @@ export function MyLibraryPage() {
                 {/* Selection checkbox - shown on hover or when items are selected */}
                 <button
                   onClick={(e) => { e.stopPropagation(); toggleSelection(item); }}
-                  className={`absolute top-4 left-4 p-1 rounded-md transition-opacity ${selectedItems.size > 0 ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+				  className={`absolute top-4 left-4 p-1 rounded-md transition-opacity ${selectedItems.size > 0 ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100'}`}
                   style={{ color: isSelected ? 'var(--color-brand-500)' : 'var(--color-text-muted)' }}
                 >
                   {isSelected ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
@@ -591,7 +539,7 @@ export function MyLibraryPage() {
                   {/* Add to collection - shown on hover */}
                   <button
                     onClick={(e) => { e.stopPropagation(); setCollectionModal({ type: item.type === 'youtube' ? 'transcript' : item.type, id: item.id, title: item.title }); }}
-                    className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+					className="p-1.5 rounded-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                     style={{ color: 'var(--color-text-muted)' }}
                     title="Add to collection"
                   >
@@ -600,7 +548,7 @@ export function MyLibraryPage() {
                   {/* Delete button - shown on hover */}
                   <button
                     onClick={(e) => handleDelete(item, e)}
-                    className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+					className="p-1.5 rounded-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                     style={{ color: 'var(--color-text-muted)' }}
                     title="Delete"
                   >
@@ -672,8 +620,8 @@ export function MyLibraryPage() {
         </motion.div>
       )}
 
-      {/* Pagination (only for YouTube when filtered) */}
-      {!isLoading && activeTab === 'youtube' && totalPages > 1 && (
+	  {/* Pagination covers the unified result set for every tab. */}
+	  {!isLoading && totalPages > 1 && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

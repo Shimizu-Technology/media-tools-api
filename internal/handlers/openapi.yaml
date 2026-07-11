@@ -2,10 +2,11 @@ openapi: "3.0.3"
 info:
   title: Media Tools API
   description: |
-    A Go-powered API for extracting YouTube transcripts and generating AI summaries.
+    A Go-powered media workspace API for video transcripts, recording transcription,
+    PDF extraction, collections, chat, webhooks, and AI summaries.
 
     ## Authentication
-    All protected endpoints require an `X-API-Key` header. Create a key via `POST /api/v1/keys`.
+    Protected endpoints accept either an `X-API-Key` header or a Clerk/legacy bearer token.
 
     ## Rate Limiting
     Each API key has a per-hour rate limit (default: 100 requests/hour).
@@ -105,6 +106,11 @@ components:
         style:
           type: string
           enum: [bullet, narrative, academic]
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        error_message:
+          type: string
         created_at:
           type: string
           format: date-time
@@ -471,6 +477,12 @@ paths:
                 $ref: "#/components/schemas/Transcript"
         "404":
           description: Not found
+    delete:
+      tags: [Transcripts]
+      summary: Delete a transcript
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses: {"200": {description: Transcript deleted}, "404": {description: Not found}}
 
   /transcripts/{id}/export:
     get:
@@ -814,6 +826,7 @@ paths:
             application/json:
               example:
                 message: "Summary generation started"
+                summary_id: "uuid-here"
                 transcript_id: "uuid-here"
                 length: "medium"
                 style: "bullet"
@@ -821,3 +834,228 @@ paths:
           description: Transcript not found
         "409":
           description: Transcript not yet completed
+
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register a legacy user when legacy auth is enabled
+      security: []
+      responses: {"201": {description: User registered}, "404": {description: Legacy auth disabled}}
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Sign in with legacy credentials when enabled
+      security: []
+      responses: {"200": {description: Auth token}, "401": {description: Invalid credentials}}
+  /auth/me:
+    get:
+      tags: [Authentication]
+      summary: Get the signed-in user
+      responses: {"200": {description: Current user}}
+  /auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh a legacy auth token when enabled
+      responses: {"200": {description: Refreshed token}}
+  /workspace:
+    get:
+      tags: [Workspace]
+      summary: List legacy workspace bookmarks
+      responses: {"200": {description: Workspace items}}
+    post:
+      tags: [Workspace]
+      summary: Save a legacy workspace bookmark
+      responses: {"201": {description: Item saved}}
+  /workspace/{type}/{id}:
+    delete:
+      tags: [Workspace]
+      summary: Remove a legacy workspace bookmark
+      parameters:
+        - {name: type, in: path, required: true, schema: {type: string}}
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses: {"200": {description: Item removed}}
+  /user/keys:
+    post:
+      tags: [API Keys]
+      summary: Create an account-owned developer key
+      responses: {"201": {description: API key created}}
+  /audio/transcribe:
+    post:
+      tags: [Audio]
+      summary: Upload audio for asynchronous transcription
+      responses: {"202": {description: Transcription queued}}
+  /audio/uploads/presign:
+    post:
+      tags: [Audio]
+      summary: Create a direct-to-storage audio upload
+      responses: {"200": {description: Presigned upload}}
+  /audio/uploads/complete:
+    post:
+      tags: [Audio]
+      summary: Complete a direct audio upload and queue transcription
+      responses: {"202": {description: Transcription queued}}
+  /audio/transcriptions:
+    get:
+      tags: [Audio]
+      summary: List audio transcriptions
+      responses: {"200": {description: Audio transcriptions}}
+  /audio/transcriptions/search:
+    get:
+      tags: [Audio]
+      summary: Search audio transcriptions
+      responses: {"200": {description: Matching audio transcriptions}}
+  /audio/transcriptions/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      tags: [Audio]
+      summary: Get an audio transcription
+      responses: {"200": {description: Audio transcription}, "404": {description: Not found}}
+    patch:
+      tags: [Audio]
+      summary: Rename an audio transcription
+      responses: {"200": {description: Audio transcription updated}}
+    delete:
+      tags: [Audio]
+      summary: Delete an audio transcription
+      responses: {"200": {description: Audio transcription deleted}}
+  /audio/transcriptions/{id}/cancel:
+    post:
+      tags: [Audio]
+      summary: Cancel an active audio transcription
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {"200": {description: Transcription canceled}}
+  /audio/transcriptions/{id}/retry:
+    post:
+      tags: [Audio]
+      summary: Retry an audio transcription
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {"202": {description: Transcription queued}}
+  /audio/transcriptions/{id}/audio:
+    get:
+      tags: [Audio]
+      summary: Get a short-lived audio playback URL
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {"200": {description: Playback URL}}
+  /audio/transcriptions/{id}/export:
+    get:
+      tags: [Audio]
+      summary: Export an audio transcription
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {"200": {description: Export file}}
+  /audio/transcriptions/{id}/summarize:
+    post:
+      tags: [Audio]
+      summary: Generate an audio summary
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {"200": {description: Audio summary}}
+  /pdf/extract:
+    post:
+      tags: [PDF]
+      summary: Upload and extract text from a PDF
+      responses: {"200": {description: PDF extraction}}
+  /pdf/extractions:
+    get:
+      tags: [PDF]
+      summary: List PDF extractions
+      responses: {"200": {description: PDF extractions}}
+  /pdf/extractions/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      tags: [PDF]
+      summary: Get a PDF extraction
+      responses: {"200": {description: PDF extraction}}
+    delete:
+      tags: [PDF]
+      summary: Delete a PDF extraction
+      responses: {"200": {description: PDF extraction deleted}}
+  /collections:
+    get:
+      tags: [Collections]
+      summary: List collections
+      responses: {"200": {description: Collections}}
+    post:
+      tags: [Collections]
+      summary: Create a collection
+      responses: {"201": {description: Collection created}}
+  /collections/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      tags: [Collections]
+      summary: Get a collection and its items
+      responses: {"200": {description: Collection}}
+    patch:
+      tags: [Collections]
+      summary: Update a collection
+      responses: {"200": {description: Collection updated}}
+    delete:
+      tags: [Collections]
+      summary: Delete a collection
+      responses: {"200": {description: Collection deleted}}
+  /collections/{id}/items:
+    post:
+      tags: [Collections]
+      summary: Add items to a collection
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {"200": {description: Items added}}
+  /collections/{id}/items/{itemId}:
+    delete:
+      tags: [Collections]
+      summary: Remove an item from a collection
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: itemId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses: {"200": {description: Item removed}}
+  /collections/{id}/chat:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      tags: [Collections]
+      summary: Get collection chat history
+      responses: {"200": {description: Chat history}}
+    post:
+      tags: [Collections]
+      summary: Chat across collection items
+      responses: {"200": {description: Chat response}}
+  /library/items:
+    get:
+      tags: [Library]
+      summary: Search and paginate all media types
+      responses: {"200": {description: Paginated library items}}
+  /library/stats:
+    get:
+      tags: [Library]
+      summary: Get exact workspace media counts
+      responses: {"200": {description: Library statistics}}
+  /webhooks:
+    get:
+      tags: [Webhooks]
+      summary: List webhooks for the current principal
+      responses: {"200": {description: Webhooks}}
+    post:
+      tags: [Webhooks]
+      summary: Register a webhook
+      responses: {"201": {description: Webhook and one-time secret}}
+  /webhooks/deliveries:
+    get:
+      tags: [Webhooks]
+      summary: List recent webhook deliveries
+      responses: {"200": {description: Webhook deliveries}}
+  /webhooks/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    patch:
+      tags: [Webhooks]
+      summary: Enable or disable a webhook
+      responses: {"200": {description: Webhook updated}}
+    delete:
+      tags: [Webhooks]
+      summary: Delete a webhook
+      responses: {"200": {description: Webhook deleted}}
+  /ops/audio/health:
+    get:
+      tags: [Operations]
+      summary: Get owner-only audio pipeline health
+      responses: {"200": {description: Audio operations health}, "403": {description: Owner access required}}

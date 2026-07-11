@@ -84,7 +84,7 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		return
 	}
 
-	actor := getActorOwnership(c)
+	actor := getActorWriteOwnership(c)
 	if !actor.IsAuthenticated() {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error:   "unauthorized",
@@ -269,7 +269,7 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 // PresignAudioUpload returns a short-lived S3 URL for direct browser upload.
 // POST /api/v1/audio/uploads/presign
 func (h *Handler) PresignAudioUpload(c *gin.Context) {
-	actor := getActorOwnership(c)
+	actor := getActorWriteOwnership(c)
 	if !actor.IsAuthenticated() {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error:   "unauthorized",
@@ -456,8 +456,8 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		AudioS3Size:        req.SizeBytes,
 		ProcessingStage:    "queued",
 		ProcessingProgress: 0,
-		UserID:             actor.UserID,
-		APIKeyID:           actor.APIKeyID,
+		UserID:             session.UserID,
+		APIKeyID:           session.APIKeyID,
 	}
 	if err := h.DB.CompleteAudioUploadAndCreateTranscription(c.Request.Context(), session.ID, at); err != nil {
 		if errors.Is(err, database.ErrAudioUploadSessionNotPending) {

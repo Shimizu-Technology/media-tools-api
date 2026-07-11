@@ -82,7 +82,7 @@ struct SettingsView: View {
                             SettingsRow(label: "Database") {
                                 HStack(spacing: 6) {
                                     Circle()
-                                        .fill(health.database == "connected" ? Theme.success : Theme.error)
+										.fill(health.database == "healthy" ? Theme.success : Theme.error)
                                         .frame(width: 8, height: 8)
                                     Text(health.database.capitalized)
                                         .font(Theme.body(14))

@@ -65,12 +65,15 @@ type YtDlpExtractor struct {
 	proxyURL    string             // Optional: residential proxy for YouTube
 	cookiesFile string             // Optional: Netscape cookies.txt for login-required sites
 	whisper     WhisperTranscriber // Optional: fallback to Whisper if subtitles fail
+	jsSolver    bool               // Whether this yt-dlp build supports the JS challenge flags
 }
 
 // NewExtractor creates a new yt-dlp based extractor.
 // Go Pattern: Constructor functions are named New<Type> or New<Package>.
 func NewExtractor(ytDlpPath string) *YtDlpExtractor {
-	return &YtDlpExtractor{ytDlpPath: ytDlpPath}
+	help, err := exec.Command(ytDlpPath, "--help").Output()
+	jsSolver := err == nil && bytes.Contains(help, []byte("--js-runtimes")) && bytes.Contains(help, []byte("--remote-components"))
+	return &YtDlpExtractor{ytDlpPath: ytDlpPath, jsSolver: jsSolver}
 }
 
 // SetProxy configures a proxy for yt-dlp requests.
@@ -94,9 +97,12 @@ func (e *YtDlpExtractor) SetWhisperFallback(w WhisperTranscriber) {
 
 // buildBaseArgs returns the common yt-dlp arguments including proxy if configured.
 func (e *YtDlpExtractor) buildBaseArgs() []string {
-	args := []string{
-		"--js-runtimes", "node", // Required for YouTube extraction
-		"--remote-components", "ejs:github", // Download JS challenge solver from GitHub
+	var args []string
+	if e.jsSolver {
+		args = append(args,
+			"--js-runtimes", "node",
+			"--remote-components", "ejs:github",
+		)
 	}
 	if e.cookiesFile != "" {
 		args = append(args, "--cookies", e.cookiesFile)

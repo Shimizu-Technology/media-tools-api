@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -24,24 +25,78 @@ import (
 
 // Service handles webhook notification delivery.
 type Service struct {
-	db         *database.DB
-	client     *http.Client
-	shutdownCh chan struct{} // Signals pending deliveries to stop
+	db            *database.DB
+	client        *http.Client
+	deliveryQueue chan deliveryTask
+	shutdownCh    chan struct{} // Cancels retries after shutdown begins
+	workerWG      sync.WaitGroup
+	notifyWG      sync.WaitGroup
+	lifecycleMu   sync.Mutex
+	closed        bool
+	shutdownOnce  sync.Once
 }
+
+type deliveryTask struct {
+	webhook models.Webhook
+	event   string
+	payload []byte
+}
+
+const (
+	deliveryWorkers   = 20
+	deliveryQueueSize = 200
+)
 
 // New creates a new webhook service.
 func New(db *database.DB) *Service {
-	return &Service{
-		db:         db,
-		client:     safeHTTPClient(),
-		shutdownCh: make(chan struct{}),
+	s := &Service{
+		db:            db,
+		client:        safeHTTPClient(),
+		deliveryQueue: make(chan deliveryTask, deliveryQueueSize),
+		shutdownCh:    make(chan struct{}),
+	}
+	for i := 0; i < deliveryWorkers; i++ {
+		s.workerWG.Add(1)
+		go s.deliveryWorker()
+	}
+	return s
+}
+
+// Shutdown stops accepting notifications, lets in-flight NotifyEvent calls
+// finish queueing, and drains every queued task. Retries stop immediately, but
+// each queued task still receives an auditable failed delivery record instead
+// of disappearing silently.
+func (s *Service) Shutdown() {
+	s.shutdownOnce.Do(func() {
+		s.lifecycleMu.Lock()
+		s.closed = true
+		close(s.shutdownCh)
+		s.lifecycleMu.Unlock()
+
+		s.notifyWG.Wait()
+		close(s.deliveryQueue)
+		s.workerWG.Wait()
+	})
+}
+
+func (s *Service) deliveryWorker() {
+	defer s.workerWG.Done()
+	for task := range s.deliveryQueue {
+		s.deliverWithRetry(task.webhook, task.event, task.payload)
 	}
 }
 
-// Shutdown signals all pending webhook deliveries to stop.
-// Call this during graceful server shutdown.
-func (s *Service) Shutdown() {
-	close(s.shutdownCh)
+// beginNotification prevents Shutdown from closing the queue while a
+// NotifyEvent call is still using it. The mutex also guarantees that no
+// WaitGroup additions can happen after shutdown starts waiting.
+func (s *Service) beginNotification() bool {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.notifyWG.Add(1)
+	return true
 }
 
 // GenerateSecret creates a random HMAC secret for a webhook.
@@ -62,8 +117,16 @@ func SignPayload(payload []byte, secret string) string {
 
 // NotifyEvent sends webhook notifications for a given event to all registered webhooks.
 // Delivery happens asynchronously with retry logic.
-func (s *Service) NotifyEvent(ctx context.Context, event string, apiKeyID string, data interface{}) {
-	webhooks, err := s.db.GetActiveWebhooksForEvent(ctx, event, apiKeyID)
+func (s *Service) NotifyEvent(ctx context.Context, event string, userID, apiKeyID *string, data interface{}) {
+	if !s.beginNotification() {
+		return
+	}
+	defer s.notifyWG.Done()
+
+	if apiKeyID != nil {
+		userID = nil
+	}
+	webhooks, err := s.db.GetActiveWebhooksForEvent(ctx, event, userID, apiKeyID)
 	if err != nil {
 		log.Printf("⚠️  Failed to get webhooks for event %s: %v", event, err)
 		return
@@ -86,8 +149,13 @@ func (s *Service) NotifyEvent(ctx context.Context, event string, apiKeyID string
 	}
 
 	for _, wh := range webhooks {
-		// Fire and forget — each delivery runs in its own goroutine
-		go s.deliverWithRetry(wh, event, payloadJSON)
+		task := deliveryTask{webhook: wh, event: event, payload: payloadJSON}
+		select {
+		case s.deliveryQueue <- task:
+		case <-ctx.Done():
+			log.Printf("⚠️  Timed out queueing webhook delivery for %s", event)
+			return
+		}
 	}
 }
 
@@ -113,6 +181,20 @@ func (s *Service) deliverWithRetry(wh models.Webhook, event string, payloadJSON 
 		return
 	}
 
+	// Shutdown closes the retry signal before draining the queue. Record tasks
+	// that had not started yet as failed so accepted events never vanish without
+	// an audit trail or trigger new outbound requests during shutdown.
+	select {
+	case <-s.shutdownCh:
+		delivery.Status = "failed"
+		delivery.LastError = "shutdown before delivery"
+		if err := s.db.UpdateWebhookDelivery(ctx, delivery); err != nil {
+			log.Printf("⚠️  Failed to mark shutdown delivery as failed: %v", err)
+		}
+		return
+	default:
+	}
+
 	retryDelays := []time.Duration{0, 1 * time.Second, 5 * time.Second, 30 * time.Second}
 
 	for attempt := 0; attempt < len(retryDelays); attempt++ {
@@ -123,13 +205,21 @@ func (s *Service) deliverWithRetry(wh models.Webhook, event string, payloadJSON 
 				log.Printf("⚠️  Webhook delivery aborted due to shutdown: %s → %s", event, wh.URL)
 				delivery.Status = "failed"
 				delivery.LastError = "shutdown during delivery"
-				s.db.UpdateWebhookDelivery(ctx, delivery)
+				if err := s.db.UpdateWebhookDelivery(ctx, delivery); err != nil {
+					log.Printf("⚠️  Failed to record webhook shutdown: %v", err)
+				}
 				return
 			case <-ctx.Done():
 				log.Printf("⚠️  Webhook delivery timed out: %s → %s", event, wh.URL)
 				delivery.Status = "failed"
 				delivery.LastError = "delivery timeout"
-				s.db.UpdateWebhookDelivery(ctx, delivery)
+				// The delivery context is already canceled here, so use a short fresh
+				// context to persist the terminal state instead of leaving it pending.
+				updateCtx, cancelUpdate := context.WithTimeout(context.Background(), 5*time.Second)
+				if err := s.db.UpdateWebhookDelivery(updateCtx, delivery); err != nil {
+					log.Printf("⚠️  Failed to record webhook timeout: %v", err)
+				}
+				cancelUpdate()
 				return
 			case <-time.After(retryDelays[attempt]):
 				// Continue with next attempt

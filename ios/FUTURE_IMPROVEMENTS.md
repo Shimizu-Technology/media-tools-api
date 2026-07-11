@@ -181,11 +181,11 @@
 ## ✅ Completed
 
 - [x] Core iOS app (SwiftUI, 5 tabs, full feature parity with web)
-- [x] Share Sheet extension (URLs, audio, PDFs)
-- [x] Home Screen widget (small + medium)
+- [ ] Wire and validate the prepared Share Sheet extension target (URLs, audio, PDFs)
+- [ ] Wire and validate the prepared Home Screen widget target (small + medium)
 - [x] Spotlight search indexing
 - [x] Local notifications on completion
-- [x] Background upload service
+- [ ] Connect and validate the prepared background upload service in the active upload flow
 - [x] Onboarding walkthrough
 - [x] Audio playback with speed control
 - [x] Export (txt/md/json)

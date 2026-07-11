@@ -64,7 +64,7 @@ function AppRoutes() {
         <Route path="collections/:collectionId" element={<CollectionsPage />} />
         <Route path="developer" element={<DeveloperPage />} />
         <Route path="developer/webhooks" element={<WebhooksPage />} />
-        <Route path="admin/ops" element={<OpsPage />} />
+		<Route path="admin/ops" element={<ProtectedRoute requireOwner><OpsPage /></ProtectedRoute>} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
 

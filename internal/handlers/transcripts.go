@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
@@ -91,12 +92,13 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 	}
 
 	// Create a new transcript record with "pending" status
+	owner := getActorWriteOwnership(c)
 	t := &models.Transcript{
 		YouTubeURL: youtubeURL,
 		YouTubeID:  videoID,
 		Status:     models.StatusPending,
-		UserID:     actor.UserID,
-		APIKeyID:   actor.APIKeyID,
+		UserID:     owner.UserID,
+		APIKeyID:   owner.APIKeyID,
 	}
 
 	if err := h.DB.CreateTranscript(c.Request.Context(), t); err != nil {
@@ -266,18 +268,56 @@ func (h *Handler) CreateSummary(c *gin.Context) {
 	if req.Style == "" {
 		req.Style = "bullet"
 	}
+	validLengths := map[string]bool{"short": true, "medium": true, "detailed": true}
+	validStyles := map[string]bool{"bullet": true, "narrative": true, "academic": true}
+	if !validLengths[req.Length] || !validStyles[req.Style] {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_options",
+			Message: "length must be short, medium, or detailed; style must be bullet, narrative, or academic",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	summaryRecord := &models.Summary{
+		ID:           uuid.NewString(),
+		TranscriptID: req.TranscriptID,
+		ModelUsed:    req.Model,
+		KeyPoints:    json.RawMessage(`[]`),
+		Length:       req.Length,
+		Style:        req.Style,
+		ContentType:  req.ContentType,
+		Status:       models.StatusPending,
+	}
+	if err := h.DB.CreateSummary(c.Request.Context(), summaryRecord); err != nil {
+		log.Printf("failed to create summary job: %v", err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "database_error", Message: "Failed to create summary job", Code: http.StatusInternalServerError,
+		})
+		return
+	}
 
 	// Submit summary generation job
-	payload, _ := json.Marshal(worker.SummaryPayload{
+	payload, err := json.Marshal(worker.SummaryPayload{
 		TranscriptID: req.TranscriptID,
 		Model:        req.Model,
 		Length:       req.Length,
 		Style:        req.Style,
 		ContentType:  req.ContentType,
+		SummaryID:    summaryRecord.ID,
 	})
+	if err != nil {
+		summaryRecord.Status = models.StatusFailed
+		summaryRecord.ErrorMessage = "failed to prepare summary job"
+		_ = h.DB.UpdateSummary(c.Request.Context(), summaryRecord)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "internal_error", Message: "Failed to prepare summary job", Code: http.StatusInternalServerError,
+		})
+		return
+	}
 
 	job := worker.Job{
-		ID:        req.TranscriptID, // Use transcript ID as job reference
+		ID:        summaryRecord.ID,
 		Type:      worker.JobSummaryGeneration,
 		Payload:   payload,
 		CreatedAt: time.Now(),
@@ -290,6 +330,7 @@ func (h *Handler) CreateSummary(c *gin.Context) {
 			if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
 				c.JSON(http.StatusAccepted, gin.H{
 					"message":       "Summary generation started",
+					"summary_id":    summaryRecord.ID,
 					"transcript_id": req.TranscriptID,
 					"length":        req.Length,
 					"style":         req.Style,
@@ -297,6 +338,9 @@ func (h *Handler) CreateSummary(c *gin.Context) {
 				return
 			}
 		}
+		summaryRecord.Status = models.StatusFailed
+		summaryRecord.ErrorMessage = "job queue was full"
+		_ = h.DB.UpdateSummary(c.Request.Context(), summaryRecord)
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
 			Error:   "queue_full",
 			Message: "Job queue is full, try again later",
@@ -307,6 +351,7 @@ func (h *Handler) CreateSummary(c *gin.Context) {
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"message":       "Summary generation started",
+		"summary_id":    summaryRecord.ID,
 		"transcript_id": req.TranscriptID,
 		"length":        req.Length,
 		"style":         req.Style,

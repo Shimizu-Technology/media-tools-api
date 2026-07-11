@@ -50,6 +50,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	// Keep multipart parsing memory bounded; larger uploads are streamed to temp files.
 	r.MaxMultipartMemory = 120 << 20
 
+	r.Use(middleware.SecurityHeaders())
+	r.Use(middleware.LimitJSONBody())
 	r.Use(middleware.CORS(cfg.AllowedOrigins))
 
 	h := handlers.NewHandler(cfg.DB, cfg.WorkerPool, cfg.AudioTranscriber, cfg.AudioStorage, cfg.Webhooks, cfg.Summarizer, cfg.JWTSecret, cfg.AdminAPIKey, cfg.OwnerKeyID, cfg.OwnerKeyPrefix, cfg.YtDlpCookiesConfigured)
@@ -158,6 +160,10 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		protected.DELETE("/collections/:id/items/:itemId", h.RemoveCollectionItem)
 		protected.GET("/collections/:id/chat", h.GetCollectionChat)
 		protected.POST("/collections/:id/chat", h.PostCollectionChat)
+
+		// Unified library and exact workspace metrics
+		protected.GET("/library/items", h.ListLibraryItems)
+		protected.GET("/library/stats", h.GetLibraryStats)
 
 		// Webhook management (MTA-18)
 		protected.POST("/webhooks", h.CreateWebhook)
