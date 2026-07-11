@@ -116,6 +116,9 @@ type Pool struct {
 	webhooks         *webhookservice.Service // MTA-18: webhook notifications
 	webhookSem       chan struct{}           // Caps concurrent webhook goroutines
 	wg               sync.WaitGroup
+	webhookWG        sync.WaitGroup
+	webhookMu        sync.Mutex
+	webhooksClosed   bool
 	ctx              context.Context
 	cancel           context.CancelFunc
 	stopOnce         sync.Once
@@ -148,7 +151,16 @@ func (p *Pool) NotifyWebhook(event string, userID, apiKeyID *string, data interf
 		userID = nil
 	}
 	if p.webhooks != nil {
+		p.webhookMu.Lock()
+		if p.webhooksClosed {
+			p.webhookMu.Unlock()
+			return
+		}
+		p.webhookWG.Add(1)
+		p.webhookMu.Unlock()
+
 		go func() {
+			defer p.webhookWG.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			// Wait briefly for a dispatch slot instead of silently dropping events.
@@ -214,6 +226,15 @@ func (p *Pool) Stop() {
 			<-done
 			log.Println("✅ All workers stopped after forced cancellation")
 		}
+
+		// No worker can launch another dispatch now. Callers racing with Stop are
+		// rejected under the mutex, while already-started dispatches finish before
+		// the webhook service is shut down.
+		p.webhookMu.Lock()
+		p.webhooksClosed = true
+		p.webhookMu.Unlock()
+		p.webhookWG.Wait()
+		p.cancel()
 	})
 }
 

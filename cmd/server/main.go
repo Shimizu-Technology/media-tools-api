@@ -143,7 +143,6 @@ func main() {
 	wp.SetAudioTranscriber(audioTranscriber) // Wire audio transcriber for async Whisper jobs
 	wp.SetAudioStorage(audioStorage)
 	wp.Start()
-	defer wp.Stop()
 
 	recoveredTranscripts, err := wp.RecoverTranscriptJobs(context.Background(), 200)
 	if err != nil {
@@ -236,16 +235,19 @@ func main() {
 	sig := <-quit
 	log.Printf("🛑 Received signal %v, shutting down gracefully...", sig)
 
-	// Signal webhook service to stop pending deliveries
-	webhookService.Shutdown()
-	log.Println("⏳ Webhook deliveries signaled to stop")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("⚠️  Server forced to shutdown: %v", err)
 	}
+
+	// Stop producers before their consumer. HTTP handlers finish first, then
+	// background workers and their webhook dispatch goroutines, and finally the
+	// webhook service drains its accepted queue into auditable outcomes.
+	wp.Stop()
+	webhookService.Shutdown()
+	log.Println("✅ Background jobs and webhook deliveries stopped")
 
 	log.Println("👋 Server stopped. Goodbye!")
 }

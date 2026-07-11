@@ -28,8 +28,11 @@ type Service struct {
 	db            *database.DB
 	client        *http.Client
 	deliveryQueue chan deliveryTask
-	shutdownCh    chan struct{} // Signals pending deliveries to stop
-	wg            sync.WaitGroup
+	shutdownCh    chan struct{} // Cancels retries after shutdown begins
+	workerWG      sync.WaitGroup
+	notifyWG      sync.WaitGroup
+	lifecycleMu   sync.Mutex
+	closed        bool
 	shutdownOnce  sync.Once
 }
 
@@ -53,36 +56,47 @@ func New(db *database.DB) *Service {
 		shutdownCh:    make(chan struct{}),
 	}
 	for i := 0; i < deliveryWorkers; i++ {
-		s.wg.Add(1)
+		s.workerWG.Add(1)
 		go s.deliveryWorker()
 	}
 	return s
 }
 
-// Shutdown signals all pending webhook deliveries to stop.
-// Call this during graceful server shutdown.
+// Shutdown stops accepting notifications, lets in-flight NotifyEvent calls
+// finish queueing, and drains every queued task. Retries stop immediately, but
+// each queued task still receives an auditable failed delivery record instead
+// of disappearing silently.
 func (s *Service) Shutdown() {
 	s.shutdownOnce.Do(func() {
+		s.lifecycleMu.Lock()
+		s.closed = true
 		close(s.shutdownCh)
-		s.wg.Wait()
+		s.lifecycleMu.Unlock()
+
+		s.notifyWG.Wait()
+		close(s.deliveryQueue)
+		s.workerWG.Wait()
 	})
 }
 
 func (s *Service) deliveryWorker() {
-	defer s.wg.Done()
-	for {
-		select {
-		case <-s.shutdownCh:
-			return
-		case task := <-s.deliveryQueue:
-			select {
-			case <-s.shutdownCh:
-				return
-			default:
-				s.deliverWithRetry(task.webhook, task.event, task.payload)
-			}
-		}
+	defer s.workerWG.Done()
+	for task := range s.deliveryQueue {
+		s.deliverWithRetry(task.webhook, task.event, task.payload)
 	}
+}
+
+// beginNotification prevents Shutdown from closing the queue while a
+// NotifyEvent call is still using it. The mutex also guarantees that no
+// WaitGroup additions can happen after shutdown starts waiting.
+func (s *Service) beginNotification() bool {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.notifyWG.Add(1)
+	return true
 }
 
 // GenerateSecret creates a random HMAC secret for a webhook.
@@ -104,6 +118,11 @@ func SignPayload(payload []byte, secret string) string {
 // NotifyEvent sends webhook notifications for a given event to all registered webhooks.
 // Delivery happens asynchronously with retry logic.
 func (s *Service) NotifyEvent(ctx context.Context, event string, userID, apiKeyID *string, data interface{}) {
+	if !s.beginNotification() {
+		return
+	}
+	defer s.notifyWG.Done()
+
 	if apiKeyID != nil {
 		userID = nil
 	}
@@ -136,8 +155,6 @@ func (s *Service) NotifyEvent(ctx context.Context, event string, userID, apiKeyI
 		case <-ctx.Done():
 			log.Printf("⚠️  Timed out queueing webhook delivery for %s", event)
 			return
-		case <-s.shutdownCh:
-			return
 		}
 	}
 }
@@ -162,6 +179,20 @@ func (s *Service) deliverWithRetry(wh models.Webhook, event string, payloadJSON 
 	if err := s.db.CreateWebhookDelivery(ctx, delivery); err != nil {
 		log.Printf("⚠️  Failed to create webhook delivery record: %v", err)
 		return
+	}
+
+	// Shutdown closes the retry signal before draining the queue. Record tasks
+	// that had not started yet as failed so accepted events never vanish without
+	// an audit trail or trigger new outbound requests during shutdown.
+	select {
+	case <-s.shutdownCh:
+		delivery.Status = "failed"
+		delivery.LastError = "shutdown before delivery"
+		if err := s.db.UpdateWebhookDelivery(ctx, delivery); err != nil {
+			log.Printf("⚠️  Failed to mark shutdown delivery as failed: %v", err)
+		}
+		return
+	default:
 	}
 
 	retryDelays := []time.Duration{0, 1 * time.Second, 5 * time.Second, 30 * time.Second}
