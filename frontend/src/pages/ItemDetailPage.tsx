@@ -38,16 +38,17 @@ export function ItemDetailPage() {
   const [audioURL, setAudioURL] = useState('');
   const [preferences, setPreferences] = useState<LibraryPreferences>({ favorite: false, archived: false, tags: [] });
   const [tagInput, setTagInput] = useState('');
+  const [videoSummaryReady, setVideoSummaryReady] = useState(false);
 
   const validType = type === 'transcript' || type === 'audio' || type === 'pdf';
+  const markVideoSummaryReady = useCallback(() => setVideoSummaryReady(true), []);
 
   const loadItem = useCallback(async (quiet = false) => {
     if (!itemId || !validType) return;
     if (!quiet) setIsLoading(true);
     setError('');
     try {
-      const result = type === 'transcript' ? await getTranscript(itemId) : type === 'audio' ? await getAudioTranscription(itemId) : await getPDFExtraction(itemId);
-      setItem(result);
+      setItem(type === 'transcript' ? await getTranscript(itemId) : type === 'audio' ? await getAudioTranscription(itemId) : await getPDFExtraction(itemId));
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -171,7 +172,7 @@ export function ItemDetailPage() {
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <TypeBadge type={type} />
               <StatusBadge status={item.status} />
-              {view.summaryReady && <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}><Sparkles className="h-3 w-3" /> Summarized</span>}
+              {(view.summaryReady || videoSummaryReady) && <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}><Sparkles className="h-3 w-3" /> Summarized</span>}
             </div>
             <h1 className="break-words text-2xl font-semibold tracking-tight sm:text-4xl">{view.title}</h1>
             <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>{view.subtitle}</p>
@@ -217,7 +218,7 @@ export function ItemDetailPage() {
 
       {complete && <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
         <div className="space-y-6">
-          {type === 'transcript' ? <SummaryPanel transcriptId={item.id} transcriptText={view.text} /> : <TextViewer title={type === 'pdf' ? 'Document text' : 'Transcript'} text={view.text} query={query} setQuery={setQuery} matches={matchCount} />}
+          {type === 'transcript' ? <SummaryPanel transcriptId={item.id} transcriptText={view.text} onSummaryReady={markVideoSummaryReady} /> : <TextViewer title={type === 'pdf' ? 'Document text' : 'Transcript'} text={view.text} query={query} setQuery={setQuery} matches={matchCount} />}
           {type === 'audio' && <AudioSummary item={item as AudioTranscription} onGenerate={handleAudioSummary} isActing={isActing} />}
         </div>
         <aside><TranscriptChatPanel itemId={item.id} itemType={type} /></aside>
