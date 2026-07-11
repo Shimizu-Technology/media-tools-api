@@ -224,6 +224,12 @@ export function PdfPage() {
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onClick={() => inputRef.current?.click()}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') inputRef.current?.click();
+            }}
+            role="button"
+            tabIndex={0}
+            aria-label="Choose a PDF to extract"
             className="relative cursor-pointer rounded-2xl border-2 border-dashed p-12 text-center transition-all duration-300"
             style={{
               borderColor: isDragging ? 'var(--color-brand-500)' : 'var(--color-border)',

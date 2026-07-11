@@ -1057,6 +1057,7 @@ export function AudioPage() {
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={startRecording}
+                    aria-label="Start recording"
                     className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 transition-colors"
                     style={{ backgroundColor: 'var(--color-error)', color: 'white' }}
                   >

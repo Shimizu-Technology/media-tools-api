@@ -10,6 +10,7 @@ import {
   FolderOpen,
   Home,
   Library,
+  ListTodo,
   Menu,
   Mic,
   PanelLeftClose,
@@ -37,6 +38,7 @@ type NavItem = {
 
 const primaryNav: NavItem[] = [
   { label: 'Dashboard', to: '/app', icon: Home, end: true },
+  { label: 'Processing', to: '/app/processing', icon: ListTodo },
   { label: 'Video', to: '/app/video', icon: FileText },
   { label: 'Recordings', to: '/app/audio', icon: Mic },
   { label: 'PDF', to: '/app/pdf', icon: BookOpen },
@@ -92,13 +94,21 @@ export function AppShell() {
             </button>
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--color-text-muted)' }}>Media Tools</p>
-              <p className="truncate text-sm" style={{ color: 'var(--color-text-secondary)' }}>Capture, summarize, organize, and chat with media.</p>
+              <p className="hidden truncate text-sm sm:block" style={{ color: 'var(--color-text-secondary)' }}>Capture, summarize, organize, and chat with media.</p>
             </div>
             <div className="flex items-center gap-2">
-              <Link to="/app/video" className="hidden min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90 sm:inline-flex" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-                <FileText className="h-4 w-4" />
-                New transcript
-              </Link>
+              <details className="group relative hidden sm:block">
+                <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+                  <FileText className="h-4 w-4" />
+                  New
+                  <ChevronRight className="h-4 w-4 rotate-90 transition-transform group-open:-rotate-90" />
+                </summary>
+                <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-56 rounded-2xl border p-2 shadow-2xl" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+                  <NewItemLink to="/app/video" icon={FileText} label="Video transcript" />
+                  <NewItemLink to="/app/audio" icon={Mic} label="Recording or audio" />
+                  <NewItemLink to="/app/pdf" icon={BookOpen} label="PDF document" />
+                </div>
+              </details>
               {LazyClerkUserButton && (
                 <Suspense fallback={<div className="h-9 w-9 rounded-full" style={{ backgroundColor: 'var(--color-surface-overlay)' }} />}>
                   <LazyClerkUserButton />
@@ -113,6 +123,15 @@ export function AppShell() {
         </main>
       </div>
     </div>
+  );
+}
+
+function NewItemLink({ to, icon: Icon, label }: { to: string; icon: ComponentType<{ className?: string }>; label: string }) {
+  return (
+    <Link to={to} className="flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition hover:bg-[var(--color-nav-hover)]">
+      <Icon className="h-4 w-4 text-[var(--color-brand-500)]" />
+      {label}
+    </Link>
   );
 }
 

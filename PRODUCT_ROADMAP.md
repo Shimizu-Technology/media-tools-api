@@ -24,14 +24,18 @@ Already in place:
 - PDF text extraction.
 - AI summaries and item chat.
 - Media library and collections.
+- Unified detail pages for video, audio, and PDF items.
+- Full-content library search across transcripts, documents, summaries, and tags.
+- Starred items, tags, and archive views.
+- Processing center for active, failed, and completed jobs.
 - User-owned records plus API-key-owned developer workflows.
 - Webhooks, exports, and owner/admin operational tools.
 
-## Near-Term Priorities
+## Recently Shipped
 
 ### 1. Unified Item Detail Pages
 
-Create a consistent detail page for every media item type.
+Media items now share a consistent detail route and workspace experience.
 
 Possible route shape:
 
@@ -52,7 +56,7 @@ Why this matters: it makes video, audio, and PDF results feel like one coherent 
 
 ### 2. Global Search
 
-Add one search experience across the entire workspace.
+The library now searches titles, transcript/document content, summaries, structured audio outputs, and tags from one server-side result set.
 
 Search should cover:
 
@@ -75,7 +79,7 @@ Useful filters:
 
 ### 3. Better Library Organization
 
-Improve the library from a list of items into a daily-use workspace.
+The library now supports starred items, tags, archive, status filters, sorting, collections, and bulk deletion.
 
 Add:
 
@@ -91,7 +95,7 @@ Collections remain useful for grouped work, but tags and favorites make everyday
 
 ### 4. Processing Center
 
-Create a processing/jobs view for async work.
+The processing center now shows queued, active, failed, and recently completed work with automatic refresh and links to recovery actions.
 
 Show:
 
@@ -266,28 +270,23 @@ Add:
 
 ## Suggested Implementation Order
 
-1. Unified item detail pages.
-2. Library polish: filters, favorites, archive, tags.
-3. Processing center.
-4. Global search.
-5. Better exports and share links.
-6. Summary templates and custom prompts.
-7. Collection-level intelligence.
-8. Speaker diarization.
-9. Team workspaces.
-10. Billing/usage limits.
-11. Browser extension and external integrations.
+1. Better exports and share links.
+2. Summary templates and custom prompts.
+3. Collection-level intelligence.
+4. Speaker diarization.
+5. Team workspaces.
+6. Billing/usage limits.
+7. Browser extension and external integrations.
 
 ## Next Recommended Milestone
 
-The next milestone should be unified library item detail pages.
+The next milestone should be shareable outputs and reusable AI workflows.
 
 Suggested scope:
 
-- Add unified item detail routes.
-- Update library cards to open those detail pages.
-- Centralize item type utilities for transcript/audio/PDF.
-- Move summary, chat, export, collection actions into reusable item-detail components.
-- Keep legacy direct tool routes working.
+- Private and revocable read-only share links.
+- More consistent exports across media types.
+- Saved summary templates and reusable prompts.
+- Collection-level briefs, action items, and decisions.
 
-This is the best next step because it gives the app a cohesive product center before larger AI/search/billing work.
+This builds on the cohesive workspace foundation without requiring team billing or third-party integration decisions yet.

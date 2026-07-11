@@ -253,6 +253,11 @@ function CollectionsList() {
                 <div
                   className="p-4 cursor-pointer flex items-center gap-4"
                   onClick={() => navigate(`/app/collections/${col.id}`)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') navigate(`/app/collections/${col.id}`);
+                  }}
+                  role="link"
+                  tabIndex={0}
                 >
                   <div className="w-10 h-10 rounded-lg bg-[var(--brand)]/10 flex items-center justify-center shrink-0">
                     <FolderOpen className="w-5 h-5 text-[var(--brand)]" />
@@ -266,16 +271,18 @@ function CollectionsList() {
                   <span className="text-xs text-[var(--text-tertiary)] tabular-nums shrink-0">
                     {col.item_count} {col.item_count === 1 ? 'item' : 'items'}
                   </span>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                  <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
                     <button
                       onClick={() => { setEditId(col.id); setEditName(col.name); setEditDesc(col.description); }}
-                      className="p-1.5 rounded-md hover:bg-white/5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                      className="flex min-h-11 min-w-11 items-center justify-center rounded-lg hover:bg-white/5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                      aria-label={`Edit ${col.name}`}
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => handleDelete(col.id)}
-                      className="p-1.5 rounded-md hover:bg-red-500/10 text-[var(--text-tertiary)] hover:text-red-400"
+                      className="flex min-h-11 min-w-11 items-center justify-center rounded-lg hover:bg-red-500/10 text-[var(--text-tertiary)] hover:text-red-400"
+                      aria-label={`Delete ${col.name}`}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -327,9 +334,9 @@ function CollectionDetail({ id }: { id: string }) {
 
   const getItemLink = (item: CollectionItem) => {
     switch (item.item_type) {
-      case 'transcript': return `/app/library?type=youtube`;
-      case 'audio': return `/app/library?type=audio`;
-      case 'pdf': return `/app/library?type=pdf`;
+      case 'transcript': return `/app/items/transcript/${item.item_id}`;
+      case 'audio': return `/app/items/audio/${item.item_id}`;
+      case 'pdf': return `/app/items/pdf/${item.item_id}`;
       default: return '/app/library';
     }
   };
@@ -431,7 +438,8 @@ function CollectionDetail({ id }: { id: string }) {
                 <button
                   onClick={() => handleRemoveItem(item.id)}
                   disabled={removing === item.id}
-                  className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-red-500/10 text-[var(--text-tertiary)] hover:text-red-400 transition-all disabled:opacity-50"
+                  className="flex min-h-11 min-w-11 items-center justify-center rounded-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 hover:bg-red-500/10 text-[var(--text-tertiary)] hover:text-red-400 transition-all disabled:opacity-50"
+                  aria-label={`Remove ${item.item_title || 'item'} from ${collection.name}`}
                 >
                   {removing === item.id ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />

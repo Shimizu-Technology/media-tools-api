@@ -164,6 +164,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		// Unified library and exact workspace metrics
 		protected.GET("/library/items", h.ListLibraryItems)
 		protected.GET("/library/stats", h.GetLibraryStats)
+		protected.GET("/library/items/:type/:id/preferences", h.GetLibraryPreferences)
+		protected.PATCH("/library/items/:type/:id/preferences", h.UpdateLibraryPreferences)
 
 		// Webhook management (MTA-18)
 		protected.POST("/webhooks", h.CreateWebhook)

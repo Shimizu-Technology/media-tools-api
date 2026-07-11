@@ -17,6 +17,9 @@ import { LandingPage } from './pages/LandingPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { DeveloperPage } from './pages/DeveloperPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { ProcessingPage } from './pages/ProcessingPage'
+import { ItemDetailPage } from './pages/ItemDetailPage'
+import { ScrollToTop } from './components/ScrollToTop'
 import { AuthProvider } from './contexts/AuthContext'
 import { getCurrentUser, type User } from './lib/api'
 import { setAuthTokenGetter } from './lib/apiAuth'
@@ -30,8 +33,10 @@ if (!isClerkEnabled) {
 
 function AppRoutes() {
   return (
-    <Routes>
-      <Route path="/" element={<LandingPage />} />
+    <>
+      <ScrollToTop />
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
 
       <Route element={<PublicLayout />}>
         <Route path="/docs" element={<DocsPage />} />
@@ -60,6 +65,8 @@ function AppRoutes() {
         <Route path="audio" element={<AudioPage />} />
         <Route path="pdf" element={<PdfPage />} />
         <Route path="library" element={<MyLibraryPage />} />
+        <Route path="items/:itemType/:itemId" element={<ItemDetailPage />} />
+        <Route path="processing" element={<ProcessingPage />} />
         <Route path="collections" element={<CollectionsPage />} />
         <Route path="collections/:collectionId" element={<CollectionsPage />} />
         <Route path="developer" element={<DeveloperPage />} />
@@ -68,8 +75,9 @@ function AppRoutes() {
         <Route path="settings" element={<SettingsPage />} />
       </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   )
 }
 

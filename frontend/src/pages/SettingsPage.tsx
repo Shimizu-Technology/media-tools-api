@@ -23,7 +23,7 @@ export function SettingsPage() {
         </div>
         <h1 className="mt-5 text-3xl font-semibold tracking-tight sm:text-4xl" style={{ color: 'var(--color-text-primary)' }}>Workspace preferences</h1>
         <p className="mt-3 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
-          Manage account context, appearance, and local development credentials.
+          {isClerkEnabled ? 'Manage your account context and workspace appearance.' : 'Manage account context, appearance, and local development credentials.'}
         </p>
       </section>
 
@@ -62,7 +62,7 @@ export function SettingsPage() {
         </div>
       </section>
 
-      <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+      {!isClerkEnabled && <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-4">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-surface-subtle)', color: 'var(--color-brand-500)' }}>
@@ -78,7 +78,7 @@ export function SettingsPage() {
             {cleared ? 'Cleared' : 'Clear local key'}
           </button>
         </div>
-      </section>
+      </section>}
     </div>
   );
 }
