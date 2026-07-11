@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -21,6 +21,8 @@ import {
   CheckCircle2,
   Circle,
   FolderPlus,
+  Star,
+  Archive,
 } from 'lucide-react';
 import { AddToCollectionModal } from '../components/AddToCollectionModal';
 import {
@@ -29,8 +31,11 @@ import {
   deleteAudioTranscription,
   deletePDFExtraction,
 } from '../lib/api';
+import { itemDetailPath } from '../lib/library';
 
 type ContentType = 'all' | 'youtube' | 'audio' | 'pdf';
+type StatusFilter = 'all' | 'completed' | 'processing' | 'failed';
+type WorkspaceFilter = 'active' | 'favorites' | 'archive';
 
 interface UnifiedItem {
   id: string;
@@ -43,6 +48,8 @@ interface UnifiedItem {
   createdAt: string;
   duration?: number;
   pageCount?: number;
+  favorite: boolean;
+  tags: string[];
 }
 
 /**
@@ -59,13 +66,17 @@ export function MyLibraryPage() {
     ? requestedTab
     : 'all';
   
-  const [activeTab, setActiveTab] = useState<ContentType>(initialTab);
+  const activeTab = initialTab;
   const [items, setItems] = useState<UnifiedItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
+  const requestedStatus = searchParams.get('status');
+  const statusFilter: StatusFilter = requestedStatus === 'completed' || requestedStatus === 'processing' || requestedStatus === 'failed' ? requestedStatus : 'all';
+  const requestedView = searchParams.get('view');
+  const workspaceFilter: WorkspaceFilter = requestedView === 'favorites' || requestedView === 'archive' ? requestedView : 'active';
   
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -76,60 +87,60 @@ export function MyLibraryPage() {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
   const [collectionModal, setCollectionModal] = useState<{ type: 'transcript' | 'audio' | 'pdf'; id: string; title: string } | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   // Update URL when tab changes
   const handleTabChange = (tab: ContentType) => {
-    setActiveTab(tab);
     setPage(1);
-    setSearchParams(tab === 'all' ? {} : { type: tab });
+    const next: Record<string, string> = {};
+    if (tab !== 'all') next.type = tab;
+    if (statusFilter !== 'all') next.status = statusFilter;
+    if (workspaceFilter !== 'active') next.view = workspaceFilter;
+    setSearchParams(next);
+  };
+
+  const handleStatusChange = (status: StatusFilter) => {
+    setPage(1);
+    const next: Record<string, string> = {};
+    if (activeTab !== 'all') next.type = activeTab;
+    if (status !== 'all') next.status = status;
+    if (workspaceFilter !== 'active') next.view = workspaceFilter;
+    setSearchParams(next);
+  };
+
+  const handleWorkspaceFilterChange = (view: WorkspaceFilter) => {
+    setPage(1);
+    const next: Record<string, string> = {};
+    if (activeTab !== 'all') next.type = activeTab;
+    if (statusFilter !== 'all') next.status = statusFilter;
+    if (view !== 'active') next.view = view;
+    setSearchParams(next);
   };
 
   // Fetch one server-side page across every content type.
-  const fetchContent = useCallback(async () => {
-    setIsLoading(true);
-    setError('');
-    
-    try {
-		const result = await listLibraryItems({
-			page,
-			per_page: perPage,
-			type: activeTab === 'all' ? undefined : activeTab,
-			search: searchQuery || undefined,
-			sort_dir: sortDir,
-		});
-		if (result.total_pages > 0 && page > result.total_pages) {
-			setPage(result.total_pages);
-			return;
-		}
-		setTotalPages(result.total_pages);
-		setTotalItems(result.total_items);
-		setItems(result.data.map((item) => ({
-			id: item.id,
-			type: item.item_type,
-			title: item.title,
-			subtitle: item.item_type === 'audio' && item.duration > 0
-				? `${item.subtitle} • ${formatDuration(item.duration)}`
-				: item.subtitle,
-			wordCount: item.word_count,
-			status: item.status,
-			hasSummary: item.summary_status === 'completed',
-			createdAt: item.created_at,
-			duration: item.duration,
-			pageCount: item.page_count,
-		})));
-    } catch (err: unknown) {
-      const apiErr = err as { message?: string };
-      setError(apiErr.message || 'Failed to load content');
-      setItems([]);
-    }
-    
-    setIsLoading(false);
-	}, [activeTab, page, searchQuery, sortDir]);
-
   useEffect(() => {
-		const timer = window.setTimeout(() => { void fetchContent(); }, 0);
-		return () => window.clearTimeout(timer);
-  }, [fetchContent]);
+		let current = true;
+		const timer = window.setTimeout(async () => {
+      setIsLoading(true);
+      setError('');
+      try {
+        const result = await listLibraryItems({ page, per_page: perPage, type: activeTab === 'all' ? undefined : activeTab, status: statusFilter === 'all' ? undefined : statusFilter, favorite: workspaceFilter === 'favorites' ? 'true' : undefined, archive: workspaceFilter === 'archive' ? 'only' : undefined, search: searchQuery || undefined, sort_dir: sortDir });
+        if (!current) return;
+        if (result.total_pages > 0 && page > result.total_pages) { setPage(result.total_pages); return; }
+        setTotalPages(result.total_pages);
+        setTotalItems(result.total_items);
+        setItems(result.data.map((item) => ({ id: item.id, type: item.item_type, title: item.title, subtitle: item.item_type === 'audio' && item.duration > 0 ? `${item.subtitle} • ${formatDuration(item.duration)}` : item.subtitle, wordCount: item.word_count, status: item.status, hasSummary: item.summary_status === 'completed', createdAt: item.created_at, duration: item.duration, pageCount: item.page_count, favorite: item.favorite, tags: item.tags || [] })));
+      } catch (err: unknown) {
+        if (!current) return;
+        const apiErr = err as { message?: string };
+        setError(apiErr.message || 'Failed to load content');
+        setItems([]);
+      } finally {
+        if (current) setIsLoading(false);
+      }
+    }, 0);
+		return () => { current = false; window.clearTimeout(timer); };
+  }, [activeTab, page, searchQuery, sortDir, statusFilter, workspaceFilter, refreshToken]);
 
   // Debounced search
   useEffect(() => {
@@ -148,17 +159,7 @@ export function MyLibraryPage() {
       toggleSelection(item);
       return;
     }
-    switch (item.type) {
-      case 'youtube':
-        navigate(`/app/video?id=${item.id}`);
-        break;
-      case 'audio':
-        navigate(`/app/audio?id=${item.id}`);
-        break;
-      case 'pdf':
-        navigate(`/app/pdf?id=${item.id}`);
-        break;
-    }
+    navigate(itemDetailPath(item.type, item.id));
   };
 
   const toggleSelection = (item: UnifiedItem) => {
@@ -191,7 +192,7 @@ export function MyLibraryPage() {
           await deletePDFExtraction(item.id);
           break;
       }
-		await fetchContent();
+		setRefreshToken((value) => value + 1);
     } catch {
       setError('Failed to delete item');
     }
@@ -227,7 +228,7 @@ export function MyLibraryPage() {
       }
     }
 
-	await fetchContent();
+	setRefreshToken((value) => value + 1);
 	setSelectedItems(failed);
 	if (failed.size > 0) {
 		setError(`${failed.size} item${failed.size === 1 ? '' : 's'} could not be deleted. Please try again.`);
@@ -257,10 +258,10 @@ export function MyLibraryPage() {
   ];
 
   const statusColors: Record<string, { bg: string; text: string }> = {
-    completed: { bg: 'rgba(24, 185, 133, 0.12)', text: 'var(--color-success)' },
+    completed: { bg: 'var(--color-success-subtle)', text: 'var(--color-success)' },
     processing: { bg: 'var(--color-brand-50)', text: 'var(--color-brand-500)' },
-    pending: { bg: 'rgba(245, 158, 11, 0.1)', text: '#f59e0b' },
-    failed: { bg: 'rgba(239, 68, 68, 0.12)', text: 'var(--color-error)' },
+    pending: { bg: 'var(--color-warning-subtle)', text: 'var(--color-warning)' },
+    failed: { bg: 'var(--color-error-subtle)', text: 'var(--color-error)' },
   };
 
   const typeIcons: Record<string, React.ReactNode> = {
@@ -269,10 +270,10 @@ export function MyLibraryPage() {
     pdf: <FileType2 className="w-4 h-4" />,
   };
 
-  const typeColors: Record<string, string> = {
-    youtube: '#ef4444',
-    audio: 'var(--color-brand-500)',
-    pdf: '#f59e0b',
+  const typeColors: Record<string, { bg: string; text: string }> = {
+    youtube: { bg: 'var(--color-error-subtle)', text: 'var(--color-error)' },
+    audio: { bg: 'var(--color-brand-50)', text: 'var(--color-brand-500)' },
+    pdf: { bg: 'var(--color-warning-subtle)', text: 'var(--color-warning)' },
   };
 
   return (
@@ -314,7 +315,7 @@ export function MyLibraryPage() {
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           className="flex items-center justify-between gap-4 p-4 rounded-xl mb-6"
-          style={{ backgroundColor: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.24)' }}
+          style={{ backgroundColor: 'var(--color-error-subtle)', border: '1px solid var(--color-error-border)' }}
         >
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium" style={{ color: 'var(--color-error)' }}>
@@ -356,7 +357,7 @@ export function MyLibraryPage() {
             style={{
               backgroundColor: activeTab === tab.value ? 'var(--color-surface)' : 'transparent',
               color: activeTab === tab.value ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-              boxShadow: activeTab === tab.value ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              boxShadow: activeTab === tab.value ? 'var(--shadow-tab-active)' : 'none',
               minHeight: '44px',
             }}
           >
@@ -374,6 +375,33 @@ export function MyLibraryPage() {
         ))}
       </motion.div>
 
+      <div className="mb-4 flex gap-2 overflow-x-auto" aria-label="Library view">
+        {([
+          { value: 'active', label: 'All items', icon: Library },
+          { value: 'favorites', label: 'Starred', icon: Star },
+          { value: 'archive', label: 'Archive', icon: Archive },
+        ] as { value: WorkspaceFilter; label: string; icon: typeof Library }[]).map(({ value, label, icon: Icon }) => (
+          <button key={value} onClick={() => handleWorkspaceFilterChange(value)} className="inline-flex min-h-11 items-center gap-2 whitespace-nowrap rounded-xl border px-4 text-sm font-semibold" style={{ borderColor: workspaceFilter === value ? 'var(--color-brand-500)' : 'var(--color-border)', backgroundColor: workspaceFilter === value ? 'var(--color-brand-50)' : 'var(--color-surface-elevated)', color: workspaceFilter === value ? 'var(--color-brand-500)' : 'var(--color-text-secondary)' }}><Icon className="h-4 w-4" />{label}</button>
+        ))}
+      </div>
+
+      <div className="mb-6 flex gap-2 overflow-x-auto" aria-label="Filter by status">
+        {(['all', 'completed', 'processing', 'failed'] as StatusFilter[]).map((status) => (
+          <button
+            key={status}
+            onClick={() => handleStatusChange(status)}
+            className="min-h-11 whitespace-nowrap rounded-full border px-4 text-sm font-medium capitalize"
+            style={{
+              borderColor: statusFilter === status ? 'var(--color-brand-500)' : 'var(--color-border)',
+              backgroundColor: statusFilter === status ? 'var(--color-brand-50)' : 'var(--color-surface-elevated)',
+              color: statusFilter === status ? 'var(--color-brand-500)' : 'var(--color-text-secondary)',
+            }}
+          >
+            {status === 'all' ? 'Any status' : status}
+          </button>
+        ))}
+      </div>
+
       {/* Search + Sort */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -390,7 +418,8 @@ export function MyLibraryPage() {
             type="text"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search by title..."
+            placeholder="Search titles, transcripts, summaries, and document text…"
+            aria-label="Search your library"
             className="w-full pl-12 pr-10 py-3 rounded-xl border text-sm outline-none transition-colors"
             style={{
               backgroundColor: 'var(--color-surface-elevated)',
@@ -402,8 +431,9 @@ export function MyLibraryPage() {
           {searchInput && (
             <button
               onClick={() => setSearchInput('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1"
+              className="absolute right-1 top-1/2 flex min-h-11 min-w-11 -translate-y-1/2 items-center justify-center rounded-lg"
               style={{ color: 'var(--color-text-muted)' }}
+              aria-label="Clear search"
             >
               <X className="w-4 h-4" />
             </button>
@@ -439,8 +469,8 @@ export function MyLibraryPage() {
           animate={{ opacity: 1, y: 0 }}
           className="flex items-center gap-3 p-6 rounded-2xl border"
           style={{
-            backgroundColor: 'rgba(239, 68, 68, 0.08)',
-            borderColor: 'rgba(239, 68, 68, 0.24)',
+            backgroundColor: 'var(--color-error-soft)',
+            borderColor: 'var(--color-error-border)',
           }}
         >
           <AlertCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--color-error)' }} />
@@ -519,17 +549,26 @@ export function MyLibraryPage() {
                   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
                 }}
                 onClick={() => handleItemClick(item)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    handleItemClick(item);
+                  }
+                }}
+                role="link"
+                tabIndex={0}
                 className="group relative p-5 rounded-2xl border cursor-pointer transition-all duration-200 hover:scale-[1.01]"
                 style={{
-                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.05)' : 'var(--color-surface-elevated)',
+                  backgroundColor: isSelected ? 'var(--color-brand-50)' : 'var(--color-surface-elevated)',
                   borderColor: isSelected ? 'var(--color-brand-500)' : 'var(--color-border)',
                 }}
               >
                 {/* Selection checkbox - shown on hover or when items are selected */}
                 <button
                   onClick={(e) => { e.stopPropagation(); toggleSelection(item); }}
-				  className={`absolute top-4 left-4 p-1 rounded-md transition-opacity ${selectedItems.size > 0 ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100'}`}
+				  className={`absolute top-2 left-2 flex min-h-11 min-w-11 items-center justify-center rounded-lg transition-opacity ${selectedItems.size > 0 ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100'}`}
                   style={{ color: isSelected ? 'var(--color-brand-500)' : 'var(--color-text-muted)' }}
+                  aria-label={isSelected ? `Deselect ${item.title}` : `Select ${item.title}`}
                 >
                   {isSelected ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
                 </button>
@@ -539,24 +578,26 @@ export function MyLibraryPage() {
                   {/* Add to collection - shown on hover */}
                   <button
                     onClick={(e) => { e.stopPropagation(); setCollectionModal({ type: item.type === 'youtube' ? 'transcript' : item.type, id: item.id, title: item.title }); }}
-					className="p-1.5 rounded-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+					className="flex min-h-11 min-w-11 items-center justify-center rounded-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
                     style={{ color: 'var(--color-text-muted)' }}
                     title="Add to collection"
+                    aria-label={`Add ${item.title} to a collection`}
                   >
                     <FolderPlus className="w-4 h-4" />
                   </button>
                   {/* Delete button - shown on hover */}
                   <button
                     onClick={(e) => handleDelete(item, e)}
-					className="p-1.5 rounded-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+					className="flex min-h-11 min-w-11 items-center justify-center rounded-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
                     style={{ color: 'var(--color-text-muted)' }}
                     title="Delete"
+                    aria-label={`Delete ${item.title}`}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
                   <div
                     className="p-1.5 rounded-lg"
-                    style={{ backgroundColor: `${typeColors[item.type]}15`, color: typeColors[item.type] }}
+                    style={{ backgroundColor: typeColors[item.type].bg, color: typeColors[item.type].text }}
                     title={item.type.charAt(0).toUpperCase() + item.type.slice(1)}
                   >
                     {typeIcons[item.type]}
@@ -593,12 +634,16 @@ export function MyLibraryPage() {
                   {item.hasSummary && (
                     <span
                       className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium"
-                      style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)', color: '#a855f7' }}
+                      style={{ backgroundColor: 'var(--color-summary-subtle)', color: 'var(--color-summary)' }}
                     >
                       <Sparkles className="w-3 h-3" />
                       Summarized
                     </span>
                   )}
+
+                  {item.favorite && <span className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}><Star className="h-3 w-3" /> Starred</span>}
+
+                  {item.tags.slice(0, 2).map((tag) => <span key={tag} className="rounded-md px-2 py-0.5 text-xs" style={{ backgroundColor: 'var(--color-surface-subtle)', color: 'var(--color-text-secondary)' }}>{tag}</span>)}
 
                   {/* Date */}
                   <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>

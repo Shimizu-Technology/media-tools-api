@@ -23,6 +23,7 @@ import {
 	type LibraryStats,
 } from '../lib/api';
 import { useAuthContext } from '../contexts/useAuthContext';
+import { itemDetailPath, itemTypeLabel } from '../lib/library';
 
 type DashboardState = {
 	items: LibraryItem[];
@@ -93,9 +94,8 @@ export function DashboardPage() {
 
   const recentItems = useMemo<RecentItem[]>(() => {
 		return data.items.map((item) => {
-			const type = item.item_type === 'youtube' ? 'Video' : item.item_type === 'audio' ? 'Recording' : 'PDF';
-			const route = item.item_type === 'youtube' ? 'video' : item.item_type;
-			return { id: item.id, type, title: item.title, status: item.status, createdAt: item.created_at, href: `/app/${route}?id=${item.id}` };
+			const type = itemTypeLabel(item.item_type);
+			return { id: item.id, type, title: item.title, status: item.status, createdAt: item.created_at, href: itemDetailPath(item.item_type, item.id) };
 		});
 	}, [data.items]);
 
@@ -121,10 +121,10 @@ export function DashboardPage() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-          <MetricCard label="Library items" value={totals.total} icon={Library} />
-          <MetricCard label="Processing" value={totals.processing} icon={Clock3} tone="warning" />
-          <MetricCard label="Completed" value={totals.completed} icon={CheckCircle2} tone="success" />
-          <MetricCard label="Needs attention" value={totals.failed} icon={AlertCircle} tone="danger" />
+          <MetricCard label="Library items" value={totals.total} icon={Library} to="/app/library" />
+          <MetricCard label="Processing" value={totals.processing} icon={Clock3} tone="warning" to="/app/processing" />
+          <MetricCard label="Completed" value={totals.completed} icon={CheckCircle2} tone="success" to="/app/library?status=completed" />
+          <MetricCard label="Needs attention" value={totals.failed} icon={AlertCircle} tone="danger" to="/app/processing?status=failed" />
         </div>
       </section>
 
@@ -193,7 +193,7 @@ function QuickAction({ to, icon: Icon, label, primary = false }: { to: string; i
   );
 }
 
-function MetricCard({ label, value, icon: Icon, tone = 'default' }: { label: string; value: number; icon: ComponentType<{ className?: string }>; tone?: 'default' | 'warning' | 'success' | 'danger' }) {
+function MetricCard({ label, value, icon: Icon, tone = 'default', to }: { label: string; value: number; icon: ComponentType<{ className?: string }>; tone?: 'default' | 'warning' | 'success' | 'danger'; to: string }) {
   const colors = {
     default: 'var(--color-brand-500)',
     warning: 'var(--color-warning)',
@@ -202,7 +202,7 @@ function MetricCard({ label, value, icon: Icon, tone = 'default' }: { label: str
   };
 
   return (
-    <div className="rounded-3xl border p-5" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+    <Link to={to} className="block rounded-3xl border p-4 transition hover:-translate-y-0.5 sm:p-5" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
       <div className="flex items-center justify-between gap-4">
         <div>
           <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{label}</p>
@@ -212,7 +212,7 @@ function MetricCard({ label, value, icon: Icon, tone = 'default' }: { label: str
           <Icon className="h-5 w-5" />
         </div>
       </div>
-    </div>
+    </Link>
   );
 }
 

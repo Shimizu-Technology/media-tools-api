@@ -287,7 +287,16 @@ export interface LibraryItem {
   duration: number;
   page_count: number;
   summary_status: string;
+  favorite: boolean;
+  archived: boolean;
+  tags: string[];
   created_at: string;
+}
+
+export interface LibraryPreferences {
+  favorite: boolean;
+  archived: boolean;
+  tags: string[];
 }
 
 export interface LibraryStats {
@@ -855,7 +864,7 @@ export async function listWebhookDeliveries(): Promise<WebhookDelivery[]> {
 // ── Unified library ──
 
 export async function listLibraryItems(params: {
-  page?: number; per_page?: number; type?: string; status?: string; search?: string; sort_dir?: 'asc' | 'desc';
+  page?: number; per_page?: number; type?: string; status?: string; search?: string; sort_dir?: 'asc' | 'desc'; favorite?: 'true'; archive?: 'all' | 'only'; tag?: string;
 } = {}): Promise<PaginatedResponse<LibraryItem>> {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -863,6 +872,20 @@ export async function listLibraryItems(params: {
   });
   const res = await fetch(`${API_BASE}/library/items?${search}`, { headers: await getHeaders() });
   return handleResponse<PaginatedResponse<LibraryItem>>(res);
+}
+
+export async function getLibraryPreferences(itemType: 'transcript' | 'audio' | 'pdf', itemId: string): Promise<LibraryPreferences> {
+  const res = await fetch(`${API_BASE}/library/items/${itemType}/${itemId}/preferences`, { headers: await getHeaders() });
+  return handleResponse<LibraryPreferences>(res);
+}
+
+export async function updateLibraryPreferences(itemType: 'transcript' | 'audio' | 'pdf', itemId: string, updates: Partial<LibraryPreferences>): Promise<LibraryPreferences> {
+  const res = await fetch(`${API_BASE}/library/items/${itemType}/${itemId}/preferences`, {
+    method: 'PATCH',
+    headers: await getHeaders(),
+    body: JSON.stringify(updates),
+  });
+  return handleResponse<LibraryPreferences>(res);
 }
 
 export async function getLibraryStats(): Promise<LibraryStats> {

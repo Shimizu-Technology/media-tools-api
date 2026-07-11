@@ -14,6 +14,7 @@ import { createSummary, getSummaries, type Summary } from '../lib/api';
 interface SummaryPanelProps {
   transcriptId: string;
   transcriptText: string;
+  onSummaryReady?: () => void;
 }
 
 type TabId = 'transcript' | 'key_points' | 'summary';
@@ -23,7 +24,7 @@ type TabId = 'transcript' | 'key_points' | 'summary';
  * Tabbed view for Full Transcript, Key Points, and Summary.
  * Typewriter effect for streaming feel. Summary length picker.
  */
-export function SummaryPanel({ transcriptId, transcriptText }: SummaryPanelProps) {
+export function SummaryPanel({ transcriptId, transcriptText, onSummaryReady }: SummaryPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('transcript');
   const [summary, setSummary] = useState<Summary | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -59,6 +60,7 @@ export function SummaryPanel({ transcriptId, transcriptText }: SummaryPanelProps
           // Backend returns newest first (ORDER BY created_at DESC).
           const latest = summaries[0];
           setSummary(latest);
+          if (latest.status === 'completed' && latest.summary_text) onSummaryReady?.();
         }
       } catch {
         // No summaries yet — that's fine
@@ -66,7 +68,7 @@ export function SummaryPanel({ transcriptId, transcriptText }: SummaryPanelProps
       setIsLoadingSummaries(false);
     };
     loadSummaries();
-  }, [transcriptId]);
+  }, [onSummaryReady, transcriptId]);
 
   // Typewriter effect for summary text
   const startTypewriter = useCallback((text: string, keyPoints: string[]) => {
@@ -142,6 +144,7 @@ export function SummaryPanel({ transcriptId, transcriptText }: SummaryPanelProps
             }
             if (latest.status === 'completed' && latest.summary_text) {
               setSummary(latest);
+              onSummaryReady?.();
               setIsGenerating(false);
               // Parse key points
               let keyPoints: string[] = [];

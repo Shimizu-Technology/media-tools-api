@@ -1029,6 +1029,18 @@ paths:
       tags: [Library]
       summary: Get exact workspace media counts
       responses: {"200": {description: Library statistics}}
+  /library/items/{type}/{id}/preferences:
+    parameters:
+      - {name: type, in: path, required: true, schema: {type: string, enum: [transcript, audio, pdf]}}
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      tags: [Library]
+      summary: Get tags, starred state, and archive state for an item
+      responses: {"200": {description: Library item preferences}}
+    patch:
+      tags: [Library]
+      summary: Update tags, starred state, or archive state for an item
+      responses: {"200": {description: Updated library item preferences}}
   /webhooks:
     get:
       tags: [Webhooks]

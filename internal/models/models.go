@@ -34,6 +34,7 @@ type Transcript struct {
 	APIKeyID       *string          `json:"api_key_id,omitempty" db:"api_key_id"`
 	CreatedAt      time.Time        `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time        `json:"updated_at" db:"updated_at"`
+	SearchVector   string           `json:"-" db:"search_vector"`
 }
 
 // Batch represents a group of transcript extraction requests.
@@ -64,6 +65,7 @@ type Summary struct {
 	ErrorMessage string           `json:"error_message,omitempty" db:"error_message"`
 	CreatedAt    time.Time        `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time        `json:"updated_at" db:"updated_at"`
+	SearchVector string           `json:"-" db:"search_vector"`
 }
 
 // Transcript chat models for AI Q&A (MTA-27)
@@ -224,6 +226,7 @@ type AudioTranscription struct {
 	UserID             *string          `json:"user_id,omitempty" db:"user_id"`
 	APIKeyID           *string          `json:"api_key_id,omitempty" db:"api_key_id"`
 	CreatedAt          time.Time        `json:"created_at" db:"created_at"`
+	SearchVector       string           `json:"-" db:"search_vector"`
 }
 
 type AudioUploadSession struct {
@@ -273,6 +276,7 @@ type PDFExtraction struct {
 	UserID       *string   `json:"user_id,omitempty" db:"user_id"`
 	APIKeyID     *string   `json:"api_key_id,omitempty" db:"api_key_id"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	SearchVector string    `json:"-" db:"search_vector"`
 }
 
 // --- Webhook Models (MTA-18) ---
@@ -379,16 +383,19 @@ type WorkspaceResponse struct {
 // LibraryItem is the common metadata shape used by the unified library. The
 // full transcript/text remains available from the item-specific detail route.
 type LibraryItem struct {
-	ID            string    `json:"id" db:"id"`
-	ItemType      string    `json:"item_type" db:"item_type"`
-	Title         string    `json:"title" db:"title"`
-	Subtitle      string    `json:"subtitle" db:"subtitle"`
-	Status        string    `json:"status" db:"status"`
-	WordCount     int       `json:"word_count" db:"word_count"`
-	Duration      float64   `json:"duration" db:"duration"`
-	PageCount     int       `json:"page_count" db:"page_count"`
-	SummaryStatus string    `json:"summary_status" db:"summary_status"`
-	CreatedAt     time.Time `json:"created_at" db:"created_at"`
+	ID            string          `json:"id" db:"id"`
+	ItemType      string          `json:"item_type" db:"item_type"`
+	Title         string          `json:"title" db:"title"`
+	Subtitle      string          `json:"subtitle" db:"subtitle"`
+	Status        string          `json:"status" db:"status"`
+	WordCount     int             `json:"word_count" db:"word_count"`
+	Duration      float64         `json:"duration" db:"duration"`
+	PageCount     int             `json:"page_count" db:"page_count"`
+	SummaryStatus string          `json:"summary_status" db:"summary_status"`
+	Favorite      bool            `json:"favorite" db:"favorite"`
+	Archived      bool            `json:"archived" db:"archived"`
+	Tags          json.RawMessage `json:"tags" db:"tags"`
+	CreatedAt     time.Time       `json:"created_at" db:"created_at"`
 }
 
 type LibraryListParams struct {
@@ -398,8 +405,23 @@ type LibraryListParams struct {
 	Status   string `form:"status"`
 	Search   string `form:"search"`
 	SortDir  string `form:"sort_dir"`
+	Favorite string `form:"favorite"`
+	Archive  string `form:"archive"`
+	Tag      string `form:"tag"`
 	UserID   *string
 	APIKeyID *string
+}
+
+type LibraryPreferences struct {
+	Favorite bool            `json:"favorite" db:"favorite"`
+	Archived bool            `json:"archived" db:"archived"`
+	Tags     json.RawMessage `json:"tags" db:"tags"`
+}
+
+type UpdateLibraryPreferencesRequest struct {
+	Favorite *bool    `json:"favorite"`
+	Archived *bool    `json:"archived"`
+	Tags     []string `json:"tags"`
 }
 
 type LibraryStats struct {
