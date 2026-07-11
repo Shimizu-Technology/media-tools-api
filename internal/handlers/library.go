@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"log"
 	"math"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -58,12 +60,18 @@ func (h *Handler) GetLibraryPreferences(c *gin.Context) {
 	}
 	actor := getActorOwnership(c)
 	owned, err := h.DB.ActorOwnsCollectionItem(c.Request.Context(), ownershipType, c.Param("id"), actor.UserID, actor.APIKeyID)
-	if err != nil || !owned {
+	if err != nil {
+		log.Printf("Failed to verify library item ownership: %v", err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error", Message: "Failed to verify library item ownership", Code: http.StatusInternalServerError})
+		return
+	}
+	if !owned {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{Error: "not_found", Message: "Library item not found", Code: http.StatusNotFound})
 		return
 	}
 	preferences, err := h.DB.GetLibraryPreferences(c.Request.Context(), itemType, c.Param("id"), actor.UserID, actor.APIKeyID)
 	if err != nil {
+		log.Printf("Failed to load library preferences: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error", Message: "Failed to load library preferences", Code: http.StatusInternalServerError})
 		return
 	}
@@ -90,7 +98,7 @@ func (h *Handler) UpdateLibraryPreferences(c *gin.Context) {
 			if value == "" || seen[key] {
 				continue
 			}
-			if len(value) > 40 || len(tags) >= 20 {
+			if utf8.RuneCountInString(value) > 40 || len(tags) >= 20 {
 				c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_tags", Message: "Use at most 20 tags with 40 characters each", Code: http.StatusBadRequest})
 				return
 			}
@@ -101,12 +109,18 @@ func (h *Handler) UpdateLibraryPreferences(c *gin.Context) {
 	}
 	actor := getActorOwnership(c)
 	owned, err := h.DB.ActorOwnsCollectionItem(c.Request.Context(), ownershipType, c.Param("id"), actor.UserID, actor.APIKeyID)
-	if err != nil || !owned {
+	if err != nil {
+		log.Printf("Failed to verify library item ownership: %v", err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error", Message: "Failed to verify library item ownership", Code: http.StatusInternalServerError})
+		return
+	}
+	if !owned {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{Error: "not_found", Message: "Library item not found", Code: http.StatusNotFound})
 		return
 	}
 	preferences, err := h.DB.UpdateLibraryPreferences(c.Request.Context(), itemType, c.Param("id"), actor.UserID, actor.APIKeyID, req)
 	if err != nil {
+		log.Printf("Failed to update library preferences: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error", Message: "Failed to update library preferences", Code: http.StatusInternalServerError})
 		return
 	}

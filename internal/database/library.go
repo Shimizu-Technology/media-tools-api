@@ -19,9 +19,7 @@ const libraryItemsCTE = `
 			COALESCE(mip.favorite, false) AS favorite,
 			COALESCE(mip.archived, false) AS archived,
 			COALESCE(mip.tags, '[]'::jsonb) AS tags,
-			t.created_at,
-			concat_ws(' ', t.title, t.channel_name, t.transcript_text,
-				COALESCE((SELECT string_agg(s.summary_text, ' ') FROM summaries s WHERE s.transcript_id = t.id AND s.status = 'completed'), ''), mip.tags::text)::text AS search_text
+			t.created_at, t.search_vector
 		FROM transcripts t
 		LEFT JOIN media_item_preferences mip ON mip.item_type = 'youtube' AND mip.item_id = t.id
 			AND (($1::uuid IS NOT NULL AND mip.user_id = $1) OR ($2::uuid IS NOT NULL AND mip.api_key_id = $2))
@@ -34,9 +32,7 @@ const libraryItemsCTE = `
 			a.status::text, a.word_count, a.duration::double precision, 0::integer,
 			COALESCE(a.summary_status, '')::text,
 			COALESCE(mip.favorite, false), COALESCE(mip.archived, false), COALESCE(mip.tags, '[]'::jsonb),
-			a.created_at,
-			concat_ws(' ', a.original_name, a.language, a.transcript_text, a.summary_text,
-				COALESCE(a.key_points::text, ''), COALESCE(a.action_items::text, ''), COALESCE(a.decisions::text, ''), mip.tags::text)::text
+			a.created_at, a.search_vector
 		FROM audio_transcriptions a
 		LEFT JOIN media_item_preferences mip ON mip.item_type = 'audio' AND mip.item_id = a.id
 			AND (($1::uuid IS NOT NULL AND mip.user_id = $1) OR ($2::uuid IS NOT NULL AND mip.api_key_id = $2))
@@ -49,17 +45,23 @@ const libraryItemsCTE = `
 			p.status::text, p.word_count, 0::double precision, p.page_count,
 			''::text,
 			COALESCE(mip.favorite, false), COALESCE(mip.archived, false), COALESCE(mip.tags, '[]'::jsonb),
-			p.created_at,
-			concat_ws(' ', p.original_name, p.text_content, mip.tags::text)::text
+			p.created_at, p.search_vector
 		FROM pdf_extractions p
 		LEFT JOIN media_item_preferences mip ON mip.item_type = 'pdf' AND mip.item_id = p.id
 			AND (($1::uuid IS NOT NULL AND mip.user_id = $1) OR ($2::uuid IS NOT NULL AND mip.api_key_id = $2))
 		WHERE (($1::uuid IS NOT NULL AND p.user_id = $1) OR ($2::uuid IS NOT NULL AND p.api_key_id = $2))
 	), filtered AS (
-		SELECT * FROM library_items
+		SELECT * FROM library_items li
 		WHERE ($3::text = '' OR item_type = $3)
 		  AND ($4::text = '' OR status = $4)
-		  AND ($5::text = '' OR search_text ILIKE '%' || $5 || '%')
+		  AND ($5::text = ''
+			OR search_vector @@ websearch_to_tsquery('simple'::regconfig, $5)
+			OR to_tsvector('simple'::regconfig, tags::text) @@ websearch_to_tsquery('simple'::regconfig, $5)
+			OR (item_type = 'youtube' AND EXISTS (
+				SELECT 1 FROM summaries s
+				WHERE s.transcript_id = li.id AND s.status = 'completed'
+				  AND s.search_vector @@ websearch_to_tsquery('simple'::regconfig, $5)
+			)))
 		  AND ($6::text = 'all' OR ($6::text = 'only' AND archived) OR ($6::text = '' AND NOT archived))
 		  AND ($7::text = '' OR ($7::text = 'true' AND favorite))
 		  AND ($8::text = '' OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(tags) tag_value WHERE LOWER(tag_value) = LOWER($8)))

@@ -34,6 +34,7 @@ type Transcript struct {
 	APIKeyID       *string          `json:"api_key_id,omitempty" db:"api_key_id"`
 	CreatedAt      time.Time        `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time        `json:"updated_at" db:"updated_at"`
+	SearchVector   string           `json:"-" db:"search_vector"`
 }
 
 // Batch represents a group of transcript extraction requests.
@@ -64,6 +65,7 @@ type Summary struct {
 	ErrorMessage string           `json:"error_message,omitempty" db:"error_message"`
 	CreatedAt    time.Time        `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time        `json:"updated_at" db:"updated_at"`
+	SearchVector string           `json:"-" db:"search_vector"`
 }
 
 // Transcript chat models for AI Q&A (MTA-27)
@@ -224,6 +226,7 @@ type AudioTranscription struct {
 	UserID             *string          `json:"user_id,omitempty" db:"user_id"`
 	APIKeyID           *string          `json:"api_key_id,omitempty" db:"api_key_id"`
 	CreatedAt          time.Time        `json:"created_at" db:"created_at"`
+	SearchVector       string           `json:"-" db:"search_vector"`
 }
 
 type AudioUploadSession struct {
@@ -273,6 +276,7 @@ type PDFExtraction struct {
 	UserID       *string   `json:"user_id,omitempty" db:"user_id"`
 	APIKeyID     *string   `json:"api_key_id,omitempty" db:"api_key_id"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	SearchVector string    `json:"-" db:"search_vector"`
 }
 
 // --- Webhook Models (MTA-18) ---
