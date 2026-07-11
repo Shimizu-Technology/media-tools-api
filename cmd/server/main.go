@@ -151,14 +151,20 @@ func main() {
 		log.Printf("♻️  Requeued %d recoverable transcript job(s) on startup", recoveredTranscripts)
 	}
 
+	summaryRecoveryCtx, stopSummaryRecovery := context.WithCancel(context.Background())
+	summaryRecoveryDone := make(chan struct{})
 	go func() {
+		defer close(summaryRecoveryDone)
 		// Summary generation can take minutes. Recover in the background so a
-		// large backlog never delays health checks or server startup.
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		// large backlog never delays health checks or server startup. The parent
+		// context is canceled during shutdown so recovery cannot race pool closure.
+		ctx, cancel := context.WithTimeout(summaryRecoveryCtx, 10*time.Minute)
 		defer cancel()
 		recoveredSummaries, recoveryErr := wp.RecoverSummaryJobs(ctx, 200)
 		if recoveryErr != nil {
-			log.Printf("⚠️  Summary job recovery failed: %v", recoveryErr)
+			if summaryRecoveryCtx.Err() == nil {
+				log.Printf("⚠️  Summary job recovery failed: %v", recoveryErr)
+			}
 		} else if recoveredSummaries > 0 {
 			log.Printf("♻️  Requeued %d recoverable summary job(s) on startup", recoveredSummaries)
 		}
@@ -234,6 +240,7 @@ func main() {
 
 	sig := <-quit
 	log.Printf("🛑 Received signal %v, shutting down gracefully...", sig)
+	stopSummaryRecovery()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -243,8 +250,9 @@ func main() {
 	}
 
 	// Stop producers before their consumer. HTTP handlers finish first, then
-	// background workers and their webhook dispatch goroutines, and finally the
-	// webhook service drains its accepted queue into auditable outcomes.
+	// startup recovery, background workers and their webhook dispatch goroutines,
+	// and finally the webhook service drains its accepted queue into auditable outcomes.
+	<-summaryRecoveryDone
 	wp.Stop()
 	webhookService.Shutdown()
 	log.Println("✅ Background jobs and webhook deliveries stopped")

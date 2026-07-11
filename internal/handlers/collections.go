@@ -437,7 +437,10 @@ func truncateUTF8(value string, maxBytes int) string {
 		return value
 	}
 	end := maxBytes
-	for end > 0 && !utf8.ValidString(value[:end]) {
+	// PostgreSQL text is valid UTF-8, so only the byte at the cut boundary can
+	// split a rune. Walk back over continuation bytes instead of repeatedly
+	// validating the entire prefix.
+	for end > 0 && !utf8.RuneStart(value[end]) {
 		end--
 	}
 	return value[:end]

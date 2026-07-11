@@ -217,12 +217,14 @@ func (p *Pool) Stop() {
 			close(done)
 		}()
 
+		workersCanceled := false
 		select {
 		case <-done:
 			log.Println("✅ All workers stopped")
 		case <-time.After(30 * time.Second):
 			log.Println("⚠️  Worker drain timed out, canceling active jobs")
 			p.cancel()
+			workersCanceled = true
 			<-done
 			log.Println("✅ All workers stopped after forced cancellation")
 		}
@@ -234,7 +236,9 @@ func (p *Pool) Stop() {
 		p.webhooksClosed = true
 		p.webhookMu.Unlock()
 		p.webhookWG.Wait()
-		p.cancel()
+		if !workersCanceled {
+			p.cancel()
+		}
 	})
 }
 
