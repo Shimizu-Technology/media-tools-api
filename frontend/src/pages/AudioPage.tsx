@@ -1427,8 +1427,8 @@ export function AudioPage() {
               <div
                 className="mb-4 rounded-2xl border p-4"
                 style={{
-                  borderColor: 'rgba(245, 158, 11, 0.35)',
-                  backgroundColor: 'rgba(245, 158, 11, 0.10)',
+                  borderColor: 'color-mix(in srgb, var(--color-warning) 35%, transparent)',
+                  backgroundColor: 'color-mix(in srgb, var(--color-warning) 10%, transparent)',
                 }}
               >
                 <div className="flex items-start gap-3">

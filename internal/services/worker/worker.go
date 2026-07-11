@@ -726,14 +726,17 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	log.Printf("📊 Audio job %s source ready: %s (%.1fMB)", at.ID, filepath.Ext(payload.TempFilePath), bytesToMB(fileInfo.Size()))
 	sourceDuration, probeErr := probeMediaDuration(ctx, payload.TempFilePath)
 	if probeErr != nil {
-		log.Printf("⚠️  Audio job %s could not probe source duration: %v", at.ID, probeErr)
+		log.Printf("⚠️  Audio job %s could not probe source duration; using safe chunked recovery: %v", at.ID, probeErr)
 	} else {
 		log.Printf("⏱️  Audio job %s source duration: %.1fs", at.ID, sourceDuration)
 	}
 
 	var transcriptionParts []string
 	chunkSeconds := 0
-	shouldChunkForRecovery := sourceDuration >= whisperDurationChunkThresholdSeconds
+	// If duration probing fails, prefer safe chunking. Splitting a short file into
+	// one part costs little, while silently reverting to a single Whisper request
+	// can recreate the long-silence hallucination this path is meant to contain.
+	shouldChunkForRecovery := probeErr != nil || sourceDuration >= whisperDurationChunkThresholdSeconds
 	if fileInfo.Size() > whisperTargetBytes || requiresWhisperTranscode(payload.TempFilePath) || shouldChunkForRecovery {
 		_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcoding", 25)
 		compressedPath := payload.TempFilePath + ".whisper" + whisperPreparedExtension
@@ -882,6 +885,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 			}
 			chunkStart := float64(idx * chunkSeconds)
 			chunkEnd := chunkStart + result.Duration
+			duration += result.Duration
 			if sourceDuration > 0 && chunkEnd > sourceDuration {
 				chunkEnd = sourceDuration
 			}
@@ -905,8 +909,6 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		language = pickDominantLanguage(languageCounts)
 		if sourceDuration > 0 {
 			duration = sourceDuration
-		} else {
-			duration = float64(len(transcriptionParts) * chunkSeconds)
 		}
 	}
 
