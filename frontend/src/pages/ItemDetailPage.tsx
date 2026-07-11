@@ -198,7 +198,7 @@ export function ItemDetailPage() {
       <section className="flex flex-col gap-4 rounded-2xl border p-4 sm:flex-row sm:items-center" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
         <div className="flex items-center gap-2 text-sm font-semibold"><Tag className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} /> Tags</div>
         <div className="flex flex-1 flex-wrap gap-2">
-          {preferences.tags.map((tag) => <span key={tag} className="inline-flex min-h-9 items-center gap-1 rounded-full px-3 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>{tag}<button onClick={() => void savePreferences({ tags: preferences.tags.filter((value) => value !== tag) })} className="flex h-7 w-7 items-center justify-center rounded-full" aria-label={`Remove ${tag} tag`}><X className="h-3 w-3" /></button></span>)}
+          {preferences.tags.map((tag) => <span key={tag} className="inline-flex min-h-9 items-center gap-1 rounded-full px-3 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>{tag}<button onClick={() => void savePreferences({ tags: preferences.tags.filter((value) => value !== tag) })} disabled={isActing} className="flex h-7 w-7 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Remove ${tag} tag`}><X className="h-3 w-3" /></button></span>)}
           {preferences.tags.length === 0 && <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Add client, project, or topic labels.</span>}
         </div>
         <div className="flex gap-2">
