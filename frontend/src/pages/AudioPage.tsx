@@ -29,6 +29,8 @@ import {
   Pencil,
   Save,
   RefreshCw,
+  Pause,
+  Play,
 } from 'lucide-react';
 import {
   transcribeAudio,
@@ -229,6 +231,7 @@ export function AudioPage() {
 
   // Recording state (MTA-23)
   const [isRecording, setIsRecording] = useState(false);
+  const [isRecordingPaused, setIsRecordingPaused] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const recordingTimeRef = useRef(0);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
@@ -374,6 +377,24 @@ export function AudioPage() {
 
   // ── Recording (MTA-23) ──
 
+  const stopRecordingTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const startRecordingTimer = () => {
+    stopRecordingTimer();
+    timerRef.current = setInterval(() => {
+      setRecordingTime(prev => {
+        const next = prev + 1;
+        recordingTimeRef.current = next;
+        return next;
+      });
+    }, 1000);
+  };
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -430,17 +451,11 @@ export function AudioPage() {
 
       recorder.start(1000); // Collect data every second
       setIsRecording(true);
+      setIsRecordingPaused(false);
       setRecordingTime(0);
       recordingTimeRef.current = 0;
       setError('');
-
-      timerRef.current = setInterval(() => {
-        setRecordingTime(prev => {
-          const next = prev + 1;
-          recordingTimeRef.current = next;
-          return next;
-        });
-      }, 1000);
+      startRecordingTimer();
     } catch {
       setError('Microphone access denied. Please allow microphone access and try again.');
     }
@@ -450,11 +465,30 @@ export function AudioPage() {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
+    stopRecordingTimer();
     setIsRecording(false);
+    setIsRecordingPaused(false);
+  };
+
+  const pauseRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state !== 'recording') return;
+
+    // Flush the current timeslice before pausing so browsers do not hold the
+    // last spoken seconds in an unfinished internal buffer.
+    recorder.requestData();
+    recorder.pause();
+    stopRecordingTimer();
+    setIsRecordingPaused(true);
+  };
+
+  const resumeRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state !== 'paused') return;
+
+    recorder.resume();
+    setIsRecordingPaused(false);
+    startRecordingTimer();
   };
 
   // ── Polling for async transcription completion ──
@@ -1036,28 +1070,51 @@ export function AudioPage() {
               {isRecording && (
                 <>
                   <motion.div
-                    animate={{ scale: [1, 1.1, 1] }}
-                    transition={{ repeat: Infinity, duration: 1.5 }}
+                    animate={isRecordingPaused ? { scale: 1 } : { scale: [1, 1.1, 1] }}
+                    transition={isRecordingPaused ? undefined : { repeat: Infinity, duration: 1.5 }}
                     className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4"
-                    style={{ backgroundColor: 'var(--color-error)', color: 'white' }}
+                    style={{
+                      backgroundColor: isRecordingPaused ? 'var(--color-warning)' : 'var(--color-error)',
+                      color: 'white',
+                    }}
                   >
-                    <Mic className="w-8 h-8" />
+                    {isRecordingPaused ? <Pause className="w-8 h-8" /> : <Mic className="w-8 h-8" />}
                   </motion.div>
-                  <p className="text-2xl font-mono font-bold mb-2" style={{ color: 'var(--color-error)' }}>
+                  <p className="text-2xl font-mono font-bold mb-2" style={{ color: isRecordingPaused ? 'var(--color-warning)' : 'var(--color-error)' }}>
                     {formatDuration(recordingTime)}
                   </p>
-                  <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>Recording...</p>
-                  <motion.button
-                    whileHover={{ scale: 1.03 }}
-                    whileTap={{ scale: 0.97 }}
-                    onClick={stopRecording}
-                    className="px-6 py-3 rounded-xl font-medium text-white"
-                    style={{ backgroundColor: 'var(--color-error)', minHeight: '48px' }}
-                  >
-                    <span className="flex items-center gap-2">
-                      <Square className="w-4 h-4" /> Stop Recording
-                    </span>
-                  </motion.button>
+                  <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>
+                    {isRecordingPaused ? 'Paused — paused time is not included' : 'Recording...'}
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    <motion.button
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={isRecordingPaused ? resumeRecording : pauseRecording}
+                      className="px-6 py-3 rounded-xl font-medium border"
+                      style={{
+                        borderColor: 'var(--color-brand-400)',
+                        color: 'var(--color-brand-500)',
+                        minHeight: '48px',
+                      }}
+                    >
+                      <span className="flex items-center gap-2">
+                        {isRecordingPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+                        {isRecordingPaused ? 'Resume Recording' : 'Pause Recording'}
+                      </span>
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={stopRecording}
+                      className="px-6 py-3 rounded-xl font-medium text-white"
+                      style={{ backgroundColor: 'var(--color-error)', minHeight: '48px' }}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Square className="w-4 h-4" /> Stop Recording
+                      </span>
+                    </motion.button>
+                  </div>
                 </>
               )}
 
@@ -1363,6 +1420,35 @@ export function AudioPage() {
                   </button>
                 </div>
                 <audio controls src={playbackUrl} className="w-full" />
+              </div>
+            )}
+
+            {result.quality_warning && (
+              <div
+                className="mb-4 rounded-2xl border p-4"
+                style={{
+                  borderColor: 'rgba(245, 158, 11, 0.35)',
+                  backgroundColor: 'rgba(245, 158, 11, 0.10)',
+                }}
+              >
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" style={{ color: 'var(--color-warning)' }} />
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+                      Transcript recovered with gaps
+                    </p>
+                    <p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                      {result.quality_warning}
+                    </p>
+                    {result.omitted_ranges && result.omitted_ranges.length > 0 && (
+                      <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                        Omitted: {result.omitted_ranges.map((range) => (
+                          `${formatDuration(Math.max(0, Math.floor(range.start)))}–${formatDuration(Math.max(0, Math.ceil(range.end)))}`
+                        )).join(', ')}
+                      </p>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 

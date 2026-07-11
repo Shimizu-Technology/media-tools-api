@@ -189,6 +189,8 @@ export interface AudioTranscription {
   word_count: number;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   error_message?: string;
+  quality_warning?: string;
+  omitted_ranges?: Array<{ start: number; end: number; reason: string }>;
   content_type: AudioContentType;
   summary_text?: string;
   key_points: string[];

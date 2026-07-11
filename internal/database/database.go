@@ -600,6 +600,8 @@ const audioTranscriptionSelectColumns = `
 	word_count,
 	status,
 	error_message,
+	COALESCE(quality_warning, '') AS quality_warning,
+	COALESCE(omitted_ranges, '[]'::jsonb) AS omitted_ranges,
 	content_type,
 	summary_text,
 	key_points,
@@ -655,12 +657,14 @@ func (db *DB) UpdateAudioTranscription(ctx context.Context, at *models.AudioTran
 		UPDATE audio_transcriptions
 		SET duration = $2, language = $3, transcript_text = $4, word_count = $5,
 			status = $6, error_message = $7,
-			processing_stage = $8, processing_progress = $9, retry_count = $10
+			processing_stage = $8, processing_progress = $9, retry_count = $10,
+			quality_warning = $11, omitted_ranges = $12
 		WHERE id = $1`
 
 	_, err := db.ExecContext(ctx, query,
 		at.ID, at.Duration, at.Language, at.TranscriptText,
 		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
+		at.QualityWarning, at.OmittedRanges,
 	)
 	return err
 }
@@ -675,13 +679,14 @@ func (db *DB) UpdateAudioTranscriptionWithSummary(ctx context.Context, at *model
 			processing_stage = $8, processing_progress = $9, retry_count = $10,
 			content_type = $11, summary_text = $12, key_points = $13,
 			action_items = $14, decisions = $15, summary_model = $16,
-			summary_status = $17
+			summary_status = $17, quality_warning = $18, omitted_ranges = $19
 		WHERE id = $1`
 
 	result, err := db.ExecContext(ctx, query,
 		at.ID, at.Duration, at.Language, at.TranscriptText,
 		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
 		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryStatus,
+		at.QualityWarning, at.OmittedRanges,
 	)
 	if err != nil {
 		return err
@@ -710,7 +715,7 @@ func (db *DB) PrepareAudioRetranscriptionForActor(ctx context.Context, at *model
 				processing_stage = $9, processing_progress = $10, retry_count = $11,
 				content_type = $12, summary_text = $13, key_points = $14,
 				action_items = $15, decisions = $16, summary_model = $17,
-				summary_status = $18
+				summary_status = $18, quality_warning = $19, omitted_ranges = $20
 			FROM previous AS p
 			WHERE a.id = p.id
 			RETURNING a.id
@@ -751,6 +756,7 @@ func (db *DB) PrepareAudioRetranscriptionForActor(ctx context.Context, at *model
 		at.ID, ownerArg, at.Duration, at.Language, at.TranscriptText,
 		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
 		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryStatus,
+		at.QualityWarning, at.OmittedRanges,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
@@ -767,13 +773,15 @@ func (db *DB) UpdateAudioTranscriptionIfActive(ctx context.Context, at *models.A
 		UPDATE audio_transcriptions
 		SET duration = $2, language = $3, transcript_text = $4, word_count = $5,
 			status = $6, error_message = $7,
-			processing_stage = $8, processing_progress = $9, retry_count = $10
+			processing_stage = $8, processing_progress = $9, retry_count = $10,
+			quality_warning = $11, omitted_ranges = $12
 		WHERE id = $1
 		  AND status IN ('pending', 'processing')`
 
 	result, err := db.ExecContext(ctx, query,
 		at.ID, at.Duration, at.Language, at.TranscriptText,
 		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
+		at.QualityWarning, at.OmittedRanges,
 	)
 	if err != nil {
 		return false, err
