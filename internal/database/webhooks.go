@@ -125,6 +125,9 @@ func (db *DB) GetActiveWebhooksForEvent(ctx context.Context, event string, userI
 	if userID == nil && apiKeyID == nil {
 		return []models.Webhook{}, nil
 	}
+	if apiKeyID != nil {
+		userID = nil
+	}
 	query := `SELECT ` + webhookSelectColumns + ` FROM webhooks
 		WHERE active = true AND $1 = ANY(events)
 		  AND (($2::uuid IS NOT NULL AND user_id = $2) OR ($3::uuid IS NOT NULL AND api_key_id = $3))`

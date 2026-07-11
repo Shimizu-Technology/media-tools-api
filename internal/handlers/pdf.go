@@ -81,7 +81,7 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 	// Generate a unique filename for storage reference
 	storedFilename := uuid.New().String() + ".pdf"
 
-	actor := getActorOwnership(c)
+	actor := getActorWriteOwnership(c)
 
 	// Extract text from the PDF (synchronous — PDFs process fast)
 	result, err := pdfservice.Extract(data)

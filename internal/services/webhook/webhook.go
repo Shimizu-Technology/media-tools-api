@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -24,24 +25,64 @@ import (
 
 // Service handles webhook notification delivery.
 type Service struct {
-	db         *database.DB
-	client     *http.Client
-	shutdownCh chan struct{} // Signals pending deliveries to stop
+	db            *database.DB
+	client        *http.Client
+	deliveryQueue chan deliveryTask
+	shutdownCh    chan struct{} // Signals pending deliveries to stop
+	wg            sync.WaitGroup
+	shutdownOnce  sync.Once
 }
+
+type deliveryTask struct {
+	webhook models.Webhook
+	event   string
+	payload []byte
+}
+
+const (
+	deliveryWorkers   = 20
+	deliveryQueueSize = 200
+)
 
 // New creates a new webhook service.
 func New(db *database.DB) *Service {
-	return &Service{
-		db:         db,
-		client:     safeHTTPClient(),
-		shutdownCh: make(chan struct{}),
+	s := &Service{
+		db:            db,
+		client:        safeHTTPClient(),
+		deliveryQueue: make(chan deliveryTask, deliveryQueueSize),
+		shutdownCh:    make(chan struct{}),
 	}
+	for i := 0; i < deliveryWorkers; i++ {
+		s.wg.Add(1)
+		go s.deliveryWorker()
+	}
+	return s
 }
 
 // Shutdown signals all pending webhook deliveries to stop.
 // Call this during graceful server shutdown.
 func (s *Service) Shutdown() {
-	close(s.shutdownCh)
+	s.shutdownOnce.Do(func() {
+		close(s.shutdownCh)
+		s.wg.Wait()
+	})
+}
+
+func (s *Service) deliveryWorker() {
+	defer s.wg.Done()
+	for {
+		select {
+		case <-s.shutdownCh:
+			return
+		case task := <-s.deliveryQueue:
+			select {
+			case <-s.shutdownCh:
+				return
+			default:
+				s.deliverWithRetry(task.webhook, task.event, task.payload)
+			}
+		}
+	}
 }
 
 // GenerateSecret creates a random HMAC secret for a webhook.
@@ -63,6 +104,9 @@ func SignPayload(payload []byte, secret string) string {
 // NotifyEvent sends webhook notifications for a given event to all registered webhooks.
 // Delivery happens asynchronously with retry logic.
 func (s *Service) NotifyEvent(ctx context.Context, event string, userID, apiKeyID *string, data interface{}) {
+	if apiKeyID != nil {
+		userID = nil
+	}
 	webhooks, err := s.db.GetActiveWebhooksForEvent(ctx, event, userID, apiKeyID)
 	if err != nil {
 		log.Printf("⚠️  Failed to get webhooks for event %s: %v", event, err)
@@ -86,10 +130,15 @@ func (s *Service) NotifyEvent(ctx context.Context, event string, userID, apiKeyI
 	}
 
 	for _, wh := range webhooks {
-		// Pool.notifyWebhook already runs this method behind a bounded semaphore.
-		// Deliver sequentially here so one event cannot create an unbounded number
-		// of retry goroutines and silently defeat that concurrency limit.
-		s.deliverWithRetry(wh, event, payloadJSON)
+		task := deliveryTask{webhook: wh, event: event, payload: payloadJSON}
+		select {
+		case s.deliveryQueue <- task:
+		case <-ctx.Done():
+			log.Printf("⚠️  Timed out queueing webhook delivery for %s", event)
+			return
+		case <-s.shutdownCh:
+			return
+		}
 	}
 }
 

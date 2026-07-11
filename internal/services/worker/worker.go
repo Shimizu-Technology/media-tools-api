@@ -142,19 +142,27 @@ func (p *Pool) NotifyWebhook(event string, userID, apiKeyID *string, data interf
 	if userID == nil && apiKeyID == nil {
 		return
 	}
+	// A row with both IDs was created by an account-owned API key. Dispatch as
+	// that exact key principal; browser-user webhooks remain a separate scope.
+	if apiKeyID != nil {
+		userID = nil
+	}
 	if p.webhooks != nil {
-		// Acquire semaphore slot (non-blocking: drop webhook if at capacity)
-		select {
-		case p.webhookSem <- struct{}{}:
-			go func() {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			// Wait briefly for a dispatch slot instead of silently dropping events.
+			// The webhook service has its own bounded delivery workers, so this
+			// semaphore covers only lookup and queueing—not the retry chain.
+			select {
+			case p.webhookSem <- struct{}{}:
 				defer func() { <-p.webhookSem }()
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
 				p.webhooks.NotifyEvent(ctx, event, userID, apiKeyID, data)
-			}()
-		default:
-			log.Printf("⚠️ Webhook semaphore full, dropping %s event", event)
-		}
+			case <-ctx.Done():
+				log.Printf("⚠️ Timed out waiting to dispatch %s webhook event", event)
+			case <-p.ctx.Done():
+			}
+		}()
 	}
 }
 

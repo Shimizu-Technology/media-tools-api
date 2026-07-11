@@ -92,12 +92,13 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 	}
 
 	// Create a new transcript record with "pending" status
+	owner := getActorWriteOwnership(c)
 	t := &models.Transcript{
 		YouTubeURL: youtubeURL,
 		YouTubeID:  videoID,
 		Status:     models.StatusPending,
-		UserID:     actor.UserID,
-		APIKeyID:   actor.APIKeyID,
+		UserID:     owner.UserID,
+		APIKeyID:   owner.APIKeyID,
 	}
 
 	if err := h.DB.CreateTranscript(c.Request.Context(), t); err != nil {

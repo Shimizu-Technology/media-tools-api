@@ -52,6 +52,7 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 		})
 		return
 	}
+	owner := getActorWriteOwnership(c)
 
 	// Enforce the 10-URL limit explicitly (belt + suspenders with the binding tag)
 	if len(req.URLs) > 10 {
@@ -99,8 +100,8 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 	batch := &models.Batch{
 		Status:     models.StatusPending,
 		TotalCount: len(parsed),
-		UserID:     actor.UserID,
-		APIKeyID:   actor.APIKeyID,
+		UserID:     owner.UserID,
+		APIKeyID:   owner.APIKeyID,
 	}
 
 	if err := h.DB.CreateBatch(c.Request.Context(), batch); err != nil {
@@ -138,8 +139,8 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 				Language:       existing.Language,
 				TranscriptText: existing.TranscriptText,
 				WordCount:      existing.WordCount,
-				UserID:         actor.UserID,
-				APIKeyID:       actor.APIKeyID,
+				UserID:         owner.UserID,
+				APIKeyID:       owner.APIKeyID,
 			}
 			needsExtraction = false
 			log.Printf("Reusing existing transcript for %s (already extracted)", p.videoID)
@@ -150,8 +151,8 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 				YouTubeID:  p.videoID,
 				Status:     models.StatusPending,
 				BatchID:    &batch.ID,
-				UserID:     actor.UserID,
-				APIKeyID:   actor.APIKeyID,
+				UserID:     owner.UserID,
+				APIKeyID:   owner.APIKeyID,
 			}
 			needsExtraction = true
 		}

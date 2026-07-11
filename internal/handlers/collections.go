@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -50,7 +51,7 @@ func (h *Handler) CreateCollection(c *gin.Context) {
 		return
 	}
 
-	actor := getActorOwnership(c)
+	actor := getActorWriteOwnership(c)
 	userID, apiKeyID := actor.UserID, actor.APIKeyID
 	if userID == nil && apiKeyID == nil {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
@@ -386,7 +387,7 @@ func buildCollectionContext(contents []database.CollectionItemContent, maxBytes 
 		headerBytes += len(headers[i]) + 2
 	}
 	if headerBytes >= maxBytes {
-		return strings.Join(headers, "")[:maxBytes]
+		return truncateUTF8(strings.Join(headers, ""), maxBytes)
 	}
 
 	budget := maxBytes - headerBytes
@@ -422,8 +423,22 @@ func buildCollectionContext(contents []database.CollectionItemContent, maxBytes 
 	combined.Grow(maxBytes)
 	for i, item := range contents {
 		combined.WriteString(headers[i])
-		combined.WriteString(item.Text[:allocations[i]])
+		combined.WriteString(truncateUTF8(item.Text, allocations[i]))
 		combined.WriteString("\n\n")
 	}
 	return combined.String()
+}
+
+func truncateUTF8(value string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(value) <= maxBytes {
+		return value
+	}
+	end := maxBytes
+	for end > 0 && !utf8.ValidString(value[:end]) {
+		end--
+	}
+	return value[:end]
 }
