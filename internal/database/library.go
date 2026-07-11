@@ -129,7 +129,9 @@ func (db *DB) GetLibraryStats(ctx context.Context, userID, apiKeyID *string) (mo
 			COUNT(*) FILTER (WHERE item_type = 'audio') AS audio,
 			COUNT(*) FILTER (WHERE item_type = 'pdf') AS pdfs
 		FROM filtered`
-	if err := db.GetContext(ctx, &stats, query, userID, apiKeyID, "", "", "", "", "", ""); err != nil {
+	// Stats describe the whole workspace, including items intentionally hidden in
+	// the archive. Normal library browsing still excludes archived items by default.
+	if err := db.GetContext(ctx, &stats, query, userID, apiKeyID, "", "", "", "all", "", ""); err != nil {
 		return stats, fmt.Errorf("get library stats: %w", err)
 	}
 	return stats, nil
