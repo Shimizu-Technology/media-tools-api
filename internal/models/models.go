@@ -51,15 +51,19 @@ type Batch struct {
 
 // Summary represents an AI-generated summary of a transcript.
 type Summary struct {
-	ID           string          `json:"id" db:"id"`
-	TranscriptID string          `json:"transcript_id" db:"transcript_id"`
-	ModelUsed    string          `json:"model_used" db:"model_used"`
-	PromptUsed   string          `json:"prompt_used" db:"prompt_used"`
-	SummaryText  string          `json:"summary_text" db:"summary_text"`
-	KeyPoints    json.RawMessage `json:"key_points" db:"key_points"`
-	Length       string          `json:"length" db:"length"`
-	Style        string          `json:"style" db:"style"`
-	CreatedAt    time.Time       `json:"created_at" db:"created_at"`
+	ID           string           `json:"id" db:"id"`
+	TranscriptID string           `json:"transcript_id" db:"transcript_id"`
+	ModelUsed    string           `json:"model_used" db:"model_used"`
+	PromptUsed   string           `json:"prompt_used" db:"prompt_used"`
+	SummaryText  string           `json:"summary_text" db:"summary_text"`
+	KeyPoints    json.RawMessage  `json:"key_points" db:"key_points"`
+	Length       string           `json:"length" db:"length"`
+	Style        string           `json:"style" db:"style"`
+	ContentType  string           `json:"content_type,omitempty" db:"content_type"`
+	Status       TranscriptStatus `json:"status" db:"status"`
+	ErrorMessage string           `json:"error_message,omitempty" db:"error_message"`
+	CreatedAt    time.Time        `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time        `json:"updated_at" db:"updated_at"`
 }
 
 // Transcript chat models for AI Q&A (MTA-27)
@@ -273,7 +277,8 @@ type PDFExtraction struct {
 
 type Webhook struct {
 	ID        string    `json:"id" db:"id"`
-	APIKeyID  string    `json:"api_key_id" db:"api_key_id"`
+	UserID    *string   `json:"user_id,omitempty" db:"user_id"`
+	APIKeyID  *string   `json:"api_key_id,omitempty" db:"api_key_id"`
 	URL       string    `json:"url" db:"url"`
 	Events    []string  `json:"events" db:"events"`
 	Secret    string    `json:"-" db:"secret"`
@@ -367,6 +372,43 @@ type WorkspaceResponse struct {
 	Transcripts []Transcript         `json:"transcripts"`
 	Audio       []AudioTranscription `json:"audio"`
 	PDFs        []PDFExtraction      `json:"pdfs"`
+}
+
+// LibraryItem is the common metadata shape used by the unified library. The
+// full transcript/text remains available from the item-specific detail route.
+type LibraryItem struct {
+	ID            string    `json:"id" db:"id"`
+	ItemType      string    `json:"item_type" db:"item_type"`
+	Title         string    `json:"title" db:"title"`
+	Subtitle      string    `json:"subtitle" db:"subtitle"`
+	Status        string    `json:"status" db:"status"`
+	WordCount     int       `json:"word_count" db:"word_count"`
+	Duration      float64   `json:"duration" db:"duration"`
+	PageCount     int       `json:"page_count" db:"page_count"`
+	SummaryStatus string    `json:"summary_status" db:"summary_status"`
+	CreatedAt     time.Time `json:"created_at" db:"created_at"`
+}
+
+type LibraryListParams struct {
+	Page     int    `form:"page"`
+	PerPage  int    `form:"per_page"`
+	ItemType string `form:"type"`
+	Status   string `form:"status"`
+	Search   string `form:"search"`
+	SortDir  string `form:"sort_dir"`
+	UserID   *string
+	APIKeyID *string
+}
+
+type LibraryStats struct {
+	Total      int `json:"total" db:"total"`
+	Pending    int `json:"pending" db:"pending"`
+	Processing int `json:"processing" db:"processing"`
+	Completed  int `json:"completed" db:"completed"`
+	Failed     int `json:"failed" db:"failed"`
+	Videos     int `json:"videos" db:"videos"`
+	Audio      int `json:"audio" db:"audio"`
+	PDFs       int `json:"pdfs" db:"pdfs"`
 }
 
 // --- Common Response Types ---

@@ -97,7 +97,11 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 			UserID:       actor.UserID,
 			APIKeyID:     actor.APIKeyID,
 		}
-		h.DB.CreatePDFExtraction(c.Request.Context(), pe)
+		if saveErr := h.DB.CreatePDFExtraction(c.Request.Context(), pe); saveErr != nil {
+			log.Printf("Failed to save failed PDF extraction: %v", saveErr)
+		} else {
+			h.Worker.NotifyWebhook("pdf.failed", pe.UserID, pe.APIKeyID, pe)
+		}
 
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "extraction_failed",
@@ -127,7 +131,11 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 			UserID:       actor.UserID,
 			APIKeyID:     actor.APIKeyID,
 		}
-		_ = h.DB.CreatePDFExtraction(c.Request.Context(), pe)
+		if saveErr := h.DB.CreatePDFExtraction(c.Request.Context(), pe); saveErr != nil {
+			log.Printf("Failed to save OCR-required PDF extraction: %v", saveErr)
+		} else {
+			h.Worker.NotifyWebhook("pdf.failed", pe.UserID, pe.APIKeyID, pe)
+		}
 
 		c.JSON(http.StatusUnprocessableEntity, models.ErrorResponse{
 			Error:   "ocr_required",
@@ -151,8 +159,14 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 
 	if err := h.DB.CreatePDFExtraction(c.Request.Context(), pe); err != nil {
 		log.Printf("Failed to save PDF extraction record: %v", err)
-		// Still return the result even if DB save fails
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "database_error",
+			Message: "PDF text was extracted but could not be saved. Please try again.",
+			Code:    http.StatusInternalServerError,
+		})
+		return
 	}
+	h.Worker.NotifyWebhook("pdf.completed", pe.UserID, pe.APIKeyID, pe)
 
 	c.JSON(http.StatusOK, pe)
 }

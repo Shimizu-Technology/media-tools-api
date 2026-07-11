@@ -152,6 +152,19 @@ func main() {
 		log.Printf("♻️  Requeued %d recoverable transcript job(s) on startup", recoveredTranscripts)
 	}
 
+	go func() {
+		// Summary generation can take minutes. Recover in the background so a
+		// large backlog never delays health checks or server startup.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		recoveredSummaries, recoveryErr := wp.RecoverSummaryJobs(ctx, 200)
+		if recoveryErr != nil {
+			log.Printf("⚠️  Summary job recovery failed: %v", recoveryErr)
+		} else if recoveredSummaries > 0 {
+			log.Printf("♻️  Requeued %d recoverable summary job(s) on startup", recoveredSummaries)
+		}
+	}()
+
 	requeued, err := wp.RecoverAudioJobs(context.Background(), 200)
 	if err != nil {
 		log.Printf("⚠️  Audio job recovery failed: %v", err)

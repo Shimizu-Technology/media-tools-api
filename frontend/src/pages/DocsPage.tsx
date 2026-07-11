@@ -122,7 +122,7 @@ export function DocsPage() {
             responseExample={`{
   "status": "ok",
   "version": "1.0.0",
-  "database": "connected",
+	"database": "healthy",
   "workers": 4
 }`}
           />

@@ -135,11 +135,11 @@ func (p *Pool) SetAudioStorage(as *storage.S3) {
 	p.audioStorage = as
 }
 
-// notifyWebhook fires a webhook event asynchronously if the service is configured.
+// NotifyWebhook fires a webhook event asynchronously if the service is configured.
 // BUG FIX: Previously synchronous — slow webhook delivery would block workers.
 // Now fires in a goroutine with its own timeout context.
-func (p *Pool) notifyWebhook(event string, apiKeyID *string, data interface{}) {
-	if apiKeyID == nil || *apiKeyID == "" {
+func (p *Pool) NotifyWebhook(event string, userID, apiKeyID *string, data interface{}) {
+	if userID == nil && apiKeyID == nil {
 		return
 	}
 	if p.webhooks != nil {
@@ -150,7 +150,7 @@ func (p *Pool) notifyWebhook(event string, apiKeyID *string, data interface{}) {
 				defer func() { <-p.webhookSem }()
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
-				p.webhooks.NotifyEvent(ctx, event, *apiKeyID, data)
+				p.webhooks.NotifyEvent(ctx, event, userID, apiKeyID, data)
 			}()
 		default:
 			log.Printf("⚠️ Webhook semaphore full, dropping %s event", event)
@@ -370,6 +370,52 @@ func (p *Pool) RecoverAudioJobs(ctx context.Context, limit int) (int, error) {
 	return requeued, nil
 }
 
+// RecoverSummaryJobs requeues summary records that were left pending or
+// processing when the process stopped. The request options live on the summary
+// row, so recovery does not depend on an in-memory queue.
+func (p *Pool) RecoverSummaryJobs(ctx context.Context, limit int) (int, error) {
+	rows, err := p.db.ListRecoverableSummaries(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+
+	requeued := 0
+	var recoveryErrs []string
+	for _, s := range rows {
+		if s.Status == models.StatusProcessing {
+			s.Status = models.StatusPending
+			s.ErrorMessage = ""
+			if err := p.db.UpdateSummary(ctx, &s); err != nil {
+				recoveryErrs = append(recoveryErrs, fmt.Sprintf("reset %s: %v", s.ID, err))
+				continue
+			}
+		}
+
+		payload, err := json.Marshal(SummaryPayload{
+			TranscriptID: s.TranscriptID,
+			Model:        s.ModelUsed,
+			Length:       s.Length,
+			Style:        s.Style,
+			ContentType:  s.ContentType,
+			SummaryID:    s.ID,
+		})
+		if err != nil {
+			recoveryErrs = append(recoveryErrs, fmt.Sprintf("marshal %s: %v", s.ID, err))
+			continue
+		}
+		if err := p.SubmitBlocking(ctx, Job{ID: s.ID, Type: JobSummaryGeneration, Payload: payload, CreatedAt: time.Now()}); err != nil {
+			recoveryErrs = append(recoveryErrs, fmt.Sprintf("requeue %s: %v", s.ID, err))
+			continue
+		}
+		requeued++
+	}
+
+	if len(recoveryErrs) > 0 {
+		return requeued, fmt.Errorf("summary recovery completed with %d issue(s): %s", len(recoveryErrs), strings.Join(recoveryErrs, "; "))
+	}
+	return requeued, nil
+}
+
 // worker is the main loop for each worker goroutine.
 // It reads jobs from the channel and processes them.
 func (p *Pool) worker(id int) {
@@ -437,7 +483,7 @@ func (p *Pool) processTranscript(job Job) error {
 		t.Status = models.StatusFailed
 		t.ErrorMessage = err.Error()
 		p.db.UpdateTranscript(ctx, t)
-		p.notifyWebhook("transcript.failed", t.APIKeyID, t) // MTA-18
+		p.NotifyWebhook("transcript.failed", t.UserID, t.APIKeyID, t) // MTA-18
 		if t.BatchID != nil {
 			p.db.UpdateBatchCounts(ctx, *t.BatchID)
 		}
@@ -456,7 +502,7 @@ func (p *Pool) processTranscript(job Job) error {
 		return fmt.Errorf("failed to save transcript: %w", err)
 	}
 
-	p.notifyWebhook("transcript.completed", t.APIKeyID, t) // MTA-18
+	p.NotifyWebhook("transcript.completed", t.UserID, t.APIKeyID, t) // MTA-18
 
 	if t.BatchID != nil {
 		if err := p.db.UpdateBatchCounts(ctx, *t.BatchID); err != nil {
@@ -465,7 +511,7 @@ func (p *Pool) processTranscript(job Job) error {
 		// Check if batch completed
 		batch, batchErr := p.db.GetBatch(ctx, *t.BatchID)
 		if batchErr == nil && batch.Status == models.StatusCompleted {
-			p.notifyWebhook("batch.completed", batch.APIKeyID, batch)
+			p.NotifyWebhook("batch.completed", batch.UserID, batch.APIKeyID, batch)
 		}
 	}
 
@@ -482,13 +528,29 @@ func (p *Pool) processSummary(job Job) error {
 		return fmt.Errorf("invalid summary payload: %w", err)
 	}
 
+	s, err := p.db.GetSummary(ctx, payload.SummaryID)
+	if err != nil {
+		return fmt.Errorf("summary job not found: %w", err)
+	}
+	s.Status = models.StatusProcessing
+	s.ErrorMessage = ""
+	if err := p.db.UpdateSummary(ctx, s); err != nil {
+		return err
+	}
+
 	// Get the transcript text
 	t, err := p.db.GetTranscript(ctx, payload.TranscriptID)
 	if err != nil {
+		s.Status = models.StatusFailed
+		s.ErrorMessage = "transcript not found"
+		_ = p.db.UpdateSummary(ctx, s)
 		return fmt.Errorf("transcript not found: %w", err)
 	}
 
 	if t.Status != models.StatusCompleted {
+		s.Status = models.StatusFailed
+		s.ErrorMessage = fmt.Sprintf("transcript not ready (status: %s)", t.Status)
+		_ = p.db.UpdateSummary(ctx, s)
 		return fmt.Errorf("transcript not ready (status: %s)", t.Status)
 	}
 
@@ -502,9 +564,12 @@ func (p *Pool) processSummary(job Job) error {
 
 	result, err := p.summarizer.Summarize(ctx, t.TranscriptText, opts)
 	if err != nil {
-		// BUG FIX: Notify via webhook so users know the summary failed
-		// (Summary model has no status field, so failure was previously silent)
-		p.notifyWebhook("summary.failed", t.APIKeyID, map[string]interface{}{
+		s.Status = models.StatusFailed
+		s.ErrorMessage = err.Error()
+		if updateErr := p.db.UpdateSummary(ctx, s); updateErr != nil {
+			log.Printf("failed to persist summary failure %s: %v", s.ID, updateErr)
+		}
+		p.NotifyWebhook("summary.failed", t.UserID, t.APIKeyID, map[string]interface{}{
 			"transcript_id": payload.TranscriptID,
 			"summary_id":    payload.SummaryID,
 			"error":         err.Error(),
@@ -516,30 +581,17 @@ func (p *Pool) processSummary(job Job) error {
 	// Save to database
 	keyPointsJSON, _ := json.Marshal(result.KeyPoints)
 
-	s := &models.Summary{
-		ID:           payload.SummaryID,
-		TranscriptID: payload.TranscriptID,
-		ModelUsed:    result.Model,
-		PromptUsed:   result.Prompt,
-		SummaryText:  result.Summary,
-		KeyPoints:    keyPointsJSON,
-		Length:       payload.Length,
-		Style:        payload.Style,
+	s.ModelUsed = result.Model
+	s.PromptUsed = result.Prompt
+	s.SummaryText = result.Summary
+	s.KeyPoints = keyPointsJSON
+	s.Status = models.StatusCompleted
+	s.ErrorMessage = ""
+	if err := p.db.UpdateSummary(ctx, s); err != nil {
+		return err
 	}
 
-	// If we have a pre-created summary ID, update it; otherwise create new
-	if payload.SummaryID != "" {
-		// Update existing placeholder
-		if err := p.db.CreateSummary(ctx, s); err != nil {
-			return err
-		}
-	} else {
-		if err := p.db.CreateSummary(ctx, s); err != nil {
-			return err
-		}
-	}
-
-	p.notifyWebhook("summary.completed", t.APIKeyID, s)
+	p.NotifyWebhook("summary.completed", t.UserID, t.APIKeyID, s)
 	return nil
 }
 
@@ -736,7 +788,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 			at.Status = "failed"
 			at.ErrorMessage = err.Error()
 			p.db.UpdateAudioTranscription(ctx, at)
-			p.notifyWebhook("audio.failed", at.APIKeyID, at)
+			p.NotifyWebhook("audio.failed", at.UserID, at.APIKeyID, at)
 			return fmt.Errorf("transcription failed: %w", err)
 		}
 		cleanedText, cleanedSegments, removedSegments := sanitizeTranscriptionResult(result)
@@ -767,7 +819,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 				at.Status = "failed"
 				at.ErrorMessage = err.Error()
 				p.db.UpdateAudioTranscription(ctx, at)
-				p.notifyWebhook("audio.failed", at.APIKeyID, at)
+				p.NotifyWebhook("audio.failed", at.UserID, at.APIKeyID, at)
 				return fmt.Errorf("chunk transcription failed (%s): %w", partName, err)
 			}
 			cleanedText, cleanedSegments, removedSegments := sanitizeTranscriptionResult(result)
@@ -818,7 +870,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		if !updated {
 			return fmt.Errorf("audio transcription stopped before completion")
 		}
-		p.notifyWebhook("audio.failed", at.APIKeyID, at)
+		p.NotifyWebhook("audio.failed", at.UserID, at.APIKeyID, at)
 		return fmt.Errorf("empty transcription result for %s", payload.OriginalName)
 	}
 
@@ -839,7 +891,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		if !updated {
 			return fmt.Errorf("audio transcription stopped before completion")
 		}
-		p.notifyWebhook("audio.failed", at.APIKeyID, at)
+		p.NotifyWebhook("audio.failed", at.UserID, at.APIKeyID, at)
 		return fmt.Errorf("transcription quality check failed for %s: %w", payload.OriginalName, qualityErr)
 	}
 
@@ -856,7 +908,7 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		return fmt.Errorf("audio transcription stopped before completion")
 	}
 
-	p.notifyWebhook("audio.completed", at.APIKeyID, at)
+	p.NotifyWebhook("audio.completed", at.UserID, at.APIKeyID, at)
 	log.Printf("✅ Audio transcription completed: %s (%s, %.0fs, %d words)",
 		payload.OriginalName, language, duration, at.WordCount)
 

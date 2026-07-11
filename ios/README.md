@@ -11,16 +11,10 @@ Native SwiftUI app for Media Tools API — transcribe videos, record audio, mana
 
 ## Setup
 
-### 1. Create Xcode Project
+### 1. Open the Xcode Project
 
-1. Open Xcode → File → New → Project
-2. Select **App** (iOS)
-3. Product Name: `MediaTools`
-4. Organization Identifier: `com.shimizu-technology`
-5. Interface: **SwiftUI**, Language: **Swift**
-6. Save in `ios/MediaTools/`
-7. Delete the auto-generated `ContentView.swift` and `MediaToolsApp.swift`
-8. Drag all `.swift` files from the existing `MediaTools/` directory into the project
+Open `ios/MediaTools/MediaTools.xcodeproj`. The main app and unit/UI test
+targets are already configured.
 
 ### 2. Add Swift Package Dependencies
 
@@ -28,7 +22,12 @@ File → Add Package Dependencies:
 - **Clerk iOS SDK**: `https://github.com/clerk/clerk-ios`
   - Add both `ClerkKit` and `ClerkKitUI` to the MediaTools target
 
-### 3. Add Targets
+### 3. Optional Extension Targets
+
+The Share Extension and Widget source files are included in this repository,
+but they are not yet wired into the checked-in Xcode project. Do not treat
+either extension as shipping until these targets, capabilities, signing, and
+on-device behavior have been verified.
 
 **Share Extension:**
 1. File → New → Target → Share Extension
@@ -138,11 +137,11 @@ MediaTools/
 - **PDF Upload** — Import PDFs from Files app for text extraction
 
 ### iOS Integration
-- **Share Sheet** — Share URLs/audio/PDFs from Safari, Voice Memos, Files, or any app
-- **Home Screen Widget** — See recent transcriptions at a glance (small + medium sizes)
+- **Share Sheet source** — Prepared for a future Share Extension target; not currently shipped
+- **Home Screen Widget source** — Prepared for a future Widget target; not currently shipped
 - **Spotlight Search** — Find transcripts from iOS system search
 - **Local Notifications** — Get notified when transcriptions complete
-- **Background Uploads** — Large files continue uploading even if app is backgrounded
+- **Background upload service** — Implemented as a service, but not yet connected to the active upload flow
 - **Haptic Feedback** — Tactile responses on key actions
 - **Swipe Actions** — Swipe to delete or add to collection
 

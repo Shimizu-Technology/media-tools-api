@@ -118,7 +118,7 @@ export function SummaryPanel({ transcriptId, transcriptText }: SummaryPanelProps
     setActiveTab('summary');
 
     try {
-      await createSummary(transcriptId, {
+      const job = await createSummary(transcriptId, {
         length: summaryLength,
         style: 'bullet',
       });
@@ -133,9 +133,14 @@ export function SummaryPanel({ transcriptId, transcriptText }: SummaryPanelProps
 
         try {
           const summaries = await getSummaries(transcriptId);
-          if (summaries.length > 0) {
-            const latest = summaries[0];
-            if (latest.summary_text) {
+          const latest = summaries.find((candidate) => candidate.id === job.summary_id);
+          if (latest) {
+            if (latest.status === 'failed') {
+              setError(latest.error_message || 'Summary generation failed. Please try again.');
+              setIsGenerating(false);
+              return;
+            }
+            if (latest.status === 'completed' && latest.summary_text) {
               setSummary(latest);
               setIsGenerating(false);
               // Parse key points

@@ -208,14 +208,17 @@ func (db *DB) ListTranscripts(ctx context.Context, params models.TranscriptListP
 		argNum++
 	}
 
-	if params.APIKeyID != nil {
-		conditions = append(conditions, fmt.Sprintf("api_key_id = $%d", argNum))
-		args = append(args, *params.APIKeyID)
-		argNum++
-	}
-	if params.UserID != nil {
+	if params.UserID != nil && params.APIKeyID != nil {
+		conditions = append(conditions, fmt.Sprintf("(user_id = $%d OR api_key_id = $%d)", argNum, argNum+1))
+		args = append(args, *params.UserID, *params.APIKeyID)
+		argNum += 2
+	} else if params.UserID != nil {
 		conditions = append(conditions, fmt.Sprintf("user_id = $%d", argNum))
 		args = append(args, *params.UserID)
+		argNum++
+	} else if params.APIKeyID != nil {
+		conditions = append(conditions, fmt.Sprintf("api_key_id = $%d", argNum))
+		args = append(args, *params.APIKeyID)
 		argNum++
 	}
 
@@ -282,14 +285,55 @@ func (db *DB) DeleteTranscript(ctx context.Context, id string) error {
 // CreateSummary inserts a new summary record.
 func (db *DB) CreateSummary(ctx context.Context, s *models.Summary) error {
 	query := `
-		INSERT INTO summaries (transcript_id, model_used, prompt_used, summary_text, key_points, length, style)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, created_at`
+		INSERT INTO summaries (
+			id, transcript_id, model_used, prompt_used, summary_text, key_points,
+			length, style, content_type, status, error_message
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		RETURNING created_at, updated_at`
 
 	return db.QueryRowContext(ctx, query,
-		s.TranscriptID, s.ModelUsed, s.PromptUsed,
+		s.ID, s.TranscriptID, s.ModelUsed, s.PromptUsed,
 		s.SummaryText, s.KeyPoints, s.Length, s.Style,
-	).Scan(&s.ID, &s.CreatedAt)
+		s.ContentType, s.Status, s.ErrorMessage,
+	).Scan(&s.CreatedAt, &s.UpdatedAt)
+}
+
+// UpdateSummary persists the latest lifecycle state and generated content.
+func (db *DB) UpdateSummary(ctx context.Context, s *models.Summary) error {
+	result, err := db.ExecContext(ctx, `
+		UPDATE summaries
+		SET model_used = $2, prompt_used = $3, summary_text = $4,
+			key_points = $5, length = $6, style = $7, content_type = $8,
+			status = $9, error_message = $10
+		WHERE id = $1`,
+		s.ID, s.ModelUsed, s.PromptUsed, s.SummaryText, s.KeyPoints,
+		s.Length, s.Style, s.ContentType, s.Status, s.ErrorMessage,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update summary: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("summary not found")
+	}
+	return nil
+}
+
+// ListRecoverableSummaries returns jobs that were queued or interrupted.
+func (db *DB) ListRecoverableSummaries(ctx context.Context, limit int) ([]models.Summary, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	var summaries []models.Summary
+	if err := db.SelectContext(ctx, &summaries, `
+		SELECT * FROM summaries
+		WHERE status IN ('pending', 'processing')
+		ORDER BY created_at ASC
+		LIMIT $1`, limit); err != nil {
+		return nil, fmt.Errorf("failed to list recoverable summaries: %w", err)
+	}
+	return summaries, nil
 }
 
 // GetSummary retrieves a single summary by ID.
@@ -320,12 +364,15 @@ func (db *DB) GetOrCreateChatSession(ctx context.Context, itemType, itemID strin
 	var session models.TranscriptChatSession
 	var ownerClause string
 	var ownerArg interface{}
-	if userID != nil {
-		ownerClause = "user_id = $3 AND api_key_id IS NULL"
-		ownerArg = *userID
-	} else if apiKeyID != nil {
+	// Prefer the API-key principal when both scopes are present. The content may
+	// be visible to the owning user too, but API integrations keep an independent
+	// chat history from the browser workspace.
+	if apiKeyID != nil {
 		ownerClause = "api_key_id = $3 AND user_id IS NULL"
 		ownerArg = *apiKeyID
+	} else if userID != nil {
+		ownerClause = "user_id = $3 AND api_key_id IS NULL"
+		ownerArg = *userID
 	} else {
 		return nil, fmt.Errorf("chat session owner is required")
 	}
@@ -349,13 +396,16 @@ func (db *DB) GetOrCreateChatSession(ctx context.Context, itemType, itemID strin
 		INSERT INTO transcript_chat_sessions (item_type, item_id, transcript_id, user_id, api_key_id)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, created_at, updated_at`
-	err = db.QueryRowContext(ctx, insertQuery, itemType, itemID, transcriptID, userID, apiKeyID).
-		Scan(&session.ID, &session.CreatedAt, &session.UpdatedAt)
-	if userID != nil {
-		session.UserID = userID
+	chatUserID, chatAPIKeyID := userID, apiKeyID
+	if apiKeyID != nil {
+		chatUserID = nil
 	}
+	err = db.QueryRowContext(ctx, insertQuery, itemType, itemID, transcriptID, chatUserID, chatAPIKeyID).
+		Scan(&session.ID, &session.CreatedAt, &session.UpdatedAt)
 	if apiKeyID != nil {
 		session.APIKeyID = apiKeyID
+	} else if userID != nil {
+		session.UserID = userID
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to create chat session: %w", err)
@@ -374,15 +424,6 @@ func (db *DB) GetOrCreateChatSession(ctx context.Context, itemType, itemID strin
 func (db *DB) DeleteChatSessionForActor(ctx context.Context, itemType, itemID string, userID, apiKeyID *string) error {
 	var err error
 	switch {
-	case userID != nil:
-		_, err = db.ExecContext(ctx, `
-			DELETE FROM transcript_chat_sessions
-			WHERE item_type = $1
-			  AND item_id = $2
-			  AND user_id = $3
-			  AND api_key_id IS NULL`,
-			itemType, itemID, *userID,
-		)
 	case apiKeyID != nil:
 		_, err = db.ExecContext(ctx, `
 			DELETE FROM transcript_chat_sessions
@@ -391,6 +432,15 @@ func (db *DB) DeleteChatSessionForActor(ctx context.Context, itemType, itemID st
 			  AND api_key_id = $3
 			  AND user_id IS NULL`,
 			itemType, itemID, *apiKeyID,
+		)
+	case userID != nil:
+		_, err = db.ExecContext(ctx, `
+			DELETE FROM transcript_chat_sessions
+			WHERE item_type = $1
+			  AND item_id = $2
+			  AND user_id = $3
+			  AND api_key_id IS NULL`,
+			itemType, itemID, *userID,
 		)
 	default:
 		return fmt.Errorf("chat session owner is required")
@@ -408,7 +458,13 @@ func (db *DB) ListChatMessages(ctx context.Context, sessionID string, limit int)
 	}
 	var messages []models.TranscriptChatMessage
 	err := db.SelectContext(ctx, &messages,
-		`SELECT * FROM transcript_chat_messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT $2`,
+		`SELECT * FROM (
+			SELECT * FROM transcript_chat_messages
+			WHERE session_id = $1
+			ORDER BY created_at DESC
+			LIMIT $2
+		) recent
+		ORDER BY created_at ASC`,
 		sessionID, limit,
 	)
 	if err != nil {
@@ -470,15 +526,15 @@ func (db *DB) UpdateAPIKeyLastUsed(ctx context.Context, id string) error {
 func (db *DB) ListAPIKeysForActor(ctx context.Context, userID, apiKeyID *string) ([]models.APIKey, error) {
 	var keys []models.APIKey
 	switch {
-	case userID != nil:
-		err := db.SelectContext(ctx, &keys,
-			`SELECT * FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC`, *userID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list API keys: %w", err)
-		}
 	case apiKeyID != nil:
 		err := db.SelectContext(ctx, &keys,
 			`SELECT * FROM api_keys WHERE id = $1 ORDER BY created_at DESC`, *apiKeyID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list API keys: %w", err)
+		}
+	case userID != nil:
+		err := db.SelectContext(ctx, &keys,
+			`SELECT * FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC`, *userID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list API keys: %w", err)
 		}
@@ -500,9 +556,6 @@ func (db *DB) RevokeAPIKeyForActor(ctx context.Context, id string, userID, apiKe
 	)
 
 	switch {
-	case userID != nil:
-		result, err = db.ExecContext(ctx,
-			`UPDATE api_keys SET active = false WHERE id = $1 AND user_id = $2`, id, *userID)
 	case apiKeyID != nil:
 		// API-key-authenticated callers may only revoke the exact key they are
 		// currently using. Keep the query simple and enforce the self-revoke rule
@@ -512,6 +565,9 @@ func (db *DB) RevokeAPIKeyForActor(ctx context.Context, id string, userID, apiKe
 		}
 		result, err = db.ExecContext(ctx,
 			`UPDATE api_keys SET active = false WHERE id = $1`, id)
+	case userID != nil:
+		result, err = db.ExecContext(ctx,
+			`UPDATE api_keys SET active = false WHERE id = $1 AND user_id = $2`, id, *userID)
 	default:
 		return fmt.Errorf("actor is required")
 	}
@@ -664,30 +720,28 @@ func (db *DB) PrepareAudioRetranscriptionForActor(ctx context.Context, at *model
 	var query string
 	var ownerArg string
 	switch {
-	case userID != nil:
-		query = `
-			WITH previous AS (
-				SELECT ` + audioTranscriptionSelectColumns + ` FROM audio_transcriptions
-				WHERE id = $1
-				  AND user_id = $2
-				  AND api_key_id IS NULL
-				  AND status IN ('completed', 'failed')
-				FOR UPDATE
-			),
-			` + updateSQL
-		ownerArg = *userID
 	case apiKeyID != nil:
 		query = `
 			WITH previous AS (
 				SELECT ` + audioTranscriptionSelectColumns + ` FROM audio_transcriptions
 				WHERE id = $1
 				  AND api_key_id = $2
-				  AND user_id IS NULL
 				  AND status IN ('completed', 'failed')
 				FOR UPDATE
 			),
 			` + updateSQL
 		ownerArg = *apiKeyID
+	case userID != nil:
+		query = `
+			WITH previous AS (
+				SELECT ` + audioTranscriptionSelectColumns + ` FROM audio_transcriptions
+				WHERE id = $1
+				  AND user_id = $2
+				  AND status IN ('completed', 'failed')
+				FOR UPDATE
+			),
+			` + updateSQL
+		ownerArg = *userID
 	default:
 		return nil, false, fmt.Errorf("actor is required")
 	}
@@ -797,7 +851,10 @@ func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int, userID, ap
 	var transcriptions []models.AudioTranscription
 	var whereClause string
 	var args []interface{}
-	if userID != nil {
+	if userID != nil && apiKeyID != nil {
+		whereClause = "WHERE user_id = $1 OR api_key_id = $2"
+		args = append(args, *userID, *apiKeyID)
+	} else if userID != nil {
 		whereClause = "WHERE user_id = $1"
 		args = append(args, *userID)
 	} else if apiKeyID != nil {
@@ -843,12 +900,15 @@ func (db *DB) SearchAudioTranscriptions(ctx context.Context, params models.Audio
 		args = append(args, params.ContentType)
 		argNum++
 	}
-	if userID != nil {
+	if userID != nil && apiKeyID != nil {
+		conditions = append(conditions, fmt.Sprintf("(user_id = $%d OR api_key_id = $%d)", argNum, argNum+1))
+		args = append(args, *userID, *apiKeyID)
+		argNum += 2
+	} else if userID != nil {
 		conditions = append(conditions, fmt.Sprintf("user_id = $%d", argNum))
 		args = append(args, *userID)
 		argNum++
-	}
-	if apiKeyID != nil {
+	} else if apiKeyID != nil {
 		conditions = append(conditions, fmt.Sprintf("api_key_id = $%d", argNum))
 		args = append(args, *apiKeyID)
 		argNum++
@@ -927,7 +987,10 @@ func (db *DB) ListPDFExtractions(ctx context.Context, limit int, userID, apiKeyI
 	var extractions []models.PDFExtraction
 	var whereClause string
 	var args []interface{}
-	if userID != nil {
+	if userID != nil && apiKeyID != nil {
+		whereClause = "WHERE user_id = $1 OR api_key_id = $2"
+		args = append(args, *userID, *apiKeyID)
+	} else if userID != nil {
 		whereClause = "WHERE user_id = $1"
 		args = append(args, *userID)
 	} else if apiKeyID != nil {

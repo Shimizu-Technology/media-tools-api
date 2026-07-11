@@ -19,7 +19,7 @@ build: ## Build the Go binary
 	go build -ldflags="-X main.Version=dev" -o bin/server ./cmd/server/
 
 run: build ## Build and run the server locally
-	./bin/server
+	@set -a; [ ! -f .env ] || . ./.env; set +a; ./bin/server
 
 dev: ## Run with live reload (requires air: go install github.com/air-verse/air@latest)
 	air
@@ -65,7 +65,7 @@ docker-db: ## Connect to the PostgreSQL database in Docker
 # ── Database ──
 
 migrate: ## Run all pending migrations
-	go run github.com/golang-migrate/migrate/v4/cmd/migrate@latest \
+	go run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1 \
 		-path migrations \
 		-database "$${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/media_tools?sslmode=disable}" \
 		up
@@ -73,13 +73,13 @@ migrate: ## Run all pending migrations
 migrate-up: migrate ## Alias for migrate
 
 migrate-down: ## Rollback the last migration
-	go run github.com/golang-migrate/migrate/v4/cmd/migrate@latest \
+	go run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1 \
 		-path migrations \
 		-database "$${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/media_tools?sslmode=disable}" \
 		down 1
 
 migrate-create: ## Create a new migration (usage: make migrate-create NAME=add_users)
-	go run github.com/golang-migrate/migrate/v4/cmd/migrate@latest \
+	go run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1 \
 		create -ext sql -dir migrations -seq $(NAME)
 
 # ── Frontend ──

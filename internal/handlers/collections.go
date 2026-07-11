@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 )
@@ -306,15 +307,7 @@ func (h *Handler) PostCollectionChat(c *gin.Context) {
 		return
 	}
 
-	// Build combined context: label each item's content
-	var combined strings.Builder
-	for i, item := range contents {
-		label := fmt.Sprintf("[%s] %s", item.ItemType, item.Title)
-		if item.Title == "" {
-			label = fmt.Sprintf("[%s #%d]", item.ItemType, i+1)
-		}
-		combined.WriteString(fmt.Sprintf("=== %s ===\n%s\n\n", label, item.Text))
-	}
+	combined := buildCollectionContext(contents, 48_000)
 
 	contextLabel := fmt.Sprintf("collection '%s' containing %d items", col.Name, len(contents))
 
@@ -351,7 +344,7 @@ func (h *Handler) PostCollectionChat(c *gin.Context) {
 	answer, modelUsed, err := h.Summarizer.ChatTranscript(
 		c.Request.Context(),
 		contextLabel,
-		combined.String(),
+		combined,
 		chatHistory,
 		req.Model,
 	)
@@ -372,4 +365,65 @@ func (h *Handler) PostCollectionChat(c *gin.Context) {
 		Session:  *session,
 		Messages: []models.TranscriptChatMessage{*userMsg, *assistantMsg},
 	})
+}
+
+// buildCollectionContext shares the prompt budget across every item before
+// redistributing unused space. This keeps later collection items represented
+// instead of concatenating everything and losing the tail to global truncation.
+func buildCollectionContext(contents []database.CollectionItemContent, maxBytes int) string {
+	if len(contents) == 0 || maxBytes <= 0 {
+		return ""
+	}
+
+	headers := make([]string, len(contents))
+	headerBytes := 0
+	for i, item := range contents {
+		label := fmt.Sprintf("[%s] %s", item.ItemType, item.Title)
+		if item.Title == "" {
+			label = fmt.Sprintf("[%s #%d]", item.ItemType, i+1)
+		}
+		headers[i] = fmt.Sprintf("=== %s ===\n", label)
+		headerBytes += len(headers[i]) + 2
+	}
+	if headerBytes >= maxBytes {
+		return strings.Join(headers, "")[:maxBytes]
+	}
+
+	budget := maxBytes - headerBytes
+	allocations := make([]int, len(contents))
+	share := budget / len(contents)
+	used := 0
+	for i, item := range contents {
+		allocations[i] = min(len(item.Text), share)
+		used += allocations[i]
+	}
+	for remaining := budget - used; remaining > 0; {
+		active := 0
+		for i, item := range contents {
+			if allocations[i] < len(item.Text) {
+				active++
+			}
+		}
+		if active == 0 {
+			break
+		}
+		extra := max(1, remaining/active)
+		for i, item := range contents {
+			if allocations[i] >= len(item.Text) || remaining == 0 {
+				continue
+			}
+			add := min(extra, len(item.Text)-allocations[i], remaining)
+			allocations[i] += add
+			remaining -= add
+		}
+	}
+
+	var combined strings.Builder
+	combined.Grow(maxBytes)
+	for i, item := range contents {
+		combined.WriteString(headers[i])
+		combined.WriteString(item.Text[:allocations[i]])
+		combined.WriteString("\n\n")
+	}
+	return combined.String()
 }

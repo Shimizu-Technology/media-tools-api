@@ -15,28 +15,24 @@ import {
   Sparkles,
 } from 'lucide-react';
 import {
-  listAudioTranscriptions,
+	getLibraryStats,
+	listLibraryItems,
   listCollections,
-  listPDFExtractions,
-  listTranscripts,
-  type AudioTranscription,
   type Collection,
-  type PDFExtraction,
-  type Transcript,
+	type LibraryItem,
+	type LibraryStats,
 } from '../lib/api';
 import { useAuthContext } from '../contexts/useAuthContext';
 
 type DashboardState = {
-  transcripts: Transcript[];
-  audio: AudioTranscription[];
-  pdfs: PDFExtraction[];
+	items: LibraryItem[];
+	stats: LibraryStats;
   collections: Collection[];
 };
 
 const emptyState: DashboardState = {
-  transcripts: [],
-  audio: [],
-  pdfs: [],
+	items: [],
+	stats: { total: 0, pending: 0, processing: 0, completed: 0, failed: 0, videos: 0, audio: 0, pdfs: 0 },
   collections: [],
 };
 
@@ -61,21 +57,19 @@ export function DashboardPage() {
     async function loadDashboard() {
       setIsLoading(true);
       setError('');
-      const [transcriptsResult, audioResult, pdfsResult, collectionsResult] = await Promise.allSettled([
-        listTranscripts({ per_page: 12 }),
-        listAudioTranscriptions(),
-        listPDFExtractions(),
-        listCollections(),
-      ]);
+		const [itemsResult, statsResult, collectionsResult] = await Promise.allSettled([
+			listLibraryItems({ per_page: 6 }),
+			getLibraryStats(),
+			listCollections(),
+		]);
 
       if (!isMounted) return;
 
-      if (transcriptsResult.status === 'fulfilled' || audioResult.status === 'fulfilled' || pdfsResult.status === 'fulfilled') {
-        setData({
-          transcripts: transcriptsResult.status === 'fulfilled' ? transcriptsResult.value.data : [],
-          audio: audioResult.status === 'fulfilled' ? audioResult.value : [],
-          pdfs: pdfsResult.status === 'fulfilled' ? pdfsResult.value : [],
-          collections: collectionsResult.status === 'fulfilled' ? collectionsResult.value : [],
+		if (itemsResult.status === 'fulfilled' && statsResult.status === 'fulfilled') {
+			setData({
+				items: itemsResult.value.data,
+				stats: statsResult.value,
+				collections: collectionsResult.status === 'fulfilled' ? collectionsResult.value : [],
         });
       } else {
         setError('Could not load your workspace yet. Try refreshing in a moment.');
@@ -88,44 +82,22 @@ export function DashboardPage() {
     return () => { isMounted = false; };
   }, []);
 
-  const totals = useMemo(() => {
-    const allItems = [...data.transcripts, ...data.audio, ...data.pdfs];
-    const processing = allItems.filter((item) => item.status === 'pending' || item.status === 'processing').length;
-    const failed = allItems.filter((item) => item.status === 'failed').length;
-    const completed = allItems.filter((item) => item.status === 'completed').length;
-    return { total: allItems.length, processing, failed, completed };
-  }, [data]);
+	const totals = useMemo(() => {
+		return {
+			total: data.stats.total,
+			processing: data.stats.pending + data.stats.processing,
+			failed: data.stats.failed,
+			completed: data.stats.completed,
+		};
+	}, [data.stats]);
 
   const recentItems = useMemo<RecentItem[]>(() => {
-    const transcriptItems = data.transcripts.map((item) => ({
-      id: item.id,
-      type: 'Video' as const,
-      title: item.title || item.youtube_url || 'Video transcript',
-      status: item.status,
-      createdAt: item.created_at,
-      href: `/app/video?id=${item.id}`,
-    }));
-    const audioItems = data.audio.map((item) => ({
-      id: item.id,
-      type: 'Recording' as const,
-      title: item.original_name || item.filename || 'Audio transcription',
-      status: item.status,
-      createdAt: item.created_at,
-      href: `/app/audio?id=${item.id}`,
-    }));
-    const pdfItems = data.pdfs.map((item) => ({
-      id: item.id,
-      type: 'PDF' as const,
-      title: item.original_name || item.filename || 'PDF extraction',
-      status: item.status,
-      createdAt: item.created_at,
-      href: `/app/pdf?id=${item.id}`,
-    }));
-
-    return [...transcriptItems, ...audioItems, ...pdfItems]
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(0, 6);
-  }, [data]);
+		return data.items.map((item) => {
+			const type = item.item_type === 'youtube' ? 'Video' : item.item_type === 'audio' ? 'Recording' : 'PDF';
+			const route = item.item_type === 'youtube' ? 'video' : item.item_type;
+			return { id: item.id, type, title: item.title, status: item.status, createdAt: item.created_at, href: `/app/${route}?id=${item.id}` };
+		});
+	}, [data.items]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-8">

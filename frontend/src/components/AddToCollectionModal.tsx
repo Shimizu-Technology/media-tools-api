@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FolderOpen,
@@ -34,32 +34,57 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
+	const [error, setError] = useState('');
+	const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    queueMicrotask(() => setAdded(new Set()));
+		queueMicrotask(() => { setAdded(new Set()); setError(''); });
     (async () => {
       setLoading(true);
       try {
         const data = await listCollections();
         setCollections(data);
-      } catch { /* ignore */ }
+		} catch (err: unknown) {
+			setError((err as { message?: string }).message || 'Could not load collections.');
+		}
       setLoading(false);
     })();
   }, [open]);
 
+	useEffect(() => {
+		if (!open) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') onClose();
+			if (event.key !== 'Tab' || !dialogRef.current) return;
+			const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])'));
+			if (focusable.length === 0) return;
+			const first = focusable[0];
+			const last = focusable[focusable.length - 1];
+			if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+			else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+		};
+		document.addEventListener('keydown', onKeyDown);
+		window.setTimeout(() => dialogRef.current?.querySelector<HTMLElement>('button')?.focus(), 0);
+		return () => document.removeEventListener('keydown', onKeyDown);
+	}, [open, onClose]);
+
   const handleAdd = async (collectionId: string) => {
-    setAdding(collectionId);
+		setAdding(collectionId);
+		setError('');
     try {
       await addCollectionItems(collectionId, [{ item_type: itemType, item_id: itemId }]);
       setAdded(prev => new Set(prev).add(collectionId));
-    } catch { /* ignore, probably duplicate */ }
+		} catch (err: unknown) {
+			setError((err as { message?: string }).message || 'Could not add this item to the collection.');
+		}
     setAdding(null);
   };
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
-    setCreating(true);
+		setCreating(true);
+		setError('');
     try {
       const col = await createCollection(newName.trim());
       // Add item immediately
@@ -68,7 +93,9 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
       setAdded(prev => new Set(prev).add(col.id));
       setNewName('');
       setShowCreate(false);
-    } catch { /* ignore */ }
+		} catch (err: unknown) {
+			setError((err as { message?: string }).message || 'Could not create the collection.');
+		}
     setCreating(false);
   };
 
@@ -76,7 +103,11 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
 
   return (
     <AnimatePresence>
-      <motion.div
+		<motion.div
+			ref={dialogRef}
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="add-to-collection-title"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
@@ -97,7 +128,7 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-[var(--border)]">
             <div>
-              <h2 className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">
+				<h2 id="add-to-collection-title" className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">
                 <FolderOpen className="w-4.5 h-4.5 text-[var(--brand)]" />
                 Add to Collection
               </h2>
@@ -105,13 +136,14 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
                 <p className="text-xs text-[var(--text-tertiary)] mt-0.5 truncate max-w-[320px]">{itemTitle}</p>
               )}
             </div>
-            <button onClick={onClose} className="p-1 rounded-md hover:bg-white/5 text-[var(--text-tertiary)]">
+			<button onClick={onClose} aria-label="Close dialog" className="flex min-h-11 min-w-11 items-center justify-center rounded-md hover:bg-[var(--color-nav-hover)] text-[var(--text-tertiary)]">
               <X className="w-4 h-4" />
             </button>
           </div>
 
           {/* Content */}
-          <div className="p-2 max-h-80 overflow-y-auto">
+		  <div className="p-2 max-h-80 overflow-y-auto">
+			{error && <p role="alert" className="m-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-500">{error}</p>}
             {loading ? (
               <div className="flex items-center justify-center py-10">
                 <Loader2 className="w-5 h-5 animate-spin text-[var(--text-tertiary)]" />

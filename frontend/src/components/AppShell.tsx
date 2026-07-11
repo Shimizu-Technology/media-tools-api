@@ -47,8 +47,9 @@ const primaryNav: NavItem[] = [
 const developerNav: NavItem[] = [
   { label: 'Developer', to: '/app/developer', icon: Code2, end: true },
   { label: 'Webhooks', to: '/app/developer/webhooks', icon: Boxes },
-  { label: 'Ops Health', to: '/app/admin/ops', icon: Activity },
 ];
+
+const opsNav: NavItem = { label: 'Ops Health', to: '/app/admin/ops', icon: Activity };
 
 export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -67,7 +68,7 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}>
-      <aside className={`fixed inset-y-0 left-0 z-40 hidden border-r backdrop-blur-xl transition-[width] duration-200 lg:flex lg:flex-col ${collapsed ? 'w-20' : 'w-72'}`} style={{ backgroundColor: 'rgba(15, 18, 23, 0.92)', borderColor: 'var(--color-border)' }}>
+		<aside className={`fixed inset-y-0 left-0 z-40 hidden border-r backdrop-blur-xl transition-[width] duration-200 lg:flex lg:flex-col ${collapsed ? 'w-20' : 'w-72'}`} style={{ backgroundColor: 'var(--color-sidebar-bg)', borderColor: 'var(--color-border)' }}>
         <SidebarContent collapsed={collapsed} onToggleCollapsed={toggleCollapsed} userName={user?.name || user?.email || 'Media workspace'} isClerkEnabled={isClerkEnabled} />
       </aside>
 
@@ -84,7 +85,7 @@ export function AppShell() {
       )}
 
       <div className={`transition-[padding] duration-200 ${collapsed ? 'lg:pl-20' : 'lg:pl-72'}`}>
-        <header className="sticky top-0 z-30 border-b backdrop-blur-xl" style={{ backgroundColor: 'rgba(11, 13, 16, 0.82)', borderColor: 'var(--color-border)' }}>
+		<header className="sticky top-0 z-30 border-b backdrop-blur-xl" style={{ backgroundColor: 'var(--color-header-bg)', borderColor: 'var(--color-border)' }}>
           <div className="flex h-16 items-center justify-between gap-3 px-4 sm:px-6">
             <button className="inline-flex h-11 w-11 items-center justify-center rounded-xl border lg:hidden" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={() => setMobileOpen(true)} aria-label="Open navigation">
               <Menu className="h-5 w-5" />
@@ -153,7 +154,7 @@ function SidebarContent({ collapsed, onToggleCollapsed, userName, isClerkEnabled
       <nav className="mt-5 flex flex-1 flex-col gap-1 overflow-y-auto">
         <NavSection items={primaryNav} collapsed={collapsed} onNavigate={onNavigate} />
         <Divider collapsed={collapsed} label="Developer" />
-        <NavSection items={developerNav} collapsed={collapsed} onNavigate={onNavigate} />
+		<NavSection items={isClerkEnabled ? developerNav : [...developerNav, opsNav]} collapsed={collapsed} onNavigate={onNavigate} />
       </nav>
 
       <div className={`mt-4 border-t pt-4 ${collapsed ? 'px-0' : 'px-2'}`} style={{ borderColor: 'var(--color-border)' }}>
@@ -205,5 +206,5 @@ function navClass(isActive: boolean, collapsed: boolean) {
     ? 'group flex min-h-11 items-center justify-center rounded-2xl transition'
     : 'group flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm font-medium transition';
 
-  return `${base} ${isActive ? 'bg-[var(--color-brand-500)] text-white shadow-lg shadow-black/15' : 'text-[var(--color-text-secondary)] hover:bg-white/[0.06] hover:text-[var(--color-text-primary)]'}`;
+	return `${base} ${isActive ? 'bg-[var(--color-brand-500)] text-white shadow-lg shadow-black/15' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-nav-hover)] hover:text-[var(--color-text-primary)]'}`;
 }

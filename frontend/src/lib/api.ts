@@ -37,7 +37,11 @@ export interface Summary {
   key_points: string[];
   length: string;
   style: string;
+	content_type?: string;
+	status: 'pending' | 'processing' | 'completed' | 'failed';
+	error_message?: string;
   created_at: string;
+	updated_at: string;
 }
 
 export type ChatItemType = 'transcript' | 'audio' | 'pdf' | 'collection';
@@ -271,6 +275,30 @@ export interface WebhookDelivery {
   delivered_at?: string;
 }
 
+export interface LibraryItem {
+  id: string;
+  item_type: 'youtube' | 'audio' | 'pdf';
+  title: string;
+  subtitle: string;
+  status: string;
+  word_count: number;
+  duration: number;
+  page_count: number;
+  summary_status: string;
+  created_at: string;
+}
+
+export interface LibraryStats {
+  total: number;
+  pending: number;
+  processing: number;
+  completed: number;
+  failed: number;
+  videos: number;
+  audio: number;
+  pdfs: number;
+}
+
 export type ExportFormat = 'txt' | 'md' | 'srt' | 'json';
 
 // ── Helpers ──
@@ -434,7 +462,7 @@ export async function deleteTranscript(id: string): Promise<void> {
 export async function createSummary(
   transcriptId: string,
   options?: { length?: string; style?: string; model?: string }
-): Promise<{ message: string; transcript_id: string }> {
+): Promise<{ message: string; summary_id: string; transcript_id: string }> {
   const res = await fetch(`${API_BASE}/summaries`, {
     method: 'POST',
     headers: await getHeaders(),
@@ -795,31 +823,49 @@ export async function removeFromWorkspace(itemType: string, itemId: string): Pro
 
 export async function createWebhook(url: string, events: string[]): Promise<Webhook> {
   const res = await fetch(`${API_BASE}/webhooks`, {
-    method: 'POST', headers: getAPIKeyHeaders(), body: JSON.stringify({ url, events }),
+    method: 'POST', headers: await getHeaders(), body: JSON.stringify({ url, events }),
   });
   return handleResponse<Webhook>(res);
 }
 
 export async function listWebhooks(): Promise<Webhook[]> {
-  const res = await fetch(`${API_BASE}/webhooks`, { headers: getAPIKeyHeaders() });
+  const res = await fetch(`${API_BASE}/webhooks`, { headers: await getHeaders() });
   return handleResponse<Webhook[]>(res);
 }
 
 export async function updateWebhook(id: string, active: boolean): Promise<void> {
   const res = await fetch(`${API_BASE}/webhooks/${id}`, {
-    method: 'PATCH', headers: getAPIKeyHeaders(), body: JSON.stringify({ active }),
+    method: 'PATCH', headers: await getHeaders(), body: JSON.stringify({ active }),
   });
-  if (!res.ok) throw new Error('Failed to update webhook');
+  await handleResponse(res);
 }
 
 export async function deleteWebhook(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/webhooks/${id}`, { method: 'DELETE', headers: getAPIKeyHeaders() });
-  if (!res.ok) throw new Error('Failed to delete webhook');
+  const res = await fetch(`${API_BASE}/webhooks/${id}`, { method: 'DELETE', headers: await getHeaders() });
+  await handleResponse(res);
 }
 
 export async function listWebhookDeliveries(): Promise<WebhookDelivery[]> {
-  const res = await fetch(`${API_BASE}/webhooks/deliveries`, { headers: getAPIKeyHeaders() });
+  const res = await fetch(`${API_BASE}/webhooks/deliveries`, { headers: await getHeaders() });
   return handleResponse<WebhookDelivery[]>(res);
+}
+
+// ── Unified library ──
+
+export async function listLibraryItems(params: {
+  page?: number; per_page?: number; type?: string; status?: string; search?: string; sort_dir?: 'asc' | 'desc';
+} = {}): Promise<PaginatedResponse<LibraryItem>> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') search.set(key, String(value));
+  });
+  const res = await fetch(`${API_BASE}/library/items?${search}`, { headers: await getHeaders() });
+  return handleResponse<PaginatedResponse<LibraryItem>>(res);
+}
+
+export async function getLibraryStats(): Promise<LibraryStats> {
+  const res = await fetch(`${API_BASE}/library/stats`, { headers: await getHeaders() });
+  return handleResponse<LibraryStats>(res);
 }
 
 // ── Collections ──

@@ -62,8 +62,8 @@ func SignPayload(payload []byte, secret string) string {
 
 // NotifyEvent sends webhook notifications for a given event to all registered webhooks.
 // Delivery happens asynchronously with retry logic.
-func (s *Service) NotifyEvent(ctx context.Context, event string, apiKeyID string, data interface{}) {
-	webhooks, err := s.db.GetActiveWebhooksForEvent(ctx, event, apiKeyID)
+func (s *Service) NotifyEvent(ctx context.Context, event string, userID, apiKeyID *string, data interface{}) {
+	webhooks, err := s.db.GetActiveWebhooksForEvent(ctx, event, userID, apiKeyID)
 	if err != nil {
 		log.Printf("⚠️  Failed to get webhooks for event %s: %v", event, err)
 		return
@@ -86,8 +86,10 @@ func (s *Service) NotifyEvent(ctx context.Context, event string, apiKeyID string
 	}
 
 	for _, wh := range webhooks {
-		// Fire and forget — each delivery runs in its own goroutine
-		go s.deliverWithRetry(wh, event, payloadJSON)
+		// Pool.notifyWebhook already runs this method behind a bounded semaphore.
+		// Deliver sequentially here so one event cannot create an unbounded number
+		// of retry goroutines and silently defeat that concurrency limit.
+		s.deliverWithRetry(wh, event, payloadJSON)
 	}
 }
 

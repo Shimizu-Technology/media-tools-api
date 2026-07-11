@@ -9,6 +9,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -252,6 +253,9 @@ func getEnvInt(key string, fallback int) int {
 
 // findYtDlp checks common locations for the yt-dlp binary.
 func findYtDlp() string {
+	if path, err := exec.LookPath("yt-dlp"); err == nil {
+		return path
+	}
 	paths := []string{
 		"/home/clawdbot/.local/bin/yt-dlp",
 		"/usr/local/bin/yt-dlp",
