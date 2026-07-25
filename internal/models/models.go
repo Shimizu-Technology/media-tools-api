@@ -261,6 +261,7 @@ type AudioTranscription struct {
 	ActionItems         json.RawMessage  `json:"action_items" db:"action_items"`
 	Decisions           json.RawMessage  `json:"decisions" db:"decisions"`
 	SummaryModel        string           `json:"summary_model,omitempty" db:"summary_model"`
+	SummaryLength       string           `json:"summary_length" db:"summary_length"`
 	SummaryStatus       string           `json:"summary_status" db:"summary_status"`
 	SummaryEvidence     json.RawMessage  `json:"summary_evidence" db:"summary_evidence"`
 	SummaryErrorMessage string           `json:"summary_error_message,omitempty" db:"summary_error_message"`

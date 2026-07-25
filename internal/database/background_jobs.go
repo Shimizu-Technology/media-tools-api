@@ -73,8 +73,8 @@ func (db *DB) QueueAudioSummary(
 		UPDATE audio_transcriptions
 		SET content_type = $2, summary_text = $3, key_points = $4,
 			action_items = $5, decisions = $6, summary_model = $7,
-			summary_status = $8, summary_evidence = $9,
-			summary_error_message = $10
+			summary_length = $8, summary_status = $9, summary_evidence = $10,
+			summary_error_message = $11
 		WHERE id = $1 AND status = 'completed'
 		  AND summary_status NOT IN ('pending', 'processing')`,
 		audio.ID,
@@ -84,6 +84,7 @@ func (db *DB) QueueAudioSummary(
 		audio.ActionItems,
 		audio.Decisions,
 		audio.SummaryModel,
+		audio.SummaryLength,
 		audio.SummaryStatus,
 		audio.SummaryEvidence,
 		audio.SummaryErrorMessage,

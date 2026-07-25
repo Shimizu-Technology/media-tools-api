@@ -229,6 +229,7 @@ export interface AudioTranscription {
   action_items: string[];
   decisions: string[];
   summary_model?: string;
+  summary_length: 'short' | 'medium' | 'detailed';
   summary_status: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
   summary_evidence?: SummaryEvidence;
   summary_error_message?: string;

@@ -885,6 +885,7 @@ func (h *Handler) SummarizeAudio(c *gin.Context) {
 	// boundary.
 	at.SummaryStatus = "pending"
 	at.SummaryErrorMessage = ""
+	at.SummaryLength = req.Length
 	at.ContentType = contentType
 	if err := h.DB.QueueAudioSummary(c.Request.Context(), at, payload); err != nil {
 		if !errors.Is(err, database.ErrAudioSummaryNotQueueable) {

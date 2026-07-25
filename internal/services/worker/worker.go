@@ -481,12 +481,7 @@ func (p *Pool) RecoverAudioSummaryJobs(ctx context.Context, limit int) (int, err
 	requeued := 0
 	var recoveryErrs []string
 	for _, at := range rows {
-		payload, err := json.Marshal(AudioSummaryPayload{
-			AudioID:     at.ID,
-			ContentType: string(at.ContentType),
-			Model:       at.SummaryModel,
-			Length:      "medium",
-		})
+		payload, err := json.Marshal(audioSummaryRecoveryPayload(at))
 		if err != nil {
 			recoveryErrs = append(recoveryErrs, fmt.Sprintf("marshal %s: %v", at.ID, err))
 			continue
@@ -503,6 +498,20 @@ func (p *Pool) RecoverAudioSummaryJobs(ctx context.Context, limit int) (int, err
 		return requeued, fmt.Errorf("audio summary recovery completed with %d issue(s): %s", len(recoveryErrs), strings.Join(recoveryErrs, "; "))
 	}
 	return requeued, nil
+}
+
+func audioSummaryRecoveryPayload(at models.AudioTranscription) AudioSummaryPayload {
+	length := at.SummaryLength
+	if length == "" {
+		// Rows created before migration 039 use the historical default.
+		length = "medium"
+	}
+	return AudioSummaryPayload{
+		AudioID:     at.ID,
+		ContentType: string(at.ContentType),
+		Model:       at.SummaryModel,
+		Length:      length,
+	}
 }
 
 // worker claims durable rows. The wake channel avoids polling latency while a
@@ -813,6 +822,10 @@ func (p *Pool) processAudioSummary(job Job) error {
 	if at.ContentType == "" {
 		at.ContentType = models.ContentGeneral
 	}
+	if payload.Length == "" {
+		payload.Length = "medium"
+	}
+	at.SummaryLength = payload.Length
 	at.SummaryStatus = "processing"
 	at.SummaryErrorMessage = ""
 	if err := p.db.UpdateAudioSummary(ctx, at); err != nil {

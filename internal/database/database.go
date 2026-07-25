@@ -616,11 +616,12 @@ const audioTranscriptionSelectColumns = `
 	key_points,
 	action_items,
 	decisions,
-		summary_model,
-		summary_status,
-		COALESCE(summary_evidence, '{}'::jsonb) AS summary_evidence,
-		COALESCE(summary_error_message, '') AS summary_error_message,
-		user_id,
+	summary_model,
+	COALESCE(summary_length, 'medium') AS summary_length,
+	summary_status,
+	COALESCE(summary_evidence, '{}'::jsonb) AS summary_evidence,
+	COALESCE(summary_error_message, '') AS summary_error_message,
+	user_id,
 	api_key_id,
 	created_at
 `
@@ -698,14 +699,14 @@ func (db *DB) CreateAudioTranscriptionWithJob(ctx context.Context, at *models.Au
 			updated_at = NOW()
 		WHERE job_type = 'audio_transcription'
 		  AND resource_id = $1
-		  AND status = 'pending'`,
+		  AND status = 'queued'`,
 		at.ID, tempFilePath, at.AudioS3Key, at.OriginalName,
 	)
 	if err != nil {
 		return fmt.Errorf("prepare audio transcription job: %w", err)
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
-		return fmt.Errorf("prepare audio transcription job: queue trigger did not create a pending job")
+		return fmt.Errorf("prepare audio transcription job: queue trigger did not create a queued job")
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -756,15 +757,15 @@ func (db *DB) UpdateAudioTranscriptionWithSummary(ctx context.Context, at *model
 			processing_stage = $8, processing_progress = $9, retry_count = $10,
 			content_type = $11, summary_text = $12, key_points = $13,
 			action_items = $14, decisions = $15, summary_model = $16,
-			summary_status = $17, summary_evidence = $18, summary_error_message = $19,
-			quality_warning = $20, omitted_ranges = $21
+			summary_length = $17, summary_status = $18, summary_evidence = $19,
+			summary_error_message = $20, quality_warning = $21, omitted_ranges = $22
 		WHERE id = $1`
 
 	result, err := db.ExecContext(ctx, query,
 		at.ID, at.Duration, at.Language, at.TranscriptText,
 		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
-		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryStatus,
-		at.SummaryEvidence, at.SummaryErrorMessage, at.QualityWarning, at.OmittedRanges,
+		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryLength,
+		at.SummaryStatus, at.SummaryEvidence, at.SummaryErrorMessage, at.QualityWarning, at.OmittedRanges,
 	)
 	if err != nil {
 		return err
@@ -796,8 +797,8 @@ func (db *DB) PrepareAudioRetranscriptionForActor(ctx context.Context, at *model
 				processing_stage = $9, processing_progress = $10, retry_count = $11,
 				content_type = $12, summary_text = $13, key_points = $14,
 				action_items = $15, decisions = $16, summary_model = $17,
-				summary_status = $18, summary_evidence = $19, summary_error_message = $20,
-				quality_warning = $21, omitted_ranges = $22
+				summary_length = $18, summary_status = $19, summary_evidence = $20,
+				summary_error_message = $21, quality_warning = $22, omitted_ranges = $23
 			FROM previous AS p
 			WHERE a.id = p.id
 			RETURNING a.id
@@ -837,8 +838,8 @@ func (db *DB) PrepareAudioRetranscriptionForActor(ctx context.Context, at *model
 	err := db.GetContext(ctx, &previous, query,
 		at.ID, ownerArg, at.Duration, at.Language, at.TranscriptText,
 		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
-		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryStatus,
-		at.SummaryEvidence, at.SummaryErrorMessage, at.QualityWarning, at.OmittedRanges,
+		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryLength,
+		at.SummaryStatus, at.SummaryEvidence, at.SummaryErrorMessage, at.QualityWarning, at.OmittedRanges,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
@@ -926,14 +927,14 @@ func (db *DB) UpdateAudioSummary(ctx context.Context, at *models.AudioTranscript
 	query := `
 		UPDATE audio_transcriptions
 		SET content_type = $2, summary_text = $3, key_points = $4, action_items = $5,
-			decisions = $6, summary_model = $7, summary_status = $8,
-			summary_evidence = $9, summary_error_message = $10
+			decisions = $6, summary_model = $7, summary_length = $8,
+			summary_status = $9, summary_evidence = $10, summary_error_message = $11
 		WHERE id = $1`
 
 	_, err := db.ExecContext(ctx, query,
 		at.ID, at.ContentType, at.SummaryText, at.KeyPoints,
-		at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryStatus,
-		at.SummaryEvidence, at.SummaryErrorMessage,
+		at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryLength,
+		at.SummaryStatus, at.SummaryEvidence, at.SummaryErrorMessage,
 	)
 	return err
 }

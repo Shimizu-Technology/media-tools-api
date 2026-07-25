@@ -50,6 +50,7 @@ struct AudioTranscription: Identifiable, Codable {
     let keyPoints: [String]?
     let actionItems: [String]?
     let decisions: [String]?
+    let summaryLength: String?
     let summaryStatus: String?
     let summaryEvidence: SummaryEvidence?
     let summaryErrorMessage: String?
