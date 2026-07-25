@@ -2,9 +2,13 @@ import SwiftUI
 
 struct ItemDetailView: View {
     let item: LibraryItem
+    @Environment(\.openURL) private var openURL
     @State private var transcript: Transcript?
     @State private var audio: AudioTranscription?
     @State private var pdf: PDFExtraction?
+    @State private var segments: [MediaSegment] = []
+    @State private var audioSeekTime: TimeInterval?
+    @State private var scrollTarget: String?
     @State private var showChat = false
     @State private var showAddToCollection = false
     @State private var summary: Summary?
@@ -26,23 +30,32 @@ struct ItemDetailView: View {
     ]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                headerSection
-                actionButtons
-                summaryTypeSection
-                audioPlayerSection
-                summarySection
-                transcriptSection
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    headerSection
+                    actionButtons
+                    summaryTypeSection
+                    audioPlayerSection
+                    summarySection
+                    transcriptSection
+                }
+                .padding()
             }
-            .padding()
+            .onChange(of: scrollTarget) {
+                guard let scrollTarget else { return }
+                withAnimation(Theme.springGentle) {
+                    proxy.scrollTo(scrollTarget, anchor: .center)
+                }
+                self.scrollTarget = nil
+            }
         }
         .background(Theme.surface)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showChat) {
             NavigationStack {
-                ChatView(itemType: chatItemType, itemId: itemId)
+                ChatView(itemType: chatItemType, itemId: itemId, onCitationTap: handleCitation)
                     .navigationTitle("Chat")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
@@ -187,8 +200,9 @@ struct ItemDetailView: View {
 
     @ViewBuilder
     private var audioPlayerSection: some View {
-        if case .audio(let a) = item, a.isComplete {
-            AudioPlayerView(audioId: a.id)
+        if let audio, audio.isComplete {
+            AudioPlayerView(audioId: audio.id, seekTime: $audioSeekTime)
+                .id("audio-player")
         }
     }
 
@@ -211,21 +225,32 @@ struct ItemDetailView: View {
                     .foregroundStyle(Theme.textSecondary)
                     .textSelection(.enabled)
 
+                CitationChips(
+                    citations: summary.evidence?.summary ?? [],
+                    onTap: handleCitation
+                )
+
                 if let points = summary.keyPoints, !points.isEmpty {
                     Text("Key Points")
                         .font(Theme.body(14, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                         .padding(.top, 4)
 
-                    ForEach(points, id: \.self) { point in
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "circle.fill")
-                                .font(.system(size: 5))
-                                .padding(.top, 7)
-                                .foregroundStyle(Theme.brand500)
-                            Text(point)
-                                .font(Theme.body(14))
-                                .foregroundStyle(Theme.textSecondary)
+                    ForEach(Array(points.enumerated()), id: \.offset) { index, point in
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "circle.fill")
+                                    .font(.system(size: 5))
+                                    .padding(.top, 7)
+                                    .foregroundStyle(Theme.brand500)
+                                Text(point)
+                                    .font(Theme.body(14))
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                            CitationChips(
+                                citations: summary.evidence?.keyPoints?[safe: index] ?? [],
+                                onTap: handleCitation
+                            )
                         }
                     }
                 }
@@ -236,15 +261,21 @@ struct ItemDetailView: View {
                         .foregroundStyle(Theme.textPrimary)
                         .padding(.top, 4)
 
-                    ForEach(actions, id: \.self) { action in
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "checkmark.square")
-                                .font(.caption)
-                                .foregroundStyle(Theme.brand500)
-                                .padding(.top, 2)
-                            Text(action)
-                                .font(Theme.body(14))
-                                .foregroundStyle(Theme.textSecondary)
+                    ForEach(Array(actions.enumerated()), id: \.offset) { index, action in
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "checkmark.square")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.brand500)
+                                    .padding(.top, 2)
+                                Text(action)
+                                    .font(Theme.body(14))
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                            CitationChips(
+                                citations: summary.evidence?.actionItems?[safe: index] ?? [],
+                                onTap: handleCitation
+                            )
                         }
                     }
                 }
@@ -281,10 +312,43 @@ struct ItemDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 SectionHeader(text: "Transcript", icon: "doc.text")
 
-                Text(text)
-                    .font(Theme.body())
-                    .foregroundStyle(Theme.textSecondary)
-                    .textSelection(.enabled)
+                if segments.isEmpty {
+                    Text(text)
+                        .font(Theme.body())
+                        .foregroundStyle(Theme.textSecondary)
+                        .textSelection(.enabled)
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(segments) { segment in
+                            Button {
+                                handleSegment(segment)
+                            } label: {
+                                HStack(alignment: .top, spacing: 10) {
+                                    Text(segment.locatorLabel)
+                                        .font(.caption.monospacedDigit().weight(.semibold))
+                                        .foregroundStyle(iconColor)
+                                        .frame(minWidth: 52, alignment: .leading)
+
+                                    Text(segment.text)
+                                        .font(Theme.body())
+                                        .foregroundStyle(Theme.textSecondary)
+                                        .multilineTextAlignment(.leading)
+
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.vertical, 10)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .id(segment.id)
+
+                            if segment.id != segments.last?.id {
+                                Divider()
+                                    .overlay(Theme.borderSubtle)
+                            }
+                        }
+                    }
+                }
             }
             .cardStyle()
         }
@@ -370,12 +434,75 @@ struct ItemDetailView: View {
                 transcript = try await service.getTranscript(t.id)
             case .audio(let a):
                 audio = try await service.getAudioItem(a.id)
+                if let audio, audio.summaryStatus == "completed" {
+                    summary = Summary(
+                        id: audio.id,
+                        transcriptId: nil,
+                        summaryText: audio.summaryText,
+                        keyPoints: audio.keyPoints,
+                        actionItems: audio.actionItems,
+                        topics: nil,
+                        status: audio.summaryStatus,
+                        message: nil,
+                        errorMessage: audio.summaryErrorMessage,
+                        evidence: audio.summaryEvidence
+                    )
+                }
             case .pdf(let p):
                 pdf = try await service.getPDF(p.id)
             }
         } catch {
             print("Failed to load detail: \(error)")
         }
+
+        do {
+            segments = try await service.getMediaSegments(itemType: chatItemType, itemId: itemId)
+        } catch {
+            // Legacy items may predate source segments; plain text remains usable.
+            print("Failed to load source segments: \(error)")
+        }
+    }
+
+    private func handleSegment(_ segment: MediaSegment) {
+        handleCitation(Citation(
+            segmentId: segment.id,
+            itemType: segment.itemType,
+            itemId: segment.itemId,
+            itemTitle: title,
+            startMs: segment.startMs,
+            endMs: segment.endMs,
+            pageNumber: segment.pageNumber
+        ))
+    }
+
+    private func handleCitation(_ citation: Citation) {
+        guard citation.itemType == chatItemType, citation.itemId == itemId else {
+            return
+        }
+
+        if citation.itemType == "transcript",
+           let startMS = citation.startMs,
+           let youtubeURL = transcript?.youtubeUrl,
+           var components = URLComponents(string: youtubeURL) {
+            var items = components.queryItems ?? []
+            items.removeAll { $0.name == "t" || $0.name == "start" }
+            items.append(URLQueryItem(name: "t", value: "\(startMS / 1_000)s"))
+            components.queryItems = items
+            if let url = components.url {
+                openURL(url)
+            }
+            return
+        }
+
+        if citation.itemType == "audio", let startMS = citation.startMs {
+            audioSeekTime = TimeInterval(startMS) / 1_000
+            scrollTarget = "audio-player"
+            showChat = false
+            return
+        }
+
+        scrollTarget = citation.segmentId
+        showChat = false
     }
 
     private func generateSummary() async {
@@ -401,6 +528,45 @@ struct ItemDetailView: View {
             Haptics.error()
             print("Summary failed: \(error)")
         }
+    }
+}
+
+// MARK: - Evidence Links
+
+struct CitationChips: View {
+    let citations: [Citation]
+    let onTap: (Citation) -> Void
+
+    var body: some View {
+        if !citations.isEmpty {
+            FlowLayout(spacing: 6) {
+                ForEach(citations, id: \.self) { citation in
+                    Button {
+                        onTap(citation)
+                    } label: {
+                        Label(citation.locatorLabel, systemImage: citation.pageNumber == nil ? "play.fill" : "doc.text")
+                            .font(Theme.caption(11, weight: .semibold))
+                            .padding(.horizontal, 10)
+                            .frame(minHeight: 44)
+                            .background(Theme.brand500.opacity(0.12))
+                            .foregroundStyle(Theme.brand400)
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(Theme.brand500.opacity(0.25), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open source at \(citation.locatorLabel)")
+                }
+            }
+        }
+    }
+}
+
+extension Swift.Collection {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 

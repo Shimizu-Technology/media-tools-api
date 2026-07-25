@@ -88,6 +88,10 @@ final class MediaToolsService {
         try await api.get("/pdf/extractions/\(id)")
     }
 
+    func getMediaSegments(itemType: String, itemId: String) async throws -> [MediaSegment] {
+        try await api.get("/library/items/\(itemType)/\(itemId)/segments")
+    }
+
     func deletePDF(_ id: String) async throws {
         try await api.delete("/pdf/extractions/\(id)")
     }
@@ -173,11 +177,32 @@ final class MediaToolsService {
     }
 
     func summarizeAudio(audioId: String, contentType: String? = nil) async throws -> Summary {
-        let audio: AudioTranscription = try await api.post(
+        let accepted: AudioTranscription = try await api.post(
             "/audio/transcriptions/\(audioId)/summarize",
             body: SummarizeAudioRequest(contentType: contentType, model: nil, length: "medium")
         )
-        return Summary(
+        if accepted.summaryStatus == "completed" {
+            return audioSummary(from: accepted)
+        }
+
+        for _ in 0..<60 {
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+            let audio = try await getAudioItem(audioId)
+            if audio.summaryStatus == "failed" {
+                throw APIError.httpError(
+                    statusCode: 500,
+                    message: audio.summaryErrorMessage ?? "Summary generation failed"
+                )
+            }
+            if audio.summaryStatus == "completed" {
+                return audioSummary(from: audio)
+            }
+        }
+        throw APIError.httpError(statusCode: 408, message: "Summary generation timed out")
+    }
+
+    private func audioSummary(from audio: AudioTranscription) -> Summary {
+        Summary(
             id: audio.id,
             transcriptId: nil,
             summaryText: audio.summaryText,
@@ -186,7 +211,8 @@ final class MediaToolsService {
             topics: nil,
             status: audio.summaryStatus,
             message: nil,
-            errorMessage: nil
+            errorMessage: audio.summaryErrorMessage,
+            evidence: audio.summaryEvidence
         )
     }
 

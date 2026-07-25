@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net"
@@ -20,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -41,6 +43,15 @@ type Result struct {
 	Language    string
 	Transcript  string
 	WordCount   int
+	Segments    []Segment
+}
+
+// Segment is a seekable source passage. Milliseconds are used throughout the
+// persistence/API layer to avoid floating-point drift in browser players.
+type Segment struct {
+	StartMS int64
+	EndMS   int64
+	Text    string
 }
 
 // WhisperResult holds the output from a Whisper API call.
@@ -48,6 +59,7 @@ type WhisperResult struct {
 	Text     string
 	Language string
 	Duration float64
+	Segments []Segment
 }
 
 // WhisperTranscriber is an interface for audio transcription (used as fallback).
@@ -141,9 +153,9 @@ func (e *YtDlpExtractor) ExtractFromURL(ctx context.Context, videoURL, videoID s
 	// Step 2: Try subtitle extraction first
 	if metadataErr == nil {
 		log.Printf("📝 Extracting transcript for: %s", metadata.Title)
-		transcript, lang, err := e.getTranscript(ctx, videoURL)
+		segments, lang, err := e.getTranscript(ctx, videoURL)
 		if err == nil {
-			cleaned := cleanTranscript(transcript)
+			cleaned := transcriptFromSegments(segments)
 			wordCount := countWords(cleaned)
 			return &Result{
 				VideoID:     videoID,
@@ -153,6 +165,7 @@ func (e *YtDlpExtractor) ExtractFromURL(ctx context.Context, videoURL, videoID s
 				Language:    lang,
 				Transcript:  cleaned,
 				WordCount:   wordCount,
+				Segments:    segments,
 			}, nil
 		}
 		log.Printf("⚠️  Subtitle extraction failed: %v", err)
@@ -200,7 +213,10 @@ func (e *YtDlpExtractor) extractWithWhisper(ctx context.Context, url, videoID st
 	args = append(args,
 		"--extract-audio",
 		"--audio-format", "mp3",
-		"--audio-quality", "0",
+		// 64K mono speech is ample input quality for Whisper and avoids
+		// downloading/uploading a much larger highest-quality MP3.
+		"--audio-quality", "64K",
+		"--postprocessor-args", "ffmpeg:-ac 1 -ar 16000",
 		"--output", audioPath,
 		"--no-playlist",
 		"--quiet",
@@ -254,7 +270,11 @@ func (e *YtDlpExtractor) extractWithWhisper(ctx context.Context, url, videoID st
 		}
 	}
 
-	cleaned := cleanTranscript(result.Text)
+	segments := groupTimedSegments(result.Segments, 30*time.Second, 700)
+	cleaned := transcriptFromSegments(segments)
+	if cleaned == "" {
+		cleaned = cleanTranscript(result.Text)
+	}
 	wordCount := countWords(cleaned)
 
 	return &Result{
@@ -265,6 +285,7 @@ func (e *YtDlpExtractor) extractWithWhisper(ctx context.Context, url, videoID st
 		Language:    result.Language,
 		Transcript:  cleaned,
 		WordCount:   wordCount,
+		Segments:    segments,
 	}, nil
 }
 
@@ -311,7 +332,7 @@ func (e *YtDlpExtractor) getMetadata(ctx context.Context, url string) (*ytDlpMet
 
 // getTranscript extracts the subtitle text using yt-dlp.
 // Returns the transcript text and the language code.
-func (e *YtDlpExtractor) getTranscript(ctx context.Context, url string) (string, string, error) {
+func (e *YtDlpExtractor) getTranscript(ctx context.Context, url string) ([]Segment, string, error) {
 	// Go Pattern: We use a context with timeout to prevent hanging processes.
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel() // Always call cancel to release resources
@@ -320,7 +341,7 @@ func (e *YtDlpExtractor) getTranscript(ctx context.Context, url string) (string,
 	// This is safer than writing to /tmp directly — no filename collisions.
 	tmpDir, err := os.MkdirTemp("", "mta-subs-*")
 	if err != nil {
-		return "", "", fmt.Errorf("failed to create temp directory: %w", err)
+		return nil, "", fmt.Errorf("failed to create temp directory: %w", err)
 	}
 	defer os.RemoveAll(tmpDir) // Clean up when done, no matter what
 
@@ -375,16 +396,17 @@ func (e *YtDlpExtractor) getTranscript(ctx context.Context, url string) (string,
 			lang = parts[len(parts)-2] // Get the language code part
 		}
 
-		text := parseVTT(string(content))
-		if text != "" {
-			return text, lang, nil
+		segments := parseVTTSegments(string(content))
+		if len(segments) > 0 {
+			return segments, lang, nil
 		}
 	}
 
-	return "", "", fmt.Errorf("no subtitles available for this video")
+	return nil, "", fmt.Errorf("no subtitles available for this video")
 }
 
-// parseVTT extracts plain text from a WebVTT subtitle file.
+// parseVTT keeps the legacy plain-text helper used by tests and callers that do
+// not need timing. New ingestion uses parseVTTSegments so cue timing survives.
 // WebVTT format:
 //
 //	WEBVTT
@@ -394,41 +416,183 @@ func (e *YtDlpExtractor) getTranscript(ctx context.Context, url string) (string,
 //	00:00:04.500 --> 00:00:08.000
 //	Today we're going to talk about...
 func parseVTT(vtt string) string {
-	lines := strings.Split(vtt, "\n")
-	var textLines []string
-	seen := make(map[string]bool) // Deduplicate repeated lines
+	return transcriptFromSegments(parseVTTSegments(vtt))
+}
 
-	// Regex to match timestamp lines like "00:00:01.000 --> 00:00:04.000"
-	timestampRegex := regexp.MustCompile(`^\d{2}:\d{2}:\d{2}`)
-	// Regex to match VTT tags like <c> and position info
-	tagRegex := regexp.MustCompile(`<[^>]+>`)
+var (
+	vttTimestampLine = regexp.MustCompile(`^((?:\d{2}:)?\d{2}:\d{2}[.,]\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}[.,]\d{3})`)
+	vttTag           = regexp.MustCompile(`<[^>]+>`)
+	vttCueIdentifier = regexp.MustCompile(`^\d+$`)
+)
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+func parseVTTSegments(vtt string) []Segment {
+	lines := strings.Split(strings.ReplaceAll(vtt, "\r\n", "\n"), "\n")
+	cues := make([]Segment, 0, len(lines)/3)
+	var current *Segment
+	var cueLines []string
 
-		// Skip empty lines, WEBVTT header, timestamp lines, and NOTE lines
-		if line == "" || line == "WEBVTT" || strings.HasPrefix(line, "Kind:") ||
-			strings.HasPrefix(line, "Language:") || strings.HasPrefix(line, "NOTE") ||
-			timestampRegex.MatchString(line) {
-			continue
+	flush := func() {
+		if current == nil {
+			cueLines = cueLines[:0]
+			return
 		}
-
-		// Skip numeric cue identifiers
-		if regexp.MustCompile(`^\d+$`).MatchString(line) {
-			continue
+		text := cleanCueText(strings.Join(cueLines, " "))
+		if text != "" && current.EndMS >= current.StartMS {
+			current.Text = text
+			cues = append(cues, *current)
 		}
-
-		// Remove VTT formatting tags
-		line = tagRegex.ReplaceAllString(line, "")
-		line = strings.TrimSpace(line)
-
-		if line != "" && !seen[line] {
-			seen[line] = true
-			textLines = append(textLines, line)
-		}
+		current = nil
+		cueLines = cueLines[:0]
 	}
 
-	return strings.Join(textLines, " ")
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if match := vttTimestampLine.FindStringSubmatch(line); len(match) == 3 {
+			flush()
+			start, startErr := parseVTTTimestamp(match[1])
+			end, endErr := parseVTTTimestamp(match[2])
+			if startErr == nil && endErr == nil {
+				current = &Segment{StartMS: start, EndMS: end}
+			}
+			continue
+		}
+		if line == "" {
+			flush()
+			continue
+		}
+		if current == nil {
+			// Headers, NOTE blocks, and cue identifiers are outside timed cues.
+			continue
+		}
+		if vttCueIdentifier.MatchString(line) {
+			continue
+		}
+		cueLines = append(cueLines, line)
+	}
+	flush()
+
+	return groupTimedSegments(cues, 30*time.Second, 700)
+}
+
+func parseVTTTimestamp(value string) (int64, error) {
+	normalized := strings.ReplaceAll(value, ",", ".")
+	parts := strings.Split(normalized, ":")
+	if len(parts) != 2 && len(parts) != 3 {
+		return 0, fmt.Errorf("invalid VTT timestamp %q", value)
+	}
+	var hours int64
+	var minutes int64
+	var secondsPart string
+	if len(parts) == 3 {
+		parsedHours, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		hours = parsedHours
+		parsedMinutes, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		minutes = parsedMinutes
+		secondsPart = parts[2]
+	} else {
+		parsedMinutes, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		minutes = parsedMinutes
+		secondsPart = parts[1]
+	}
+	seconds, err := strconv.ParseFloat(secondsPart, 64)
+	if err != nil {
+		return 0, err
+	}
+	return hours*3_600_000 + minutes*60_000 + int64(seconds*1000), nil
+}
+
+func cleanCueText(value string) string {
+	value = html.UnescapeString(vttTag.ReplaceAllString(value, ""))
+	return cleanTranscript(value)
+}
+
+func groupTimedSegments(cues []Segment, targetDuration time.Duration, maxChars int) []Segment {
+	if len(cues) == 0 {
+		return nil
+	}
+	targetMS := targetDuration.Milliseconds()
+	grouped := make([]Segment, 0, len(cues))
+	var current Segment
+
+	flush := func() {
+		current.Text = cleanTranscript(current.Text)
+		if current.Text != "" {
+			grouped = append(grouped, current)
+		}
+		current = Segment{}
+	}
+
+	for _, cue := range cues {
+		cue.Text = cleanCueText(cue.Text)
+		if cue.Text == "" {
+			continue
+		}
+		if current.Text == "" {
+			current = cue
+			continue
+		}
+		gap := cue.StartMS - current.EndMS
+		novel := appendNovelCaptionText(current.Text, cue.Text)
+		wouldExceedDuration := cue.EndMS-current.StartMS > targetMS
+		wouldExceedChars := len(novel) > maxChars
+		if gap > 3_000 || wouldExceedDuration || wouldExceedChars {
+			flush()
+			current = cue
+			continue
+		}
+		current.Text = novel
+		if cue.EndMS > current.EndMS {
+			current.EndMS = cue.EndMS
+		}
+	}
+	flush()
+	return grouped
+}
+
+func appendNovelCaptionText(existing, next string) string {
+	existingWords := strings.Fields(existing)
+	nextWords := strings.Fields(next)
+	maxOverlap := min(len(existingWords), len(nextWords), 30)
+	for overlap := maxOverlap; overlap > 0; overlap-- {
+		if equalWordsFold(existingWords[len(existingWords)-overlap:], nextWords[:overlap]) {
+			if overlap == len(nextWords) {
+				return existing
+			}
+			return strings.Join(append(existingWords, nextWords[overlap:]...), " ")
+		}
+	}
+	return strings.TrimSpace(existing + " " + next)
+}
+
+func equalWordsFold(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if !strings.EqualFold(left[index], right[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func transcriptFromSegments(segments []Segment) string {
+	parts := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		if text := cleanTranscript(segment.Text); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return cleanTranscript(strings.Join(parts, " "))
 }
 
 // cleanTranscript normalizes whitespace and cleans up common transcript artifacts.

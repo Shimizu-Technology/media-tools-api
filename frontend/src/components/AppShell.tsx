@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, type ComponentType } from 'react';
+import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
 import {
   Activity,
@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuthContext } from '../contexts/useAuthContext';
+import { getHealth, getLibraryStats } from '../lib/api';
 
 const CLERK_CONFIGURED = Boolean(
   import.meta.env.VITE_CLERK_PUBLISHABLE_KEY && import.meta.env.VITE_CLERK_PUBLISHABLE_KEY !== 'YOUR_PUBLISHABLE_KEY'
@@ -59,6 +60,26 @@ export function AppShell() {
     try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'; } catch { return false; }
   });
   const { user, isClerkEnabled } = useAuthContext();
+  const [activeJobs, setActiveJobs] = useState(0);
+
+  useEffect(() => {
+    let current = true;
+    const refresh = async () => {
+      try {
+        const stats = await getLibraryStats();
+        if (current) setActiveJobs(stats.pending + stats.processing);
+      } catch {
+        // The navigation remains usable if the lightweight status check fails.
+      }
+    };
+    void getHealth().catch(() => undefined);
+    void refresh();
+    const timer = window.setInterval(() => { void refresh(); }, 8000);
+    return () => {
+      current = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const toggleCollapsed = () => {
     setCollapsed((current) => {
@@ -71,14 +92,14 @@ export function AppShell() {
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}>
 		<aside className={`fixed inset-y-0 left-0 z-40 hidden border-r backdrop-blur-xl transition-[width] duration-200 lg:flex lg:flex-col ${collapsed ? 'w-20' : 'w-72'}`} style={{ backgroundColor: 'var(--color-sidebar-bg)', borderColor: 'var(--color-border)' }}>
-        <SidebarContent collapsed={collapsed} onToggleCollapsed={toggleCollapsed} userName={user?.name || user?.email || 'Media workspace'} isClerkEnabled={isClerkEnabled} />
+        <SidebarContent collapsed={collapsed} onToggleCollapsed={toggleCollapsed} userName={user?.name || user?.email || 'Media workspace'} isClerkEnabled={isClerkEnabled} activeJobs={activeJobs} />
       </aside>
 
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
           <button className="absolute inset-0 bg-black/55" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />
           <aside className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[340px] flex-col border-r" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-            <SidebarContent collapsed={false} onToggleCollapsed={toggleCollapsed} userName={user?.name || user?.email || 'Media workspace'} isClerkEnabled={isClerkEnabled} mobile onNavigate={() => setMobileOpen(false)} />
+            <SidebarContent collapsed={false} onToggleCollapsed={toggleCollapsed} userName={user?.name || user?.email || 'Media workspace'} isClerkEnabled={isClerkEnabled} activeJobs={activeJobs} mobile onNavigate={() => setMobileOpen(false)} />
           </aside>
           <button className="absolute left-[calc(min(86vw,340px)+0.75rem)] top-4 flex h-10 w-10 items-center justify-center rounded-full border bg-white/10 text-white backdrop-blur" style={{ borderColor: 'rgba(255,255,255,0.25)' }} onClick={() => setMobileOpen(false)} aria-label="Close navigation">
             <X className="h-5 w-5" />
@@ -97,6 +118,7 @@ export function AppShell() {
               <p className="hidden truncate text-sm sm:block" style={{ color: 'var(--color-text-secondary)' }}>Capture, summarize, organize, and chat with media.</p>
             </div>
             <div className="flex items-center gap-2">
+              {activeJobs > 0 && <Link to="/app/processing" className="hidden min-h-11 items-center gap-2 rounded-xl border px-3 text-xs font-semibold sm:inline-flex" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}><span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-brand-500)] opacity-50" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--color-brand-500)]" /></span>{activeJobs} active</Link>}
               <details className="group relative hidden sm:block">
                 <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)' }}>
                   <FileText className="h-4 w-4" />
@@ -135,11 +157,12 @@ function NewItemLink({ to, icon: Icon, label }: { to: string; icon: ComponentTyp
   );
 }
 
-function SidebarContent({ collapsed, onToggleCollapsed, userName, isClerkEnabled, mobile = false, onNavigate }: {
+function SidebarContent({ collapsed, onToggleCollapsed, userName, isClerkEnabled, activeJobs, mobile = false, onNavigate }: {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   userName: string;
   isClerkEnabled: boolean;
+  activeJobs: number;
   mobile?: boolean;
   onNavigate?: () => void;
 }) {
@@ -171,7 +194,7 @@ function SidebarContent({ collapsed, onToggleCollapsed, userName, isClerkEnabled
       )}
 
       <nav className="mt-5 flex flex-1 flex-col gap-1 overflow-y-auto">
-        <NavSection items={primaryNav} collapsed={collapsed} onNavigate={onNavigate} />
+        <NavSection items={primaryNav} collapsed={collapsed} onNavigate={onNavigate} activeJobs={activeJobs} />
         <Divider collapsed={collapsed} label="Developer" />
 		<NavSection items={isClerkEnabled ? developerNav : [...developerNav, opsNav]} collapsed={collapsed} onNavigate={onNavigate} />
       </nav>
@@ -192,7 +215,7 @@ function SidebarContent({ collapsed, onToggleCollapsed, userName, isClerkEnabled
   );
 }
 
-function NavSection({ items, collapsed, onNavigate }: { items: NavItem[]; collapsed: boolean; onNavigate?: () => void }) {
+function NavSection({ items, collapsed, onNavigate, activeJobs = 0 }: { items: NavItem[]; collapsed: boolean; onNavigate?: () => void; activeJobs?: number }) {
   return (
     <div className="space-y-1">
       {items.map((item) => {
@@ -201,7 +224,9 @@ function NavSection({ items, collapsed, onNavigate }: { items: NavItem[]; collap
           <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={({ isActive }) => navClass(isActive, collapsed)} title={collapsed ? item.label : undefined}>
             <Icon className="h-5 w-5 shrink-0" />
             {!collapsed && <span>{item.label}</span>}
-            {!collapsed && <ChevronRight className="ml-auto h-4 w-4 opacity-50" />}
+            {!collapsed && item.to === '/app/processing' && activeJobs > 0 && <span className="ml-auto rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>{activeJobs}</span>}
+            {!collapsed && !(item.to === '/app/processing' && activeJobs > 0) && <ChevronRight className="ml-auto h-4 w-4 opacity-50" />}
+            {collapsed && item.to === '/app/processing' && activeJobs > 0 && <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[var(--color-brand-500)] ring-2 ring-[var(--color-sidebar-bg)]" />}
           </NavLink>
         );
       })}
@@ -222,7 +247,7 @@ function Divider({ collapsed, label }: { collapsed: boolean; label: string }) {
 
 function navClass(isActive: boolean, collapsed: boolean) {
   const base = collapsed
-    ? 'group flex min-h-11 items-center justify-center rounded-2xl transition'
+    ? 'group relative flex min-h-11 items-center justify-center rounded-2xl transition'
     : 'group flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm font-medium transition';
 
 	return `${base} ${isActive ? 'bg-[var(--color-brand-500)] text-white shadow-lg shadow-black/15' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-nav-hover)] hover:text-[var(--color-text-primary)]'}`;

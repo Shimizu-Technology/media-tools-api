@@ -13,21 +13,37 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
 
 // Service handles AI summary generation.
 type Service struct {
-	apiKey     string
-	model      string
-	httpClient *http.Client
+	apiKey       string
+	model        string
+	chatModel    string
+	providerSort string
+	httpClient   *http.Client
 }
 
 // New creates a new summary service.
 func New(apiKey, defaultModel string) *Service {
+	return NewWithModels(apiKey, defaultModel, defaultModel, "")
+}
+
+// NewWithModels allows interactive chat to use a faster model independently
+// from the model chosen for durable summaries.
+func NewWithModels(apiKey, summaryModel, chatModel, providerSort string) *Service {
+	if strings.TrimSpace(chatModel) == "" {
+		chatModel = summaryModel
+	}
 	return &Service{
-		apiKey: apiKey,
-		model:  defaultModel,
+		apiKey:       apiKey,
+		model:        summaryModel,
+		chatModel:    chatModel,
+		providerSort: strings.TrimSpace(providerSort),
 		// Go Pattern: Always configure timeouts on HTTP clients.
 		// The default http.Client has NO timeout — requests can hang forever!
 		httpClient: &http.Client{
@@ -46,29 +62,41 @@ type Options struct {
 
 // AudioResult holds the structured output from an audio transcription summary (MTA-22).
 type AudioResult struct {
-	Summary     string   `json:"summary"`
-	KeyPoints   []string `json:"key_points"`
-	ActionItems []string `json:"action_items"`
-	Decisions   []string `json:"decisions"`
-	Model       string   `json:"model"`
+	Summary     string                 `json:"summary"`
+	KeyPoints   []string               `json:"key_points"`
+	ActionItems []string               `json:"action_items"`
+	Decisions   []string               `json:"decisions"`
+	Model       string                 `json:"model"`
+	Evidence    models.SummaryEvidence `json:"evidence"`
 }
 
 // Result holds the generated summary.
 type Result struct {
-	Summary     string   `json:"summary"`
-	KeyPoints   []string `json:"key_points"`
-	ActionItems []string `json:"action_items,omitempty"`
-	Topics      []string `json:"topics,omitempty"`
-	Model       string   `json:"model"`
-	Prompt      string   `json:"prompt"`
+	Summary     string                 `json:"summary"`
+	KeyPoints   []string               `json:"key_points"`
+	ActionItems []string               `json:"action_items,omitempty"`
+	Topics      []string               `json:"topics,omitempty"`
+	Model       string                 `json:"model"`
+	Prompt      string                 `json:"prompt"`
+	Evidence    models.SummaryEvidence `json:"evidence"`
 }
 
 // --- OpenRouter API types ---
 // These match the OpenAI chat completions format used by OpenRouter.
 
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
+	Model          string               `json:"model"`
+	Messages       []chatMessage        `json:"messages"`
+	ResponseFormat *responseFormat      `json:"response_format,omitempty"`
+	Provider       *providerPreferences `json:"provider,omitempty"`
+}
+
+type responseFormat struct {
+	Type string `json:"type"`
+}
+
+type providerPreferences struct {
+	Sort string `json:"sort,omitempty"`
 }
 
 type chatMessage struct {
@@ -123,7 +151,8 @@ func (s *Service) Summarize(ctx context.Context, transcriptText string, opts Opt
 
 	// Make the API request
 	reqBody := chatRequest{
-		Model: model,
+		Model:    model,
+		Provider: s.providerPreferences(),
 		Messages: []chatMessage{
 			{
 				Role:    "system",
@@ -201,7 +230,7 @@ func (s *Service) ChatTranscript(ctx context.Context, contextLabel, transcriptTe
 		return "", "", fmt.Errorf("OpenRouter API key not configured; set OPENROUTER_API_KEY")
 	}
 
-	model := s.model
+	model := s.chatModel
 	if modelOverride != "" {
 		model = modelOverride
 	}
@@ -227,6 +256,7 @@ func (s *Service) ChatTranscript(ctx context.Context, contextLabel, transcriptTe
 	reqBody := chatRequest{
 		Model:    model,
 		Messages: reqMessages,
+		Provider: s.providerPreferences(),
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
@@ -301,7 +331,8 @@ func (s *Service) SummarizeAudio(ctx context.Context, transcriptText string, opt
 	log.Printf("🤖 Generating %s audio summary (%s) using %s", opts.Length, opts.ContentType, model)
 
 	reqBody := chatRequest{
-		Model: model,
+		Model:    model,
+		Provider: s.providerPreferences(),
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: prompt},
@@ -359,6 +390,13 @@ func (s *Service) SummarizeAudio(ctx context.Context, transcriptText string, opt
 	result.Model = model
 
 	return result, nil
+}
+
+func (s *Service) providerPreferences() *providerPreferences {
+	if s.providerSort == "" {
+		return nil
+	}
+	return &providerPreferences{Sort: s.providerSort}
 }
 
 // getAudioSystemPrompt returns a system prompt tailored to the content type (MTA-24).

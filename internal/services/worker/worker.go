@@ -29,12 +29,16 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
+
+	"github.com/google/uuid"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
+	evidenceservice "github.com/Shimizu-Technology/media-tools-api/internal/services/evidence"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
@@ -48,6 +52,7 @@ const (
 	JobTranscriptExtraction JobType = "transcript_extraction"
 	JobSummaryGeneration    JobType = "summary_generation"
 	JobAudioTranscription   JobType = "audio_transcription"
+	JobAudioSummary         JobType = "audio_summary"
 )
 
 const whisperTargetBytes = 24 << 20 // Keep below 25MB hard limit to account for multipart overhead
@@ -81,6 +86,7 @@ func requiresWhisperTranscode(path string) bool {
 
 // Job represents a unit of work to be processed by a worker.
 type Job struct {
+	QueueID   string // Durable background_jobs row ID once claimed
 	ID        string // The database record ID
 	Type      JobType
 	Payload   json.RawMessage // Flexible payload — different job types need different data
@@ -93,6 +99,16 @@ type omittedAudioRange struct {
 	Reason string  `json:"reason"`
 }
 
+type chunkTranscription struct {
+	Index    int
+	Text     string
+	Language string
+	Duration float64
+	Segments []audio.TranscriptionSegment
+	Omitted  *omittedAudioRange
+	Err      error
+}
+
 // SummaryPayload is the data needed for a summary generation job.
 type SummaryPayload struct {
 	TranscriptID string `json:"transcript_id"`
@@ -101,6 +117,13 @@ type SummaryPayload struct {
 	Style        string `json:"style"`
 	ContentType  string `json:"content_type"`
 	SummaryID    string `json:"summary_id"`
+}
+
+type AudioSummaryPayload struct {
+	AudioID     string `json:"audio_id"`
+	Model       string `json:"model"`
+	Length      string `json:"length"`
+	ContentType string `json:"content_type"`
 }
 
 // AudioPayload is the data needed for an audio transcription job.
@@ -114,13 +137,17 @@ type AudioPayload struct {
 
 // Pool manages a pool of worker goroutines.
 type Pool struct {
-	jobs             chan Job
+	wake             chan struct{}
 	workers          int
+	instanceID       string
+	leaseDuration    time.Duration
 	db               *database.DB
 	extractor        transcript.Extractor
 	summarizer       *summary.Service
 	audioTranscriber *audio.Transcriber // Audio transcription via Whisper
 	audioStorage     *storage.S3
+	chunkConcurrency int
+	transcriptionSem chan struct{}
 	webhooks         *webhookservice.Service // MTA-18: webhook notifications
 	webhookSem       chan struct{}           // Caps concurrent webhook goroutines
 	wg               sync.WaitGroup
@@ -130,6 +157,8 @@ type Pool struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
 	stopOnce         sync.Once
+	stateMu          sync.RWMutex
+	stopped          bool
 }
 
 // SetWebhookService sets the webhook service for notifications (MTA-18).
@@ -144,6 +173,19 @@ func (p *Pool) SetAudioTranscriber(at *audio.Transcriber) {
 
 func (p *Pool) SetAudioStorage(as *storage.S3) {
 	p.audioStorage = as
+}
+
+// SetTranscriptionConcurrency bounds parallelism both within one long
+// recording and across all worker jobs.
+func (p *Pool) SetTranscriptionConcurrency(perJob, global int) {
+	if perJob < 1 {
+		perJob = 1
+	}
+	if global < perJob {
+		global = perJob
+	}
+	p.chunkConcurrency = perJob
+	p.transcriptionSem = make(chan struct{}, global)
 }
 
 // NotifyWebhook fires a webhook event asynchronously if the service is configured.
@@ -189,15 +231,23 @@ func (p *Pool) NotifyWebhook(event string, userID, apiKeyID *string, data interf
 // NewPool creates a new worker pool.
 func NewPool(workers, queueSize int, db *database.DB, ext transcript.Extractor, sum *summary.Service) *Pool {
 	ctx, cancel := context.WithCancel(context.Background())
+	wakeBuffer := queueSize
+	if wakeBuffer <= 0 {
+		wakeBuffer = 1
+	}
 	return &Pool{
-		jobs:       make(chan Job, queueSize), // Buffered channel
-		workers:    workers,
-		db:         db,
-		extractor:  ext,
-		summarizer: sum,
-		webhookSem: make(chan struct{}, 20), // Cap concurrent webhook goroutines
-		ctx:        ctx,
-		cancel:     cancel,
+		wake:             make(chan struct{}, wakeBuffer),
+		workers:          workers,
+		instanceID:       uuid.NewString(),
+		leaseDuration:    5 * time.Minute,
+		db:               db,
+		extractor:        ext,
+		summarizer:       sum,
+		webhookSem:       make(chan struct{}, 20), // Cap concurrent webhook goroutines
+		chunkConcurrency: 3,
+		transcriptionSem: make(chan struct{}, 6),
+		ctx:              ctx,
+		cancel:           cancel,
 	}
 }
 
@@ -217,25 +267,14 @@ func (p *Pool) Start() {
 func (p *Pool) Stop() {
 	p.stopOnce.Do(func() {
 		log.Println("⏹️  Stopping workers...")
-		close(p.jobs) // Closing the queue lets workers drain already-queued jobs.
-
-		done := make(chan struct{})
-		go func() {
-			p.wg.Wait()
-			close(done)
-		}()
-
-		workersCanceled := false
-		select {
-		case <-done:
-			log.Println("✅ All workers stopped")
-		case <-time.After(30 * time.Second):
-			log.Println("⚠️  Worker drain timed out, canceling active jobs")
-			p.cancel()
-			workersCanceled = true
-			<-done
-			log.Println("✅ All workers stopped after forced cancellation")
-		}
+		p.stateMu.Lock()
+		p.stopped = true
+		p.stateMu.Unlock()
+		// Durable jobs remain leased and are reclaimed after lease expiry if an
+		// in-flight operation cannot finish before shutdown.
+		p.cancel()
+		p.wg.Wait()
+		log.Println("✅ All workers stopped")
 
 		// No worker can launch another dispatch now. Callers racing with Stop are
 		// rejected under the mutex, while already-started dispatches finish before
@@ -244,59 +283,69 @@ func (p *Pool) Stop() {
 		p.webhooksClosed = true
 		p.webhookMu.Unlock()
 		p.webhookWG.Wait()
-		if !workersCanceled {
-			p.cancel()
-		}
 	})
 }
 
 // Submit adds a job to the queue.
-// Returns an error if the queue is full (non-blocking).
-func (p *Pool) Submit(job Job) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("⚠️  Rejected job %s while worker pool was stopping", job.ID)
-			err = fmt.Errorf("worker pool is stopping")
-		}
-	}()
-
-	// Go Pattern: `select` with `default` makes channel operations non-blocking.
-	// Without default, sending to a full channel would block the HTTP handler.
-	select {
-	case <-p.ctx.Done():
+// Work is persisted first; the channel is only a low-latency wake signal.
+func (p *Pool) Submit(job Job) error {
+	p.stateMu.RLock()
+	stopped := p.stopped
+	p.stateMu.RUnlock()
+	if stopped {
 		return fmt.Errorf("worker pool is stopping")
-	case p.jobs <- job:
-		log.Printf("📥 Job queued: %s (type: %s)", job.ID, job.Type)
-		return nil
-	default:
-		return fmt.Errorf("job queue is full; try again later")
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	inserted, err := p.db.EnqueueBackgroundJob(ctx, string(job.Type), job.ID, job.Payload)
+	if err != nil {
+		return err
+	}
+	if inserted {
+		log.Printf("📥 Durable job queued: %s (type: %s)", job.ID, job.Type)
+	}
+	p.signalWorkers()
+	return nil
 }
 
 // SubmitBlocking adds a job to the queue and blocks until it can be queued
 // or the provided context is canceled.
-func (p *Pool) SubmitBlocking(ctx context.Context, job Job) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("⚠️  Rejected blocking job %s while worker pool was stopping", job.ID)
-			err = fmt.Errorf("worker pool is stopping")
-		}
-	}()
-
-	select {
-	case <-p.ctx.Done():
+func (p *Pool) SubmitBlocking(ctx context.Context, job Job) error {
+	p.stateMu.RLock()
+	stopped := p.stopped
+	p.stateMu.RUnlock()
+	if stopped {
 		return fmt.Errorf("worker pool is stopping")
-	case p.jobs <- job:
-		log.Printf("📥 Job queued (blocking): %s (type: %s)", job.ID, job.Type)
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	}
+	inserted, err := p.db.EnqueueBackgroundJob(ctx, string(job.Type), job.ID, job.Payload)
+	if err != nil {
+		return err
+	}
+	if inserted {
+		log.Printf("📥 Durable job queued: %s (type: %s)", job.ID, job.Type)
+	}
+	p.signalWorkers()
+	return nil
+}
+
+func (p *Pool) signalWorkers() {
+	select {
+	case p.wake <- struct{}{}:
+	default:
 	}
 }
 
 // QueueSize returns the current number of jobs in the queue.
 func (p *Pool) QueueSize() int {
-	return len(p.jobs)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	count, err := p.db.CountQueuedBackgroundJobs(ctx)
+	if err != nil {
+		log.Printf("⚠️  Failed to count durable jobs: %v", err)
+		return 0
+	}
+	return count
 }
 
 // WorkerCount returns the number of workers.
@@ -317,16 +366,6 @@ func (p *Pool) RecoverTranscriptJobs(ctx context.Context, limit int) (int, error
 		if t.Status == models.StatusCompleted || t.Status == models.StatusFailed {
 			continue
 		}
-		if t.Status == models.StatusProcessing {
-			// A worker died mid-job, so reflect reality before requeueing it.
-			t.Status = models.StatusPending
-			if err := p.db.UpdateTranscript(ctx, &t); err != nil {
-				recoveryErrs = append(recoveryErrs, fmt.Sprintf("reset %s: %v", t.ID, err))
-				log.Printf("⚠️  Failed to reset transcript %s for recovery: %v", t.ID, err)
-				continue
-			}
-		}
-
 		job := Job{
 			ID:        t.ID,
 			Type:      JobTranscriptExtraction,
@@ -361,18 +400,6 @@ func (p *Pool) RecoverAudioJobs(ctx context.Context, limit int) (int, error) {
 			continue
 		}
 
-		if at.Status == "processing" {
-			// A worker died mid-job, so reflect reality before requeueing it.
-			at.Status = "pending"
-			at.ProcessingStage = "queued"
-			at.ProcessingProgress = 0
-			if err := p.db.UpdateAudioTranscription(ctx, &at); err != nil {
-				recoveryErrs = append(recoveryErrs, fmt.Sprintf("reset %s: %v", at.ID, err))
-				log.Printf("⚠️  Failed to reset audio transcription %s for recovery: %v", at.ID, err)
-				continue
-			}
-		}
-
 		payload := AudioPayload{
 			AudioID:      at.ID,
 			AudioS3Key:   at.AudioS3Key,
@@ -398,10 +425,6 @@ func (p *Pool) RecoverAudioJobs(ctx context.Context, limit int) (int, error) {
 		}
 
 		requeued++
-		if err := p.db.UpdateAudioProcessing(ctx, at.ID, "queued", 0); err != nil {
-			recoveryErrs = append(recoveryErrs, fmt.Sprintf("mark queued %s: %v", at.ID, err))
-			log.Printf("⚠️  Failed to update recovered audio transcription %s to queued: %v", at.ID, err)
-		}
 	}
 
 	if len(recoveryErrs) > 0 {
@@ -423,15 +446,6 @@ func (p *Pool) RecoverSummaryJobs(ctx context.Context, limit int) (int, error) {
 	requeued := 0
 	var recoveryErrs []string
 	for _, s := range rows {
-		if s.Status == models.StatusProcessing {
-			s.Status = models.StatusPending
-			s.ErrorMessage = ""
-			if err := p.db.UpdateSummary(ctx, &s); err != nil {
-				recoveryErrs = append(recoveryErrs, fmt.Sprintf("reset %s: %v", s.ID, err))
-				continue
-			}
-		}
-
 		payload, err := json.Marshal(SummaryPayload{
 			TranscriptID: s.TranscriptID,
 			Model:        s.ModelUsed,
@@ -457,49 +471,159 @@ func (p *Pool) RecoverSummaryJobs(ctx context.Context, limit int) (int, error) {
 	return requeued, nil
 }
 
-// worker is the main loop for each worker goroutine.
-// It reads jobs from the channel and processes them.
+// RecoverAudioSummaryJobs ensures legacy/interrupted audio summary rows have a
+// corresponding durable job.
+func (p *Pool) RecoverAudioSummaryJobs(ctx context.Context, limit int) (int, error) {
+	rows, err := p.db.ListRecoverableAudioSummaries(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+	requeued := 0
+	var recoveryErrs []string
+	for _, at := range rows {
+		payload, err := json.Marshal(AudioSummaryPayload{
+			AudioID:     at.ID,
+			ContentType: string(at.ContentType),
+			Model:       at.SummaryModel,
+			Length:      "medium",
+		})
+		if err != nil {
+			recoveryErrs = append(recoveryErrs, fmt.Sprintf("marshal %s: %v", at.ID, err))
+			continue
+		}
+		if err := p.SubmitBlocking(ctx, Job{
+			ID: at.ID, Type: JobAudioSummary, Payload: payload, CreatedAt: time.Now(),
+		}); err != nil {
+			recoveryErrs = append(recoveryErrs, fmt.Sprintf("requeue %s: %v", at.ID, err))
+			continue
+		}
+		requeued++
+	}
+	if len(recoveryErrs) > 0 {
+		return requeued, fmt.Errorf("audio summary recovery completed with %d issue(s): %s", len(recoveryErrs), strings.Join(recoveryErrs, "; "))
+	}
+	return requeued, nil
+}
+
+// worker claims durable rows. The wake channel avoids polling latency while a
+// periodic tick recovers work submitted by another process.
 func (p *Pool) worker(id int) {
 	defer p.wg.Done() // Signal completion when this worker exits
 
 	log.Printf("👷 Worker %d started", id)
 
-	// Go Pattern: `range` over a channel reads values until the channel is closed.
-	// This is the idiomatic way to consume from a channel.
-	for job := range p.jobs {
-		// Check if we should stop
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		claimed, err := p.db.ClaimBackgroundJob(p.ctx, p.instanceID, p.leaseDuration)
+		if err != nil {
+			if p.ctx.Err() != nil {
+				return
+			}
+			log.Printf("⚠️  Worker %d failed to claim a job: %v", id, err)
+		}
+		if claimed != nil {
+			p.runClaimedJob(id, claimed)
+			continue
+		}
+
 		select {
 		case <-p.ctx.Done():
 			log.Printf("👷 Worker %d shutting down", id)
 			return
-		default:
-			// Continue processing
-		}
-
-		log.Printf("👷 Worker %d processing job: %s (type: %s)", id, job.ID, job.Type)
-
-		// Go Pattern: Error handling — each job type has its own handler.
-		// We use a switch statement (like a match/case in other languages).
-		var err error
-		switch job.Type {
-		case JobTranscriptExtraction:
-			err = p.processTranscript(job)
-		case JobSummaryGeneration:
-			err = p.processSummary(job)
-		case JobAudioTranscription:
-			err = p.processAudioTranscription(job)
-		default:
-			log.Printf("❌ Worker %d: unknown job type: %s", id, job.Type)
-		}
-
-		if err != nil {
-			log.Printf("❌ Worker %d: job %s failed: %v", id, job.ID, err)
-		} else {
-			log.Printf("✅ Worker %d: job %s completed", id, job.ID)
+		case <-p.wake:
+		case <-ticker.C:
 		}
 	}
+}
 
-	log.Printf("👷 Worker %d stopped", id)
+func (p *Pool) runClaimedJob(workerNumber int, claimed *models.BackgroundJob) {
+	job := Job{
+		QueueID:   claimed.ID,
+		ID:        claimed.ResourceID,
+		Type:      JobType(claimed.JobType),
+		Payload:   claimed.Payload,
+		CreatedAt: claimed.CreatedAt,
+	}
+	started := time.Now()
+	log.Printf("👷 Worker %d processing durable job %s: %s (type: %s, attempt: %d)",
+		workerNumber, job.QueueID, job.ID, job.Type, claimed.Attempts)
+
+	heartbeatDone := make(chan struct{})
+	heartbeatStopped := make(chan struct{})
+	go func() {
+		defer close(heartbeatStopped)
+		p.heartbeatJob(job.QueueID, heartbeatDone)
+	}()
+	err := p.dispatchJob(job)
+	close(heartbeatDone)
+	<-heartbeatStopped
+
+	if p.ctx.Err() != nil {
+		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		releaseErr := p.db.ExpireBackgroundJobLease(releaseCtx, job.QueueID, p.instanceID)
+		releaseCancel()
+		if releaseErr != nil {
+			log.Printf("⚠️  Worker %d could not release job %s during shutdown: %v", workerNumber, job.QueueID, releaseErr)
+		} else {
+			log.Printf("⏹️  Worker %d released job %s for immediate recovery", workerNumber, job.QueueID)
+		}
+		return
+	}
+	markCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err != nil {
+		if markErr := p.db.FailBackgroundJob(markCtx, job.QueueID, p.instanceID, err.Error()); markErr != nil {
+			log.Printf("⚠️  Failed to mark durable job %s failed: %v", job.QueueID, markErr)
+		}
+		log.Printf("❌ Worker %d: job %s failed after %s: %v", workerNumber, job.ID, time.Since(started).Round(time.Millisecond), err)
+		return
+	}
+	if err := p.db.CompleteBackgroundJob(markCtx, job.QueueID, p.instanceID); err != nil {
+		log.Printf("⚠️  Failed to mark durable job %s complete: %v", job.QueueID, err)
+		return
+	}
+	log.Printf("✅ Worker %d: job %s completed in %s", workerNumber, job.ID, time.Since(started).Round(time.Millisecond))
+}
+
+func (p *Pool) heartbeatJob(jobID string, done <-chan struct{}) {
+	ticker := time.NewTicker(p.leaseDuration / 3)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-p.ctx.Done():
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err := p.db.HeartbeatBackgroundJob(ctx, jobID, p.instanceID, p.leaseDuration)
+			cancel()
+			if err != nil {
+				log.Printf("⚠️  Background job %s heartbeat failed: %v", jobID, err)
+			}
+		}
+	}
+}
+
+func (p *Pool) dispatchJob(job Job) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("worker panic: %v", recovered)
+		}
+	}()
+	switch job.Type {
+	case JobTranscriptExtraction:
+		return p.processTranscript(job)
+	case JobSummaryGeneration:
+		return p.processSummary(job)
+	case JobAudioTranscription:
+		return p.processAudioTranscription(job)
+	case JobAudioSummary:
+		return p.processAudioSummary(job)
+	default:
+		return fmt.Errorf("unknown job type: %s", job.Type)
+	}
 }
 
 // processTranscript handles transcript extraction jobs.
@@ -510,6 +634,12 @@ func (p *Pool) processTranscript(job Job) error {
 	t, err := p.db.GetTranscript(ctx, job.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get transcript: %w", err)
+	}
+	if t.Status == models.StatusCompleted || t.Status == models.StatusFailed {
+		// A worker may crash after saving the resource but before acknowledging
+		// the queue row. Treat that replay as success instead of doing paid work
+		// twice or overwriting a terminal user-visible result.
+		return nil
 	}
 
 	// Update status to processing
@@ -538,9 +668,20 @@ func (p *Pool) processTranscript(job Job) error {
 	t.TranscriptText = result.Transcript
 	t.WordCount = result.WordCount
 	t.Status = models.StatusCompleted
+	t.ErrorMessage = ""
 
-	if err := p.db.UpdateTranscript(ctx, t); err != nil {
-		return fmt.Errorf("failed to save transcript: %w", err)
+	segments := make([]models.MediaSegment, 0, len(result.Segments))
+	for _, segment := range result.Segments {
+		startMS := segment.StartMS
+		endMS := segment.EndMS
+		segments = append(segments, models.MediaSegment{
+			StartMS: &startMS,
+			EndMS:   &endMS,
+			Text:    segment.Text,
+		})
+	}
+	if err := p.db.CompleteTranscriptWithSegments(ctx, t, segments); err != nil {
+		return fmt.Errorf("failed to save transcript and evidence: %w", err)
 	}
 
 	p.NotifyWebhook("transcript.completed", t.UserID, t.APIKeyID, t) // MTA-18
@@ -573,6 +714,9 @@ func (p *Pool) processSummary(job Job) error {
 	if err != nil {
 		return fmt.Errorf("summary job not found: %w", err)
 	}
+	if s.Status == models.StatusCompleted || s.Status == models.StatusFailed {
+		return nil
+	}
 	s.Status = models.StatusProcessing
 	s.ErrorMessage = ""
 	if err := p.db.UpdateSummary(ctx, s); err != nil {
@@ -603,7 +747,18 @@ func (p *Pool) processSummary(job Job) error {
 		ContentType: payload.ContentType,
 	}
 
-	result, err := p.summarizer.Summarize(ctx, t.TranscriptText, opts)
+	segments, err := p.ensureMediaSegments(ctx, "transcript", t.ID, t.Title, t.TranscriptText)
+	if err != nil {
+		s.Status = models.StatusFailed
+		s.ErrorMessage = err.Error()
+		_ = p.db.UpdateSummary(ctx, s)
+		return fmt.Errorf("load transcript evidence: %w", err)
+	}
+	result, err := p.summarizer.SummarizeEvidence(
+		ctx,
+		evidenceservice.ToSummarySegments(segments, t.Title),
+		opts,
+	)
 	if err != nil {
 		s.Status = models.StatusFailed
 		s.ErrorMessage = err.Error()
@@ -621,11 +776,13 @@ func (p *Pool) processSummary(job Job) error {
 
 	// Save to database
 	keyPointsJSON, _ := json.Marshal(result.KeyPoints)
+	evidenceJSON, _ := json.Marshal(result.Evidence)
 
 	s.ModelUsed = result.Model
 	s.PromptUsed = result.Prompt
 	s.SummaryText = result.Summary
 	s.KeyPoints = keyPointsJSON
+	s.Evidence = evidenceJSON
 	s.Status = models.StatusCompleted
 	s.ErrorMessage = ""
 	if err := p.db.UpdateSummary(ctx, s); err != nil {
@@ -634,6 +791,91 @@ func (p *Pool) processSummary(job Job) error {
 
 	p.NotifyWebhook("summary.completed", t.UserID, t.APIKeyID, s)
 	return nil
+}
+
+func (p *Pool) processAudioSummary(job Job) error {
+	ctx := p.ctx
+	var payload AudioSummaryPayload
+	if err := json.Unmarshal(job.Payload, &payload); err != nil {
+		return fmt.Errorf("invalid audio summary payload: %w", err)
+	}
+	at, err := p.db.GetAudioTranscription(ctx, payload.AudioID)
+	if err != nil {
+		return fmt.Errorf("audio summary item not found: %w", err)
+	}
+	if at.SummaryStatus == "completed" || at.SummaryStatus == "failed" {
+		return nil
+	}
+	if at.Status != "completed" || strings.TrimSpace(at.TranscriptText) == "" {
+		return fmt.Errorf("audio transcription is not ready for summarization")
+	}
+	at.ContentType = models.AudioContentType(payload.ContentType)
+	if at.ContentType == "" {
+		at.ContentType = models.ContentGeneral
+	}
+	at.SummaryStatus = "processing"
+	at.SummaryErrorMessage = ""
+	if err := p.db.UpdateAudioSummary(ctx, at); err != nil {
+		return fmt.Errorf("mark audio summary processing: %w", err)
+	}
+
+	segments, err := p.ensureMediaSegments(ctx, "audio", at.ID, at.OriginalName, at.TranscriptText)
+	if err != nil {
+		at.SummaryStatus = "failed"
+		at.SummaryErrorMessage = err.Error()
+		_ = p.db.UpdateAudioSummary(ctx, at)
+		return fmt.Errorf("load audio evidence: %w", err)
+	}
+	result, err := p.summarizer.SummarizeAudioEvidence(
+		ctx,
+		evidenceservice.ToSummarySegments(segments, at.OriginalName),
+		summary.Options{
+			Model:       payload.Model,
+			Length:      payload.Length,
+			ContentType: string(at.ContentType),
+			Style:       "bullet",
+		},
+	)
+	if err != nil {
+		at.SummaryStatus = "failed"
+		at.SummaryErrorMessage = err.Error()
+		_ = p.db.UpdateAudioSummary(ctx, at)
+		return fmt.Errorf("generate audio summary: %w", err)
+	}
+
+	at.SummaryText = result.Summary
+	at.KeyPoints, _ = json.Marshal(result.KeyPoints)
+	at.ActionItems, _ = json.Marshal(result.ActionItems)
+	at.Decisions, _ = json.Marshal(result.Decisions)
+	at.SummaryEvidence, _ = json.Marshal(result.Evidence)
+	at.SummaryModel = result.Model
+	at.SummaryStatus = "completed"
+	at.SummaryErrorMessage = ""
+	if err := p.db.UpdateAudioSummary(ctx, at); err != nil {
+		return fmt.Errorf("save audio summary: %w", err)
+	}
+	return nil
+}
+
+func (p *Pool) ensureMediaSegments(
+	ctx context.Context,
+	itemType, itemID, itemTitle, text string,
+) ([]models.MediaSegment, error) {
+	segments, err := p.db.ListMediaSegments(ctx, itemType, itemID)
+	if err != nil {
+		return nil, err
+	}
+	if len(segments) > 0 {
+		return segments, nil
+	}
+	legacy := evidenceservice.ChunkText(text, 1_200)
+	if len(legacy) == 0 {
+		return nil, fmt.Errorf("no evidence could be created for %s", itemTitle)
+	}
+	if err := p.db.ReplaceMediaSegments(ctx, itemType, itemID, legacy); err != nil {
+		return nil, err
+	}
+	return p.db.ListMediaSegments(ctx, itemType, itemID)
 }
 
 // processAudioTranscription handles audio transcription jobs via Whisper API.
@@ -650,6 +892,9 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	at, err := p.db.GetAudioTranscription(ctx, payload.AudioID)
 	if err != nil {
 		return fmt.Errorf("failed to get audio transcription: %w", err)
+	}
+	if at.Status == "completed" || at.Status == "failed" {
+		return nil
 	}
 
 	if retryCount, err := p.db.IncrementAudioRetryCount(ctx, at.ID); err == nil {
@@ -859,48 +1104,25 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	} else {
 		partTexts := make([]string, 0, len(transcriptionParts))
 		languageCounts := map[string]int{}
-		for idx, partPath := range transcriptionParts {
-			if len(transcriptionParts) > 0 {
-				progress := 40 + int(float64(idx)/float64(len(transcriptionParts))*50)
-				_ = p.db.UpdateAudioProcessing(ctx, at.ID, "transcribing", progress)
-			}
-			partName := fmt.Sprintf("%s.part.%03d%s",
-				strings.TrimSuffix(payload.OriginalName, filepath.Ext(payload.OriginalName)),
-				idx+1,
-				filepath.Ext(partPath),
-			)
-			log.Printf("📝 Audio job %s sending chunk %d/%d to Whisper", at.ID, idx+1, len(transcriptionParts))
-			result, err := p.transcribeFile(ctx, partPath, partName)
-			if err != nil {
-				log.Printf("❌ Whisper chunk transcription failed (%s): %v", partName, err)
-				at.Status = "failed"
-				at.ErrorMessage = err.Error()
-				p.db.UpdateAudioTranscription(ctx, at)
-				p.NotifyWebhook("audio.failed", at.UserID, at.APIKeyID, at)
-				return fmt.Errorf("chunk transcription failed (%s): %w", partName, err)
-			}
-			cleanedText, cleanedSegments, removedSegments, chunkQualityErr := assessTranscriptionChunk(result)
-			if removedSegments > 0 {
-				log.Printf("🧹 Audio job %s removed %d repeated Whisper segment(s) from chunk %d/%d", at.ID, removedSegments, idx+1, len(transcriptionParts))
-			}
-			chunkStart := float64(idx * chunkSeconds)
-			chunkEnd := chunkStart + result.Duration
+		chunkResults, chunkErr := p.transcribeChunks(
+			ctx, at.ID, payload.OriginalName, transcriptionParts, chunkSeconds, sourceDuration,
+		)
+		if chunkErr != nil {
+			log.Printf("❌ Whisper chunk transcription failed for %s: %v", payload.OriginalName, chunkErr)
+			at.Status = "failed"
+			at.ErrorMessage = chunkErr.Error()
+			_ = p.db.UpdateAudioTranscription(ctx, at)
+			p.NotifyWebhook("audio.failed", at.UserID, at.APIKeyID, at)
+			return chunkErr
+		}
+		for _, result := range chunkResults {
 			duration += result.Duration
-			if sourceDuration > 0 && chunkEnd > sourceDuration {
-				chunkEnd = sourceDuration
-			}
-			if chunkQualityErr != nil {
-				omittedRanges = append(omittedRanges, omittedAudioRange{Start: chunkStart, End: chunkEnd, Reason: chunkQualityErr.Error()})
-				log.Printf("⚠️  Audio job %s omitted chunk %d/%d (%.1fs-%.1fs): %v", at.ID, idx+1, len(transcriptionParts), chunkStart, chunkEnd, chunkQualityErr)
+			if result.Omitted != nil {
+				omittedRanges = append(omittedRanges, *result.Omitted)
 				continue
 			}
-
-			partTexts = append(partTexts, cleanedText)
-			for segmentIdx := range cleanedSegments {
-				cleanedSegments[segmentIdx].Start += chunkStart
-				cleanedSegments[segmentIdx].End += chunkStart
-			}
-			transcriptionSegments = append(transcriptionSegments, cleanedSegments...)
+			partTexts = append(partTexts, result.Text)
+			transcriptionSegments = append(transcriptionSegments, result.Segments...)
 			if result.Language != "" {
 				languageCounts[result.Language]++
 			}
@@ -977,10 +1199,24 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	at.ProcessingStage = "completed"
 	at.ProcessingProgress = 100
 
-	updated, err := p.db.UpdateAudioTranscriptionIfActive(ctx, at)
+	segments := make([]models.MediaSegment, 0, len(transcriptionSegments))
+	for _, segment := range transcriptionSegments {
+		text := strings.TrimSpace(segment.Text)
+		if text == "" {
+			continue
+		}
+		startMS := int64(segment.Start * 1000)
+		endMS := int64(segment.End * 1000)
+		segments = append(segments, models.MediaSegment{
+			StartMS: &startMS,
+			EndMS:   &endMS,
+			Text:    text,
+		})
+	}
+	updated, err := p.db.CompleteAudioTranscriptionWithSegments(ctx, at, segments)
 	if err != nil {
-		log.Printf("⚠️  Failed to save audio transcription result: %v", err)
-		return fmt.Errorf("failed to save transcription: %w", err)
+		log.Printf("⚠️  Failed to save audio transcription result and evidence: %v", err)
+		return fmt.Errorf("failed to save transcription and evidence: %w", err)
 	}
 	if !updated {
 		return fmt.Errorf("audio transcription stopped before completion")
@@ -994,7 +1230,105 @@ func (p *Pool) processAudioTranscription(job Job) error {
 }
 
 func (p *Pool) transcribeFile(ctx context.Context, path, originalName string) (*audio.TranscriptionResult, error) {
+	select {
+	case p.transcriptionSem <- struct{}{}:
+		defer func() { <-p.transcriptionSem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	return p.transcribeFileWithRetry(ctx, path, originalName, 4)
+}
+
+func (p *Pool) transcribeChunks(
+	ctx context.Context,
+	audioID, originalName string,
+	paths []string,
+	chunkSeconds int,
+	sourceDuration float64,
+) ([]chunkTranscription, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	concurrency := min(max(1, p.chunkConcurrency), len(paths))
+	chunkCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	results := make([]chunkTranscription, len(paths))
+	indexes := make(chan int)
+	var completed atomic.Int64
+	var wg sync.WaitGroup
+
+	for workerIndex := 0; workerIndex < concurrency; workerIndex++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range indexes {
+				partPath := paths[index]
+				partName := fmt.Sprintf("%s.part.%03d%s",
+					strings.TrimSuffix(originalName, filepath.Ext(originalName)),
+					index+1,
+					filepath.Ext(partPath),
+				)
+				log.Printf("📝 Audio job %s sending chunk %d/%d to Whisper", audioID, index+1, len(paths))
+				result, err := p.transcribeFile(chunkCtx, partPath, partName)
+				if err != nil {
+					results[index] = chunkTranscription{Index: index, Err: fmt.Errorf("chunk transcription failed (%s): %w", partName, err)}
+					cancel()
+					continue
+				}
+				cleanedText, cleanedSegments, removedSegments, qualityErr := assessTranscriptionChunk(result)
+				if removedSegments > 0 {
+					log.Printf("🧹 Audio job %s removed %d repeated Whisper segment(s) from chunk %d/%d", audioID, removedSegments, index+1, len(paths))
+				}
+				chunkStart := float64(index * chunkSeconds)
+				chunkEnd := chunkStart + result.Duration
+				if sourceDuration > 0 && chunkEnd > sourceDuration {
+					chunkEnd = sourceDuration
+				}
+				chunkResult := chunkTranscription{
+					Index: index, Text: cleanedText, Language: result.Language,
+					Duration: result.Duration, Segments: cleanedSegments,
+				}
+				if qualityErr != nil {
+					chunkResult.Omitted = &omittedAudioRange{
+						Start: chunkStart, End: chunkEnd, Reason: qualityErr.Error(),
+					}
+					log.Printf("⚠️  Audio job %s omitted chunk %d/%d (%.1fs-%.1fs): %v",
+						audioID, index+1, len(paths), chunkStart, chunkEnd, qualityErr)
+				} else {
+					for segmentIndex := range chunkResult.Segments {
+						chunkResult.Segments[segmentIndex].Start += chunkStart
+						chunkResult.Segments[segmentIndex].End += chunkStart
+					}
+				}
+				results[index] = chunkResult
+				done := completed.Add(1)
+				progress := 40 + int(float64(done)/float64(len(paths))*50)
+				_ = p.db.UpdateAudioProcessing(ctx, audioID, "transcribing", progress)
+			}
+		}()
+	}
+
+sendLoop:
+	for index := range paths {
+		select {
+		case indexes <- index:
+		case <-chunkCtx.Done():
+			break sendLoop
+		}
+	}
+	close(indexes)
+	wg.Wait()
+
+	for _, result := range results {
+		if result.Err != nil {
+			return nil, result.Err
+		}
+	}
+	if err := chunkCtx.Err(); err != nil && ctx.Err() == nil {
+		return nil, fmt.Errorf("chunk transcription canceled: %w", err)
+	}
+	return results, ctx.Err()
 }
 
 // whisperUploadFilename ensures the multipart filename extension matches the

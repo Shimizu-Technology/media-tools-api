@@ -1,6 +1,11 @@
 package audio
 
-import "testing"
+import (
+	"bytes"
+	"mime/multipart"
+	"strings"
+	"testing"
+)
 
 func TestWhisperContentType(t *testing.T) {
 	tests := []struct {
@@ -24,5 +29,48 @@ func TestWhisperContentType(t *testing.T) {
 				t.Fatalf("whisperContentType() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWriteTranscriptionMultipartStreamsAudioAndVerboseTimingFields(t *testing.T) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	boundary := writer.Boundary()
+	if err := writeTranscriptionMultipart(
+		writer,
+		strings.NewReader("audio-bytes"),
+		`meeting "notes".mp3`,
+		"whisper-1",
+		"en",
+		"Product names",
+	); err != nil {
+		t.Fatalf("writeTranscriptionMultipart() error = %v", err)
+	}
+
+	reader := multipart.NewReader(bytes.NewReader(body.Bytes()), boundary)
+	fields := map[string]string{}
+	for {
+		part, err := reader.NextPart()
+		if err != nil {
+			break
+		}
+		var value bytes.Buffer
+		_, _ = value.ReadFrom(part)
+		if part.FormName() == "file" {
+			if part.FileName() != `meeting "notes".mp3` {
+				t.Fatalf("filename = %q, want escaped original name", part.FileName())
+			}
+			if value.String() != "audio-bytes" {
+				t.Fatalf("file body = %q, want streamed audio", value.String())
+			}
+			continue
+		}
+		fields[part.FormName()] = value.String()
+	}
+	if fields["model"] != "whisper-1" ||
+		fields["language"] != "en" ||
+		fields["prompt"] != "Product names" ||
+		fields["response_format"] != "verbose_json" {
+		t.Fatalf("multipart fields = %#v, want model, language, prompt, and verbose timing", fields)
 	}
 }

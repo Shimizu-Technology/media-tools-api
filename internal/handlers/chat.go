@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
+	evidenceservice "github.com/Shimizu-Technology/media-tools-api/internal/services/evidence"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 )
 
@@ -17,6 +19,7 @@ type chatTarget struct {
 	ItemID       string
 	ContextLabel string
 	Text         string
+	Title        string
 	UserID       *string
 	APIKeyID     *string
 }
@@ -44,6 +47,7 @@ func (h *Handler) loadTranscriptChatTarget(c *gin.Context) (*chatTarget, *models
 		ItemID:       t.ID,
 		ContextLabel: "YouTube transcript",
 		Text:         t.TranscriptText,
+		Title:        t.Title,
 		UserID:       actor.UserID,
 		APIKeyID:     actor.APIKeyID,
 	}, nil, 0
@@ -72,6 +76,7 @@ func (h *Handler) loadAudioChatTarget(c *gin.Context) (*chatTarget, *models.Erro
 		ItemID:       at.ID,
 		ContextLabel: "audio transcription",
 		Text:         at.TranscriptText,
+		Title:        at.OriginalName,
 		UserID:       actor.UserID,
 		APIKeyID:     actor.APIKeyID,
 	}, nil, 0
@@ -100,6 +105,7 @@ func (h *Handler) loadPDFChatTarget(c *gin.Context) (*chatTarget, *models.ErrorR
 		ItemID:       pe.ID,
 		ContextLabel: "PDF text extraction",
 		Text:         pe.TextContent,
+		Title:        pe.OriginalName,
 		UserID:       actor.UserID,
 		APIKeyID:     actor.APIKeyID,
 	}, nil, 0
@@ -208,10 +214,42 @@ func (h *Handler) postChatResponse(c *gin.Context, target *chatTarget, req model
 		Content: req.Message,
 	})
 
-	answer, modelUsed, err := h.Summarizer.ChatTranscript(
+	segments, err := h.DB.SearchMediaSegments(
+		c.Request.Context(),
+		target.ItemType,
+		target.ItemID,
+		req.Message,
+		15,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "database_error", Message: "Failed to retrieve source evidence", Code: http.StatusInternalServerError,
+		})
+		return
+	}
+	if len(segments) == 0 {
+		legacy := evidenceservice.ChunkText(target.Text, 1_200)
+		if len(legacy) > 0 {
+			if err := h.DB.ReplaceMediaSegments(c.Request.Context(), target.ItemType, target.ItemID, legacy); err != nil {
+				log.Printf("Legacy evidence backfill failed (%s:%s): %v", target.ItemType, target.ItemID, err)
+			} else {
+				segments, _ = h.DB.SearchMediaSegments(
+					c.Request.Context(), target.ItemType, target.ItemID, req.Message, 15,
+				)
+			}
+		}
+	}
+	if len(segments) == 0 {
+		c.JSON(http.StatusConflict, models.ErrorResponse{
+			Error: "no_evidence", Message: "No source evidence is available for chat", Code: http.StatusConflict,
+		})
+		return
+	}
+
+	answer, err := h.Summarizer.ChatEvidence(
 		c.Request.Context(),
 		target.ContextLabel,
-		target.Text,
+		evidenceservice.ToSummarySegments(segments, target.Title),
 		chatHistory,
 		req.Model,
 	)
@@ -227,9 +265,10 @@ func (h *Handler) postChatResponse(c *gin.Context, target *chatTarget, req model
 	assistantMsg := &models.TranscriptChatMessage{
 		SessionID: session.ID,
 		Role:      "assistant",
-		Content:   strings.TrimSpace(answer),
-		ModelUsed: modelUsed,
+		Content:   strings.TrimSpace(answer.Answer),
+		ModelUsed: answer.Model,
 	}
+	assistantMsg.Citations, _ = json.Marshal(answer.Citations)
 	if err := h.DB.CreateChatMessage(c.Request.Context(), assistantMsg); err != nil {
 		log.Printf("Assistant message save failed (session %s): %v", session.ID, err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{

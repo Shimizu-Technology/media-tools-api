@@ -252,6 +252,47 @@ Test content`,
 	}
 }
 
+func TestParseVTTSegmentsPreservesSeekableTimingAndDeduplicatesRollingCaptions(t *testing.T) {
+	vtt := `WEBVTT
+
+00:00:01.250 --> 00:00:03.000
+Welcome to the project
+
+00:00:02.750 --> 00:00:05.500
+Welcome to the project overview
+
+01:02:03.400 --> 01:02:05.000
+This starts after an hour`
+
+	segments := parseVTTSegments(vtt)
+	if len(segments) != 2 {
+		t.Fatalf("parseVTTSegments() returned %d segments, want 2: %#v", len(segments), segments)
+	}
+	if segments[0].StartMS != 1_250 || segments[0].EndMS != 5_500 {
+		t.Fatalf("first timing = %d-%d, want 1250-5500", segments[0].StartMS, segments[0].EndMS)
+	}
+	if segments[0].Text != "Welcome to the project overview" {
+		t.Fatalf("first text = %q, want rolling caption text without duplicate prefix", segments[0].Text)
+	}
+	if segments[1].StartMS != 3_723_400 || segments[1].EndMS != 3_725_000 {
+		t.Fatalf("hour timing = %d-%d, want 3723400-3725000", segments[1].StartMS, segments[1].EndMS)
+	}
+}
+
+func TestParseVTTSegmentsSupportsMinuteOnlyTimestampsAndCueSettings(t *testing.T) {
+	vtt := `WEBVTT
+
+00:59.900 --> 01:01.250 align:start position:0%
+Before and after the minute`
+	segments := parseVTTSegments(vtt)
+	if len(segments) != 1 {
+		t.Fatalf("parseVTTSegments() returned %d segments, want 1", len(segments))
+	}
+	if segments[0].StartMS != 59_900 || segments[0].EndMS != 61_250 {
+		t.Fatalf("timing = %d-%d, want 59900-61250", segments[0].StartMS, segments[0].EndMS)
+	}
+}
+
 // TestCleanTranscript tests transcript text cleanup.
 func TestCleanTranscript(t *testing.T) {
 	tests := []struct {

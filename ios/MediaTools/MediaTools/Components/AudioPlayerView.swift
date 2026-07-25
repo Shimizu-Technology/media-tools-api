@@ -4,9 +4,15 @@ import AVFoundation
 /// In-app audio playback for recorded/uploaded audio.
 struct AudioPlayerView: View {
     let audioId: String
+    @Binding private var seekTime: TimeInterval?
     @State private var player = AudioPlayerService()
     @State private var isLoading = true
     @State private var error: String?
+
+    init(audioId: String, seekTime: Binding<TimeInterval?> = .constant(nil)) {
+        self.audioId = audioId
+        self._seekTime = seekTime
+    }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -144,6 +150,12 @@ struct AudioPlayerView: View {
         .task {
             await loadAudio()
         }
+        .onChange(of: seekTime) {
+            guard let seekTime else { return }
+            player.seek(seconds: seekTime)
+            player.play()
+            self.seekTime = nil
+        }
         .onDisappear {
             player.stop()
         }
@@ -155,6 +167,11 @@ struct AudioPlayerView: View {
             let playbackURL: PlaybackURLResponse = try await APIClient.shared.get("/audio/transcriptions/\(audioId)/audio")
             if let url = URL(string: playbackURL.url) {
                 player.load(url: url)
+                if let seekTime {
+                    player.seek(seconds: seekTime)
+                    player.play()
+                    self.seekTime = nil
+                }
             } else {
                 error = "Invalid audio URL"
             }
@@ -240,6 +257,11 @@ class AudioPlayerService {
         guard duration > 0 else { return }
         let time = CMTime(seconds: Double(fraction) * duration, preferredTimescale: 600)
         avPlayer?.seek(to: time)
+    }
+
+    func seek(seconds: TimeInterval) {
+        let target = duration > 0 ? min(duration, max(0, seconds)) : max(0, seconds)
+        avPlayer?.seek(to: CMTime(seconds: target, preferredTimescale: 600))
     }
 
     func skip(seconds: Double) {
