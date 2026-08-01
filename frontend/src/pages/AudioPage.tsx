@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Mic,
@@ -493,7 +493,11 @@ export function AudioPage() {
 
   // ── Polling for async transcription completion ──
 
-  const shouldPoll = result?.status === 'pending' || result?.status === 'processing';
+  const shouldPoll =
+    result?.status === 'pending' ||
+    result?.status === 'processing' ||
+    result?.summary_status === 'pending' ||
+    result?.summary_status === 'processing';
 
   usePolling(
     useCallback(async () => {
@@ -513,7 +517,11 @@ export function AudioPage() {
     {
       enabled: shouldPoll,
       interval: 2000,
-      shouldStop: (data: AudioTranscription) => data.status === 'completed' || data.status === 'failed',
+      shouldStop: (data: AudioTranscription) => {
+        const mediaDone = data.status === 'completed' || data.status === 'failed';
+        const summaryDone = data.summary_status !== 'pending' && data.summary_status !== 'processing';
+        return mediaDone && summaryDone;
+      },
     }
   );
 
@@ -1325,6 +1333,24 @@ export function AudioPage() {
               {isCanceling ? 'Stopping...' : 'Stop processing'}
             </button>
           )}
+          {result && (
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              <button
+                onClick={handleReset}
+                className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 text-sm font-semibold"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              >
+                <Mic className="h-4 w-4" /> Start another
+              </button>
+              <Link
+                to="/app/processing"
+                className="inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold"
+                style={{ color: 'var(--color-brand-500)' }}
+              >
+                <History className="h-4 w-4" /> View all jobs
+              </Link>
+            </div>
+          )}
         </motion.div>
       )}
 
@@ -1539,21 +1565,36 @@ export function AudioPage() {
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={handleSummarize}
-                  disabled={isSummarizing}
+                  disabled={isSummarizing || result.summary_status === 'pending' || result.summary_status === 'processing'}
                   className="w-full px-6 py-3 rounded-xl text-white font-medium text-base transition-colors duration-200 flex items-center justify-center gap-2"
                   style={{ backgroundColor: isSummarizing ? '#9ca3af' : 'var(--color-brand-500)', minHeight: '48px' }}>
-                  {isSummarizing ? (
-                    <><Loader2 className="w-5 h-5 animate-spin" /> Generating summary...</>
+                  {isSummarizing || result.summary_status === 'pending' || result.summary_status === 'processing' ? (
+                    <><Loader2 className="w-5 h-5 animate-spin" /> Generating in background...</>
                   ) : (
                     <><Sparkles className="w-5 h-5" /> Generate AI Summary</>
                   )}
                 </motion.button>
+                {(result.summary_status === 'pending' || result.summary_status === 'processing') && (
+                  <p className="mt-3 text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                    You can start another transcription or leave this page. This summary will keep running.
+                  </p>
+                )}
+                {result.summary_status === 'failed' && (
+                  <p className="mt-3 text-center text-sm" style={{ color: 'var(--color-danger)' }}>
+                    {result.summary_error_message || 'Summary generation failed. You can try again.'}
+                  </p>
+                )}
               </motion.div>
             )}
 
             {/* Summary results (MTA-22) */}
             {result.summary_status === 'completed' && result.summary_text && (
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4 mb-4">
+                <div className="flex justify-end">
+                  <Link to={`/app/items/audio/${result.id}`} className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 text-sm font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-brand-500)' }}>
+                    <Clock className="h-4 w-4" /> Open timestamped summary
+                  </Link>
+                </div>
                 {/* Executive Summary */}
                 <SectionCard
                   icon={<Sparkles className="w-4 h-4" />}

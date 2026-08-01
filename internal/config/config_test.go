@@ -89,3 +89,28 @@ func TestLoadRequiresClerkAudienceAuthorizedPartyOrCORSOriginInRelease(t *testin
 		t.Fatalf("Load error = %q, want Clerk token-boundary config error", err.Error())
 	}
 }
+
+func TestLoadClampsWhisperConcurrencyAndAcceptsThroughputRouting(t *testing.T) {
+	t.Setenv("YT_DLP_PATH", "/bin/true")
+	t.Setenv("WHISPER_CHUNK_CONCURRENCY", "4")
+	t.Setenv("WHISPER_GLOBAL_CONCURRENCY", "2")
+	t.Setenv("OPENROUTER_PROVIDER_SORT", "throughput")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.WhisperChunkConcurrency != 4 || cfg.WhisperGlobalConcurrency != 4 {
+		t.Fatalf("Whisper concurrency = %d/%d, want 4/4", cfg.WhisperChunkConcurrency, cfg.WhisperGlobalConcurrency)
+	}
+}
+
+func TestLoadRejectsUnknownOpenRouterProviderSort(t *testing.T) {
+	t.Setenv("YT_DLP_PATH", "/bin/true")
+	t.Setenv("OPENROUTER_PROVIDER_SORT", "fastest-ish")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "OPENROUTER_PROVIDER_SORT") {
+		t.Fatalf("Load error = %v, want provider sort validation error", err)
+	}
+}

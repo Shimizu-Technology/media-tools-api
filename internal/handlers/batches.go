@@ -6,7 +6,6 @@
 package handlers
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -172,20 +171,7 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 			}
 
 			if err := h.Worker.Submit(job); err != nil {
-				if h.isOwnerRequest(c) {
-					ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
-					blockingErr := h.Worker.SubmitBlocking(ctx, job)
-					cancel()
-					if blockingErr == nil {
-						// queued successfully for owner; continue
-						transcripts = append(transcripts, *t)
-						continue
-					}
-				}
-				log.Printf("Failed to queue extraction job for %s: %v", t.ID, err)
-				t.Status = models.StatusFailed
-				t.ErrorMessage = "Job queue is full, please try again later"
-				_ = h.DB.UpdateTranscript(c.Request.Context(), t)
+				log.Printf("Batch transcript %s queued durably but local wake failed: %v", t.ID, err)
 			}
 		}
 

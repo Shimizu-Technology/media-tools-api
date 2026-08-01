@@ -9,13 +9,13 @@ A media processing API for YouTube transcripts, recording transcription, PDF ext
 - **YouTube Transcripts** — Paste a URL, get the full transcript with metadata
 - **Recording Transcription** — Upload audio files or meeting recordings (MP3, M4A, MP4, WAV, etc.) for transcription
 - **PDF Text Extraction** — Extract text from PDF documents
-- **AI Summaries** — Generate summaries with key points, action items, and decisions
-- **Background Processing** — Long-running jobs processed asynchronously
+- **Cited AI Summaries & Chat** — Every supported claim links back to the exact video/audio timestamp or PDF page
+- **Background Processing** — PostgreSQL-backed jobs continue independently of the current page and survive server restarts
 - **Dual Auth** — API keys for scripts + Clerk sign-in for browser users
 - **Universal Video URLs** — YouTube, Vimeo, and any yt-dlp-supported video platform
 - **Ownership** — Each transcript is linked to the user or API key that created it
 - **Unified Library** — Server-side search, pagination, and exact workspace metrics across all media
-- **Durable Jobs** — Transcript, audio, and summary work is recovered after server restarts
+- **Concurrent Work** — Multiple media jobs and long-recording Whisper chunks can run in parallel with configurable limits
 - **Collections & Chat** — Organize mixed media and ask questions across individual items or collections
 - **Webhooks** — Account- or API-key-owned delivery subscriptions with signed payloads
 
@@ -137,6 +137,9 @@ curl -X POST http://localhost:8080/api/v1/transcripts \
 # Get transcript (poll until status is "completed")
 GET /api/v1/transcripts/:id
 
+# Get timestamped source passages used by summaries and chat
+GET /api/v1/library/items/transcript/:id/segments
+
 # List your transcripts
 GET /api/v1/transcripts?page=1&per_page=20&status=completed
 ```
@@ -153,7 +156,7 @@ curl -X POST http://localhost:8080/api/v1/audio/transcribe \
 # Get transcription (poll until status is "completed")
 GET /api/v1/audio/transcriptions/:id
 
-# Generate AI summary for audio
+# Queue an AI summary for audio (returns 202; poll the audio item)
 POST /api/v1/audio/transcriptions/:id/summarize
 curl -X POST http://localhost:8080/api/v1/audio/transcriptions/:id/summarize \
   -H "Content-Type: application/json" \

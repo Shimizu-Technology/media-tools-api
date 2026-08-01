@@ -100,6 +100,8 @@ components:
           type: array
           items:
             type: string
+        evidence:
+          $ref: "#/components/schemas/SummaryEvidence"
         length:
           type: string
           enum: [short, medium, detailed]
@@ -127,7 +129,7 @@ components:
           nullable: true
         item_type:
           type: string
-          enum: [transcript, audio, pdf]
+          enum: [transcript, audio, pdf, collection]
         item_id:
           type: string
           format: uuid
@@ -159,6 +161,10 @@ components:
         model_used:
           type: string
           example: "openai/gpt-4o-mini"
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Citation"
         created_at:
           type: string
           format: date-time
@@ -172,6 +178,59 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ChatMessage"
+
+    Citation:
+      type: object
+      required: [segment_id, item_type, item_id]
+      properties:
+        segment_id: {type: string}
+        item_type: {type: string, enum: [transcript, audio, pdf]}
+        item_id: {type: string, format: uuid}
+        item_title: {type: string}
+        start_ms: {type: integer, format: int64, nullable: true}
+        end_ms: {type: integer, format: int64, nullable: true}
+        page_number: {type: integer, nullable: true}
+
+    SummaryEvidence:
+      type: object
+      properties:
+        summary:
+          type: array
+          items: {$ref: "#/components/schemas/Citation"}
+        key_points:
+          type: array
+          items:
+            type: array
+            items: {$ref: "#/components/schemas/Citation"}
+        action_items:
+          type: array
+          items:
+            type: array
+            items: {$ref: "#/components/schemas/Citation"}
+        decisions:
+          type: array
+          items:
+            type: array
+            items: {$ref: "#/components/schemas/Citation"}
+        topics:
+          type: array
+          items:
+            type: array
+            items: {$ref: "#/components/schemas/Citation"}
+
+    MediaSegment:
+      type: object
+      required: [id, item_type, item_id, ordinal, text]
+      properties:
+        id: {type: string, format: uuid}
+        item_type: {type: string, enum: [transcript, audio, pdf]}
+        item_id: {type: string, format: uuid}
+        ordinal: {type: integer}
+        start_ms: {type: integer, format: int64, nullable: true}
+        end_ms: {type: integer, format: int64, nullable: true}
+        page_number: {type: integer, nullable: true}
+        text: {type: string}
+        created_at: {type: string, format: date-time}
 
     Batch:
       type: object
@@ -946,9 +1005,10 @@ paths:
   /audio/transcriptions/{id}/summarize:
     post:
       tags: [Audio]
-      summary: Generate an audio summary
+      summary: Queue an audio summary
+      description: Returns immediately while evidence-grounded summarization continues in the durable background queue.
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
-      responses: {"200": {description: Audio summary}}
+      responses: {"202": {description: Audio summary queued}}
   /pdf/extract:
     post:
       tags: [PDF]
@@ -1041,6 +1101,21 @@ paths:
       tags: [Library]
       summary: Update tags, starred state, or archive state for an item
       responses: {"200": {description: Updated library item preferences}}
+  /library/items/{type}/{id}/segments:
+    parameters:
+      - {name: type, in: path, required: true, schema: {type: string, enum: [transcript, audio, pdf]}}
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      tags: [Library]
+      summary: List timestamped or page-backed source evidence for an item
+      responses:
+        "200":
+          description: Ordered source evidence
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/MediaSegment"}
   /webhooks:
     get:
       tags: [Webhooks]

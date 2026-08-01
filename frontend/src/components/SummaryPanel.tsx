@@ -9,12 +9,16 @@ import {
   RefreshCw,
   AlertCircle,
 } from 'lucide-react';
-import { createSummary, getSummaries, type Summary } from '../lib/api';
+import { CitationRow } from './CitationChip';
+import { createSummary, getSummaries, type Citation, type MediaSegment, type Summary } from '../lib/api';
+import { formatTimestamp } from '../lib/citations';
 
 interface SummaryPanelProps {
   transcriptId: string;
   transcriptText: string;
   onSummaryReady?: () => void;
+  segments?: MediaSegment[];
+  onCitationClick?: (citation: Citation) => void;
 }
 
 type TabId = 'transcript' | 'key_points' | 'summary';
@@ -24,7 +28,13 @@ type TabId = 'transcript' | 'key_points' | 'summary';
  * Tabbed view for Full Transcript, Key Points, and Summary.
  * Typewriter effect for streaming feel. Summary length picker.
  */
-export function SummaryPanel({ transcriptId, transcriptText, onSummaryReady }: SummaryPanelProps) {
+export function SummaryPanel({
+  transcriptId,
+  transcriptText,
+  onSummaryReady,
+  segments = [],
+  onCitationClick = () => undefined,
+}: SummaryPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('transcript');
   const [summary, setSummary] = useState<Summary | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -327,6 +337,7 @@ export function SummaryPanel({ transcriptId, transcriptText, onSummaryReady }: S
           {tabs.map((tab) => (
             <button
               key={tab.id}
+              aria-label={tab.label}
               onClick={() => setActiveTab(tab.id)}
               className="relative flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors duration-200"
               style={{
@@ -362,7 +373,30 @@ export function SummaryPanel({ transcriptId, transcriptText, onSummaryReady }: S
                 className="text-sm leading-relaxed whitespace-pre-wrap max-h-[60vh] overflow-y-auto"
                 style={{ color: 'var(--color-text-secondary)' }}
               >
-                {transcriptText}
+                {segments.length > 0 ? (
+                  <div className="space-y-1">
+                    {segments.map((segment) => (
+                      <button
+                        type="button"
+                        key={segment.id}
+                        onClick={() => onCitationClick({
+                          segment_id: segment.id,
+                          item_type: segment.item_type,
+                          item_id: segment.item_id,
+                          start_ms: segment.start_ms,
+                          end_ms: segment.end_ms,
+                          page_number: segment.page_number,
+                        })}
+                        className="grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-xl px-3 py-2 text-left transition hover:bg-[var(--color-surface-overlay)]"
+                      >
+                        <span className="font-mono text-xs font-semibold" style={{ color: 'var(--color-brand-500)' }}>
+                          {typeof segment.start_ms === 'number' ? formatTimestamp(segment.start_ms) : 'Source'}
+                        </span>
+                        <span>{segment.text}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : transcriptText}
               </motion.div>
             )}
 
@@ -419,7 +453,10 @@ export function SummaryPanel({ transcriptId, transcriptText, onSummaryReady }: S
                         >
                           {i + 1}
                         </span>
-                        <span style={{ color: 'var(--color-text-secondary)' }}>{point}</span>
+                        <span className="min-w-0" style={{ color: 'var(--color-text-secondary)' }}>
+                          {point}
+                          {!isTyping && <CitationRow citations={summary?.evidence?.key_points?.[i]} onClick={onCitationClick} />}
+                        </span>
                       </motion.li>
                     ))}
                   </ul>
@@ -472,6 +509,7 @@ export function SummaryPanel({ transcriptId, transcriptText, onSummaryReady }: S
                         style={{ backgroundColor: 'var(--color-brand-500)' }}
                       />
                     )}
+                    {!isTyping && <CitationRow citations={summary?.evidence?.summary} onClick={onCitationClick} />}
                   </div>
                 )}
 

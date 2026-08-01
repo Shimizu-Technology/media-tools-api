@@ -199,6 +199,7 @@ func (db *DB) RemoveCollectionItem(ctx context.Context, collectionID, itemID str
 
 // CollectionItemContent holds the text content of a single collection item.
 type CollectionItemContent struct {
+	ItemID   string
 	ItemType string
 	Title    string
 	Text     string
@@ -412,7 +413,7 @@ func (db *DB) getOwnedCollectionItemContentsBatch(ctx context.Context, items []m
 			if row.Text == "" {
 				continue
 			}
-			results["transcript"][row.ID] = CollectionItemContent{ItemType: "transcript", Title: row.Title, Text: row.Text}
+			results["transcript"][row.ID] = CollectionItemContent{ItemID: row.ID, ItemType: "transcript", Title: row.Title, Text: row.Text}
 		}
 	}
 
@@ -433,14 +434,14 @@ func (db *DB) getOwnedCollectionItemContentsBatch(ctx context.Context, items []m
 			if row.Text == "" {
 				continue
 			}
-			results["audio"][row.ID] = CollectionItemContent{ItemType: "audio", Title: row.Title, Text: row.Text}
+			results["audio"][row.ID] = CollectionItemContent{ItemID: row.ID, ItemType: "audio", Title: row.Title, Text: row.Text}
 		}
 	}
 
 	if len(groupedIDs["pdf"]) > 0 {
 		var rows []collectionItemContentRow
 		if err := db.SelectContext(ctx, &rows, `
-			SELECT id, COALESCE(filename, '') AS title, COALESCE(text_content, '') AS text
+				SELECT id, COALESCE(original_name, '') AS title, COALESCE(text_content, '') AS text
 			FROM pdf_extractions
 			WHERE id = ANY($1)
 			  AND status = 'completed'
@@ -454,7 +455,7 @@ func (db *DB) getOwnedCollectionItemContentsBatch(ctx context.Context, items []m
 			if row.Text == "" {
 				continue
 			}
-			results["pdf"][row.ID] = CollectionItemContent{ItemType: "pdf", Title: row.Title, Text: row.Text}
+			results["pdf"][row.ID] = CollectionItemContent{ItemID: row.ID, ItemType: "pdf", Title: row.Title, Text: row.Text}
 		}
 	}
 

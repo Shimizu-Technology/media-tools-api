@@ -40,6 +40,7 @@ export interface Summary {
 	content_type?: string;
 	status: 'pending' | 'processing' | 'completed' | 'failed';
 	error_message?: string;
+  evidence?: SummaryEvidence;
   created_at: string;
 	updated_at: string;
 }
@@ -62,6 +63,37 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   model_used?: string;
+  citations?: Citation[];
+  created_at: string;
+}
+
+export interface Citation {
+  segment_id: string;
+  item_type: 'transcript' | 'audio' | 'pdf';
+  item_id: string;
+  item_title?: string;
+  start_ms?: number;
+  end_ms?: number;
+  page_number?: number;
+}
+
+export interface SummaryEvidence {
+  summary?: Citation[];
+  key_points?: Citation[][];
+  action_items?: Citation[][];
+  decisions?: Citation[][];
+  topics?: Citation[][];
+}
+
+export interface MediaSegment {
+  id: string;
+  item_type: 'transcript' | 'audio' | 'pdf';
+  item_id: string;
+  ordinal: number;
+  start_ms?: number;
+  end_ms?: number;
+  page_number?: number;
+  text: string;
   created_at: string;
 }
 
@@ -197,7 +229,10 @@ export interface AudioTranscription {
   action_items: string[];
   decisions: string[];
   summary_model?: string;
-  summary_status: 'none' | 'processing' | 'completed' | 'failed';
+  summary_length: 'short' | 'medium' | 'detailed';
+  summary_status: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
+  summary_evidence?: SummaryEvidence;
+  summary_error_message?: string;
   created_at: string;
 }
 
@@ -891,6 +926,16 @@ export async function updateLibraryPreferences(itemType: 'transcript' | 'audio' 
 export async function getLibraryStats(): Promise<LibraryStats> {
   const res = await fetch(`${API_BASE}/library/stats`, { headers: await getHeaders() });
   return handleResponse<LibraryStats>(res);
+}
+
+export async function getMediaSegments(
+  itemType: 'transcript' | 'audio' | 'pdf',
+  itemId: string,
+): Promise<MediaSegment[]> {
+  const res = await fetch(`${API_BASE}/library/items/${itemType}/${itemId}/segments`, {
+    headers: await getHeaders(),
+  });
+  return handleResponse<MediaSegment[]>(res);
 }
 
 // ── Collections ──

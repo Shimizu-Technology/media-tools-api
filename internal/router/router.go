@@ -166,6 +166,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		protected.GET("/library/stats", h.GetLibraryStats)
 		protected.GET("/library/items/:type/:id/preferences", h.GetLibraryPreferences)
 		protected.PATCH("/library/items/:type/:id/preferences", h.UpdateLibraryPreferences)
+		protected.GET("/library/items/:type/:id/segments", h.GetMediaSegments)
 
 		// Webhook management (MTA-18)
 		protected.POST("/webhooks", h.CreateWebhook)

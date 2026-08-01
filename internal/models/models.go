@@ -58,6 +58,7 @@ type Summary struct {
 	PromptUsed   string           `json:"prompt_used" db:"prompt_used"`
 	SummaryText  string           `json:"summary_text" db:"summary_text"`
 	KeyPoints    json.RawMessage  `json:"key_points" db:"key_points"`
+	Evidence     json.RawMessage  `json:"evidence" db:"evidence"`
 	Length       string           `json:"length" db:"length"`
 	Style        string           `json:"style" db:"style"`
 	ContentType  string           `json:"content_type,omitempty" db:"content_type"`
@@ -81,12 +82,50 @@ type TranscriptChatSession struct {
 }
 
 type TranscriptChatMessage struct {
-	ID        string    `json:"id" db:"id"`
-	SessionID string    `json:"session_id" db:"session_id"`
-	Role      string    `json:"role" db:"role"` // "user" or "assistant"
-	Content   string    `json:"content" db:"content"`
-	ModelUsed string    `json:"model_used,omitempty" db:"model_used"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	ID        string          `json:"id" db:"id"`
+	SessionID string          `json:"session_id" db:"session_id"`
+	Role      string          `json:"role" db:"role"` // "user" or "assistant"
+	Content   string          `json:"content" db:"content"`
+	ModelUsed string          `json:"model_used,omitempty" db:"model_used"`
+	Citations json.RawMessage `json:"citations" db:"citations"`
+	CreatedAt time.Time       `json:"created_at" db:"created_at"`
+}
+
+// MediaSegment is a source-backed passage from a video, recording, or PDF.
+// Time values use milliseconds so clients can seek without floating-point
+// drift; PDF evidence uses PageNumber instead.
+type MediaSegment struct {
+	ID         string    `json:"id" db:"id"`
+	ItemType   string    `json:"item_type" db:"item_type"`
+	ItemID     string    `json:"item_id" db:"item_id"`
+	Ordinal    int       `json:"ordinal" db:"ordinal"`
+	StartMS    *int64    `json:"start_ms,omitempty" db:"start_ms"`
+	EndMS      *int64    `json:"end_ms,omitempty" db:"end_ms"`
+	PageNumber *int      `json:"page_number,omitempty" db:"page_number"`
+	Text       string    `json:"text" db:"text"`
+	CreatedAt  time.Time `json:"created_at" db:"created_at"`
+}
+
+// Citation is the validated, reader-facing pointer attached to a summary
+// claim or assistant answer.
+type Citation struct {
+	SegmentID  string `json:"segment_id"`
+	ItemType   string `json:"item_type"`
+	ItemID     string `json:"item_id"`
+	ItemTitle  string `json:"item_title,omitempty"`
+	StartMS    *int64 `json:"start_ms,omitempty"`
+	EndMS      *int64 `json:"end_ms,omitempty"`
+	PageNumber *int   `json:"page_number,omitempty"`
+}
+
+// SummaryEvidence keeps citations aligned by output position while preserving
+// the existing string-array API for key points, actions, and decisions.
+type SummaryEvidence struct {
+	Summary     []Citation   `json:"summary"`
+	KeyPoints   [][]Citation `json:"key_points"`
+	ActionItems [][]Citation `json:"action_items,omitempty"`
+	Decisions   [][]Citation `json:"decisions,omitempty"`
+	Topics      [][]Citation `json:"topics,omitempty"`
 }
 
 // APIKey represents an API key for authentication.
@@ -199,34 +238,57 @@ var ValidContentTypes = map[AudioContentType]bool{
 }
 
 type AudioTranscription struct {
-	ID                 string           `json:"id" db:"id"`
-	Filename           string           `json:"filename" db:"filename"`
-	OriginalName       string           `json:"original_name" db:"original_name"`
-	AudioS3Key         string           `json:"audio_s3_key,omitempty" db:"audio_s3_key"`
-	AudioS3Status      string           `json:"audio_s3_status,omitempty" db:"audio_s3_status"`
-	AudioS3Size        int64            `json:"audio_s3_size,omitempty" db:"audio_s3_size"`
-	ProcessingStage    string           `json:"processing_stage,omitempty" db:"processing_stage"`
-	ProcessingProgress int              `json:"processing_progress,omitempty" db:"processing_progress"`
-	RetryCount         int              `json:"retry_count,omitempty" db:"retry_count"`
-	Duration           float64          `json:"duration" db:"duration"`
-	Language           string           `json:"language" db:"language"`
-	TranscriptText     string           `json:"transcript_text" db:"transcript_text"`
-	WordCount          int              `json:"word_count" db:"word_count"`
-	Status             string           `json:"status" db:"status"`
-	ErrorMessage       string           `json:"error_message,omitempty" db:"error_message"`
-	QualityWarning     string           `json:"quality_warning,omitempty" db:"quality_warning"`
-	OmittedRanges      json.RawMessage  `json:"omitted_ranges" db:"omitted_ranges"`
-	ContentType        AudioContentType `json:"content_type" db:"content_type"`
-	SummaryText        string           `json:"summary_text,omitempty" db:"summary_text"`
-	KeyPoints          json.RawMessage  `json:"key_points" db:"key_points"`
-	ActionItems        json.RawMessage  `json:"action_items" db:"action_items"`
-	Decisions          json.RawMessage  `json:"decisions" db:"decisions"`
-	SummaryModel       string           `json:"summary_model,omitempty" db:"summary_model"`
-	SummaryStatus      string           `json:"summary_status" db:"summary_status"`
-	UserID             *string          `json:"user_id,omitempty" db:"user_id"`
-	APIKeyID           *string          `json:"api_key_id,omitempty" db:"api_key_id"`
-	CreatedAt          time.Time        `json:"created_at" db:"created_at"`
-	SearchVector       string           `json:"-" db:"search_vector"`
+	ID                  string           `json:"id" db:"id"`
+	Filename            string           `json:"filename" db:"filename"`
+	OriginalName        string           `json:"original_name" db:"original_name"`
+	AudioS3Key          string           `json:"audio_s3_key,omitempty" db:"audio_s3_key"`
+	AudioS3Status       string           `json:"audio_s3_status,omitempty" db:"audio_s3_status"`
+	AudioS3Size         int64            `json:"audio_s3_size,omitempty" db:"audio_s3_size"`
+	ProcessingStage     string           `json:"processing_stage,omitempty" db:"processing_stage"`
+	ProcessingProgress  int              `json:"processing_progress,omitempty" db:"processing_progress"`
+	RetryCount          int              `json:"retry_count,omitempty" db:"retry_count"`
+	Duration            float64          `json:"duration" db:"duration"`
+	Language            string           `json:"language" db:"language"`
+	TranscriptText      string           `json:"transcript_text" db:"transcript_text"`
+	WordCount           int              `json:"word_count" db:"word_count"`
+	Status              string           `json:"status" db:"status"`
+	ErrorMessage        string           `json:"error_message,omitempty" db:"error_message"`
+	QualityWarning      string           `json:"quality_warning,omitempty" db:"quality_warning"`
+	OmittedRanges       json.RawMessage  `json:"omitted_ranges" db:"omitted_ranges"`
+	ContentType         AudioContentType `json:"content_type" db:"content_type"`
+	SummaryText         string           `json:"summary_text,omitempty" db:"summary_text"`
+	KeyPoints           json.RawMessage  `json:"key_points" db:"key_points"`
+	ActionItems         json.RawMessage  `json:"action_items" db:"action_items"`
+	Decisions           json.RawMessage  `json:"decisions" db:"decisions"`
+	SummaryModel        string           `json:"summary_model,omitempty" db:"summary_model"`
+	SummaryLength       string           `json:"summary_length" db:"summary_length"`
+	SummaryStatus       string           `json:"summary_status" db:"summary_status"`
+	SummaryEvidence     json.RawMessage  `json:"summary_evidence" db:"summary_evidence"`
+	SummaryErrorMessage string           `json:"summary_error_message,omitempty" db:"summary_error_message"`
+	UserID              *string          `json:"user_id,omitempty" db:"user_id"`
+	APIKeyID            *string          `json:"api_key_id,omitempty" db:"api_key_id"`
+	CreatedAt           time.Time        `json:"created_at" db:"created_at"`
+	SearchVector        string           `json:"-" db:"search_vector"`
+}
+
+// BackgroundJob is the durable queue record claimed by worker processes.
+type BackgroundJob struct {
+	ID             string          `json:"id" db:"id"`
+	JobType        string          `json:"job_type" db:"job_type"`
+	ResourceID     string          `json:"resource_id" db:"resource_id"`
+	Payload        json.RawMessage `json:"payload" db:"payload"`
+	Status         string          `json:"status" db:"status"`
+	Attempts       int             `json:"attempts" db:"attempts"`
+	MaxAttempts    int             `json:"max_attempts" db:"max_attempts"`
+	RunAt          time.Time       `json:"run_at" db:"run_at"`
+	LockedBy       *string         `json:"locked_by,omitempty" db:"locked_by"`
+	LockedAt       *time.Time      `json:"locked_at,omitempty" db:"locked_at"`
+	LeaseExpiresAt *time.Time      `json:"lease_expires_at,omitempty" db:"lease_expires_at"`
+	StartedAt      *time.Time      `json:"started_at,omitempty" db:"started_at"`
+	CompletedAt    *time.Time      `json:"completed_at,omitempty" db:"completed_at"`
+	LastError      string          `json:"last_error" db:"last_error"`
+	CreatedAt      time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at" db:"updated_at"`
 }
 
 type AudioUploadSession struct {

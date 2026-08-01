@@ -13,14 +13,27 @@ const libraryItemsCTE = `
 		SELECT t.id, 'youtube'::text AS item_type,
 			COALESCE(NULLIF(t.title, ''), 'Untitled video')::text AS title,
 			COALESCE(NULLIF(t.channel_name, ''), 'Unknown channel')::text AS subtitle,
-			t.status::text, t.word_count, t.duration::double precision AS duration,
+			CASE
+				WHEN t.status::text = 'completed'
+				 AND COALESCE(latest_summary.status, '') IN ('pending', 'processing')
+				THEN latest_summary.status
+				ELSE t.status::text
+			END AS status,
+			t.word_count, t.duration::double precision AS duration,
 			0::integer AS page_count,
-			COALESCE((SELECT s.status::text FROM summaries s WHERE s.transcript_id = t.id ORDER BY s.created_at DESC LIMIT 1), '') AS summary_status,
+			COALESCE(latest_summary.status, '') AS summary_status,
 			COALESCE(mip.favorite, false) AS favorite,
 			COALESCE(mip.archived, false) AS archived,
 			COALESCE(mip.tags, '[]'::jsonb) AS tags,
 			t.created_at, t.search_vector
 		FROM transcripts t
+		LEFT JOIN LATERAL (
+			SELECT s.status::text AS status
+			FROM summaries s
+			WHERE s.transcript_id = t.id
+			ORDER BY s.created_at DESC
+			LIMIT 1
+		) latest_summary ON true
 		LEFT JOIN media_item_preferences mip ON mip.item_type = 'youtube' AND mip.item_id = t.id
 			AND (($1::uuid IS NOT NULL AND mip.user_id = $1) OR ($2::uuid IS NOT NULL AND mip.api_key_id = $2))
 		WHERE (($1::uuid IS NOT NULL AND t.user_id = $1) OR ($2::uuid IS NOT NULL AND t.api_key_id = $2))
@@ -29,7 +42,12 @@ const libraryItemsCTE = `
 
 		SELECT a.id, 'audio'::text, COALESCE(NULLIF(a.original_name, ''), 'Untitled recording')::text,
 			COALESCE(NULLIF(UPPER(a.language), ''), 'Recording')::text,
-			a.status::text, a.word_count, a.duration::double precision, 0::integer,
+			CASE
+				WHEN a.status::text = 'completed' AND a.summary_status IN ('pending', 'processing')
+				THEN a.summary_status
+				ELSE a.status::text
+			END AS status,
+			a.word_count, a.duration::double precision, 0::integer,
 			COALESCE(a.summary_status, '')::text,
 			COALESCE(mip.favorite, false), COALESCE(mip.archived, false), COALESCE(mip.tags, '[]'::jsonb),
 			a.created_at, a.search_vector

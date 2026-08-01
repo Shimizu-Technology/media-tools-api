@@ -284,30 +284,36 @@ func (db *DB) DeleteTranscript(ctx context.Context, id string) error {
 
 // CreateSummary inserts a new summary record.
 func (db *DB) CreateSummary(ctx context.Context, s *models.Summary) error {
+	if len(s.Evidence) == 0 {
+		s.Evidence = []byte(`{}`)
+	}
 	query := `
 		INSERT INTO summaries (
 			id, transcript_id, model_used, prompt_used, summary_text, key_points,
-			length, style, content_type, status, error_message
+			evidence, length, style, content_type, status, error_message
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING created_at, updated_at`
 
 	return db.QueryRowContext(ctx, query,
 		s.ID, s.TranscriptID, s.ModelUsed, s.PromptUsed,
-		s.SummaryText, s.KeyPoints, s.Length, s.Style,
+		s.SummaryText, s.KeyPoints, s.Evidence, s.Length, s.Style,
 		s.ContentType, s.Status, s.ErrorMessage,
 	).Scan(&s.CreatedAt, &s.UpdatedAt)
 }
 
 // UpdateSummary persists the latest lifecycle state and generated content.
 func (db *DB) UpdateSummary(ctx context.Context, s *models.Summary) error {
+	if len(s.Evidence) == 0 {
+		s.Evidence = []byte(`{}`)
+	}
 	result, err := db.ExecContext(ctx, `
 		UPDATE summaries
 		SET model_used = $2, prompt_used = $3, summary_text = $4,
-			key_points = $5, length = $6, style = $7, content_type = $8,
-			status = $9, error_message = $10
+			key_points = $5, evidence = $6, length = $7, style = $8, content_type = $9,
+			status = $10, error_message = $11
 		WHERE id = $1`,
-		s.ID, s.ModelUsed, s.PromptUsed, s.SummaryText, s.KeyPoints,
+		s.ID, s.ModelUsed, s.PromptUsed, s.SummaryText, s.KeyPoints, s.Evidence,
 		s.Length, s.Style, s.ContentType, s.Status, s.ErrorMessage,
 	)
 	if err != nil {
@@ -475,12 +481,15 @@ func (db *DB) ListChatMessages(ctx context.Context, sessionID string, limit int)
 
 // CreateChatMessage inserts a chat message.
 func (db *DB) CreateChatMessage(ctx context.Context, msg *models.TranscriptChatMessage) error {
+	if len(msg.Citations) == 0 {
+		msg.Citations = []byte(`[]`)
+	}
 	query := `
-		INSERT INTO transcript_chat_messages (session_id, role, content, model_used)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO transcript_chat_messages (session_id, role, content, model_used, citations)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, created_at`
 	if err := db.QueryRowContext(ctx, query,
-		msg.SessionID, msg.Role, msg.Content, msg.ModelUsed,
+		msg.SessionID, msg.Role, msg.Content, msg.ModelUsed, msg.Citations,
 	).Scan(&msg.ID, &msg.CreatedAt); err != nil {
 		return fmt.Errorf("failed to create chat message: %w", err)
 	}
@@ -608,7 +617,10 @@ const audioTranscriptionSelectColumns = `
 	action_items,
 	decisions,
 	summary_model,
+	COALESCE(summary_length, 'medium') AS summary_length,
 	summary_status,
+	COALESCE(summary_evidence, '{}'::jsonb) AS summary_evidence,
+	COALESCE(summary_error_message, '') AS summary_error_message,
 	user_id,
 	api_key_id,
 	created_at
@@ -638,6 +650,69 @@ func (db *DB) CreateAudioTranscription(ctx context.Context, at *models.AudioTran
 		at.Duration, at.Language, at.TranscriptText, at.WordCount, at.Status, at.ErrorMessage,
 		at.ContentType, at.UserID, at.APIKeyID,
 	).Scan(&at.ID, &at.CreatedAt)
+}
+
+// CreateAudioTranscriptionWithJob stores a local upload and its exact worker
+// payload in one transaction. Migration 038 creates the queue row from the
+// INSERT trigger; the second statement fills in the process-local temporary
+// path before any worker can observe or claim the committed job.
+func (db *DB) CreateAudioTranscriptionWithJob(ctx context.Context, at *models.AudioTranscription, tempFilePath string) error {
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin audio transcription transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	query := `
+		INSERT INTO audio_transcriptions (
+			filename, original_name, audio_s3_key, audio_s3_status, audio_s3_size,
+			processing_stage, processing_progress, retry_count,
+			duration, language, transcript_text, word_count, status, error_message, content_type, user_id, api_key_id
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		RETURNING id, created_at`
+
+	if at.ContentType == "" {
+		at.ContentType = models.ContentGeneral
+	}
+	if at.ProcessingStage == "" {
+		at.ProcessingStage = "queued"
+	}
+
+	if err := tx.QueryRowContext(ctx, query,
+		at.Filename, at.OriginalName, at.AudioS3Key, at.AudioS3Status, at.AudioS3Size,
+		at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
+		at.Duration, at.Language, at.TranscriptText, at.WordCount, at.Status, at.ErrorMessage,
+		at.ContentType, at.UserID, at.APIKeyID,
+	).Scan(&at.ID, &at.CreatedAt); err != nil {
+		return fmt.Errorf("create audio transcription: %w", err)
+	}
+
+	result, err := tx.ExecContext(ctx, `
+		UPDATE background_jobs
+		SET payload = jsonb_build_object(
+				'audio_id', $1::text,
+				'temp_file_path', $2::text,
+				'audio_s3_key', $3::text,
+				'original_name', $4::text
+			),
+			updated_at = NOW()
+		WHERE job_type = 'audio_transcription'
+		  AND resource_id = $1
+		  AND status = 'queued'`,
+		at.ID, tempFilePath, at.AudioS3Key, at.OriginalName,
+	)
+	if err != nil {
+		return fmt.Errorf("prepare audio transcription job: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return fmt.Errorf("prepare audio transcription job: queue trigger did not create a queued job")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit audio transcription transaction: %w", err)
+	}
+	return nil
 }
 
 // GetAudioTranscription retrieves a single audio transcription by ID.
@@ -672,6 +747,9 @@ func (db *DB) UpdateAudioTranscription(ctx context.Context, at *models.AudioTran
 // UpdateAudioTranscriptionWithSummary atomically updates transcription and summary fields.
 // Use this when re-transcription needs to clear or restore both payloads as one row mutation.
 func (db *DB) UpdateAudioTranscriptionWithSummary(ctx context.Context, at *models.AudioTranscription) error {
+	if len(at.SummaryEvidence) == 0 {
+		at.SummaryEvidence = []byte(`{}`)
+	}
 	query := `
 		UPDATE audio_transcriptions
 		SET duration = $2, language = $3, transcript_text = $4, word_count = $5,
@@ -679,14 +757,15 @@ func (db *DB) UpdateAudioTranscriptionWithSummary(ctx context.Context, at *model
 			processing_stage = $8, processing_progress = $9, retry_count = $10,
 			content_type = $11, summary_text = $12, key_points = $13,
 			action_items = $14, decisions = $15, summary_model = $16,
-			summary_status = $17, quality_warning = $18, omitted_ranges = $19
+			summary_length = $17, summary_status = $18, summary_evidence = $19,
+			summary_error_message = $20, quality_warning = $21, omitted_ranges = $22
 		WHERE id = $1`
 
 	result, err := db.ExecContext(ctx, query,
 		at.ID, at.Duration, at.Language, at.TranscriptText,
 		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
-		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryStatus,
-		at.QualityWarning, at.OmittedRanges,
+		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryLength,
+		at.SummaryStatus, at.SummaryEvidence, at.SummaryErrorMessage, at.QualityWarning, at.OmittedRanges,
 	)
 	if err != nil {
 		return err
@@ -706,6 +785,9 @@ func (db *DB) PrepareAudioRetranscriptionForActor(ctx context.Context, at *model
 	if at == nil {
 		return nil, false, fmt.Errorf("audio transcription is required")
 	}
+	if len(at.SummaryEvidence) == 0 {
+		at.SummaryEvidence = []byte(`{}`)
+	}
 
 	const updateSQL = `
 		updated AS (
@@ -715,7 +797,8 @@ func (db *DB) PrepareAudioRetranscriptionForActor(ctx context.Context, at *model
 				processing_stage = $9, processing_progress = $10, retry_count = $11,
 				content_type = $12, summary_text = $13, key_points = $14,
 				action_items = $15, decisions = $16, summary_model = $17,
-				summary_status = $18, quality_warning = $19, omitted_ranges = $20
+				summary_length = $18, summary_status = $19, summary_evidence = $20,
+				summary_error_message = $21, quality_warning = $22, omitted_ranges = $23
 			FROM previous AS p
 			WHERE a.id = p.id
 			RETURNING a.id
@@ -755,8 +838,8 @@ func (db *DB) PrepareAudioRetranscriptionForActor(ctx context.Context, at *model
 	err := db.GetContext(ctx, &previous, query,
 		at.ID, ownerArg, at.Duration, at.Language, at.TranscriptText,
 		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
-		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryStatus,
-		at.QualityWarning, at.OmittedRanges,
+		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryLength,
+		at.SummaryStatus, at.SummaryEvidence, at.SummaryErrorMessage, at.QualityWarning, at.OmittedRanges,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
@@ -838,17 +921,43 @@ func (db *DB) ListRecoverableAudioTranscriptions(ctx context.Context, limit int)
 
 // UpdateAudioSummary updates the summary fields of an audio transcription (MTA-22).
 func (db *DB) UpdateAudioSummary(ctx context.Context, at *models.AudioTranscription) error {
+	if len(at.SummaryEvidence) == 0 {
+		at.SummaryEvidence = []byte(`{}`)
+	}
 	query := `
 		UPDATE audio_transcriptions
 		SET content_type = $2, summary_text = $3, key_points = $4, action_items = $5,
-			decisions = $6, summary_model = $7, summary_status = $8
+			decisions = $6, summary_model = $7, summary_length = $8,
+			summary_status = $9, summary_evidence = $10, summary_error_message = $11
 		WHERE id = $1`
 
 	_, err := db.ExecContext(ctx, query,
 		at.ID, at.ContentType, at.SummaryText, at.KeyPoints,
-		at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryStatus,
+		at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryLength,
+		at.SummaryStatus, at.SummaryEvidence, at.SummaryErrorMessage,
 	)
 	return err
+}
+
+// ListRecoverableAudioSummaries returns summary jobs interrupted by a restart.
+func (db *DB) ListRecoverableAudioSummaries(ctx context.Context, limit int) ([]models.AudioTranscription, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	var rows []models.AudioTranscription
+	err := db.SelectContext(ctx, &rows, `
+		SELECT `+audioTranscriptionSelectColumns+`
+		FROM audio_transcriptions
+		WHERE summary_status IN ('pending', 'processing')
+		  AND status = 'completed'
+		ORDER BY created_at ASC
+		LIMIT $1`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list recoverable audio summaries: %w", err)
+	}
+	return rows, nil
 }
 
 // ListAudioTranscriptions returns recent audio transcriptions.

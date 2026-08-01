@@ -10,7 +10,6 @@
 package audio
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -139,68 +138,46 @@ func (t *Transcriber) Transcribe(ctx context.Context, audioData io.Reader, filen
 		return nil, fmt.Errorf("OpenAI API key not configured; set OPENAI_API_KEY environment variable")
 	}
 
-	// Build multipart form body
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-
-	// Add the audio file. Include a concrete part MIME type because some audio
-	// APIs inspect both the multipart filename and Content-Type when validating
-	// media formats.
-	partHeader := make(textproto.MIMEHeader)
-	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, escapeQuotes(filename)))
-	partHeader.Set("Content-Type", whisperContentType(filename))
-	part, err := writer.CreatePart(partHeader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create form file: %w", err)
-	}
-
-	if _, err := io.Copy(part, audioData); err != nil {
-		return nil, fmt.Errorf("failed to copy audio data: %w", err)
-	}
-
-	if err := writer.WriteField("model", t.model); err != nil {
-		return nil, fmt.Errorf("failed to write model field: %w", err)
-	}
-	if t.language != "" {
-		if err := writer.WriteField("language", t.language); err != nil {
-			return nil, fmt.Errorf("failed to write language field: %w", err)
+	// Stream multipart data through a pipe instead of copying files up to 24MB
+	// into a second in-memory buffer before the request can begin.
+	bodyReader, bodyWriter := io.Pipe()
+	writer := multipart.NewWriter(bodyWriter)
+	contentType := writer.FormDataContentType()
+	writeDone := make(chan error, 1)
+	go func() {
+		err := writeTranscriptionMultipart(writer, audioData, filename, t.model, t.language, t.prompt)
+		if err != nil {
+			_ = bodyWriter.CloseWithError(err)
+		} else {
+			_ = bodyWriter.Close()
 		}
-	}
-	if t.prompt != "" {
-		if err := writer.WriteField("prompt", t.prompt); err != nil {
-			return nil, fmt.Errorf("failed to write prompt field: %w", err)
-		}
-	}
-	// Make hallucination-prone retries deterministic instead of sampling.
-	if err := writer.WriteField("temperature", "0"); err != nil {
-		return nil, fmt.Errorf("failed to write temperature field: %w", err)
-	}
-
-	// Request verbose JSON for language, duration, and segment-level quality data.
-	if err := writer.WriteField("response_format", "verbose_json"); err != nil {
-		return nil, fmt.Errorf("failed to write response_format field: %w", err)
-	}
-
-	// Close the writer to finalize the multipart body
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
-	}
+		writeDone <- err
+	}()
 
 	// Create the HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/audio/transcriptions", &body)
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/audio/transcriptions", bodyReader)
 	if err != nil {
+		_ = bodyReader.Close()
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+t.apiKey)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Content-Type", contentType)
 
 	// Send the request
 	resp, err := t.httpClient.Do(req)
 	if err != nil {
+		// Unblock the multipart writer if the transport failed before consuming
+		// the request stream (DNS, TLS, connection refusal, and similar errors).
+		_ = bodyReader.CloseWithError(err)
+		<-writeDone
 		return nil, fmt.Errorf("Whisper API request failed: %w", err)
 	}
+	writeErr := <-writeDone
 	defer resp.Body.Close()
+	if writeErr != nil {
+		return nil, writeErr
+	}
 
 	// Read response body
 	respBody, err := io.ReadAll(resp.Body)
@@ -225,6 +202,46 @@ func (t *Transcriber) Transcribe(ctx context.Context, audioData io.Reader, filen
 		Duration: whisperResp.Duration,
 		Segments: whisperResp.Segments,
 	}, nil
+}
+
+func writeTranscriptionMultipart(
+	writer *multipart.Writer,
+	audioData io.Reader,
+	filename, model, language, prompt string,
+) error {
+	partHeader := make(textproto.MIMEHeader)
+	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, escapeQuotes(filename)))
+	partHeader.Set("Content-Type", whisperContentType(filename))
+	part, err := writer.CreatePart(partHeader)
+	if err != nil {
+		return fmt.Errorf("failed to create form file: %w", err)
+	}
+	if _, err := io.Copy(part, audioData); err != nil {
+		return fmt.Errorf("failed to copy audio data: %w", err)
+	}
+	if err := writer.WriteField("model", model); err != nil {
+		return fmt.Errorf("failed to write model field: %w", err)
+	}
+	if language != "" {
+		if err := writer.WriteField("language", language); err != nil {
+			return fmt.Errorf("failed to write language field: %w", err)
+		}
+	}
+	if prompt != "" {
+		if err := writer.WriteField("prompt", prompt); err != nil {
+			return fmt.Errorf("failed to write prompt field: %w", err)
+		}
+	}
+	if err := writer.WriteField("temperature", "0"); err != nil {
+		return fmt.Errorf("failed to write temperature field: %w", err)
+	}
+	if err := writer.WriteField("response_format", "verbose_json"); err != nil {
+		return fmt.Errorf("failed to write response_format field: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("failed to close multipart request: %w", err)
+	}
+	return nil
 }
 
 func whisperContentType(filename string) string {
@@ -280,7 +297,24 @@ func (a *WhisperAdapter) TranscribeForYouTube(ctx context.Context, audioData io.
 		Text:     result.Text,
 		Language: result.Language,
 		Duration: result.Duration,
+		Segments: transcriptionSegmentsToTranscriptSegments(result.Segments),
 	}, nil
+}
+
+func transcriptionSegmentsToTranscriptSegments(segments []TranscriptionSegment) []transcript.Segment {
+	result := make([]transcript.Segment, 0, len(segments))
+	for _, segment := range segments {
+		text := strings.TrimSpace(segment.Text)
+		if text == "" {
+			continue
+		}
+		result = append(result, transcript.Segment{
+			StartMS: int64(segment.Start * 1000),
+			EndMS:   int64(segment.End * 1000),
+			Text:    text,
+		})
+	}
+	return result
 }
 
 // NewWhisperAdapter creates an adapter for use with the transcript package.

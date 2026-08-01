@@ -65,7 +65,12 @@ func main() {
 
 	// Step 3: Create Services
 	extractor := transcript.NewExtractor(cfg.YtDlpPath)
-	summarizer := summary.New(cfg.OpenRouterAPIKey, cfg.OpenRouterModel)
+	summarizer := summary.NewWithModels(
+		cfg.OpenRouterAPIKey,
+		cfg.OpenRouterModel,
+		cfg.OpenRouterChatModel,
+		cfg.OpenRouterProviderSort,
+	)
 
 	// Configure YouTube proxy if provided (residential proxy to bypass IP blocks)
 	if cfg.YouTubeProxy != "" {
@@ -142,6 +147,7 @@ func main() {
 	wp.SetWebhookService(webhookService)     // MTA-18: wire webhooks into worker for job notifications
 	wp.SetAudioTranscriber(audioTranscriber) // Wire audio transcriber for async Whisper jobs
 	wp.SetAudioStorage(audioStorage)
+	wp.SetTranscriptionConcurrency(cfg.WhisperChunkConcurrency, cfg.WhisperGlobalConcurrency)
 	wp.Start()
 
 	recoveredTranscripts, err := wp.RecoverTranscriptJobs(context.Background(), 200)
@@ -167,6 +173,14 @@ func main() {
 			}
 		} else if recoveredSummaries > 0 {
 			log.Printf("♻️  Requeued %d recoverable summary job(s) on startup", recoveredSummaries)
+		}
+		recoveredAudioSummaries, recoveryErr := wp.RecoverAudioSummaryJobs(ctx, 200)
+		if recoveryErr != nil {
+			if summaryRecoveryCtx.Err() == nil {
+				log.Printf("⚠️  Audio summary job recovery failed: %v", recoveryErr)
+			}
+		} else if recoveredAudioSummaries > 0 {
+			log.Printf("♻️  Requeued %d recoverable audio summary job(s) on startup", recoveredAudioSummaries)
 		}
 	}()
 

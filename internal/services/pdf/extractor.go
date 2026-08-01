@@ -16,10 +16,17 @@ import (
 // ExtractionResult holds the output from a PDF text extraction.
 type ExtractionResult struct {
 	Text           string // Extracted text content
-	PageCount      int    // Number of pages
-	WordCount      int    // Word count
-	TextPages      int    // Pages with extracted text
-	OCRRecommended bool   // True when doc looks image/scanned-heavy
+	Pages          []PageContent
+	PageCount      int  // Number of pages
+	WordCount      int  // Word count
+	TextPages      int  // Pages with extracted text
+	OCRRecommended bool // True when doc looks image/scanned-heavy
+}
+
+// PageContent preserves document page boundaries for source citations.
+type PageContent struct {
+	PageNumber int
+	Text       string
 }
 
 // Extract reads a PDF from the given reader and extracts all text content.
@@ -48,6 +55,7 @@ func Extract(data []byte) (*ExtractionResult, error) {
 
 	// Extract text from each page
 	var allText strings.Builder
+	pages := make([]PageContent, 0, pageCount)
 	textPages := 0
 	for i := 1; i <= pageCount; i++ {
 		page := pdfReader.Page(i)
@@ -62,12 +70,13 @@ func Extract(data []byte) (*ExtractionResult, error) {
 			continue
 		}
 
-		if i > 1 {
-			allText.WriteString(fmt.Sprintf("\n--- Page %d ---\n", i))
-		}
-		trimmed := strings.TrimSpace(text)
+		trimmed := normalizeExtractedText(strings.TrimSpace(text))
 		if trimmed != "" {
 			textPages++
+			pages = append(pages, PageContent{PageNumber: i, Text: trimmed})
+		}
+		if allText.Len() > 0 {
+			allText.WriteString(fmt.Sprintf("\n--- Page %d ---\n", i))
 		}
 		allText.WriteString(trimmed)
 	}
@@ -79,6 +88,7 @@ func Extract(data []byte) (*ExtractionResult, error) {
 
 	return &ExtractionResult{
 		Text:           extractedText,
+		Pages:          pages,
 		PageCount:      pageCount,
 		WordCount:      wordCount,
 		TextPages:      textPages,

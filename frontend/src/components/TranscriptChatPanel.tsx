@@ -4,20 +4,36 @@ import { MessageSquare, Send, Loader2, AlertCircle, MessageCircle } from 'lucide
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { getChat, sendChatMessage, type ChatItemType, type ChatMessage } from '../lib/api';
+import { useNavigate } from 'react-router-dom';
+import { CitationRow } from './CitationChip';
+import { getChat, sendChatMessage, type ChatItemType, type ChatMessage, type Citation } from '../lib/api';
+import { itemDetailPath } from '../lib/library';
 
 interface TranscriptChatPanelProps {
   itemId: string;
   itemType: ChatItemType;
+  onCitationClick?: (citation: Citation) => void;
 }
 
-export function TranscriptChatPanel({ itemId, itemType }: TranscriptChatPanelProps) {
+export function TranscriptChatPanel({ itemId, itemType, onCitationClick }: TranscriptChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState('');
   const endRef = useRef<HTMLDivElement | null>(null);
+  const navigate = useNavigate();
+  const openCitation = (citation: Citation) => {
+    if (onCitationClick) {
+      onCitationClick(citation);
+      return;
+    }
+    const params = new URLSearchParams();
+    if (typeof citation.start_ms === 'number') params.set('t', String(Math.floor(citation.start_ms / 1000)));
+    if (typeof citation.page_number === 'number') params.set('page', String(citation.page_number));
+    const search = params.toString();
+    navigate(`${itemDetailPath(citation.item_type, citation.item_id)}${search ? `?${search}` : ''}`);
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -136,6 +152,7 @@ export function TranscriptChatPanel({ itemId, itemType }: TranscriptChatPanelPro
                     }}
                   >
                     <MarkdownMessage content={m.content} isUser={isUser} />
+                    {!isUser && <CitationRow citations={m.citations} onClick={openCitation} />}
                   </div>
                 </motion.div>
               );
@@ -193,6 +210,7 @@ export function TranscriptChatPanel({ itemId, itemType }: TranscriptChatPanelPro
             />
             <button
               onClick={handleSend}
+              aria-label="Send message"
               disabled={isSending || input.trim() === ''}
               className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium text-white transition-all duration-200 disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}

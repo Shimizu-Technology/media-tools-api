@@ -4,6 +4,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
+	evidenceservice "github.com/Shimizu-Technology/media-tools-api/internal/services/evidence"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 )
 
@@ -308,8 +310,6 @@ func (h *Handler) PostCollectionChat(c *gin.Context) {
 		return
 	}
 
-	combined := buildCollectionContext(contents, 48_000)
-
 	contextLabel := fmt.Sprintf("collection '%s' containing %d items", col.Name, len(contents))
 
 	// Chat session
@@ -342,10 +342,40 @@ func (h *Handler) PostCollectionChat(c *gin.Context) {
 	}
 	chatHistory = append(chatHistory, summary.ChatMessage{Role: "user", Content: req.Message})
 
-	answer, modelUsed, err := h.Summarizer.ChatTranscript(
+	evidenceSegments := make([]summary.EvidenceSegment, 0, min(30, len(contents)*6))
+	for _, content := range contents {
+		segments, searchErr := h.DB.SearchMediaSegments(
+			c.Request.Context(), content.ItemType, content.ItemID, req.Message, 6,
+		)
+		if searchErr != nil {
+			log.Printf("Collection evidence search failed (%s:%s): %v", content.ItemType, content.ItemID, searchErr)
+			continue
+		}
+		if len(segments) == 0 {
+			legacy := evidenceservice.ChunkText(content.Text, 1_200)
+			if len(legacy) > 0 && h.DB.ReplaceMediaSegments(c.Request.Context(), content.ItemType, content.ItemID, legacy) == nil {
+				segments, _ = h.DB.SearchMediaSegments(
+					c.Request.Context(), content.ItemType, content.ItemID, req.Message, 6,
+				)
+			}
+		}
+		evidenceSegments = append(evidenceSegments, evidenceservice.ToSummarySegments(segments, content.Title)...)
+		if len(evidenceSegments) >= 30 {
+			evidenceSegments = evidenceSegments[:30]
+			break
+		}
+	}
+	if len(evidenceSegments) == 0 {
+		c.JSON(http.StatusConflict, models.ErrorResponse{
+			Error: "no_evidence", Message: "The collection has no source evidence available for chat", Code: http.StatusConflict,
+		})
+		return
+	}
+
+	answer, err := h.Summarizer.ChatEvidence(
 		c.Request.Context(),
 		contextLabel,
-		combined,
+		evidenceSegments,
 		chatHistory,
 		req.Model,
 	)
@@ -358,9 +388,16 @@ func (h *Handler) PostCollectionChat(c *gin.Context) {
 
 	assistantMsg := &models.TranscriptChatMessage{
 		SessionID: session.ID, Role: "assistant",
-		Content: strings.TrimSpace(answer), ModelUsed: modelUsed,
+		Content: strings.TrimSpace(answer.Answer), ModelUsed: answer.Model,
 	}
-	_ = h.DB.CreateChatMessage(c.Request.Context(), assistantMsg)
+	assistantMsg.Citations, _ = json.Marshal(answer.Citations)
+	if err := h.DB.CreateChatMessage(c.Request.Context(), assistantMsg); err != nil {
+		log.Printf("Collection assistant message save failed (session %s): %v", session.ID, err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "database_error", Message: "Failed to save assistant response", Code: http.StatusInternalServerError,
+		})
+		return
+	}
 
 	c.JSON(http.StatusOK, models.ChatResponse{
 		Session:  *session,

@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
+	evidenceservice "github.com/Shimizu-Technology/media-tools-api/internal/services/evidence"
 	pdfservice "github.com/Shimizu-Technology/media-tools-api/internal/services/pdf"
 )
 
@@ -157,8 +158,18 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 		APIKeyID:     actor.APIKeyID,
 	}
 
-	if err := h.DB.CreatePDFExtraction(c.Request.Context(), pe); err != nil {
-		log.Printf("Failed to save PDF extraction record: %v", err)
+	segments := make([]models.MediaSegment, 0, len(result.Pages))
+	for _, page := range result.Pages {
+		pageNumber := page.PageNumber
+		// Some PDFs put an entire chapter on one logical page. Keep the page
+		// address while bounding each AI evidence passage.
+		for _, chunk := range evidenceservice.ChunkText(page.Text, 1_200) {
+			chunk.PageNumber = &pageNumber
+			segments = append(segments, chunk)
+		}
+	}
+	if err := h.DB.CreatePDFExtractionWithSegments(c.Request.Context(), pe, segments); err != nil {
+		log.Printf("Failed to save PDF extraction and page evidence: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
 			Message: "PDF text was extracted but could not be saved. Please try again.",

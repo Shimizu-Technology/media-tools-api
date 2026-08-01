@@ -26,6 +26,14 @@ enum Configuration {
         return "https://media-tools-api.onrender.com"
     }()
 
+    /// Browser app used as a deep-link fallback for cross-item citations.
+    static let webAppURL: String = {
+        if let url = configuredValue("WEB_APP_URL") {
+            return url
+        }
+        return "https://media-tools-gu.netlify.app"
+    }()
+
     /// Keychain access group shared between the main app and share extension.
     static let keychainAccessGroup = "group.com.shimizu-technology.media-tools"
 

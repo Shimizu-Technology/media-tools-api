@@ -24,7 +24,6 @@ import (
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
-	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
@@ -195,7 +194,7 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		APIKeyID:           actor.APIKeyID,
 	}
 
-	if err := h.DB.CreateAudioTranscription(c.Request.Context(), at); err != nil {
+	if err := h.DB.CreateAudioTranscriptionWithJob(c.Request.Context(), at, tempFilePath); err != nil {
 		os.Remove(tempFilePath) // Clean up temp file on error
 		log.Printf("Failed to create audio transcription record: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -235,28 +234,10 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	}
 
 	if err := h.Worker.Submit(job); err != nil {
-		if h.isOwnerRequest(c) {
-			ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
-			defer cancel()
-			if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
-				log.Printf("📤 Audio transcription job queued (blocking): %s (%s, %.1f MB)",
-					at.ID, header.Filename, float64(header.Size)/(1024*1024))
-				c.JSON(http.StatusAccepted, at)
-				return
-			}
-		}
-
-		os.Remove(tempFilePath)
-		at.Status = "failed"
-		at.ErrorMessage = "Job queue is full, please try again later"
-		h.DB.UpdateAudioTranscription(c.Request.Context(), at)
-
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
-			Error:   "queue_full",
-			Message: "Server is busy. Please try again in a moment.",
-			Code:    http.StatusServiceUnavailable,
-		})
-		return
+		// The transactional queue row contains this process's exact temporary
+		// path. A worker will claim it on the next database poll even if this
+		// low-latency wake-up cannot be delivered.
+		log.Printf("Audio transcription %s queued durably but local wake failed: %v", at.ID, err)
 	}
 
 	log.Printf("📤 Audio transcription job queued: %s (%s, %.1f MB)",
@@ -499,26 +480,10 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 	}
 
 	if err := h.Worker.Submit(job); err != nil {
-		if h.isOwnerRequest(c) {
-			ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
-			defer cancel()
-			if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
-				c.JSON(http.StatusAccepted, at)
-				return
-			}
-		}
-		at.Status = "failed"
-		at.ErrorMessage = "Job queue is full, please try again later"
-		at.ProcessingStage = "failed"
-		at.ProcessingProgress = 100
-		_ = h.DB.UpdateAudioTranscription(c.Request.Context(), at)
-
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
-			Error:   "queue_full",
-			Message: "Server is busy. Please try again in a moment.",
-			Code:    http.StatusServiceUnavailable,
-		})
-		return
+		// Completing the upload session and inserting the audio row also commits
+		// its durable job. Submit only refreshes the payload and wakes this
+		// process; the trigger payload already contains the S3 recovery key.
+		log.Printf("Direct audio upload %s queued durably but local wake failed: %v", at.ID, err)
 	}
 
 	c.JSON(http.StatusAccepted, at)
@@ -680,11 +645,13 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 	at.Decisions = json.RawMessage("[]")
 	at.SummaryModel = ""
 	at.SummaryStatus = "none"
+	at.SummaryEvidence = json.RawMessage("{}")
+	at.SummaryErrorMessage = ""
 
 	// Atomically swap from completed/failed to pending. The DB status predicate
 	// closes the concurrent-request window where two re-transcribe clicks could
 	// otherwise enqueue duplicate Whisper jobs.
-	previous, prepared, err := h.DB.PrepareAudioRetranscriptionForActor(c.Request.Context(), at, actor.UserID, actor.APIKeyID)
+	_, prepared, err := h.DB.PrepareAudioRetranscriptionForActor(c.Request.Context(), at, actor.UserID, actor.APIKeyID)
 	if err != nil {
 		os.Remove(tempFilePath)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -703,42 +670,12 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 		})
 		return
 	}
-	restorePrevious := func() error {
-		restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer restoreCancel()
-
-		if err := h.DB.UpdateAudioTranscriptionWithSummary(restoreCtx, previous); err != nil {
-			log.Printf("Warning: failed to restore audio transcription %s after queue failure: %v", previous.ID, err)
-			return fmt.Errorf("failed to restore previous audio state: %w", err)
-		}
-		return nil
-	}
-
 	if err := h.Worker.Submit(job); err != nil {
-		if h.isOwnerRequest(c) {
-			ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
-			defer cancel()
-			if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
-				clearStaleChat()
-				c.JSON(http.StatusAccepted, at)
-				return
-			}
-		}
+		// The pending state and an S3-backed recovery payload were committed by
+		// one UPDATE transaction. If the richer temporary-path refresh fails,
+		// discard that local copy and let a polling worker download from S3.
 		os.Remove(tempFilePath)
-		if restoreErr := restorePrevious(); restoreErr != nil {
-			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-				Error:   "restore_failed",
-				Message: "Server is busy and could not verify that your previous transcript was fully restored. The original recording is still saved; please refresh before trying again.",
-				Code:    http.StatusInternalServerError,
-			})
-			return
-		}
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
-			Error:   "queue_full",
-			Message: "Server is busy. Your previous transcript was preserved. Please try again in a moment.",
-			Code:    http.StatusServiceUnavailable,
-		})
-		return
+		log.Printf("Audio retry %s queued durably but local wake failed: %v", at.ID, err)
 	}
 
 	clearStaleChat()
@@ -915,63 +852,63 @@ func (h *Handler) SummarizeAudio(c *gin.Context) {
 		return
 	}
 
-	// Mark as processing
-	at.SummaryStatus = "processing"
-	at.ContentType = contentType
-	h.DB.UpdateAudioSummary(c.Request.Context(), at)
+	if req.Length == "" {
+		req.Length = "medium"
+	}
+	if req.Length != "short" && req.Length != "medium" && req.Length != "detailed" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: "invalid_length", Message: "length must be short, medium, or detailed", Code: http.StatusBadRequest,
+		})
+		return
+	}
+	if at.SummaryStatus == "pending" || at.SummaryStatus == "processing" {
+		c.JSON(http.StatusAccepted, at)
+		return
+	}
 
-	// Generate summary
-	opts := summary.Options{
+	payload, err := json.Marshal(worker.AudioSummaryPayload{
+		AudioID:     at.ID,
 		Model:       req.Model,
 		Length:      req.Length,
 		ContentType: string(contentType),
-	}
-
-	result, err := h.Summarizer.SummarizeAudio(c.Request.Context(), at.TranscriptText, opts)
+	})
 	if err != nil {
-		log.Printf("Audio summary failed for %s: %v", id, err)
-		at.SummaryStatus = "failed"
-		h.DB.UpdateAudioSummary(c.Request.Context(), at)
-
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "summary_failed",
-			Message: "Failed to generate summary: " + err.Error(),
+			Error:   "queue_error",
+			Message: "Failed to prepare summary job",
 			Code:    http.StatusInternalServerError,
 		})
 		return
 	}
-
-	// Marshal arrays to JSON
-	keyPointsJSON, err := json.Marshal(result.KeyPoints)
-	if err != nil {
-		log.Printf("Failed to marshal key points for %s: %v", id, err)
-		keyPointsJSON = []byte("[]")
-	}
-	actionItemsJSON, err := json.Marshal(result.ActionItems)
-	if err != nil {
-		log.Printf("Failed to marshal action items for %s: %v", id, err)
-		actionItemsJSON = []byte("[]")
-	}
-	decisionsJSON, err := json.Marshal(result.Decisions)
-	if err != nil {
-		log.Printf("Failed to marshal decisions for %s: %v", id, err)
-		decisionsJSON = []byte("[]")
-	}
-
-	// Update record
-	at.SummaryText = result.Summary
-	at.KeyPoints = keyPointsJSON
-	at.ActionItems = actionItemsJSON
-	at.Decisions = decisionsJSON
-	at.SummaryModel = result.Model
-	at.SummaryStatus = "completed"
+	// Persist the exact request and pending state atomically. Submit below is an
+	// idempotent payload refresh plus low-latency wake-up, not the durability
+	// boundary.
+	at.SummaryStatus = "pending"
+	at.SummaryErrorMessage = ""
+	at.SummaryLength = req.Length
 	at.ContentType = contentType
-
-	if err := h.DB.UpdateAudioSummary(c.Request.Context(), at); err != nil {
-		log.Printf("Failed to save audio summary for %s: %v", id, err)
+	if err := h.DB.QueueAudioSummary(c.Request.Context(), at, payload); err != nil {
+		if !errors.Is(err, database.ErrAudioSummaryNotQueueable) {
+			log.Printf("Failed to queue audio summary %s: %v", at.ID, err)
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error: "database_error", Message: "Failed to queue audio summary.", Code: http.StatusInternalServerError,
+			})
+			return
+		}
+		c.JSON(http.StatusConflict, models.ErrorResponse{
+			Error: "summary_not_queued", Message: "The summary is already active or could not be queued.", Code: http.StatusConflict,
+		})
+		return
+	}
+	if err := h.Worker.Submit(worker.Job{
+		ID: at.ID, Type: worker.JobAudioSummary, Payload: payload, CreatedAt: time.Now(),
+	}); err != nil {
+		// The queue row committed with the audio state, so another worker process
+		// or the two-second poll will still claim it.
+		log.Printf("Audio summary %s queued durably but local wake failed: %v", at.ID, err)
 	}
 
-	c.JSON(http.StatusOK, at)
+	c.JSON(http.StatusAccepted, at)
 }
 
 // SearchAudioTranscriptions searches audio transcriptions with full-text search (MTA-25).

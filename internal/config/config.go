@@ -43,8 +43,10 @@ type Config struct {
 	AudioPlaybackURLExpiryMinutes int
 
 	// OpenRouter AI settings
-	OpenRouterAPIKey string
-	OpenRouterModel  string // Default model for summaries
+	OpenRouterAPIKey       string
+	OpenRouterModel        string // Default model for summaries
+	OpenRouterChatModel    string // Optional faster model for interactive chat
+	OpenRouterProviderSort string // price, latency, or throughput
 
 	// OpenAI settings (for Whisper/audio transcription)
 	OpenAIAPIKey                string
@@ -75,8 +77,10 @@ type Config struct {
 	OwnerAPIKeyPrefix string
 
 	// Worker settings
-	WorkerCount  int // Number of background worker goroutines
-	JobQueueSize int // Size of the in-memory job queue buffer
+	WorkerCount              int // Number of background worker goroutines
+	JobQueueSize             int // Size of the in-memory job queue buffer
+	WhisperChunkConcurrency  int // Parallel chunks within one recording
+	WhisperGlobalConcurrency int // Process-wide cap across recordings
 
 	// Rate limiting
 	DefaultRateLimit int // Requests per hour per API key
@@ -119,6 +123,10 @@ func Load() (*Config, error) {
 		// OpenRouter AI
 		OpenRouterAPIKey: getEnv("OPENROUTER_API_KEY", ""),
 		OpenRouterModel:  getEnv("OPENROUTER_MODEL", "anthropic/claude-4.5-sonnet-20250929"),
+		// Interactive Q&A favors a fast workhorse model; durable summaries keep
+		// the separately configured quality-oriented model above.
+		OpenRouterChatModel:    getEnv("OPENROUTER_CHAT_MODEL", "google/gemini-2.5-flash"),
+		OpenRouterProviderSort: getEnv("OPENROUTER_PROVIDER_SORT", "throughput"),
 
 		// OpenAI (Whisper/API for audio transcription)
 		OpenAIAPIKey:                getEnv("OPENAI_API_KEY", ""),
@@ -146,8 +154,10 @@ func Load() (*Config, error) {
 		OwnerAPIKeyPrefix: getEnv("OWNER_API_KEY_PREFIX", ""),
 
 		// Worker defaults
-		WorkerCount:  getEnvInt("WORKER_COUNT", 3),
-		JobQueueSize: getEnvInt("JOB_QUEUE_SIZE", 100),
+		WorkerCount:              getEnvInt("WORKER_COUNT", 3),
+		JobQueueSize:             getEnvInt("JOB_QUEUE_SIZE", 100),
+		WhisperChunkConcurrency:  getEnvInt("WHISPER_CHUNK_CONCURRENCY", 3),
+		WhisperGlobalConcurrency: getEnvInt("WHISPER_GLOBAL_CONCURRENCY", 6),
 
 		// Rate limiting
 		DefaultRateLimit: getEnvInt("DEFAULT_RATE_LIMIT", 100),
@@ -189,6 +199,17 @@ func Load() (*Config, error) {
 	// This protects the API key creation endpoint from unauthorized access.
 	if cfg.GinMode == "release" && cfg.AdminAPIKey == "" {
 		return nil, fmt.Errorf("ADMIN_API_KEY must be set in production; this protects API key creation")
+	}
+	if cfg.WhisperChunkConcurrency < 1 {
+		cfg.WhisperChunkConcurrency = 1
+	}
+	if cfg.WhisperGlobalConcurrency < cfg.WhisperChunkConcurrency {
+		cfg.WhisperGlobalConcurrency = cfg.WhisperChunkConcurrency
+	}
+	switch cfg.OpenRouterProviderSort {
+	case "", "price", "latency", "throughput":
+	default:
+		return nil, fmt.Errorf("OPENROUTER_PROVIDER_SORT must be price, latency, throughput, or empty")
 	}
 	return cfg, nil
 }

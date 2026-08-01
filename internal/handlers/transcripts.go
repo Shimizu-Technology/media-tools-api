@@ -2,7 +2,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"log"
 	"math"
@@ -122,24 +121,9 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 	}
 
 	if err := h.Worker.Submit(job); err != nil {
-		if h.isOwnerRequest(c) {
-			ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
-			defer cancel()
-			if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
-				c.JSON(http.StatusAccepted, t)
-				return
-			}
-		}
-		log.Printf("⚠️  Failed to queue extraction job: %v", err)
-		t.Status = models.StatusFailed
-		t.ErrorMessage = "Job queue is full, please try again later"
-		_ = h.DB.UpdateTranscript(c.Request.Context(), t)
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
-			Error:   "queue_full",
-			Message: "Server is busy. Please try again in a moment.",
-			Code:    http.StatusServiceUnavailable,
-		})
-		return
+		// The transcript insert and outbox row committed together. A local wake
+		// failure only adds up to the two-second cross-process polling delay.
+		log.Printf("Transcript %s queued durably but local wake failed: %v", t.ID, err)
 	}
 
 	// Return 202 Accepted — the work is happening in the background
@@ -324,29 +308,7 @@ func (h *Handler) CreateSummary(c *gin.Context) {
 	}
 
 	if err := h.Worker.Submit(job); err != nil {
-		if h.isOwnerRequest(c) {
-			ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
-			defer cancel()
-			if err := h.Worker.SubmitBlocking(ctx, job); err == nil {
-				c.JSON(http.StatusAccepted, gin.H{
-					"message":       "Summary generation started",
-					"summary_id":    summaryRecord.ID,
-					"transcript_id": req.TranscriptID,
-					"length":        req.Length,
-					"style":         req.Style,
-				})
-				return
-			}
-		}
-		summaryRecord.Status = models.StatusFailed
-		summaryRecord.ErrorMessage = "job queue was full"
-		_ = h.DB.UpdateSummary(c.Request.Context(), summaryRecord)
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
-			Error:   "queue_full",
-			Message: "Job queue is full, try again later",
-			Code:    http.StatusServiceUnavailable,
-		})
-		return
+		log.Printf("Summary %s queued durably but local wake failed: %v", summaryRecord.ID, err)
 	}
 
 	c.JSON(http.StatusAccepted, gin.H{

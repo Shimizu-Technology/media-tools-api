@@ -1,24 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { ClerkProvider, useAuth } from '@clerk/clerk-react'
 import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { FileText } from 'lucide-react'
 import { AppShell } from './components/AppShell'
 import { ProtectedRoute } from './components/ProtectedRoute'
-import { HomePage } from './pages/HomePage'
-import { MyLibraryPage } from './pages/MyLibraryPage'
-import { AudioPage } from './pages/AudioPage'
-import { PdfPage } from './pages/PdfPage'
-import { DocsPage } from './pages/DocsPage'
-import { WebhooksPage } from './pages/WebhooksPage'
-import { OpsPage } from './pages/OpsPage'
-import { CollectionsPage } from './pages/CollectionsPage'
-import { PrivacyPage } from './pages/PrivacyPage'
-import { LandingPage } from './pages/LandingPage'
-import { DashboardPage } from './pages/DashboardPage'
-import { DeveloperPage } from './pages/DeveloperPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { ProcessingPage } from './pages/ProcessingPage'
-import { ItemDetailPage } from './pages/ItemDetailPage'
 import { ScrollToTop } from './components/ScrollToTop'
 import { AuthProvider } from './contexts/AuthContext'
 import { getCurrentUser, type User } from './lib/api'
@@ -26,6 +11,22 @@ import { setAuthTokenGetter } from './lib/apiAuth'
 
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 const isClerkEnabled = Boolean(CLERK_PUBLISHABLE_KEY && CLERK_PUBLISHABLE_KEY !== 'YOUR_PUBLISHABLE_KEY')
+
+const HomePage = lazy(() => import('./pages/HomePage').then((module) => ({ default: module.HomePage })))
+const MyLibraryPage = lazy(() => import('./pages/MyLibraryPage').then((module) => ({ default: module.MyLibraryPage })))
+const AudioPage = lazy(() => import('./pages/AudioPage').then((module) => ({ default: module.AudioPage })))
+const PdfPage = lazy(() => import('./pages/PdfPage').then((module) => ({ default: module.PdfPage })))
+const DocsPage = lazy(() => import('./pages/DocsPage').then((module) => ({ default: module.DocsPage })))
+const WebhooksPage = lazy(() => import('./pages/WebhooksPage').then((module) => ({ default: module.WebhooksPage })))
+const OpsPage = lazy(() => import('./pages/OpsPage').then((module) => ({ default: module.OpsPage })))
+const CollectionsPage = lazy(() => import('./pages/CollectionsPage').then((module) => ({ default: module.CollectionsPage })))
+const PrivacyPage = lazy(() => import('./pages/PrivacyPage').then((module) => ({ default: module.PrivacyPage })))
+const LandingPage = lazy(() => import('./pages/LandingPage').then((module) => ({ default: module.LandingPage })))
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })))
+const DeveloperPage = lazy(() => import('./pages/DeveloperPage').then((module) => ({ default: module.DeveloperPage })))
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })))
+const ProcessingPage = lazy(() => import('./pages/ProcessingPage').then((module) => ({ default: module.ProcessingPage })))
+const ItemDetailPage = lazy(() => import('./pages/ItemDetailPage').then((module) => ({ default: module.ItemDetailPage })))
 
 if (!isClerkEnabled) {
   console.warn('Clerk not configured — using local API-key development mode. Add VITE_CLERK_PUBLISHABLE_KEY to .env.local for browser auth.')
@@ -35,7 +36,8 @@ function AppRoutes() {
   return (
     <>
       <ScrollToTop />
-      <Routes>
+      <Suspense fallback={<RouteLoading />}>
+        <Routes>
         <Route path="/" element={<LandingPage />} />
 
       <Route element={<PublicLayout />}>
@@ -76,9 +78,14 @@ function AppRoutes() {
       </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+        </Routes>
+      </Suspense>
     </>
   )
+}
+
+function RouteLoading() {
+  return <div className="flex min-h-[45vh] items-center justify-center" role="status"><div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-brand-500)]" /><span className="sr-only">Loading page</span></div>
 }
 
 function LegacyRedirect({ to, includePathTail = false }: { to: string; includePathTail?: boolean }) {
