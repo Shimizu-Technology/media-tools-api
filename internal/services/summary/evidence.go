@@ -585,6 +585,9 @@ func parseValidatedCitedOutput(content string, segments []EvidenceSegment, limit
 	}
 	output = validateCitedOutput(output, segments)
 	output = enforceEvidenceLimits(output, limits)
+	if err := validateEvidenceWordLimits(output, limits); err != nil {
+		return citedOutput{}, err
+	}
 	if err := requireCitedOutput(output); err != nil {
 		return citedOutput{}, err
 	}
@@ -598,33 +601,44 @@ func completionWasTruncated(completion completionResult) bool {
 }
 
 func enforceEvidenceLimits(output citedOutput, limits evidenceLimits) citedOutput {
-	output.Summary.Text = truncateWords(output.Summary.Text, limits.SummaryWords)
-	output.KeyPoints = enforceClaimLimits(output.KeyPoints, limits.KeyPoints, limits.ClaimWords)
-	output.ActionItems = enforceClaimLimits(output.ActionItems, limits.ActionItems, limits.ClaimWords)
-	output.Decisions = enforceClaimLimits(output.Decisions, limits.Decisions, limits.ClaimWords)
-	output.Topics = enforceClaimLimits(output.Topics, limits.Topics, limits.ClaimWords)
+	output.KeyPoints = enforceClaimCount(output.KeyPoints, limits.KeyPoints)
+	output.ActionItems = enforceClaimCount(output.ActionItems, limits.ActionItems)
+	output.Decisions = enforceClaimCount(output.Decisions, limits.Decisions)
+	output.Topics = enforceClaimCount(output.Topics, limits.Topics)
 	return output
 }
 
-func enforceClaimLimits(claims []citedClaim, maxItems, maxWords int) []citedClaim {
+func enforceClaimCount(claims []citedClaim, maxItems int) []citedClaim {
 	if maxItems <= 0 {
 		return nil
 	}
 	if len(claims) > maxItems {
 		claims = claims[:maxItems]
 	}
-	for index := range claims {
-		claims[index].Text = truncateWords(claims[index].Text, maxWords)
-	}
 	return claims
 }
 
-func truncateWords(value string, maxWords int) string {
-	words := strings.Fields(value)
-	if maxWords <= 0 || len(words) <= maxWords {
-		return strings.TrimSpace(value)
+func validateEvidenceWordLimits(output citedOutput, limits evidenceLimits) error {
+	if len(strings.Fields(output.Summary.Text)) > limits.SummaryWords {
+		return fmt.Errorf("summary exceeded the %d-word output limit", limits.SummaryWords)
 	}
-	return strings.Join(words[:maxWords], " ") + "…"
+	sections := []struct {
+		name   string
+		claims []citedClaim
+	}{
+		{name: "key_points", claims: output.KeyPoints},
+		{name: "action_items", claims: output.ActionItems},
+		{name: "decisions", claims: output.Decisions},
+		{name: "topics", claims: output.Topics},
+	}
+	for _, section := range sections {
+		for index, claim := range section.claims {
+			if len(strings.Fields(claim.Text)) > limits.ClaimWords {
+				return fmt.Errorf("%s item %d exceeded the %d-word output limit", section.name, index+1, limits.ClaimWords)
+			}
+		}
+	}
+	return nil
 }
 
 func normalizeFinishReason(value string) string {

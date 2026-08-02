@@ -305,31 +305,49 @@ func TestCompleteCitedSummaryRegeneratesValidJSONMarkedAsLength(t *testing.T) {
 	}
 }
 
-func TestEnforceEvidenceLimitsCapsEveryPersistedSection(t *testing.T) {
+func TestEnforceEvidenceLimitsCapsOnlyWholeItems(t *testing.T) {
 	output := citedOutput{
-		Summary: citedClaim{Text: "one two three four", Citations: []string{"segment-1"}},
+		Summary: citedClaim{Text: "complete summary remains intact", Citations: []string{"segment-1"}},
 		KeyPoints: []citedClaim{
-			{Text: "one two three", Citations: []string{"segment-1"}},
+			{Text: "complete first point", Citations: []string{"segment-1"}},
 			{Text: "second point", Citations: []string{"segment-1"}},
 		},
-		ActionItems: []citedClaim{{Text: "one two three", Citations: []string{"segment-1"}}},
+		ActionItems: []citedClaim{{Text: "complete action item", Citations: []string{"segment-1"}}},
 		Decisions:   []citedClaim{{Text: "must be cleared", Citations: []string{"segment-1"}}},
 		Topics:      []citedClaim{{Text: "must be cleared", Citations: []string{"segment-1"}}},
 	}
-	limits := evidenceLimits{SummaryWords: 2, KeyPoints: 1, ActionItems: 1, Decisions: 1, Topics: 0, ClaimWords: 2}
+	limits := evidenceLimits{SummaryWords: 10, KeyPoints: 1, ActionItems: 1, Decisions: 1, Topics: 0, ClaimWords: 10}
 
 	got := enforceEvidenceLimits(output, limits)
-	if got.Summary.Text != "one two…" {
-		t.Fatalf("summary = %q, want two-word cap", got.Summary.Text)
+	if got.Summary.Text != "complete summary remains intact" {
+		t.Fatalf("summary = %q, want complete text preserved", got.Summary.Text)
 	}
-	if len(got.KeyPoints) != 1 || got.KeyPoints[0].Text != "one two…" {
-		t.Fatalf("key points = %#v, want one item capped to two words", got.KeyPoints)
+	if len(got.KeyPoints) != 1 || got.KeyPoints[0].Text != "complete first point" {
+		t.Fatalf("key points = %#v, want one complete item", got.KeyPoints)
 	}
-	if len(got.ActionItems) != 1 || got.ActionItems[0].Text != "one two…" {
-		t.Fatalf("action items = %#v, want capped claim", got.ActionItems)
+	if len(got.ActionItems) != 1 || got.ActionItems[0].Text != "complete action item" {
+		t.Fatalf("action items = %#v, want complete claim", got.ActionItems)
 	}
 	if len(got.Decisions) != 1 || len(got.Topics) != 0 {
 		t.Fatalf("zero-category enforcement failed: decisions=%#v topics=%#v", got.Decisions, got.Topics)
+	}
+}
+
+func TestValidateEvidenceWordLimitsRejectsInsteadOfTruncatingClaims(t *testing.T) {
+	output := citedOutput{
+		Summary: citedClaim{Text: "complete summary text", Citations: []string{"segment-1"}},
+		KeyPoints: []citedClaim{
+			{Text: "this claim exceeds the configured limit", Citations: []string{"segment-1"}},
+		},
+	}
+	limits := evidenceLimits{SummaryWords: 10, ClaimWords: 3}
+
+	err := validateEvidenceWordLimits(output, limits)
+	if err == nil || !strings.Contains(err.Error(), "key_points item 1") {
+		t.Fatalf("validateEvidenceWordLimits() error = %v, want oversized complete claim rejected", err)
+	}
+	if output.KeyPoints[0].Text != "this claim exceeds the configured limit" {
+		t.Fatalf("validation mutated claim text: %q", output.KeyPoints[0].Text)
 	}
 }
 
