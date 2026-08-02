@@ -118,12 +118,25 @@ type chatResponse struct {
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`
+		FinishReason       string               `json:"finish_reason"`
+		NativeFinishReason string               `json:"native_finish_reason"`
+		Error              *openRouterErrorBody `json:"error"`
 	} `json:"choices"`
 	Model string `json:"model"`
-	Error *struct {
-		Message string `json:"message"`
-		Code    int    `json:"code"`
-	} `json:"error"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage"`
+	Error *openRouterErrorBody `json:"error"`
+}
+
+type openRouterErrorBody struct {
+	Message  string `json:"message"`
+	Code     int    `json:"code"`
+	Metadata struct {
+		ErrorType string `json:"error_type"`
+	} `json:"metadata"`
 }
 
 // ProviderError keeps provider failures typed without exposing raw upstream
@@ -131,6 +144,29 @@ type chatResponse struct {
 type ProviderError struct {
 	StatusCode int
 	ErrorType  string
+}
+
+// StructuredOutputError means the provider answered, but the response could
+// not be accepted as the complete, cited JSON contract after one bounded
+// regeneration attempt. It retains only operational metadata, never model
+// content, so it is safe to wrap in worker logs.
+type StructuredOutputError struct {
+	FinishReason       string
+	NativeFinishReason string
+	Attempts           int
+	Cause              error
+}
+
+func (e *StructuredOutputError) Error() string {
+	finishReason := strings.TrimSpace(e.FinishReason)
+	if finishReason == "" {
+		finishReason = "unknown"
+	}
+	return fmt.Sprintf("AI structured output remained invalid after %d attempts (finish_reason=%s)", e.Attempts, finishReason)
+}
+
+func (e *StructuredOutputError) Unwrap() error {
+	return e.Cause
 }
 
 func (e *ProviderError) Error() string {
@@ -167,6 +203,11 @@ func PublicErrorMessage(err error) string {
 		default:
 			return "We couldn't generate the AI summary. Please try again."
 		}
+	}
+
+	var structuredErr *StructuredOutputError
+	if errors.As(err, &structuredErr) {
+		return "The AI service returned an incomplete summary. We retried automatically, but it still couldn't finish. Please try again."
 	}
 
 	return "We couldn't generate the AI summary. Please try again."
@@ -218,14 +259,20 @@ func summaryMaxTokens(length string) int {
 
 func newProviderError(status int, body []byte) error {
 	var response struct {
-		Error struct {
-			Metadata struct {
-				ErrorType string `json:"error_type"`
-			} `json:"metadata"`
-		} `json:"error"`
+		Error   *openRouterErrorBody `json:"error"`
+		Choices []struct {
+			Error *openRouterErrorBody `json:"error"`
+		} `json:"choices"`
 	}
 	_ = json.Unmarshal(body, &response)
-	return &ProviderError{StatusCode: status, ErrorType: response.Error.Metadata.ErrorType}
+	errorType := ""
+	if response.Error != nil {
+		errorType = response.Error.Metadata.ErrorType
+	}
+	if errorType == "" && len(response.Choices) > 0 && response.Choices[0].Error != nil {
+		errorType = response.Choices[0].Error.Metadata.ErrorType
+	}
+	return &ProviderError{StatusCode: status, ErrorType: errorType}
 }
 
 func providerErrorStatus(responseStatus, errorCode int) int {

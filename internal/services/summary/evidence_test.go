@@ -3,6 +3,8 @@ package summary
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -96,14 +98,14 @@ func TestCompleteJSONMessagesFallsBackWhenProviderRejectsJSONMode(t *testing.T) 
 		}, nil
 	})}
 
-	content, model, err := service.completeJSONMessages(context.Background(), "test/model", []chatMessage{
+	completion, err := service.completeJSONMessages(context.Background(), "test/model", []chatMessage{
 		{Role: "user", Content: "Return JSON"},
 	}, mediumSummaryMaxTokens)
 	if err != nil {
 		t.Fatalf("completeJSONMessages() error = %v", err)
 	}
-	if content != `{"answer":"ok"}` || model != "provider/model" {
-		t.Fatalf("result = (%q, %q), want parsed fallback response", content, model)
+	if completion.Content != `{"answer":"ok"}` || completion.Model != "provider/model" {
+		t.Fatalf("result = (%q, %q), want parsed fallback response", completion.Content, completion.Model)
 	}
 	if len(bodies) != 2 {
 		t.Fatalf("request count = %d, want 2", len(bodies))
@@ -140,10 +142,154 @@ func TestCompleteJSONMessagesBoundsProviderOutputBudget(t *testing.T) {
 		}, nil
 	})}
 
-	_, _, err := service.completeJSONMessages(context.Background(), "test/model", []chatMessage{
+	_, err := service.completeJSONMessages(context.Background(), "test/model", []chatMessage{
 		{Role: "user", Content: "Return JSON"},
 	}, shortSummaryMaxTokens)
 	if err != nil {
 		t.Fatalf("completeJSONMessages() error = %v", err)
 	}
+}
+
+func TestCompleteCitedSummaryRegeneratesAfterTruncatedLengthResponse(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []string
+	service := NewWithModels("test-key", "test/model", "test/model", "")
+	service.httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		mu.Lock()
+		bodies = append(bodies, string(body))
+		call := len(bodies)
+		mu.Unlock()
+		if call == 1 {
+			return jsonCompletionResponse(
+				`{"summary":{"text":"unfinished","citations":["segment-1"]},"key_points":[`,
+				"length",
+				3_000,
+			), nil
+		}
+		return jsonCompletionResponse(validCitedSummaryJSON(), "stop", 412), nil
+	})}
+
+	segments := []EvidenceSegment{{ID: "segment-1", Text: "Supported evidence"}}
+	output, completion, err := service.completeCitedSummary(
+		context.Background(),
+		"test/model",
+		"Return cited JSON.",
+		"Summarize the evidence compactly.",
+		mediumSummaryMaxTokens,
+		segments,
+	)
+	if err != nil {
+		t.Fatalf("completeCitedSummary() error = %v", err)
+	}
+	if output.Summary.Text != "Recovered summary" || completion.FinishReason != "stop" {
+		t.Fatalf("recovered result = (%q, %q), want valid stop response", output.Summary.Text, completion.FinishReason)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("request count = %d, want one bounded regeneration", len(bodies))
+	}
+	if !strings.Contains(bodies[1], "previous response could not be accepted") {
+		t.Fatalf("retry request did not include compact regeneration instruction: %s", bodies[1])
+	}
+	for index, body := range bodies {
+		if !strings.Contains(body, `"max_tokens":3000`) {
+			t.Fatalf("request %d changed the bounded output budget: %s", index+1, body)
+		}
+	}
+}
+
+func TestCompleteCitedSummaryReturnsTypedErrorAfterTwoInvalidResponses(t *testing.T) {
+	calls := 0
+	service := NewWithModels("test-key", "test/model", "test/model", "")
+	service.httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		return jsonCompletionResponse(`{"summary":`, "length", mediumSummaryMaxTokens), nil
+	})}
+
+	_, _, err := service.completeCitedSummary(
+		context.Background(),
+		"test/model",
+		"Return cited JSON.",
+		"Summarize.",
+		mediumSummaryMaxTokens,
+		[]EvidenceSegment{{ID: "segment-1", Text: "Evidence"}},
+	)
+	if err == nil {
+		t.Fatal("completeCitedSummary() error = nil, want terminal structured output error")
+	}
+	var structuredErr *StructuredOutputError
+	if !errors.As(err, &structuredErr) {
+		t.Fatalf("error type = %T, want *StructuredOutputError", err)
+	}
+	if structuredErr.Attempts != 2 || structuredErr.FinishReason != "length" || calls != 2 {
+		t.Fatalf("structured error = %#v after %d calls, want two length attempts", structuredErr, calls)
+	}
+	if message := PublicErrorMessage(err); !strings.Contains(message, "retried automatically") {
+		t.Fatalf("PublicErrorMessage() = %q, want transparent retry guidance", message)
+	}
+}
+
+func TestCompleteJSONMessagesClassifiesChoiceLevelProviderError(t *testing.T) {
+	service := NewWithModels("test-key", "test/model", "test/model", "")
+	service.httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(
+				`{"choices":[{"message":{"content":"partial"},"finish_reason":"error","error":{"code":502,"message":"private provider detail","metadata":{"error_type":"provider_unavailable"}}}]}`,
+			)),
+			Header: make(http.Header),
+		}, nil
+	})}
+
+	_, err := service.completeJSONMessages(context.Background(), "test/model", []chatMessage{{Role: "user", Content: "Return JSON"}}, 100)
+	var providerErr *ProviderError
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("error type = %T, want *ProviderError", err)
+	}
+	if providerErr.StatusCode != http.StatusBadGateway || providerErr.ErrorType != "provider_unavailable" {
+		t.Fatalf("provider error = %#v, want choice-level 502 classification", providerErr)
+	}
+	if strings.Contains(err.Error(), "private provider detail") {
+		t.Fatalf("error leaked choice-level provider content: %v", err)
+	}
+}
+
+func TestEvidenceSummaryPromptBoundsUnusedAndVisibleCategories(t *testing.T) {
+	audioPrompt := evidenceSummaryPrompt(
+		[]EvidenceSegment{{ID: "segment-1", Text: "Evidence"}},
+		Options{Length: "medium", Style: "bullet"},
+		true,
+	)
+	for _, expected := range []string{
+		"summary: at most 220 words",
+		"key_points: at most 7 items",
+		"topics: at most 0 items",
+	} {
+		if !strings.Contains(audioPrompt, expected) {
+			t.Fatalf("audio prompt missing %q: %s", expected, audioPrompt)
+		}
+	}
+}
+
+func jsonCompletionResponse(content, finishReason string, completionTokens int) *http.Response {
+	payload := fmt.Sprintf(
+		`{"model":"provider/model","choices":[{"message":{"content":%q},"finish_reason":%q,"native_finish_reason":%q}],"usage":{"prompt_tokens":1200,"completion_tokens":%d,"total_tokens":%d}}`,
+		content,
+		finishReason,
+		finishReason,
+		completionTokens,
+		completionTokens+1_200,
+	)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(payload)),
+		Header:     make(http.Header),
+	}
+}
+
+func validCitedSummaryJSON() string {
+	return `{"summary":{"text":"Recovered summary","citations":["segment-1"]},"key_points":[{"text":"Supported point","citations":["segment-1"]}],"action_items":[],"decisions":[],"topics":[]}`
 }
