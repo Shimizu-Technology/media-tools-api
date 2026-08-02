@@ -120,21 +120,23 @@ function CollectionsList() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="mx-auto max-w-4xl">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-semibold text-[var(--text-primary)] flex items-center gap-3">
-            <FolderOpen className="w-7 h-7 text-[var(--brand)]" />
+      <div className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em]" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
+            <FolderOpen className="h-3.5 w-3.5" /> Workspace
+          </div>
+          <h1 className="flex items-center gap-3 text-3xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-4xl">
             Collections
           </h1>
-          <p className="text-sm text-[var(--text-secondary)] mt-1">
+          <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--text-secondary)]">
             Group transcripts, recordings, and documents together
           </p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--brand)] text-white font-medium text-sm hover:brightness-110 transition-all"
+          className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[var(--brand)] px-4 text-sm font-semibold text-white transition-all hover:brightness-110 sm:w-auto"
         >
           <Plus className="w-4 h-4" />
           New Collection
@@ -151,8 +153,8 @@ function CollectionsList() {
             className="flex items-center gap-2 p-3 mb-4 rounded-lg bg-red-500/10 text-red-400 text-sm"
           >
             <AlertCircle className="w-4 h-4 shrink-0" />
-            {error}
-            <button onClick={() => setError('')} className="ml-auto"><X className="w-4 h-4" /></button>
+            <span className="min-w-0 flex-1">{error}</span>
+            <button onClick={() => setError('')} className="ml-auto flex min-h-11 min-w-11 items-center justify-center rounded-lg" aria-label="Dismiss error"><X className="w-4 h-4" /></button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -166,32 +168,32 @@ function CollectionsList() {
             exit={{ opacity: 0, height: 0 }}
             className="overflow-hidden mb-6"
           >
-            <div className="p-4 rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
               <input
                 autoFocus
                 value={newName}
                 onChange={e => setNewName(e.target.value)}
                 placeholder="Collection name..."
-                className="w-full bg-transparent text-[var(--text-primary)] text-lg font-medium placeholder:text-[var(--text-tertiary)] outline-none mb-3"
+                className="mb-3 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--color-surface-subtle)] px-3 text-base font-semibold text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
                 onKeyDown={e => e.key === 'Enter' && handleCreate()}
               />
               <input
                 value={newDesc}
                 onChange={e => setNewDesc(e.target.value)}
                 placeholder="Description (optional)"
-                className="w-full bg-transparent text-[var(--text-secondary)] text-sm placeholder:text-[var(--text-tertiary)] outline-none mb-4"
+                className="mb-4 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--color-surface-subtle)] px-3 text-base text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)] sm:text-sm"
               />
               <div className="flex gap-2 justify-end">
                 <button
                   onClick={() => { setShowCreate(false); setNewName(''); setNewDesc(''); }}
-                  className="px-3 py-1.5 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                  className="min-h-11 rounded-xl px-4 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--color-nav-hover)] hover:text-[var(--text-primary)]"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleCreate}
                   disabled={!newName.trim() || creating}
-                  className="px-4 py-1.5 text-sm rounded-lg bg-[var(--brand)] text-white font-medium disabled:opacity-50 flex items-center gap-2"
+                  className="flex min-h-11 items-center gap-2 rounded-xl bg-[var(--brand)] px-4 text-sm font-semibold text-white disabled:opacity-50"
                 >
                   {creating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   Create
@@ -227,31 +229,31 @@ function CollectionsList() {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.04 }}
-              className="group rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--brand)]/30 transition-all"
+              className="group rounded-2xl border border-[var(--border)] bg-[var(--surface)] transition-all hover:border-[var(--brand)]/30"
             >
               {editId === col.id ? (
-                <div className="p-4">
+                <div className="p-4 sm:p-5">
                   <input
                     autoFocus
                     value={editName}
                     onChange={e => setEditName(e.target.value)}
-                    className="w-full bg-transparent text-[var(--text-primary)] text-lg font-medium outline-none mb-2"
+                    className="mb-2 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--color-surface-subtle)] px-3 text-base font-semibold text-[var(--text-primary)] outline-none"
                     onKeyDown={e => e.key === 'Enter' && handleUpdate(col.id)}
                   />
                   <input
                     value={editDesc}
                     onChange={e => setEditDesc(e.target.value)}
                     placeholder="Description"
-                    className="w-full bg-transparent text-[var(--text-secondary)] text-sm outline-none mb-3"
+                    className="mb-3 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--color-surface-subtle)] px-3 text-base text-[var(--text-secondary)] outline-none sm:text-sm"
                   />
                   <div className="flex gap-2 justify-end">
-                    <button onClick={() => setEditId(null)} className="px-3 py-1.5 text-sm text-[var(--text-secondary)]">Cancel</button>
-                    <button onClick={() => handleUpdate(col.id)} className="px-4 py-1.5 text-sm rounded-lg bg-[var(--brand)] text-white font-medium">Save</button>
+                    <button onClick={() => setEditId(null)} className="min-h-11 rounded-xl px-4 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--color-nav-hover)]">Cancel</button>
+                    <button onClick={() => handleUpdate(col.id)} className="min-h-11 rounded-xl bg-[var(--brand)] px-4 text-sm font-semibold text-white">Save</button>
                   </div>
                 </div>
               ) : (
                 <div
-                  className="p-4 cursor-pointer flex items-center gap-4"
+                  className="flex min-h-20 cursor-pointer flex-wrap items-center gap-3 p-4 sm:flex-nowrap sm:gap-4"
                   onClick={() => navigate(`/app/collections/${col.id}`)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') navigate(`/app/collections/${col.id}`);
@@ -268,7 +270,7 @@ function CollectionsList() {
                       <p className="text-sm text-[var(--text-tertiary)] truncate">{col.description}</p>
                     )}
                   </div>
-                  <span className="text-xs text-[var(--text-tertiary)] tabular-nums shrink-0">
+                  <span className="shrink-0 text-xs tabular-nums text-[var(--text-tertiary)]">
                     {col.item_count} {col.item_count === 1 ? 'item' : 'items'}
                   </span>
                   <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
@@ -351,10 +353,10 @@ function CollectionDetail({ id }: { id: string }) {
 
   if (error || !collection) {
     return (
-      <div className="max-w-4xl mx-auto text-center py-20">
+      <div className="mx-auto max-w-4xl py-20 text-center">
         <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
         <p className="text-[var(--text-secondary)]">{error || 'Not found'}</p>
-        <Link to="/app/collections" className="text-sm text-[var(--brand)] mt-2 inline-block hover:underline">
+        <Link to="/app/collections" className="mt-2 inline-flex min-h-11 items-center rounded-xl px-3 text-sm text-[var(--brand)] hover:bg-[var(--color-nav-hover)]">
           Back to collections
         </Link>
       </div>
@@ -362,32 +364,32 @@ function CollectionDetail({ id }: { id: string }) {
   }
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="mx-auto max-w-4xl">
       {/* Back + header */}
       <Link
         to="/app/collections"
-        className="inline-flex items-center gap-1.5 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)] mb-4 transition-colors"
+        className="mb-4 inline-flex min-h-11 items-center gap-1.5 rounded-xl pr-3 text-sm text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)]"
       >
         <ArrowLeft className="w-4 h-4" />
         All Collections
       </Link>
 
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-[var(--text-primary)] flex items-center gap-3">
-          <FolderOpen className="w-7 h-7 text-[var(--brand)]" />
-          {collection.name}
+      <div className="mb-8 rounded-[2rem] border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-7">
+        <h1 className="flex min-w-0 items-start gap-3 text-2xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-3xl">
+          <FolderOpen className="mt-1 h-7 w-7 shrink-0 text-[var(--brand)]" />
+          <span className="min-w-0 break-words">{collection.name}</span>
         </h1>
         {collection.description && (
           <p className="text-sm text-[var(--text-secondary)] mt-1">{collection.description}</p>
         )}
-        <div className="flex items-center gap-3 mt-2">
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
           <p className="text-xs text-[var(--text-tertiary)]">
             {collection.items.length} {collection.items.length === 1 ? 'item' : 'items'}
           </p>
           {collection.items.length > 0 && (
             <button
               onClick={() => setShowChat(!showChat)}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+              className={`flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-medium transition-all sm:ml-auto sm:w-auto ${
                 showChat
                   ? 'bg-[var(--brand)] text-white'
                   : 'bg-[var(--brand)]/10 text-[var(--brand)] hover:bg-[var(--brand)]/20'
@@ -402,7 +404,7 @@ function CollectionDetail({ id }: { id: string }) {
 
       {/* Items */}
       {collection.items.length === 0 ? (
-        <div className="text-center py-16 border border-dashed border-[var(--border)] rounded-xl">
+        <div className="rounded-2xl border border-dashed border-[var(--border)] px-5 py-16 text-center">
           <GripVertical className="w-8 h-8 text-[var(--text-tertiary)] mx-auto mb-3 rotate-90" />
           <p className="text-[var(--text-secondary)] mb-1">No items in this collection</p>
           <p className="text-sm text-[var(--text-tertiary)]">
@@ -420,7 +422,7 @@ function CollectionDetail({ id }: { id: string }) {
                 initial={{ opacity: 0, x: -8 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: i * 0.03 }}
-                className="group flex items-center gap-3 p-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--brand)]/20 transition-all"
+                className="group flex min-h-20 items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 transition-all hover:border-[var(--brand)]/20 sm:p-4"
               >
                 <Icon className={`w-4.5 h-4.5 shrink-0 ${colorClass}`} />
                 <div className="flex-1 min-w-0">
@@ -462,7 +464,7 @@ function CollectionDetail({ id }: { id: string }) {
             exit={{ opacity: 0, height: 0 }}
             className="overflow-hidden mt-8"
           >
-            <div className="border border-[var(--border)] rounded-xl overflow-hidden">
+            <div className="overflow-hidden rounded-2xl border border-[var(--border)]">
               <TranscriptChatPanel itemId={id} itemType="collection" />
             </div>
           </motion.div>

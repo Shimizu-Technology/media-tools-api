@@ -91,26 +91,26 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}>
-		<aside className={`fixed inset-y-0 left-0 z-40 hidden border-r backdrop-blur-xl transition-[width] duration-200 lg:flex lg:flex-col ${collapsed ? 'w-20' : 'w-72'}`} style={{ backgroundColor: 'var(--color-sidebar-bg)', borderColor: 'var(--color-border)' }}>
+      <aside className={`fixed inset-y-0 left-0 z-40 hidden border-r backdrop-blur-xl transition-[width] duration-200 xl:flex xl:flex-col ${collapsed ? 'w-20' : 'w-72'}`} style={{ backgroundColor: 'var(--color-sidebar-bg)', borderColor: 'var(--color-border)' }}>
         <SidebarContent collapsed={collapsed} onToggleCollapsed={toggleCollapsed} userName={user?.name || user?.email || 'Media workspace'} isClerkEnabled={isClerkEnabled} activeJobs={activeJobs} />
       </aside>
 
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-50 xl:hidden" role="dialog" aria-modal="true">
           <button className="absolute inset-0 bg-black/55" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />
           <aside className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[340px] flex-col border-r" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
             <SidebarContent collapsed={false} onToggleCollapsed={toggleCollapsed} userName={user?.name || user?.email || 'Media workspace'} isClerkEnabled={isClerkEnabled} activeJobs={activeJobs} mobile onNavigate={() => setMobileOpen(false)} />
           </aside>
-          <button className="absolute left-[calc(min(86vw,340px)+0.75rem)] top-4 flex h-10 w-10 items-center justify-center rounded-full border bg-white/10 text-white backdrop-blur" style={{ borderColor: 'rgba(255,255,255,0.25)' }} onClick={() => setMobileOpen(false)} aria-label="Close navigation">
+          <button className="absolute left-[calc(min(86vw,340px)+0.75rem)] top-4 flex h-11 w-11 items-center justify-center rounded-full border bg-white/10 text-white backdrop-blur" style={{ borderColor: 'rgba(255,255,255,0.25)' }} onClick={() => setMobileOpen(false)} aria-label="Close navigation">
             <X className="h-5 w-5" />
           </button>
         </div>
       )}
 
-      <div className={`transition-[padding] duration-200 ${collapsed ? 'lg:pl-20' : 'lg:pl-72'}`}>
-		<header className="sticky top-0 z-30 border-b backdrop-blur-xl" style={{ backgroundColor: 'var(--color-header-bg)', borderColor: 'var(--color-border)' }}>
+      <div className={`transition-[padding] duration-200 ${collapsed ? 'xl:pl-20' : 'xl:pl-72'}`}>
+        <header className="sticky top-0 z-30 border-b backdrop-blur-xl" style={{ backgroundColor: 'var(--color-header-bg)', borderColor: 'var(--color-border)' }}>
           <div className="flex h-16 items-center justify-between gap-3 px-4 sm:px-6">
-            <button className="inline-flex h-11 w-11 items-center justify-center rounded-xl border lg:hidden" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={() => setMobileOpen(true)} aria-label="Open navigation">
+            <button className="inline-flex h-11 w-11 items-center justify-center rounded-xl border transition-colors hover:bg-[var(--color-nav-hover)] xl:hidden" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={() => setMobileOpen(true)} aria-label="Open navigation">
               <Menu className="h-5 w-5" />
             </button>
             <div className="min-w-0">
@@ -132,7 +132,7 @@ export function AppShell() {
                 </div>
               </details>
               {LazyClerkUserButton && (
-                <Suspense fallback={<div className="h-9 w-9 rounded-full" style={{ backgroundColor: 'var(--color-surface-overlay)' }} />}>
+                <Suspense fallback={<div className="h-11 w-11 rounded-full" style={{ backgroundColor: 'var(--color-surface-overlay)' }} />}>
                   <LazyClerkUserButton />
                 </Suspense>
               )}
@@ -140,7 +140,7 @@ export function AppShell() {
           </div>
         </header>
 
-        <main className="min-h-[calc(100vh-4rem)] px-4 py-6 sm:px-6 lg:px-8">
+        <main className="min-h-[calc(100vh-4rem)] px-4 py-5 sm:px-6 sm:py-7 xl:px-8">
           <Outlet />
         </main>
       </div>
@@ -181,14 +181,14 @@ function SidebarContent({ collapsed, onToggleCollapsed, userName, isClerkEnabled
           )}
         </Link>
         {!mobile && !collapsed && (
-          <button className="ml-auto hidden h-10 w-10 items-center justify-center rounded-xl border text-sm lg:flex" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Collapse sidebar">
+          <button className="ml-auto hidden h-11 w-11 items-center justify-center rounded-xl border text-sm transition-colors hover:bg-[var(--color-nav-hover)] xl:flex" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Collapse sidebar">
             <PanelLeftClose className="h-4 w-4" />
           </button>
         )}
       </div>
 
       {!mobile && collapsed && (
-        <button className="mx-auto mt-3 flex h-10 w-10 items-center justify-center rounded-xl border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Expand sidebar">
+        <button className="mx-auto mt-3 flex h-11 w-11 items-center justify-center rounded-xl border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Expand sidebar">
           <PanelLeftOpen className="h-4 w-4" />
         </button>
       )}
@@ -196,7 +196,7 @@ function SidebarContent({ collapsed, onToggleCollapsed, userName, isClerkEnabled
       <nav className="mt-5 flex flex-1 flex-col gap-1 overflow-y-auto">
         <NavSection items={primaryNav} collapsed={collapsed} onNavigate={onNavigate} activeJobs={activeJobs} />
         <Divider collapsed={collapsed} label="Developer" />
-		<NavSection items={isClerkEnabled ? developerNav : [...developerNav, opsNav]} collapsed={collapsed} onNavigate={onNavigate} />
+        <NavSection items={isClerkEnabled ? developerNav : [...developerNav, opsNav]} collapsed={collapsed} onNavigate={onNavigate} />
       </nav>
 
       <div className={`mt-4 border-t pt-4 ${collapsed ? 'px-0' : 'px-2'}`} style={{ borderColor: 'var(--color-border)' }}>

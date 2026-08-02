@@ -309,7 +309,7 @@ export function ItemDetailPage() {
       <section className="flex flex-col gap-4 rounded-2xl border p-4 sm:flex-row sm:items-center" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
         <div className="flex items-center gap-2 text-sm font-semibold"><Tag className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} /> Tags</div>
         <div className="flex flex-1 flex-wrap gap-2">
-          {preferences.tags.map((tag) => <span key={tag} className="inline-flex min-h-9 items-center gap-1 rounded-full px-3 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>{tag}<button onClick={() => void savePreferences({ tags: preferences.tags.filter((value) => value !== tag) })} disabled={isActing} className="flex h-7 w-7 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Remove ${tag} tag`}><X className="h-3 w-3" /></button></span>)}
+          {preferences.tags.map((tag) => <span key={tag} className="inline-flex min-h-11 items-center gap-1 rounded-full py-1 pl-3 pr-1 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>{tag}<button onClick={() => void savePreferences({ tags: preferences.tags.filter((value) => value !== tag) })} disabled={isActing} className="flex h-9 w-9 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Remove ${tag} tag`}><X className="h-3 w-3" /></button></span>)}
           {preferences.tags.length === 0 && <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Add client, project, or topic labels.</span>}
         </div>
         <div className="flex gap-2">
@@ -328,12 +328,12 @@ export function ItemDetailPage() {
 
       {type === 'audio' && (item as AudioTranscription).quality_warning && <section className="rounded-2xl border p-5" style={{ borderColor: 'rgba(245, 158, 11, 0.4)', backgroundColor: 'rgba(245, 158, 11, 0.08)' }}><div className="flex items-start gap-3"><AlertCircle className="mt-0.5 h-5 w-5 shrink-0" style={{ color: 'var(--color-warning)' }} /><div><h2 className="font-semibold">Partial transcript recovered</h2><p className="mt-1 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{(item as AudioTranscription).quality_warning}</p>{((item as AudioTranscription).omitted_ranges || []).length > 0 && <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>Omitted: {(item as AudioTranscription).omitted_ranges?.map((range) => `${formatDuration(range.start)}–${formatDuration(range.end)}`).join(', ')}</p>}</div></div></section>}
 
-      {complete && <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
-        <div className="space-y-6">
+      {complete && <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
+        <div className="min-w-0 space-y-6">
           {type === 'transcript' ? <SummaryPanel transcriptId={item.id} transcriptText={view.text} segments={segments} onCitationClick={openCitation} onSummaryReady={markVideoSummaryReady} /> : <TextViewer title={type === 'pdf' ? 'Document text' : 'Transcript'} text={view.text} segments={segments} query={query} setQuery={setQuery} matches={matchCount} onCitationClick={openCitation} transcriptModes={type === 'audio'} />}
           {type === 'audio' && <AudioSummary item={item as AudioTranscription} onGenerate={handleAudioSummary} isActing={isActing} onCitationClick={openCitation} />}
         </div>
-        <aside><TranscriptChatPanel itemId={item.id} itemType={type} onCitationClick={openCitation} /></aside>
+        <aside className="min-w-0 xl:sticky xl:top-24 xl:self-start"><TranscriptChatPanel itemId={item.id} itemType={type} onCitationClick={openCitation} /></aside>
       </div>}
 
       <AddToCollectionModal open={collectionOpen} onClose={() => setCollectionOpen(false)} itemType={type} itemId={item.id} itemTitle={view.title} />
@@ -376,10 +376,49 @@ function TextViewer({ title, text, segments, query, setQuery, matches, onCitatio
     }
   };
 
-  return <section className="overflow-hidden rounded-2xl border" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}><div className="border-b p-4" style={{ borderColor: 'var(--color-border)' }}><div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center"><div className="flex items-center gap-2"><FileText className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} /><div><h2 className="font-semibold">{title}</h2>{hasTimestampedView && <p className="mt-0.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>{mode === 'full' ? 'Clean text for reading and copying' : 'Select a timestamp to play that moment'}</p>}</div></div><div className="flex flex-col gap-2 sm:flex-row sm:items-center">{hasTimestampedView && <div className="grid grid-cols-2 rounded-xl border p-1" role="group" aria-label="Transcript view" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}><button type="button" aria-pressed={mode === 'full'} onClick={() => setMode('full')} className="min-h-11 rounded-lg px-3 text-sm font-semibold transition" style={{ backgroundColor: mode === 'full' ? 'var(--color-surface-elevated)' : undefined, color: mode === 'full' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: mode === 'full' ? '0 1px 2px rgba(0, 0, 0, 0.16)' : undefined }}>Full</button><button type="button" aria-pressed={mode === 'timestamped'} onClick={() => setMode('timestamped')} className="min-h-11 rounded-lg px-3 text-sm font-semibold transition" style={{ backgroundColor: mode === 'timestamped' ? 'var(--color-surface-elevated)' : undefined, color: mode === 'timestamped' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: mode === 'timestamped' ? '0 1px 2px rgba(0, 0, 0, 0.16)' : undefined }}>Timestamped</button></div>}<button type="button" onClick={() => void copyVisibleTranscript()} disabled={!copyText} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)] disabled:opacity-40" style={{ borderColor: 'var(--color-border)' }}>{viewerCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{viewerCopied ? 'Copied' : copyLabel}</button><div className="relative"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: 'var(--color-text-muted)' }} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find in text" aria-label="Find in text" className="min-h-11 w-full rounded-xl border bg-transparent pl-9 pr-10 text-sm outline-none sm:w-56" style={{ borderColor: 'var(--color-border)' }} />{query && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: 'var(--color-text-muted)' }}>{matches}</span>}</div></div></div>{viewerCopyError && <p role="status" className="mt-3 text-sm" style={{ color: 'var(--color-danger)' }}>{viewerCopyError}</p>}</div><div className="max-h-[70vh] overflow-y-auto p-4 text-sm leading-7 sm:p-5" style={{ color: 'var(--color-text-secondary)' }}>{showSegments ? <div className="space-y-1">{visibleSegments.map((segment) => {
-    const location = typeof segment.start_ms === 'number' ? formatTimestamp(segment.start_ms) : typeof segment.page_number === 'number' ? `Page ${segment.page_number}` : 'Source';
-    return <button id={`segment-${segment.id}`} data-page={segment.page_number} type="button" key={segment.id} onClick={() => onCitationClick({ segment_id: segment.id, item_type: segment.item_type, item_id: segment.item_id, start_ms: segment.start_ms, end_ms: segment.end_ms, page_number: segment.page_number })} className="grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-xl px-3 py-2 text-left transition hover:bg-[var(--color-surface-overlay)]"><span className="font-mono text-xs font-semibold" style={{ color: 'var(--color-brand-500)' }}>{location}</span><span>{renderHighlighted(segment.text, query)}</span></button>;
-  })}</div> : <div className="whitespace-pre-wrap px-2 py-1">{renderHighlighted(plainText, query)}</div>}</div></section>;
+  return (
+    <section className="min-w-0 overflow-hidden rounded-2xl border" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+      <div className="border-b p-4 sm:p-5" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
+            <FileText className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="font-semibold">{title}</h2>
+            {hasTimestampedView && <p className="mt-0.5 text-xs leading-5" style={{ color: 'var(--color-text-muted)' }}>{mode === 'full' ? 'Clean text for reading and copying' : 'Select a timestamp to play that moment'}</p>}
+          </div>
+        </div>
+
+        <div className="mt-4 grid min-w-0 gap-2 sm:grid-cols-2 2xl:grid-cols-[auto_auto_minmax(12rem,1fr)]">
+          {hasTimestampedView && (
+            <div className="grid min-w-0 grid-cols-2 rounded-xl border p-1" role="group" aria-label="Transcript view" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}>
+              <button type="button" aria-pressed={mode === 'full'} onClick={() => setMode('full')} className="min-h-11 min-w-0 rounded-lg px-3 text-sm font-semibold transition" style={{ backgroundColor: mode === 'full' ? 'var(--color-surface-elevated)' : undefined, color: mode === 'full' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: mode === 'full' ? 'var(--shadow-tab-active)' : undefined }}>Full</button>
+              <button type="button" aria-pressed={mode === 'timestamped'} onClick={() => setMode('timestamped')} className="min-h-11 min-w-0 rounded-lg px-3 text-sm font-semibold transition" style={{ backgroundColor: mode === 'timestamped' ? 'var(--color-surface-elevated)' : undefined, color: mode === 'timestamped' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: mode === 'timestamped' ? 'var(--shadow-tab-active)' : undefined }}>Timestamped</button>
+            </div>
+          )}
+          <button type="button" onClick={() => void copyVisibleTranscript()} disabled={!copyText} className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)] disabled:opacity-40" style={{ borderColor: 'var(--color-border)' }}>
+            {viewerCopied ? <Check className="h-4 w-4 shrink-0" /> : <Copy className="h-4 w-4 shrink-0" />}
+            <span className="truncate">{viewerCopied ? 'Copied' : copyLabel}</span>
+          </button>
+          <div className={`relative min-w-0 ${hasTimestampedView ? 'sm:col-span-2 2xl:col-span-1' : ''}`}>
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: 'var(--color-text-muted)' }} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find in text" aria-label="Find in text" className="min-h-11 w-full min-w-0 rounded-xl border bg-transparent pl-9 pr-10 text-sm outline-none" style={{ borderColor: 'var(--color-border)' }} />
+            {query && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: 'var(--color-text-muted)' }}>{matches}</span>}
+          </div>
+        </div>
+        {viewerCopyError && <p role="status" className="mt-3 text-sm" style={{ color: 'var(--color-danger)' }}>{viewerCopyError}</p>}
+      </div>
+
+      <div className="max-h-[62vh] overflow-y-auto overscroll-contain p-3 text-sm leading-7 sm:max-h-[70vh] sm:p-5" style={{ color: 'var(--color-text-secondary)' }}>
+        {showSegments ? (
+          <div className="space-y-1">{visibleSegments.map((segment) => {
+            const location = typeof segment.start_ms === 'number' ? formatTimestamp(segment.start_ms) : typeof segment.page_number === 'number' ? `Page ${segment.page_number}` : 'Source';
+            return <button id={`segment-${segment.id}`} data-page={segment.page_number} type="button" key={segment.id} onClick={() => onCitationClick({ segment_id: segment.id, item_type: segment.item_type, item_id: segment.item_id, start_ms: segment.start_ms, end_ms: segment.end_ms, page_number: segment.page_number })} className="grid min-h-11 w-full grid-cols-[3.75rem_minmax(0,1fr)] gap-2 rounded-xl px-2 py-2 text-left transition hover:bg-[var(--color-surface-overlay)] sm:grid-cols-[4.5rem_minmax(0,1fr)] sm:gap-3 sm:px-3"><span className="font-mono text-xs font-semibold" style={{ color: 'var(--color-brand-500)' }}>{location}</span><span>{renderHighlighted(segment.text, query)}</span></button>;
+          })}</div>
+        ) : <div className="whitespace-pre-wrap px-2 py-1">{renderHighlighted(plainText, query)}</div>}
+      </div>
+    </section>
+  );
 }
 
 function AudioSummary({ item, onGenerate, isActing, onCitationClick }: { item: AudioTranscription; onGenerate: () => void; isActing: boolean; onCitationClick: (citation: Citation) => void }) {

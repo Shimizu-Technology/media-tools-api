@@ -28,7 +28,9 @@ export function ClerkUserButton() {
         <UserButton
           appearance={{
             elements: {
-              avatarBox: 'w-8 h-8',
+              rootBox: 'flex h-11 w-11 items-center justify-center',
+              userButtonTrigger: 'flex h-11 w-11 items-center justify-center rounded-xl focus-visible:ring-2 focus-visible:ring-[var(--color-brand-500)]',
+              avatarBox: 'h-8 w-8',
             },
           }}
         />

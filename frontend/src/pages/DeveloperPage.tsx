@@ -175,7 +175,7 @@ export function DeveloperPage() {
                   </div>
                   <div className="flex items-center gap-3 rounded-xl border p-3 font-mono text-xs" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
                     <span className="min-w-0 flex-1 break-all">{createdKey}</span>
-                    <button type="button" onClick={handleCopy} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border" style={{ borderColor: 'var(--color-border)' }} aria-label="Copy API key">
+                    <button type="button" onClick={handleCopy} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border" style={{ borderColor: 'var(--color-border)' }} aria-label="Copy API key">
                       {copied ? <Check className="h-4 w-4" style={{ color: 'var(--color-success)' }} /> : <Copy className="h-4 w-4" />}
                     </button>
                   </div>
@@ -222,9 +222,9 @@ export function DeveloperPage() {
                         {key.active ? 'Active' : 'Revoked'}
                       </span>
                     </div>
-                    <p className="mt-1 font-mono text-xs" style={{ color: 'var(--color-text-muted)' }}>{key.key_prefix} · {key.rate_limit} req/hr · created {formatDate(key.created_at)}</p>
+                    <p className="mt-1 break-words font-mono text-xs" style={{ color: 'var(--color-text-muted)' }}>{key.key_prefix} · {key.rate_limit} req/hr · created {formatDate(key.created_at)}</p>
                   </div>
-                  <button type="button" onClick={() => handleRevoke(key.id)} disabled={!key.active} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50" style={{ borderColor: 'var(--color-border)', color: 'var(--color-danger)' }}>
+                  <button type="button" onClick={() => handleRevoke(key.id)} disabled={!key.active} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50" style={{ borderColor: 'var(--color-border)', color: 'var(--color-danger)' }}>
                     <Trash2 className="h-4 w-4" />
                     Revoke
                   </button>

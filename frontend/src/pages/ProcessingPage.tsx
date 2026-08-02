@@ -63,9 +63,9 @@ export function ProcessingPage() {
         <Stat label="Needs attention" value={counts.failed} icon={AlertCircle} className="col-span-2 sm:col-span-1" />
       </div>
 
-      <div className="flex gap-1 overflow-x-auto rounded-2xl p-1" style={{ backgroundColor: 'var(--color-surface-elevated)' }}>
+      <div className="grid grid-cols-3 gap-1 rounded-2xl p-1" style={{ backgroundColor: 'var(--color-surface-elevated)' }}>
         {(['active', 'failed', 'completed'] as JobFilter[]).map((filter) => (
-          <button key={filter} onClick={() => setSearchParams(filter === 'active' ? {} : { status: filter })} className="min-h-11 whitespace-nowrap rounded-xl px-4 text-sm font-semibold capitalize" style={{ backgroundColor: filter === activeFilter ? 'var(--color-surface)' : 'transparent', color: filter === activeFilter ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>{filter === 'active' ? 'Active jobs' : filter}</button>
+          <button key={filter} onClick={() => setSearchParams(filter === 'active' ? {} : { status: filter })} className="min-h-11 min-w-0 rounded-xl px-2 text-xs font-semibold capitalize sm:px-4 sm:text-sm" style={{ backgroundColor: filter === activeFilter ? 'var(--color-surface)' : 'transparent', color: filter === activeFilter ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>{filter === 'active' ? 'Active jobs' : filter}</button>
         ))}
       </div>
 
