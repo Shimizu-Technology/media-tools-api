@@ -60,6 +60,15 @@ type completionResult struct {
 	CompletionTokens   int
 }
 
+type evidenceLimits struct {
+	SummaryWords int
+	KeyPoints    int
+	ActionItems  int
+	Decisions    int
+	Topics       int
+	ClaimWords   int
+}
+
 // CitedChatResult is a grounded assistant response with server-validated
 // source pointers.
 type CitedChatResult struct {
@@ -177,7 +186,13 @@ func (s *Service) summarizeEvidenceBatch(
 	systemPrompt := evidenceSystemPrompt(opts.ContentType, audio)
 	prompt := evidenceSummaryPrompt(segments, opts, audio)
 	output, completion, err := s.completeCitedSummary(
-		ctx, model, systemPrompt, prompt, summaryMaxTokens(opts.Length), segments,
+		ctx,
+		model,
+		systemPrompt,
+		prompt,
+		summaryMaxTokens(opts.Length),
+		segments,
+		evidenceSummaryLimits(opts.Length, audio),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("generate cited summary: %w", err)
@@ -227,6 +242,7 @@ Requested style: %s
 		prompt,
 		summaryMaxTokens(opts.Length),
 		allSegments,
+		evidenceSummaryLimits(opts.Length, audio),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("consolidate cited summary: %w", err)
@@ -440,39 +456,45 @@ Use empty arrays when a category has no supported claims.
 }
 
 func evidenceOutputLimits(length string, audio bool) string {
-	type limits struct {
-		summaryWords int
-		keyPoints    int
-		actionItems  int
-		decisions    int
-		topics       int
-	}
-	selected := limits{summaryWords: 220, keyPoints: 7, actionItems: 8, decisions: 8, topics: 6}
-	switch strings.ToLower(strings.TrimSpace(length)) {
-	case "short":
-		selected = limits{summaryWords: 100, keyPoints: 4, actionItems: 5, decisions: 5, topics: 4}
-	case "detailed":
-		selected = limits{summaryWords: 450, keyPoints: 12, actionItems: 12, decisions: 12, topics: 10}
-	}
-	if audio {
-		selected.topics = 0
-	} else {
-		selected.decisions = 0
-	}
+	selected := evidenceSummaryLimits(length, audio)
 	return fmt.Sprintf(`Output limits (these are maximums, not targets):
 - summary: at most %d words
 - key_points: at most %d items
 - action_items: at most %d items
 - decisions: at most %d items
 - topics: at most %d items
-- each list item's text: one concise sentence, at most 35 words
+- each list item's text: one concise sentence, at most %d words
 - use [] for any category whose maximum is 0`,
-		selected.summaryWords,
-		selected.keyPoints,
-		selected.actionItems,
-		selected.decisions,
-		selected.topics,
+		selected.SummaryWords,
+		selected.KeyPoints,
+		selected.ActionItems,
+		selected.Decisions,
+		selected.Topics,
+		selected.ClaimWords,
 	)
+}
+
+func evidenceSummaryLimits(length string, audio bool) evidenceLimits {
+	selected := evidenceLimits{
+		SummaryWords: 220,
+		KeyPoints:    7,
+		ActionItems:  8,
+		Decisions:    8,
+		Topics:       6,
+		ClaimWords:   35,
+	}
+	switch strings.ToLower(strings.TrimSpace(length)) {
+	case "short":
+		selected = evidenceLimits{SummaryWords: 100, KeyPoints: 4, ActionItems: 5, Decisions: 5, Topics: 4, ClaimWords: 35}
+	case "detailed":
+		selected = evidenceLimits{SummaryWords: 450, KeyPoints: 12, ActionItems: 12, Decisions: 12, Topics: 10, ClaimWords: 35}
+	}
+	if audio {
+		selected.Topics = 0
+	} else {
+		selected.Decisions = 0
+	}
+	return selected
 }
 
 func (s *Service) completeCitedSummary(
@@ -482,12 +504,16 @@ func (s *Service) completeCitedSummary(
 	userPrompt string,
 	maxTokens int,
 	segments []EvidenceSegment,
+	limits evidenceLimits,
 ) (citedOutput, completionResult, error) {
 	completion, err := s.completeJSON(ctx, model, systemPrompt, userPrompt, maxTokens)
 	if err != nil {
 		return citedOutput{}, completionResult{}, err
 	}
-	output, outputErr := parseValidatedCitedOutput(completion.Content, segments)
+	output, outputErr := parseValidatedCitedOutput(completion.Content, segments, limits)
+	if outputErr == nil && completionWasTruncated(completion) {
+		outputErr = fmt.Errorf("provider stopped at its output limit")
+	}
 	if outputErr == nil {
 		return output, completion, nil
 	}
@@ -510,7 +536,10 @@ func (s *Service) completeCitedSummary(
 	if retryErr != nil {
 		return citedOutput{}, completionResult{}, fmt.Errorf("regenerate cited summary: %w", retryErr)
 	}
-	retryOutput, retryOutputErr := parseValidatedCitedOutput(retryCompletion.Content, segments)
+	retryOutput, retryOutputErr := parseValidatedCitedOutput(retryCompletion.Content, segments, limits)
+	if retryOutputErr == nil && completionWasTruncated(retryCompletion) {
+		retryOutputErr = fmt.Errorf("provider stopped at its output limit")
+	}
 	if retryOutputErr != nil {
 		log.Printf(
 			"AI cited summary regeneration was rejected (model=%s, finish_reason=%s, native_finish_reason=%s, prompt_tokens=%d, completion_tokens=%d, content_bytes=%d): %v",
@@ -549,16 +578,53 @@ func (s *Service) completeCitedSummary(
 	return retryOutput, retryCompletion, nil
 }
 
-func parseValidatedCitedOutput(content string, segments []EvidenceSegment) (citedOutput, error) {
+func parseValidatedCitedOutput(content string, segments []EvidenceSegment, limits evidenceLimits) (citedOutput, error) {
 	output, err := parseCitedOutput(content)
 	if err != nil {
 		return citedOutput{}, err
 	}
 	output = validateCitedOutput(output, segments)
+	output = enforceEvidenceLimits(output, limits)
 	if err := requireCitedOutput(output); err != nil {
 		return citedOutput{}, err
 	}
 	return output, nil
+}
+
+func completionWasTruncated(completion completionResult) bool {
+	return strings.EqualFold(strings.TrimSpace(completion.FinishReason), "length") ||
+		strings.EqualFold(strings.TrimSpace(completion.NativeFinishReason), "length") ||
+		strings.EqualFold(strings.TrimSpace(completion.NativeFinishReason), "max_tokens")
+}
+
+func enforceEvidenceLimits(output citedOutput, limits evidenceLimits) citedOutput {
+	output.Summary.Text = truncateWords(output.Summary.Text, limits.SummaryWords)
+	output.KeyPoints = enforceClaimLimits(output.KeyPoints, limits.KeyPoints, limits.ClaimWords)
+	output.ActionItems = enforceClaimLimits(output.ActionItems, limits.ActionItems, limits.ClaimWords)
+	output.Decisions = enforceClaimLimits(output.Decisions, limits.Decisions, limits.ClaimWords)
+	output.Topics = enforceClaimLimits(output.Topics, limits.Topics, limits.ClaimWords)
+	return output
+}
+
+func enforceClaimLimits(claims []citedClaim, maxItems, maxWords int) []citedClaim {
+	if maxItems <= 0 {
+		return nil
+	}
+	if len(claims) > maxItems {
+		claims = claims[:maxItems]
+	}
+	for index := range claims {
+		claims[index].Text = truncateWords(claims[index].Text, maxWords)
+	}
+	return claims
+}
+
+func truncateWords(value string, maxWords int) string {
+	words := strings.Fields(value)
+	if maxWords <= 0 || len(words) <= maxWords {
+		return strings.TrimSpace(value)
+	}
+	return strings.Join(words[:maxWords], " ") + "…"
 }
 
 func normalizeFinishReason(value string) string {

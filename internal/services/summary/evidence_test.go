@@ -181,6 +181,7 @@ func TestCompleteCitedSummaryRegeneratesAfterTruncatedLengthResponse(t *testing.
 		"Summarize the evidence compactly.",
 		mediumSummaryMaxTokens,
 		segments,
+		evidenceSummaryLimits("medium", true),
 	)
 	if err != nil {
 		t.Fatalf("completeCitedSummary() error = %v", err)
@@ -216,6 +217,7 @@ func TestCompleteCitedSummaryReturnsTypedErrorAfterTwoInvalidResponses(t *testin
 		"Summarize.",
 		mediumSummaryMaxTokens,
 		[]EvidenceSegment{{ID: "segment-1", Text: "Evidence"}},
+		evidenceSummaryLimits("medium", true),
 	)
 	if err == nil {
 		t.Fatal("completeCitedSummary() error = nil, want terminal structured output error")
@@ -271,6 +273,63 @@ func TestEvidenceSummaryPromptBoundsUnusedAndVisibleCategories(t *testing.T) {
 		if !strings.Contains(audioPrompt, expected) {
 			t.Fatalf("audio prompt missing %q: %s", expected, audioPrompt)
 		}
+	}
+}
+
+func TestCompleteCitedSummaryRegeneratesValidJSONMarkedAsLength(t *testing.T) {
+	calls := 0
+	service := NewWithModels("test-key", "test/model", "test/model", "")
+	service.httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		finishReason := "length"
+		if calls == 2 {
+			finishReason = "stop"
+		}
+		return jsonCompletionResponse(validCitedSummaryJSON(), finishReason, 400), nil
+	})}
+
+	output, completion, err := service.completeCitedSummary(
+		context.Background(),
+		"test/model",
+		"Return cited JSON.",
+		"Summarize.",
+		mediumSummaryMaxTokens,
+		[]EvidenceSegment{{ID: "segment-1", Text: "Evidence"}},
+		evidenceSummaryLimits("medium", true),
+	)
+	if err != nil {
+		t.Fatalf("completeCitedSummary() error = %v", err)
+	}
+	if calls != 2 || completion.FinishReason != "stop" || output.Summary.Text != "Recovered summary" {
+		t.Fatalf("result = (%d calls, %q, %q), want regeneration followed by a complete response", calls, completion.FinishReason, output.Summary.Text)
+	}
+}
+
+func TestEnforceEvidenceLimitsCapsEveryPersistedSection(t *testing.T) {
+	output := citedOutput{
+		Summary: citedClaim{Text: "one two three four", Citations: []string{"segment-1"}},
+		KeyPoints: []citedClaim{
+			{Text: "one two three", Citations: []string{"segment-1"}},
+			{Text: "second point", Citations: []string{"segment-1"}},
+		},
+		ActionItems: []citedClaim{{Text: "one two three", Citations: []string{"segment-1"}}},
+		Decisions:   []citedClaim{{Text: "must be cleared", Citations: []string{"segment-1"}}},
+		Topics:      []citedClaim{{Text: "must be cleared", Citations: []string{"segment-1"}}},
+	}
+	limits := evidenceLimits{SummaryWords: 2, KeyPoints: 1, ActionItems: 1, Decisions: 1, Topics: 0, ClaimWords: 2}
+
+	got := enforceEvidenceLimits(output, limits)
+	if got.Summary.Text != "one two…" {
+		t.Fatalf("summary = %q, want two-word cap", got.Summary.Text)
+	}
+	if len(got.KeyPoints) != 1 || got.KeyPoints[0].Text != "one two…" {
+		t.Fatalf("key points = %#v, want one item capped to two words", got.KeyPoints)
+	}
+	if len(got.ActionItems) != 1 || got.ActionItems[0].Text != "one two…" {
+		t.Fatalf("action items = %#v, want capped claim", got.ActionItems)
+	}
+	if len(got.Decisions) != 1 || len(got.Topics) != 0 {
+		t.Fatalf("zero-category enforcement failed: decisions=%#v topics=%#v", got.Decisions, got.Topics)
 	}
 }
 
