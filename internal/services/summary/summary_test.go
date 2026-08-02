@@ -32,13 +32,14 @@ func TestProviderErrorDoesNotExposeUpstreamPayload(t *testing.T) {
 	body := []byte(`{"error":{"message":"Add credits at https://openrouter.ai/settings/credits","metadata":{"error_type":"payment_required","user_id":"private-user"}}}`)
 	err := newProviderError(http.StatusPaymentRequired, body)
 
-	for _, sensitive := range []string{"settings/credits", "private-user", "Add credits"} {
+	for _, sensitive := range []string{"settings/credits", "private-user", "Add credits", "OpenRouter", "payment_required"} {
 		if strings.Contains(err.Error(), sensitive) {
 			t.Fatalf("error %q exposed sensitive upstream payload %q", err, sensitive)
 		}
 	}
-	if !strings.Contains(err.Error(), "payment_required") {
-		t.Fatalf("error = %q, want safe provider error type", err)
+	var providerErr *ProviderError
+	if !errors.As(err, &providerErr) || providerErr.StatusCode != http.StatusPaymentRequired || providerErr.ErrorType != "payment_required" {
+		t.Fatalf("typed provider error = %#v, want status and error type retained for classification", providerErr)
 	}
 }
 
@@ -65,5 +66,18 @@ func TestPublicErrorMessageHidesUnknownInternalErrors(t *testing.T) {
 	message := PublicErrorMessage(errors.New("database DSN and internal identifier"))
 	if strings.Contains(message, "DSN") || strings.Contains(message, "identifier") {
 		t.Fatalf("PublicErrorMessage() exposed internal details: %q", message)
+	}
+}
+
+func TestPublicChatErrorMessageHidesProviderDetails(t *testing.T) {
+	err := &ProviderError{StatusCode: http.StatusPaymentRequired, ErrorType: "payment_required"}
+	message := PublicChatErrorMessage(err)
+	for _, sensitive := range []string{"OpenRouter", "payment_required", "402"} {
+		if strings.Contains(message, sensitive) {
+			t.Fatalf("PublicChatErrorMessage() exposed provider detail %q in %q", sensitive, message)
+		}
+	}
+	if !strings.Contains(message, "credits may need attention") {
+		t.Fatalf("PublicChatErrorMessage() = %q, want actionable credit guidance", message)
 	}
 }

@@ -256,7 +256,7 @@ func (h *Handler) postChatResponse(c *gin.Context, target *chatTarget, req model
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "ai_error",
-			Message: "Failed to generate response: " + err.Error(),
+			Message: summary.PublicChatErrorMessage(err),
 			Code:    http.StatusInternalServerError,
 		})
 		return

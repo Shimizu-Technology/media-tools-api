@@ -134,10 +134,7 @@ type ProviderError struct {
 }
 
 func (e *ProviderError) Error() string {
-	if e.ErrorType != "" {
-		return fmt.Sprintf("OpenRouter request failed (%d, %s)", e.StatusCode, e.ErrorType)
-	}
-	return fmt.Sprintf("OpenRouter request failed (%d)", e.StatusCode)
+	return "AI provider request failed"
 }
 
 // PublicErrorMessage translates internal and provider errors into copy that is
@@ -173,6 +170,39 @@ func PublicErrorMessage(err error) string {
 	}
 
 	return "We couldn't generate the AI summary. Please try again."
+}
+
+// PublicChatErrorMessage is the chat-specific version of the public error
+// boundary. Chat endpoints are synchronous, so their handler responses must be
+// safe even when a caller accidentally renders the returned message verbatim.
+func PublicChatErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "The AI service took too long to answer. Please try again."
+	}
+	if errors.Is(err, context.Canceled) {
+		return "The AI response was interrupted. Please try again."
+	}
+
+	var providerErr *ProviderError
+	if errors.As(err, &providerErr) {
+		switch providerErr.StatusCode {
+		case http.StatusPaymentRequired:
+			return "The AI service couldn't answer because the workspace's AI credits may need attention. Please try again."
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return "AI chat is temporarily unavailable because the service configuration needs attention."
+		case http.StatusRequestTimeout:
+			return "The AI service took too long to answer. Please try again."
+		case http.StatusTooManyRequests:
+			return "The AI service is busy right now. Please wait a moment and try again."
+		case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return "The AI service is temporarily unavailable. Please try again in a moment."
+		}
+	}
+
+	return "We couldn't generate an answer. Please try again."
 }
 
 func summaryMaxTokens(length string) int {

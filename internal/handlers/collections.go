@@ -381,7 +381,7 @@ func (h *Handler) PostCollectionChat(c *gin.Context) {
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error: "ai_error", Message: "Failed to generate response: " + err.Error(), Code: http.StatusInternalServerError,
+			Error: "ai_error", Message: summary.PublicChatErrorMessage(err), Code: http.StatusInternalServerError,
 		})
 		return
 	}
