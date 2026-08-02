@@ -70,7 +70,7 @@ func main() {
 		cfg.OpenRouterModel,
 		cfg.OpenRouterChatModel,
 		cfg.OpenRouterProviderSort,
-	)
+	).WithOpenAIFallback(cfg.OpenAIAPIKey, cfg.OpenAISummaryFallbackModel)
 
 	// Configure YouTube proxy if provided (residential proxy to bypass IP blocks)
 	if cfg.YouTubeProxy != "" {

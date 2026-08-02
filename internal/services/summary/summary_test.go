@@ -30,7 +30,7 @@ func TestSummaryMaxTokensUsesBoundedBudgets(t *testing.T) {
 
 func TestProviderErrorDoesNotExposeUpstreamPayload(t *testing.T) {
 	body := []byte(`{"error":{"message":"Add credits at https://openrouter.ai/settings/credits","metadata":{"error_type":"payment_required","user_id":"private-user"}}}`)
-	err := newProviderError(http.StatusPaymentRequired, body)
+	err := newProviderError("OpenRouter", http.StatusPaymentRequired, body)
 
 	for _, sensitive := range []string{"settings/credits", "private-user", "Add credits", "OpenRouter", "payment_required"} {
 		if strings.Contains(err.Error(), sensitive) {

@@ -1,20 +1,20 @@
-// Package summary handles AI-powered transcript summarization via OpenRouter.
+// Package summary handles AI-powered transcript summarization through a
+// primary OpenRouter route and an optional direct OpenAI fallback.
 //
-// OpenRouter provides a unified API for multiple LLM providers (OpenAI,
-// Anthropic, Google, etc.) using a single API key. The request format
-// follows the OpenAI chat completions standard.
+// Both providers use the OpenAI chat-completions request shape, which lets the
+// service preserve one summary contract while recovering from provider-level
+// billing, authentication, rate-limit, and availability failures.
 package summary
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
@@ -29,11 +29,61 @@ const (
 
 // Service handles AI summary generation.
 type Service struct {
-	apiKey       string
-	model        string
-	chatModel    string
-	providerSort string
-	httpClient   *http.Client
+	apiKey              string
+	model               string
+	chatModel           string
+	providerSort        string
+	openAIAPIKey        string
+	openAIFallbackModel string
+	httpClient          *http.Client
+	providerStateMu     sync.RWMutex
+	openRouterRetryAt   time.Time
+}
+
+// WithOpenAIFallback configures a direct OpenAI route for provider failures.
+// It intentionally reuses the service's HTTP client so timeouts and test
+// transports remain consistent across both providers.
+func (s *Service) WithOpenAIFallback(apiKey, model string) *Service {
+	s.openAIAPIKey = strings.TrimSpace(apiKey)
+	s.openAIFallbackModel = strings.TrimSpace(model)
+	return s
+}
+
+func (s *Service) hasCompletionProvider() bool {
+	return strings.TrimSpace(s.apiKey) != "" ||
+		(strings.TrimSpace(s.openAIAPIKey) != "" && strings.TrimSpace(s.openAIFallbackModel) != "")
+}
+
+func (s *Service) shouldBypassOpenRouter() bool {
+	s.providerStateMu.RLock()
+	retryAt := s.openRouterRetryAt
+	s.providerStateMu.RUnlock()
+	return !retryAt.IsZero() && time.Now().Before(retryAt)
+}
+
+func (s *Service) deferOpenRouterAfterPaymentFailure() {
+	s.providerStateMu.Lock()
+	s.openRouterRetryAt = time.Now().Add(5 * time.Minute)
+	s.providerStateMu.Unlock()
+}
+
+func shouldFallbackToOpenAI(err error) bool {
+	var providerErr *ProviderError
+	if !errors.As(err, &providerErr) {
+		return false
+	}
+	switch providerErr.StatusCode {
+	case http.StatusPaymentRequired,
+		http.StatusUnauthorized,
+		http.StatusForbidden,
+		http.StatusTooManyRequests,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
 }
 
 // New creates a new summary service.
@@ -142,6 +192,7 @@ type openRouterErrorBody struct {
 // ProviderError keeps provider failures typed without exposing raw upstream
 // response bodies through persisted job errors or API responses.
 type ProviderError struct {
+	Provider   string
 	StatusCode int
 	ErrorType  string
 }
@@ -170,7 +221,7 @@ func (e *StructuredOutputError) Unwrap() error {
 }
 
 func (e *ProviderError) Error() string {
-	return "AI provider request failed"
+	return fmt.Sprintf("AI provider request failed (status=%d)", e.StatusCode)
 }
 
 // PublicErrorMessage translates internal and provider errors into copy that is
@@ -257,7 +308,7 @@ func summaryMaxTokens(length string) int {
 	}
 }
 
-func newProviderError(status int, body []byte) error {
+func newProviderError(provider string, status int, body []byte) error {
 	var response struct {
 		Error   *openRouterErrorBody `json:"error"`
 		Choices []struct {
@@ -272,7 +323,7 @@ func newProviderError(status int, body []byte) error {
 	if errorType == "" && len(response.Choices) > 0 && response.Choices[0].Error != nil {
 		errorType = response.Choices[0].Error.Metadata.ErrorType
 	}
-	return &ProviderError{StatusCode: status, ErrorType: errorType}
+	return &ProviderError{Provider: provider, StatusCode: status, ErrorType: errorType}
 }
 
 func providerErrorStatus(responseStatus, errorCode int) int {
@@ -293,8 +344,8 @@ type ChatMessage struct {
 
 // Summarize generates an AI summary of the given transcript text.
 func (s *Service) Summarize(ctx context.Context, transcriptText string, opts Options) (*Result, error) {
-	if s.apiKey == "" {
-		return nil, fmt.Errorf("OpenRouter API key not configured; set OPENROUTER_API_KEY")
+	if !s.hasCompletionProvider() {
+		return nil, fmt.Errorf("AI provider key not configured; set OPENROUTER_API_KEY or OPENAI_API_KEY")
 	}
 
 	// Use provided model or fall back to default
@@ -334,60 +385,14 @@ func (s *Service) Summarize(ctx context.Context, transcriptText string, opts Opt
 		},
 	}
 
-	jsonBody, err := json.Marshal(reqBody)
+	completion, _, _, err := s.sendJSONCompletion(ctx, reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, err
 	}
-
-	// Build the HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST",
-		"https://openrouter.ai/api/v1/chat/completions",
-		bytes.NewReader(jsonBody),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+s.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("HTTP-Referer", "https://github.com/Shimizu-Technology/media-tools-api")
-	req.Header.Set("X-Title", "Media Tools API")
-
-	// Send the request
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("OpenRouter request failed: %w", err)
-	}
-	defer resp.Body.Close() // Go Pattern: ALWAYS close response bodies!
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, newProviderError(resp.StatusCode, body)
-	}
-
-	// Parse the response
-	var chatResp chatResponse
-	if err := json.Unmarshal(body, &chatResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if chatResp.Error != nil {
-		return nil, newProviderError(providerErrorStatus(resp.StatusCode, chatResp.Error.Code), body)
-	}
-
-	if len(chatResp.Choices) == 0 {
-		return nil, fmt.Errorf("no response from model")
-	}
-
-	content := chatResp.Choices[0].Message.Content
 
 	// Try to parse structured output (JSON with summary + key_points)
-	result := parseStructuredOutput(content)
-	result.Model = model
+	result := parseStructuredOutput(completion.Content)
+	result.Model = completion.Model
 	result.Prompt = prompt
 
 	return result, nil
@@ -395,8 +400,8 @@ func (s *Service) Summarize(ctx context.Context, transcriptText string, opts Opt
 
 // ChatTranscript answers a user question using transcript context.
 func (s *Service) ChatTranscript(ctx context.Context, contextLabel, transcriptText string, messages []ChatMessage, modelOverride string) (string, string, error) {
-	if s.apiKey == "" {
-		return "", "", fmt.Errorf("OpenRouter API key not configured; set OPENROUTER_API_KEY")
+	if !s.hasCompletionProvider() {
+		return "", "", fmt.Errorf("AI provider key not configured; set OPENROUTER_API_KEY or OPENAI_API_KEY")
 	}
 
 	model := s.chatModel
@@ -429,59 +434,18 @@ func (s *Service) ChatTranscript(ctx context.Context, contextLabel, transcriptTe
 		Provider:  s.providerPreferences(),
 	}
 
-	jsonBody, err := json.Marshal(reqBody)
+	completion, _, _, err := s.sendJSONCompletion(ctx, reqBody)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal request: %w", err)
+		return "", "", err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST",
-		"https://openrouter.ai/api/v1/chat/completions",
-		bytes.NewReader(jsonBody),
-	)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+s.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("HTTP-Referer", "https://github.com/Shimizu-Technology/media-tools-api")
-	req.Header.Set("X-Title", "Media Tools API")
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return "", "", fmt.Errorf("OpenRouter request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", "", newProviderError(resp.StatusCode, body)
-	}
-
-	var chatResp chatResponse
-	if err := json.Unmarshal(body, &chatResp); err != nil {
-		return "", "", fmt.Errorf("failed to parse response: %w", err)
-	}
-	if chatResp.Error != nil {
-		return "", "", newProviderError(providerErrorStatus(resp.StatusCode, chatResp.Error.Code), body)
-	}
-	if len(chatResp.Choices) == 0 {
-		return "", "", fmt.Errorf("no response from model")
-	}
-
-	content := chatResp.Choices[0].Message.Content
-	return content, model, nil
+	return completion.Content, completion.Model, nil
 }
 
 // SummarizeAudio generates a structured summary of audio transcription text (MTA-22).
 // Returns structured output with summary, key points, action items, and decisions.
 func (s *Service) SummarizeAudio(ctx context.Context, transcriptText string, opts Options) (*AudioResult, error) {
-	if s.apiKey == "" {
-		return nil, fmt.Errorf("OpenRouter API key not configured; set OPENROUTER_API_KEY")
+	if !s.hasCompletionProvider() {
+		return nil, fmt.Errorf("AI provider key not configured; set OPENROUTER_API_KEY or OPENAI_API_KEY")
 	}
 
 	model := s.model
@@ -510,55 +474,12 @@ func (s *Service) SummarizeAudio(ctx context.Context, transcriptText string, opt
 		},
 	}
 
-	jsonBody, err := json.Marshal(reqBody)
+	completion, _, _, err := s.sendJSONCompletion(ctx, reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST",
-		"https://openrouter.ai/api/v1/chat/completions",
-		bytes.NewReader(jsonBody),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+s.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("HTTP-Referer", "https://github.com/Shimizu-Technology/media-tools-api")
-	req.Header.Set("X-Title", "Media Tools API")
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("OpenRouter request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, newProviderError(resp.StatusCode, body)
-	}
-
-	var chatResp chatResponse
-	if err := json.Unmarshal(body, &chatResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if chatResp.Error != nil {
-		return nil, newProviderError(providerErrorStatus(resp.StatusCode, chatResp.Error.Code), body)
-	}
-
-	if len(chatResp.Choices) == 0 {
-		return nil, fmt.Errorf("no response from model")
-	}
-
-	content := chatResp.Choices[0].Message.Content
-	result := parseAudioOutput(content)
-	result.Model = model
+	result := parseAudioOutput(completion.Content)
+	result.Model = completion.Model
 
 	return result, nil
 }
