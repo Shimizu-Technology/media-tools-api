@@ -48,8 +48,9 @@ type Config struct {
 	OpenRouterChatModel    string // Optional faster model for interactive chat
 	OpenRouterProviderSort string // price, latency, or throughput
 
-	// OpenAI settings (for Whisper/audio transcription)
+	// OpenAI settings (for Whisper/audio transcription and summary fallback)
 	OpenAIAPIKey                string
+	OpenAISummaryFallbackModel  string
 	OpenAITranscriptionModel    string
 	OpenAITranscriptionLanguage string
 	OpenAITranscriptionPrompt   string
@@ -128,8 +129,10 @@ func Load() (*Config, error) {
 		OpenRouterChatModel:    getEnv("OPENROUTER_CHAT_MODEL", "google/gemini-2.5-flash"),
 		OpenRouterProviderSort: getEnv("OPENROUTER_PROVIDER_SORT", "throughput"),
 
-		// OpenAI (Whisper/API for audio transcription)
+		// OpenAI (Whisper/API for audio transcription and a direct summary
+		// fallback when OpenRouter cannot accept a request).
 		OpenAIAPIKey:                getEnv("OPENAI_API_KEY", ""),
+		OpenAISummaryFallbackModel:  getEnv("OPENAI_SUMMARY_FALLBACK_MODEL", "gpt-4.1-mini"),
 		OpenAITranscriptionModel:    getEnv("OPENAI_TRANSCRIPTION_MODEL", "whisper-1"),
 		OpenAITranscriptionLanguage: getEnv("OPENAI_TRANSCRIPTION_LANGUAGE", "en"),
 		OpenAITranscriptionPrompt:   getEnv("OPENAI_TRANSCRIPTION_PROMPT", ""),

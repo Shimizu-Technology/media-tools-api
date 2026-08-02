@@ -1,6 +1,7 @@
 package summary
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -30,7 +31,7 @@ func TestSummaryMaxTokensUsesBoundedBudgets(t *testing.T) {
 
 func TestProviderErrorDoesNotExposeUpstreamPayload(t *testing.T) {
 	body := []byte(`{"error":{"message":"Add credits at https://openrouter.ai/settings/credits","metadata":{"error_type":"payment_required","user_id":"private-user"}}}`)
-	err := newProviderError(http.StatusPaymentRequired, body)
+	err := newProviderError("OpenRouter", http.StatusPaymentRequired, body)
 
 	for _, sensitive := range []string{"settings/credits", "private-user", "Add credits", "OpenRouter", "payment_required"} {
 		if strings.Contains(err.Error(), sensitive) {
@@ -59,6 +60,15 @@ func TestPublicErrorMessageClassifiesProviderFailures(t *testing.T) {
 		if !strings.Contains(message, test.want) {
 			t.Fatalf("PublicErrorMessage(%d) = %q, want text containing %q", test.status, message, test.want)
 		}
+	}
+}
+
+func TestShouldFallbackToOpenAIForInternalServerErrorButNotCancellation(t *testing.T) {
+	if !shouldFallbackToOpenAI(&ProviderError{StatusCode: http.StatusInternalServerError}) {
+		t.Fatal("shouldFallbackToOpenAI(500) = false, want transient provider failure fallback")
+	}
+	if shouldFallbackToOpenAI(context.Canceled) {
+		t.Fatal("shouldFallbackToOpenAI(context.Canceled) = true, want cancellation preserved")
 	}
 }
 

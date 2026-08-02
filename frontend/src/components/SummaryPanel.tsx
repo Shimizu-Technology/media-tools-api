@@ -8,6 +8,8 @@ import {
   ChevronDown,
   RefreshCw,
   AlertCircle,
+  Check,
+  Copy,
 } from 'lucide-react';
 import { CitationRow } from './CitationChip';
 import { createSummary, getSummaries, getSummaryErrorMessage, type Citation, type MediaSegment, type Summary } from '../lib/api';
@@ -45,11 +47,14 @@ export function SummaryPanel({
   const [typedText, setTypedText] = useState('');
   const [typedKeyPoints, setTypedKeyPoints] = useState<string[]>([]);
   const [isTyping, setIsTyping] = useState(false);
+  const [transcriptMode, setTranscriptMode] = useState<'full' | 'timestamped'>('full');
+  const [transcriptCopied, setTranscriptCopied] = useState(false);
+  const [transcriptCopyError, setTranscriptCopyError] = useState('');
   const typeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
-    { id: 'transcript', label: 'Full Transcript', icon: <FileText className="w-4 h-4" /> },
+    { id: 'transcript', label: 'Transcript', icon: <FileText className="w-4 h-4" /> },
     { id: 'key_points', label: 'Key Points', icon: <List className="w-4 h-4" /> },
     { id: 'summary', label: 'Summary', icon: <Sparkles className="w-4 h-4" /> },
   ];
@@ -200,6 +205,24 @@ export function SummaryPanel({
   })();
 
   const hasSummary = !!summary;
+  const timedSegments = segments.filter((segment) => typeof segment.start_ms === 'number');
+  const hasTimestampedTranscript = timedSegments.length > 0;
+  const plainTranscript = transcriptText.trim() || segments.map((segment) => segment.text.trim()).filter(Boolean).join('\n\n');
+  const transcriptCopyText = transcriptMode === 'timestamped' && hasTimestampedTranscript
+    ? timedSegments.map((segment) => `[${formatTimestamp(segment.start_ms || 0)}] ${segment.text.trim()}`).join('\n')
+    : plainTranscript;
+
+  const copyTranscript = async () => {
+    if (!transcriptCopyText) return;
+    setTranscriptCopyError('');
+    try {
+      await navigator.clipboard.writeText(transcriptCopyText);
+      setTranscriptCopied(true);
+      window.setTimeout(() => setTranscriptCopied(false), 1800);
+    } catch {
+      setTranscriptCopyError('Clipboard access was blocked. Check your browser permissions and try again.');
+    }
+  };
 
   return (
     <div className="w-full">
@@ -370,12 +393,14 @@ export function SummaryPanel({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.2 }}
-                className="text-sm leading-relaxed whitespace-pre-wrap max-h-[60vh] overflow-y-auto"
+                className="text-sm leading-relaxed"
                 style={{ color: 'var(--color-text-secondary)' }}
               >
-                {segments.length > 0 ? (
+                {hasTimestampedTranscript && <div className="mb-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div className="grid grid-cols-2 rounded-xl border p-1" role="group" aria-label="Transcript view" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}><button type="button" aria-pressed={transcriptMode === 'full'} onClick={() => setTranscriptMode('full')} className="min-h-11 rounded-lg px-3 text-sm font-semibold transition" style={{ backgroundColor: transcriptMode === 'full' ? 'var(--color-surface-elevated)' : undefined, color: transcriptMode === 'full' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: transcriptMode === 'full' ? '0 1px 2px rgba(0, 0, 0, 0.16)' : undefined }}>Full</button><button type="button" aria-pressed={transcriptMode === 'timestamped'} onClick={() => setTranscriptMode('timestamped')} className="min-h-11 rounded-lg px-3 text-sm font-semibold transition" style={{ backgroundColor: transcriptMode === 'timestamped' ? 'var(--color-surface-elevated)' : undefined, color: transcriptMode === 'timestamped' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: transcriptMode === 'timestamped' ? '0 1px 2px rgba(0, 0, 0, 0.16)' : undefined }}>Timestamped</button></div><button type="button" onClick={() => void copyTranscript()} disabled={!transcriptCopyText} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)] disabled:opacity-40" style={{ borderColor: 'var(--color-border)' }}>{transcriptCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{transcriptCopied ? 'Copied' : transcriptMode === 'timestamped' ? 'Copy timestamped' : 'Copy full transcript'}</button></div>{transcriptCopyError && <p role="status" className="mt-2 text-sm" style={{ color: 'var(--color-danger)' }}>{transcriptCopyError}</p>}</div>}
+                <div className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap">
+                {transcriptMode === 'timestamped' && hasTimestampedTranscript ? (
                   <div className="space-y-1">
-                    {segments.map((segment) => (
+                    {timedSegments.map((segment) => (
                       <button
                         type="button"
                         key={segment.id}
@@ -396,7 +421,8 @@ export function SummaryPanel({
                       </button>
                     ))}
                   </div>
-                ) : transcriptText}
+                ) : plainTranscript}
+                </div>
               </motion.div>
             )}
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -259,8 +260,8 @@ func (s *Service) ChatEvidence(
 	messages []ChatMessage,
 	modelOverride string,
 ) (*CitedChatResult, error) {
-	if s.apiKey == "" {
-		return nil, fmt.Errorf("OpenRouter API key not configured; set OPENROUTER_API_KEY")
+	if !s.hasCompletionProvider() {
+		return nil, fmt.Errorf("AI provider key not configured; set OPENROUTER_API_KEY or OPENAI_API_KEY")
 	}
 	segments = usableEvidence(segments)
 	if len(segments) == 0 {
@@ -364,38 +365,93 @@ func (s *Service) sendJSONCompletion(
 	ctx context.Context,
 	reqBody chatRequest,
 ) (completion completionResult, status int, responseBody []byte, err error) {
+	if strings.TrimSpace(s.apiKey) == "" || s.shouldBypassOpenRouter() {
+		return s.sendOpenAICompletion(ctx, reqBody)
+	}
+
+	completion, status, responseBody, err = s.sendProviderCompletion(
+		ctx,
+		reqBody,
+		"OpenRouter",
+		"https://openrouter.ai/api/v1/chat/completions",
+		s.apiKey,
+	)
+	if err == nil || !shouldFallbackToOpenAI(err) ||
+		strings.TrimSpace(s.openAIAPIKey) == "" || strings.TrimSpace(s.openAIFallbackModel) == "" {
+		return completion, status, responseBody, err
+	}
+
+	fallbackStatus := status
+	var providerErr *ProviderError
+	if errors.As(err, &providerErr) {
+		fallbackStatus = providerErr.StatusCode
+	}
+	if fallbackStatus == http.StatusPaymentRequired {
+		s.deferOpenRouterAfterPaymentFailure()
+	}
+	log.Printf("OpenRouter completion failed with status %d; retrying with direct OpenAI model %s", fallbackStatus, s.openAIFallbackModel)
+	return s.sendOpenAICompletion(ctx, reqBody)
+}
+
+func (s *Service) sendOpenAICompletion(
+	ctx context.Context,
+	reqBody chatRequest,
+) (completion completionResult, status int, responseBody []byte, err error) {
+	if strings.TrimSpace(s.openAIAPIKey) == "" || strings.TrimSpace(s.openAIFallbackModel) == "" {
+		return completionResult{}, 0, nil, fmt.Errorf("OpenAI summary fallback not configured")
+	}
+	reqBody.Model = s.openAIFallbackModel
+	reqBody.Provider = nil
+	return s.sendProviderCompletion(
+		ctx,
+		reqBody,
+		"OpenAI",
+		"https://api.openai.com/v1/chat/completions",
+		s.openAIAPIKey,
+	)
+}
+
+func (s *Service) sendProviderCompletion(
+	ctx context.Context,
+	reqBody chatRequest,
+	provider string,
+	endpoint string,
+	apiKey string,
+) (completion completionResult, status int, responseBody []byte, err error) {
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		return completionResult{}, 0, nil, fmt.Errorf("marshal OpenRouter request: %w", err)
+		return completionResult{}, 0, nil, fmt.Errorf("marshal %s request: %w", provider, err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(jsonBody))
+		endpoint, bytes.NewReader(jsonBody))
 	if err != nil {
-		return completionResult{}, 0, nil, fmt.Errorf("create OpenRouter request: %w", err)
+		return completionResult{}, 0, nil, fmt.Errorf("create %s request: %w", provider, err)
 	}
-	req.Header.Set("Authorization", "Bearer "+s.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("HTTP-Referer", "https://github.com/Shimizu-Technology/media-tools-api")
-	req.Header.Set("X-Title", "Media Tools API")
+	if provider == "OpenRouter" {
+		req.Header.Set("HTTP-Referer", "https://github.com/Shimizu-Technology/media-tools-api")
+		req.Header.Set("X-Title", "Media Tools API")
+	}
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return completionResult{}, 0, nil, fmt.Errorf("OpenRouter request failed: %w", err)
+		return completionResult{}, 0, nil, &ProviderTransportError{Provider: provider, Cause: err}
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return completionResult{}, resp.StatusCode, nil, fmt.Errorf("read OpenRouter response: %w", err)
+		return completionResult{}, resp.StatusCode, nil, &ProviderTransportError{Provider: provider, Cause: err}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return completionResult{}, resp.StatusCode, body, newProviderError(resp.StatusCode, body)
+		return completionResult{}, resp.StatusCode, body, newProviderError(provider, resp.StatusCode, body)
 	}
 	var parsed chatResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return completionResult{}, resp.StatusCode, body, fmt.Errorf("parse OpenRouter response: %w", err)
+		return completionResult{}, resp.StatusCode, body, fmt.Errorf("parse %s response: %w", provider, err)
 	}
 	if parsed.Error != nil {
-		return completionResult{}, resp.StatusCode, body, newProviderError(providerErrorStatus(resp.StatusCode, parsed.Error.Code), body)
+		return completionResult{}, resp.StatusCode, body, newProviderError(provider, providerErrorStatus(resp.StatusCode, parsed.Error.Code), body)
 	}
 	if len(parsed.Choices) == 0 {
 		return completionResult{}, resp.StatusCode, body, fmt.Errorf("no response from model")
@@ -406,7 +462,7 @@ func (s *Service) sendJSONCompletion(
 		if choice.Error != nil {
 			code = providerErrorStatus(resp.StatusCode, choice.Error.Code)
 		}
-		return completionResult{}, resp.StatusCode, body, newProviderError(code, body)
+		return completionResult{}, resp.StatusCode, body, newProviderError(provider, code, body)
 	}
 	actualModel := reqBody.Model
 	if strings.TrimSpace(parsed.Model) != "" {

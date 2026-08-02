@@ -114,3 +114,16 @@ func TestLoadRejectsUnknownOpenRouterProviderSort(t *testing.T) {
 		t.Fatalf("Load error = %v, want provider sort validation error", err)
 	}
 }
+
+func TestLoadConfiguresOpenAISummaryFallbackModel(t *testing.T) {
+	t.Setenv("YT_DLP_PATH", "/bin/true")
+	t.Setenv("OPENAI_SUMMARY_FALLBACK_MODEL", "gpt-4.1-mini-custom")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.OpenAISummaryFallbackModel != "gpt-4.1-mini-custom" {
+		t.Fatalf("OpenAISummaryFallbackModel = %q, want configured model", cfg.OpenAISummaryFallbackModel)
+	}
+}
