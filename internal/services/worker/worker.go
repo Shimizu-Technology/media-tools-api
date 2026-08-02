@@ -759,7 +759,7 @@ func (p *Pool) processSummary(job Job) error {
 	segments, err := p.ensureMediaSegments(ctx, "transcript", t.ID, t.Title, t.TranscriptText)
 	if err != nil {
 		s.Status = models.StatusFailed
-		s.ErrorMessage = err.Error()
+		s.ErrorMessage = "We couldn't prepare this transcript for summarization. Please try again."
 		_ = p.db.UpdateSummary(ctx, s)
 		return fmt.Errorf("load transcript evidence: %w", err)
 	}
@@ -770,14 +770,15 @@ func (p *Pool) processSummary(job Job) error {
 	)
 	if err != nil {
 		s.Status = models.StatusFailed
-		s.ErrorMessage = err.Error()
+		publicMessage := summary.PublicErrorMessage(err)
+		s.ErrorMessage = publicMessage
 		if updateErr := p.db.UpdateSummary(ctx, s); updateErr != nil {
 			log.Printf("failed to persist summary failure %s: %v", s.ID, updateErr)
 		}
 		p.NotifyWebhook("summary.failed", t.UserID, t.APIKeyID, map[string]interface{}{
 			"transcript_id": payload.TranscriptID,
 			"summary_id":    payload.SummaryID,
-			"error":         err.Error(),
+			"error":         publicMessage,
 		})
 		log.Printf("❌ Summary generation failed for transcript %s: %v", payload.TranscriptID, err)
 		return fmt.Errorf("summary generation failed: %w", err)
@@ -835,7 +836,7 @@ func (p *Pool) processAudioSummary(job Job) error {
 	segments, err := p.ensureMediaSegments(ctx, "audio", at.ID, at.OriginalName, at.TranscriptText)
 	if err != nil {
 		at.SummaryStatus = "failed"
-		at.SummaryErrorMessage = err.Error()
+		at.SummaryErrorMessage = "We couldn't prepare this recording for summarization. Please try again."
 		_ = p.db.UpdateAudioSummary(ctx, at)
 		return fmt.Errorf("load audio evidence: %w", err)
 	}
@@ -851,7 +852,7 @@ func (p *Pool) processAudioSummary(job Job) error {
 	)
 	if err != nil {
 		at.SummaryStatus = "failed"
-		at.SummaryErrorMessage = err.Error()
+		at.SummaryErrorMessage = summary.PublicErrorMessage(err)
 		_ = p.db.UpdateAudioSummary(ctx, at)
 		return fmt.Errorf("generate audio summary: %w", err)
 	}

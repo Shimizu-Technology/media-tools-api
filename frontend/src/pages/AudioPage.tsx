@@ -45,6 +45,7 @@ import {
   downloadAudioExport,
   listAudioTranscriptions,
   getAudioPlaybackUrl,
+  getSummaryErrorMessage,
   type AudioTranscription,
   type AudioContentType,
   type APIError,
@@ -1571,7 +1572,7 @@ export function AudioPage() {
                   {isSummarizing || result.summary_status === 'pending' || result.summary_status === 'processing' ? (
                     <><Loader2 className="w-5 h-5 animate-spin" /> Generating in background...</>
                   ) : (
-                    <><Sparkles className="w-5 h-5" /> Generate AI Summary</>
+                    <><Sparkles className="w-5 h-5" /> {result.summary_status === 'failed' ? 'Try AI Summary Again' : 'Generate AI Summary'}</>
                   )}
                 </motion.button>
                 {(result.summary_status === 'pending' || result.summary_status === 'processing') && (
@@ -1580,9 +1581,19 @@ export function AudioPage() {
                   </p>
                 )}
                 {result.summary_status === 'failed' && (
-                  <p className="mt-3 text-center text-sm" style={{ color: 'var(--color-danger)' }}>
-                    {result.summary_error_message || 'Summary generation failed. You can try again.'}
-                  </p>
+                  <div
+                    role="alert"
+                    className="mt-3 flex items-start gap-3 rounded-xl border p-4 text-left"
+                    style={{ borderColor: 'rgba(239, 68, 68, 0.3)', backgroundColor: 'rgba(239, 68, 68, 0.08)' }}
+                  >
+                    <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" style={{ color: 'var(--color-danger)' }} />
+                    <div>
+                      <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Summary couldn't be generated</p>
+                      <p className="mt-1 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
+                        {getSummaryErrorMessage(result.summary_error_message)}
+                      </p>
+                    </div>
+                  </div>
                 )}
               </motion.div>
             )}

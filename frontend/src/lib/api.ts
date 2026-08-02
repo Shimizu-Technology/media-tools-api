@@ -171,6 +171,23 @@ export function getErrorMessage(err: unknown): string {
   return 'An unexpected error occurred';
 }
 
+const SUMMARY_ERROR_FALLBACK = "We couldn't generate the AI summary. Please try again.";
+
+/**
+ * Older jobs may contain a raw upstream provider payload. Never render those
+ * payloads: they can include account links, request metadata, and identifiers.
+ */
+export function getSummaryErrorMessage(message?: string): string {
+  const value = message?.trim();
+  if (!value) return SUMMARY_ERROR_FALLBACK;
+
+  const looksLikeProviderPayload =
+    value.length > 320 ||
+    /openrouter|provider_name|previous_errors|user_id|max_tokens|settings\/credits|\{\s*"?error/i.test(value);
+
+  return looksLikeProviderPayload ? SUMMARY_ERROR_FALLBACK : value;
+}
+
 /**
  * Common error codes returned by the API.
  */
