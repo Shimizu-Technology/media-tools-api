@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -48,6 +49,24 @@ type citedPartial struct {
 	Output citedOutput
 	Model  string
 	Prompt string
+}
+
+type completionResult struct {
+	Content            string
+	Model              string
+	FinishReason       string
+	NativeFinishReason string
+	PromptTokens       int
+	CompletionTokens   int
+}
+
+type evidenceLimits struct {
+	SummaryWords int
+	KeyPoints    int
+	ActionItems  int
+	Decisions    int
+	Topics       int
+	ClaimWords   int
 }
 
 // CitedChatResult is a grounded assistant response with server-validated
@@ -166,19 +185,19 @@ func (s *Service) summarizeEvidenceBatch(
 ) (*citedPartial, error) {
 	systemPrompt := evidenceSystemPrompt(opts.ContentType, audio)
 	prompt := evidenceSummaryPrompt(segments, opts, audio)
-	content, actualModel, err := s.completeJSON(ctx, model, systemPrompt, prompt, summaryMaxTokens(opts.Length))
+	output, completion, err := s.completeCitedSummary(
+		ctx,
+		model,
+		systemPrompt,
+		prompt,
+		summaryMaxTokens(opts.Length),
+		segments,
+		evidenceSummaryLimits(opts.Length, audio),
+	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("generate cited summary: %w", err)
 	}
-	output, err := parseCitedOutput(content)
-	if err != nil {
-		return nil, fmt.Errorf("parse cited summary: %w", err)
-	}
-	output = validateCitedOutput(output, segments)
-	if err := requireCitedOutput(output); err != nil {
-		return nil, err
-	}
-	return &citedPartial{Output: output, Model: actualModel, Prompt: prompt}, nil
+	return &citedPartial{Output: output, Model: completion.Model, Prompt: prompt}, nil
 }
 
 func (s *Service) consolidateEvidenceSummaries(
@@ -214,20 +233,21 @@ Return exactly one JSON object:
 
 Requested length: %s
 Requested style: %s
-%s`, opts.Length, opts.Style, source.String())
-	content, actualModel, err := s.completeJSON(ctx, model, evidenceSystemPrompt(opts.ContentType, audio), prompt, summaryMaxTokens(opts.Length))
+%s
+%s`, opts.Length, opts.Style, evidenceOutputLimits(opts.Length, audio), source.String())
+	output, completion, err := s.completeCitedSummary(
+		ctx,
+		model,
+		evidenceSystemPrompt(opts.ContentType, audio),
+		prompt,
+		summaryMaxTokens(opts.Length),
+		allSegments,
+		evidenceSummaryLimits(opts.Length, audio),
+	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("consolidate cited summary: %w", err)
 	}
-	output, err := parseCitedOutput(content)
-	if err != nil {
-		return nil, fmt.Errorf("parse consolidated cited summary: %w", err)
-	}
-	output = validateCitedOutput(output, allSegments)
-	if err := requireCitedOutput(output); err != nil {
-		return nil, err
-	}
-	return &citedPartial{Output: output, Model: actualModel, Prompt: prompt}, nil
+	return &citedPartial{Output: output, Model: completion.Model, Prompt: prompt}, nil
 }
 
 // ChatEvidence answers against a small retrieved evidence set and returns only
@@ -267,7 +287,7 @@ func (s *Service) ChatEvidence(
 		}
 	}
 
-	content, actualModel, err := s.completeJSONMessages(ctx, model, reqMessages, chatMaxTokens)
+	completion, err := s.completeJSONMessages(ctx, model, reqMessages, chatMaxTokens)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +295,7 @@ func (s *Service) ChatEvidence(
 		Answer    string   `json:"answer"`
 		Citations []string `json:"citations"`
 	}
-	if err := unmarshalJSONObject(content, &output); err != nil {
+	if err := unmarshalJSONObject(completion.Content, &output); err != nil {
 		return nil, fmt.Errorf("parse cited chat response: %w", err)
 	}
 	output.Answer = strings.TrimSpace(output.Answer)
@@ -294,18 +314,18 @@ func (s *Service) ChatEvidence(
 	return &CitedChatResult{
 		Answer:    output.Answer,
 		Citations: citations,
-		Model:     actualModel,
+		Model:     completion.Model,
 	}, nil
 }
 
-func (s *Service) completeJSON(ctx context.Context, model, system, user string, maxTokens int) (string, string, error) {
+func (s *Service) completeJSON(ctx context.Context, model, system, user string, maxTokens int) (completionResult, error) {
 	return s.completeJSONMessages(ctx, model, []chatMessage{
 		{Role: "system", Content: system},
 		{Role: "user", Content: user},
 	}, maxTokens)
 }
 
-func (s *Service) completeJSONMessages(ctx context.Context, model string, messages []chatMessage, maxTokens int) (string, string, error) {
+func (s *Service) completeJSONMessages(ctx context.Context, model string, messages []chatMessage, maxTokens int) (completionResult, error) {
 	if maxTokens <= 0 {
 		maxTokens = mediumSummaryMaxTokens
 	}
@@ -316,9 +336,9 @@ func (s *Service) completeJSONMessages(ctx context.Context, model string, messag
 		ResponseFormat: &responseFormat{Type: "json_object"},
 		Provider:       s.providerPreferences(),
 	}
-	content, actualModel, status, responseBody, err := s.sendJSONCompletion(ctx, reqBody)
+	completion, status, responseBody, err := s.sendJSONCompletion(ctx, reqBody)
 	if err == nil {
-		return content, actualModel, nil
+		return completion, nil
 	}
 
 	// OpenRouter can route a model to a provider that supports chat but not the
@@ -330,28 +350,28 @@ func (s *Service) completeJSONMessages(ctx context.Context, model string, messag
 			strings.Contains(lowerBody, "json mode") ||
 			strings.Contains(lowerBody, "unsupported parameter"))
 	if !jsonModeUnsupported {
-		return "", "", err
+		return completionResult{}, err
 	}
 	reqBody.ResponseFormat = nil
-	content, actualModel, _, _, fallbackErr := s.sendJSONCompletion(ctx, reqBody)
+	completion, _, _, fallbackErr := s.sendJSONCompletion(ctx, reqBody)
 	if fallbackErr != nil {
-		return "", "", fmt.Errorf("OpenRouter JSON-mode fallback failed: %w", fallbackErr)
+		return completionResult{}, fmt.Errorf("OpenRouter JSON-mode fallback failed: %w", fallbackErr)
 	}
-	return content, actualModel, nil
+	return completion, nil
 }
 
 func (s *Service) sendJSONCompletion(
 	ctx context.Context,
 	reqBody chatRequest,
-) (content string, actualModel string, status int, responseBody []byte, err error) {
+) (completion completionResult, status int, responseBody []byte, err error) {
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", "", 0, nil, fmt.Errorf("marshal OpenRouter request: %w", err)
+		return completionResult{}, 0, nil, fmt.Errorf("marshal OpenRouter request: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(jsonBody))
 	if err != nil {
-		return "", "", 0, nil, fmt.Errorf("create OpenRouter request: %w", err)
+		return completionResult{}, 0, nil, fmt.Errorf("create OpenRouter request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+s.apiKey)
 	req.Header.Set("Content-Type", "application/json")
@@ -360,31 +380,46 @@ func (s *Service) sendJSONCompletion(
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return "", "", 0, nil, fmt.Errorf("OpenRouter request failed: %w", err)
+		return completionResult{}, 0, nil, fmt.Errorf("OpenRouter request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", "", resp.StatusCode, nil, fmt.Errorf("read OpenRouter response: %w", err)
+		return completionResult{}, resp.StatusCode, nil, fmt.Errorf("read OpenRouter response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", "", resp.StatusCode, body, newProviderError(resp.StatusCode, body)
+		return completionResult{}, resp.StatusCode, body, newProviderError(resp.StatusCode, body)
 	}
 	var parsed chatResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", "", resp.StatusCode, body, fmt.Errorf("parse OpenRouter response: %w", err)
+		return completionResult{}, resp.StatusCode, body, fmt.Errorf("parse OpenRouter response: %w", err)
 	}
 	if parsed.Error != nil {
-		return "", "", resp.StatusCode, body, newProviderError(providerErrorStatus(resp.StatusCode, parsed.Error.Code), body)
+		return completionResult{}, resp.StatusCode, body, newProviderError(providerErrorStatus(resp.StatusCode, parsed.Error.Code), body)
 	}
 	if len(parsed.Choices) == 0 {
-		return "", "", resp.StatusCode, body, fmt.Errorf("no response from model")
+		return completionResult{}, resp.StatusCode, body, fmt.Errorf("no response from model")
 	}
-	actualModel = reqBody.Model
+	choice := parsed.Choices[0]
+	if choice.Error != nil || strings.EqualFold(choice.FinishReason, "error") {
+		code := http.StatusBadGateway
+		if choice.Error != nil {
+			code = providerErrorStatus(resp.StatusCode, choice.Error.Code)
+		}
+		return completionResult{}, resp.StatusCode, body, newProviderError(code, body)
+	}
+	actualModel := reqBody.Model
 	if strings.TrimSpace(parsed.Model) != "" {
 		actualModel = parsed.Model
 	}
-	return parsed.Choices[0].Message.Content, actualModel, resp.StatusCode, body, nil
+	return completionResult{
+		Content:            choice.Message.Content,
+		Model:              actualModel,
+		FinishReason:       choice.FinishReason,
+		NativeFinishReason: choice.NativeFinishReason,
+		PromptTokens:       parsed.Usage.PromptTokens,
+		CompletionTokens:   parsed.Usage.CompletionTokens,
+	}, resp.StatusCode, body, nil
 }
 
 func evidenceSystemPrompt(contentType string, audio bool) string {
@@ -415,8 +450,203 @@ Return exactly one JSON object:
 }
 
 Use empty arrays when a category has no supported claims.
+%s
 
-%s`, label, opts.Length, opts.Style, formatEvidence(segments))
+%s`, label, opts.Length, opts.Style, evidenceOutputLimits(opts.Length, audio), formatEvidence(segments))
+}
+
+func evidenceOutputLimits(length string, audio bool) string {
+	selected := evidenceSummaryLimits(length, audio)
+	return fmt.Sprintf(`Output limits (these are maximums, not targets):
+- summary: at most %d words
+- key_points: at most %d items
+- action_items: at most %d items
+- decisions: at most %d items
+- topics: at most %d items
+- each list item's text: one concise sentence, at most %d words
+- use [] for any category whose maximum is 0`,
+		selected.SummaryWords,
+		selected.KeyPoints,
+		selected.ActionItems,
+		selected.Decisions,
+		selected.Topics,
+		selected.ClaimWords,
+	)
+}
+
+func evidenceSummaryLimits(length string, audio bool) evidenceLimits {
+	selected := evidenceLimits{
+		SummaryWords: 220,
+		KeyPoints:    7,
+		ActionItems:  8,
+		Decisions:    8,
+		Topics:       6,
+		ClaimWords:   35,
+	}
+	switch strings.ToLower(strings.TrimSpace(length)) {
+	case "short":
+		selected = evidenceLimits{SummaryWords: 100, KeyPoints: 4, ActionItems: 5, Decisions: 5, Topics: 4, ClaimWords: 35}
+	case "detailed":
+		selected = evidenceLimits{SummaryWords: 450, KeyPoints: 12, ActionItems: 12, Decisions: 12, Topics: 10, ClaimWords: 35}
+	}
+	if audio {
+		selected.Topics = 0
+	} else {
+		selected.Decisions = 0
+	}
+	return selected
+}
+
+func (s *Service) completeCitedSummary(
+	ctx context.Context,
+	model string,
+	systemPrompt string,
+	userPrompt string,
+	maxTokens int,
+	segments []EvidenceSegment,
+	limits evidenceLimits,
+) (citedOutput, completionResult, error) {
+	completion, err := s.completeJSON(ctx, model, systemPrompt, userPrompt, maxTokens)
+	if err != nil {
+		return citedOutput{}, completionResult{}, err
+	}
+	output, outputErr := parseValidatedCitedOutput(completion.Content, segments, limits)
+	if outputErr == nil && completionWasTruncated(completion) {
+		outputErr = fmt.Errorf("provider stopped at its output limit")
+	}
+	if outputErr == nil {
+		return output, completion, nil
+	}
+
+	log.Printf(
+		"AI cited summary attempt 1 was rejected; regenerating compactly (model=%s, finish_reason=%s, native_finish_reason=%s, prompt_tokens=%d, completion_tokens=%d, content_bytes=%d): %v",
+		completion.Model,
+		normalizeFinishReason(completion.FinishReason),
+		normalizeFinishReason(completion.NativeFinishReason),
+		completion.PromptTokens,
+		completion.CompletionTokens,
+		len(completion.Content),
+		outputErr,
+	)
+
+	retrySystem := systemPrompt + " The previous response could not be accepted. " +
+		"Regenerate the entire JSON object from the source evidence. Be compact, obey every output maximum, " +
+		"start with {, end with }, and do not include markdown or commentary."
+	retryCompletion, retryErr := s.completeJSON(ctx, model, retrySystem, userPrompt, maxTokens)
+	if retryErr != nil {
+		return citedOutput{}, completionResult{}, fmt.Errorf("regenerate cited summary: %w", retryErr)
+	}
+	retryOutput, retryOutputErr := parseValidatedCitedOutput(retryCompletion.Content, segments, limits)
+	if retryOutputErr == nil && completionWasTruncated(retryCompletion) {
+		retryOutputErr = fmt.Errorf("provider stopped at its output limit")
+	}
+	if retryOutputErr != nil {
+		log.Printf(
+			"AI cited summary regeneration was rejected (model=%s, finish_reason=%s, native_finish_reason=%s, prompt_tokens=%d, completion_tokens=%d, content_bytes=%d): %v",
+			retryCompletion.Model,
+			normalizeFinishReason(retryCompletion.FinishReason),
+			normalizeFinishReason(retryCompletion.NativeFinishReason),
+			retryCompletion.PromptTokens,
+			retryCompletion.CompletionTokens,
+			len(retryCompletion.Content),
+			retryOutputErr,
+		)
+		finishReason := retryCompletion.FinishReason
+		nativeFinishReason := retryCompletion.NativeFinishReason
+		if strings.TrimSpace(finishReason) == "" {
+			finishReason = completion.FinishReason
+		}
+		if strings.TrimSpace(nativeFinishReason) == "" {
+			nativeFinishReason = completion.NativeFinishReason
+		}
+		return citedOutput{}, completionResult{}, &StructuredOutputError{
+			FinishReason:       finishReason,
+			NativeFinishReason: nativeFinishReason,
+			Attempts:           2,
+			Cause:              retryOutputErr,
+		}
+	}
+
+	log.Printf(
+		"AI cited summary recovered on bounded regeneration (model=%s, finish_reason=%s, prompt_tokens=%d, completion_tokens=%d, content_bytes=%d)",
+		retryCompletion.Model,
+		normalizeFinishReason(retryCompletion.FinishReason),
+		retryCompletion.PromptTokens,
+		retryCompletion.CompletionTokens,
+		len(retryCompletion.Content),
+	)
+	return retryOutput, retryCompletion, nil
+}
+
+func parseValidatedCitedOutput(content string, segments []EvidenceSegment, limits evidenceLimits) (citedOutput, error) {
+	output, err := parseCitedOutput(content)
+	if err != nil {
+		return citedOutput{}, err
+	}
+	output = validateCitedOutput(output, segments)
+	output = enforceEvidenceLimits(output, limits)
+	if err := validateEvidenceWordLimits(output, limits); err != nil {
+		return citedOutput{}, err
+	}
+	if err := requireCitedOutput(output); err != nil {
+		return citedOutput{}, err
+	}
+	return output, nil
+}
+
+func completionWasTruncated(completion completionResult) bool {
+	return strings.EqualFold(strings.TrimSpace(completion.FinishReason), "length") ||
+		strings.EqualFold(strings.TrimSpace(completion.NativeFinishReason), "length") ||
+		strings.EqualFold(strings.TrimSpace(completion.NativeFinishReason), "max_tokens")
+}
+
+func enforceEvidenceLimits(output citedOutput, limits evidenceLimits) citedOutput {
+	output.KeyPoints = enforceClaimCount(output.KeyPoints, limits.KeyPoints)
+	output.ActionItems = enforceClaimCount(output.ActionItems, limits.ActionItems)
+	output.Decisions = enforceClaimCount(output.Decisions, limits.Decisions)
+	output.Topics = enforceClaimCount(output.Topics, limits.Topics)
+	return output
+}
+
+func enforceClaimCount(claims []citedClaim, maxItems int) []citedClaim {
+	if maxItems <= 0 {
+		return nil
+	}
+	if len(claims) > maxItems {
+		claims = claims[:maxItems]
+	}
+	return claims
+}
+
+func validateEvidenceWordLimits(output citedOutput, limits evidenceLimits) error {
+	if len(strings.Fields(output.Summary.Text)) > limits.SummaryWords {
+		return fmt.Errorf("summary exceeded the %d-word output limit", limits.SummaryWords)
+	}
+	sections := []struct {
+		name   string
+		claims []citedClaim
+	}{
+		{name: "key_points", claims: output.KeyPoints},
+		{name: "action_items", claims: output.ActionItems},
+		{name: "decisions", claims: output.Decisions},
+		{name: "topics", claims: output.Topics},
+	}
+	for _, section := range sections {
+		for index, claim := range section.claims {
+			if len(strings.Fields(claim.Text)) > limits.ClaimWords {
+				return fmt.Errorf("%s item %d exceeded the %d-word output limit", section.name, index+1, limits.ClaimWords)
+			}
+		}
+	}
+	return nil
+}
+
+func normalizeFinishReason(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+	return value
 }
 
 func formatEvidence(segments []EvidenceSegment) string {
