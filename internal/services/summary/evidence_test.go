@@ -98,7 +98,7 @@ func TestCompleteJSONMessagesFallsBackWhenProviderRejectsJSONMode(t *testing.T) 
 
 	content, model, err := service.completeJSONMessages(context.Background(), "test/model", []chatMessage{
 		{Role: "user", Content: "Return JSON"},
-	})
+	}, mediumSummaryMaxTokens)
 	if err != nil {
 		t.Fatalf("completeJSONMessages() error = %v", err)
 	}
@@ -113,5 +113,37 @@ func TestCompleteJSONMessagesFallsBackWhenProviderRejectsJSONMode(t *testing.T) 
 	}
 	if strings.Contains(bodies[1], `"response_format"`) {
 		t.Fatalf("fallback request still included JSON mode: %s", bodies[1])
+	}
+	for index, body := range bodies {
+		if !strings.Contains(body, `"max_tokens":3000`) {
+			t.Fatalf("request %d did not retain the explicit output budget: %s", index+1, body)
+		}
+	}
+}
+
+func TestCompleteJSONMessagesBoundsProviderOutputBudget(t *testing.T) {
+	service := NewWithModels("test-key", "test/model", "test/model", "")
+	service.httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if !strings.Contains(string(body), `"max_tokens":1500`) {
+			t.Fatalf("request body = %s, want explicit 1500-token budget", body)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(bytes.NewBufferString(
+				`{"model":"provider/model","choices":[{"message":{"content":"{\"answer\":\"ok\"}"}}]}`,
+			)),
+			Header: make(http.Header),
+		}, nil
+	})}
+
+	_, _, err := service.completeJSONMessages(context.Background(), "test/model", []chatMessage{
+		{Role: "user", Content: "Return JSON"},
+	}, shortSummaryMaxTokens)
+	if err != nil {
+		t.Fatalf("completeJSONMessages() error = %v", err)
 	}
 }

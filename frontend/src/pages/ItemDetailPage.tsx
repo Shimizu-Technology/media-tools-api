@@ -11,6 +11,7 @@ import {
   getAudioPlaybackUrl,
   getAudioTranscription,
   getErrorMessage,
+  getSummaryErrorMessage,
   getLibraryPreferences,
   getMediaSegments,
   getPDFExtraction,
@@ -354,7 +355,42 @@ function TextViewer({ title, text, segments, query, setQuery, matches, onCitatio
 function AudioSummary({ item, onGenerate, isActing, onCitationClick }: { item: AudioTranscription; onGenerate: () => void; isActing: boolean; onCitationClick: (citation: Citation) => void }) {
   const hasSummary = Boolean(item.summary_text);
   const pending = item.summary_status === 'pending' || item.summary_status === 'processing';
-  return <section className="rounded-2xl border p-5 sm:p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div className="flex items-center gap-2"><Sparkles className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} /><h2 className="font-semibold">AI summary</h2></div><button onClick={onGenerate} disabled={isActing || pending} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white disabled:opacity-50" style={{ backgroundColor: 'var(--color-brand-500)' }}>{isActing || pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}{pending ? 'Generating in background' : hasSummary ? 'Regenerate' : 'Generate summary'}</button></div>{pending && <p className="mt-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>You can leave this page or start another upload. The summary will keep running.</p>}{item.summary_status === 'failed' && <p className="mt-4 text-sm" style={{ color: 'var(--color-danger)' }}>{item.summary_error_message || 'Summary generation failed. You can try again.'}</p>}{hasSummary ? <div className="mt-5 space-y-5"><div><p className="whitespace-pre-wrap text-sm leading-7" style={{ color: 'var(--color-text-secondary)' }}>{item.summary_text}</p><CitationRow citations={item.summary_evidence?.summary} onClick={onCitationClick} /></div><ListBlock title="Key points" items={item.key_points} citations={item.summary_evidence?.key_points} onCitationClick={onCitationClick} /><ListBlock title="Action items" items={item.action_items} citations={item.summary_evidence?.action_items} onCitationClick={onCitationClick} /><ListBlock title="Decisions" items={item.decisions} citations={item.summary_evidence?.decisions} onCitationClick={onCitationClick} /></div> : !pending && <p className="mt-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>Create structured notes, key points, decisions, and action items from this recording.</p>}</section>;
+  const buttonLabel = isActing ? 'Starting summary' : pending ? 'Generating in background' : item.summary_status === 'failed' ? 'Try again' : hasSummary ? 'Regenerate' : 'Generate summary';
+
+  return (
+    <section className="rounded-2xl border p-5 sm:p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} />
+          <h2 className="font-semibold">AI summary</h2>
+        </div>
+        <button onClick={onGenerate} disabled={isActing || pending} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white disabled:opacity-50" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+          {isActing || pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          {buttonLabel}
+        </button>
+      </div>
+      {pending && <p className="mt-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>You can leave this page or start another upload. The summary will keep running.</p>}
+      {item.summary_status === 'failed' && (
+        <div role="alert" className="mt-4 flex items-start gap-3 rounded-xl border p-4" style={{ borderColor: 'rgba(239, 68, 68, 0.3)', backgroundColor: 'rgba(239, 68, 68, 0.08)' }}>
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" style={{ color: 'var(--color-danger)' }} />
+          <div>
+            <p className="text-sm font-semibold">Summary couldn't be generated</p>
+            <p className="mt-1 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{getSummaryErrorMessage(item.summary_error_message)}</p>
+          </div>
+        </div>
+      )}
+      {hasSummary ? (
+        <div className="mt-5 space-y-5">
+          <div><p className="whitespace-pre-wrap text-sm leading-7" style={{ color: 'var(--color-text-secondary)' }}>{item.summary_text}</p><CitationRow citations={item.summary_evidence?.summary} onClick={onCitationClick} /></div>
+          <ListBlock title="Key points" items={item.key_points} citations={item.summary_evidence?.key_points} onCitationClick={onCitationClick} />
+          <ListBlock title="Action items" items={item.action_items} citations={item.summary_evidence?.action_items} onCitationClick={onCitationClick} />
+          <ListBlock title="Decisions" items={item.decisions} citations={item.summary_evidence?.decisions} onCitationClick={onCitationClick} />
+        </div>
+      ) : !pending && item.summary_status !== 'failed' && (
+        <p className="mt-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>Create structured notes, key points, decisions, and action items from this recording.</p>
+      )}
+    </section>
+  );
 }
 
 function ListBlock({ title, items, citations, onCitationClick }: { title: string; items: string[]; citations?: Citation[][]; onCitationClick: (citation: Citation) => void }) {

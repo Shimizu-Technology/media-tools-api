@@ -10,7 +10,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { CitationRow } from './CitationChip';
-import { createSummary, getSummaries, type Citation, type MediaSegment, type Summary } from '../lib/api';
+import { createSummary, getSummaries, getSummaryErrorMessage, type Citation, type MediaSegment, type Summary } from '../lib/api';
 import { formatTimestamp } from '../lib/citations';
 
 interface SummaryPanelProps {
@@ -148,7 +148,7 @@ export function SummaryPanel({
           const latest = summaries.find((candidate) => candidate.id === job.summary_id);
           if (latest) {
             if (latest.status === 'failed') {
-              setError(latest.error_message || 'Summary generation failed. Please try again.');
+              setError(getSummaryErrorMessage(latest.error_message));
               setIsGenerating(false);
               return;
             }

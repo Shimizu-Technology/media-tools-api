@@ -166,7 +166,7 @@ func (s *Service) summarizeEvidenceBatch(
 ) (*citedPartial, error) {
 	systemPrompt := evidenceSystemPrompt(opts.ContentType, audio)
 	prompt := evidenceSummaryPrompt(segments, opts, audio)
-	content, actualModel, err := s.completeJSON(ctx, model, systemPrompt, prompt)
+	content, actualModel, err := s.completeJSON(ctx, model, systemPrompt, prompt, summaryMaxTokens(opts.Length))
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +215,7 @@ Return exactly one JSON object:
 Requested length: %s
 Requested style: %s
 %s`, opts.Length, opts.Style, source.String())
-	content, actualModel, err := s.completeJSON(ctx, model, evidenceSystemPrompt(opts.ContentType, audio), prompt)
+	content, actualModel, err := s.completeJSON(ctx, model, evidenceSystemPrompt(opts.ContentType, audio), prompt, summaryMaxTokens(opts.Length))
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +267,7 @@ func (s *Service) ChatEvidence(
 		}
 	}
 
-	content, actualModel, err := s.completeJSONMessages(ctx, model, reqMessages)
+	content, actualModel, err := s.completeJSONMessages(ctx, model, reqMessages, chatMaxTokens)
 	if err != nil {
 		return nil, err
 	}
@@ -298,17 +298,21 @@ func (s *Service) ChatEvidence(
 	}, nil
 }
 
-func (s *Service) completeJSON(ctx context.Context, model, system, user string) (string, string, error) {
+func (s *Service) completeJSON(ctx context.Context, model, system, user string, maxTokens int) (string, string, error) {
 	return s.completeJSONMessages(ctx, model, []chatMessage{
 		{Role: "system", Content: system},
 		{Role: "user", Content: user},
-	})
+	}, maxTokens)
 }
 
-func (s *Service) completeJSONMessages(ctx context.Context, model string, messages []chatMessage) (string, string, error) {
+func (s *Service) completeJSONMessages(ctx context.Context, model string, messages []chatMessage, maxTokens int) (string, string, error) {
+	if maxTokens <= 0 {
+		maxTokens = mediumSummaryMaxTokens
+	}
 	reqBody := chatRequest{
 		Model:          model,
 		Messages:       messages,
+		MaxTokens:      maxTokens,
 		ResponseFormat: &responseFormat{Type: "json_object"},
 		Provider:       s.providerPreferences(),
 	}
@@ -364,14 +368,14 @@ func (s *Service) sendJSONCompletion(
 		return "", "", resp.StatusCode, nil, fmt.Errorf("read OpenRouter response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", "", resp.StatusCode, body, fmt.Errorf("OpenRouter returned %d: %s", resp.StatusCode, string(body))
+		return "", "", resp.StatusCode, body, newProviderError(resp.StatusCode, body)
 	}
 	var parsed chatResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return "", "", resp.StatusCode, body, fmt.Errorf("parse OpenRouter response: %w", err)
 	}
 	if parsed.Error != nil {
-		return "", "", resp.StatusCode, body, fmt.Errorf("OpenRouter error: %s", parsed.Error.Message)
+		return "", "", resp.StatusCode, body, newProviderError(providerErrorStatus(resp.StatusCode, parsed.Error.Code), body)
 	}
 	if len(parsed.Choices) == 0 {
 		return "", "", resp.StatusCode, body, fmt.Errorf("no response from model")

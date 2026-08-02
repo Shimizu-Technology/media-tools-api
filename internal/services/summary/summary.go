@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -17,6 +18,13 @@ import (
 	"time"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
+)
+
+const (
+	shortSummaryMaxTokens    = 1_500
+	mediumSummaryMaxTokens   = 3_000
+	detailedSummaryMaxTokens = 5_000
+	chatMaxTokens            = 1_200
 )
 
 // Service handles AI summary generation.
@@ -87,6 +95,7 @@ type Result struct {
 type chatRequest struct {
 	Model          string               `json:"model"`
 	Messages       []chatMessage        `json:"messages"`
+	MaxTokens      int                  `json:"max_tokens"`
 	ResponseFormat *responseFormat      `json:"response_format,omitempty"`
 	Provider       *providerPreferences `json:"provider,omitempty"`
 }
@@ -115,6 +124,88 @@ type chatResponse struct {
 		Message string `json:"message"`
 		Code    int    `json:"code"`
 	} `json:"error"`
+}
+
+// ProviderError keeps provider failures typed without exposing raw upstream
+// response bodies through persisted job errors or API responses.
+type ProviderError struct {
+	StatusCode int
+	ErrorType  string
+}
+
+func (e *ProviderError) Error() string {
+	if e.ErrorType != "" {
+		return fmt.Sprintf("OpenRouter request failed (%d, %s)", e.StatusCode, e.ErrorType)
+	}
+	return fmt.Sprintf("OpenRouter request failed (%d)", e.StatusCode)
+}
+
+// PublicErrorMessage translates internal and provider errors into copy that is
+// safe to persist and display. The original error remains available to server
+// logs, while provider payloads, account links, and identifiers stay private.
+func PublicErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "The AI service took too long to respond. Please try again."
+	}
+	if errors.Is(err, context.Canceled) {
+		return "Summary generation was interrupted. Please try again."
+	}
+
+	var providerErr *ProviderError
+	if errors.As(err, &providerErr) {
+		switch providerErr.StatusCode {
+		case http.StatusPaymentRequired:
+			return "The AI service could not reserve enough capacity for this summary. Please try again. If it keeps happening, the workspace's AI credits may need attention."
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return "AI summaries are temporarily unavailable because the service configuration needs attention."
+		case http.StatusRequestTimeout:
+			return "The AI service took too long to respond. Please try again."
+		case http.StatusTooManyRequests:
+			return "The AI service is busy right now. Please wait a moment and try again."
+		case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return "The AI service is temporarily unavailable. Please try again in a moment."
+		default:
+			return "We couldn't generate the AI summary. Please try again."
+		}
+	}
+
+	return "We couldn't generate the AI summary. Please try again."
+}
+
+func summaryMaxTokens(length string) int {
+	switch strings.ToLower(strings.TrimSpace(length)) {
+	case "short":
+		return shortSummaryMaxTokens
+	case "detailed":
+		return detailedSummaryMaxTokens
+	default:
+		return mediumSummaryMaxTokens
+	}
+}
+
+func newProviderError(status int, body []byte) error {
+	var response struct {
+		Error struct {
+			Metadata struct {
+				ErrorType string `json:"error_type"`
+			} `json:"metadata"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(body, &response)
+	return &ProviderError{StatusCode: status, ErrorType: response.Error.Metadata.ErrorType}
+}
+
+func providerErrorStatus(responseStatus, errorCode int) int {
+	if errorCode >= 400 {
+		return errorCode
+	}
+	if responseStatus >= 400 {
+		return responseStatus
+	}
+	return http.StatusBadGateway
 }
 
 // ChatMessage represents a chat message used for transcript Q&A.
@@ -151,8 +242,9 @@ func (s *Service) Summarize(ctx context.Context, transcriptText string, opts Opt
 
 	// Make the API request
 	reqBody := chatRequest{
-		Model:    model,
-		Provider: s.providerPreferences(),
+		Model:     model,
+		MaxTokens: summaryMaxTokens(opts.Length),
+		Provider:  s.providerPreferences(),
 		Messages: []chatMessage{
 			{
 				Role:    "system",
@@ -197,7 +289,7 @@ func (s *Service) Summarize(ctx context.Context, transcriptText string, opts Opt
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("OpenRouter returned %d: %s", resp.StatusCode, string(body))
+		return nil, newProviderError(resp.StatusCode, body)
 	}
 
 	// Parse the response
@@ -207,7 +299,7 @@ func (s *Service) Summarize(ctx context.Context, transcriptText string, opts Opt
 	}
 
 	if chatResp.Error != nil {
-		return nil, fmt.Errorf("OpenRouter error: %s", chatResp.Error.Message)
+		return nil, newProviderError(providerErrorStatus(resp.StatusCode, chatResp.Error.Code), body)
 	}
 
 	if len(chatResp.Choices) == 0 {
@@ -254,9 +346,10 @@ func (s *Service) ChatTranscript(ctx context.Context, contextLabel, transcriptTe
 	}
 
 	reqBody := chatRequest{
-		Model:    model,
-		Messages: reqMessages,
-		Provider: s.providerPreferences(),
+		Model:     model,
+		Messages:  reqMessages,
+		MaxTokens: chatMaxTokens,
+		Provider:  s.providerPreferences(),
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
@@ -289,7 +382,7 @@ func (s *Service) ChatTranscript(ctx context.Context, contextLabel, transcriptTe
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("OpenRouter returned %d: %s", resp.StatusCode, string(body))
+		return "", "", newProviderError(resp.StatusCode, body)
 	}
 
 	var chatResp chatResponse
@@ -297,7 +390,7 @@ func (s *Service) ChatTranscript(ctx context.Context, contextLabel, transcriptTe
 		return "", "", fmt.Errorf("failed to parse response: %w", err)
 	}
 	if chatResp.Error != nil {
-		return "", "", fmt.Errorf("OpenRouter error: %s", chatResp.Error.Message)
+		return "", "", newProviderError(providerErrorStatus(resp.StatusCode, chatResp.Error.Code), body)
 	}
 	if len(chatResp.Choices) == 0 {
 		return "", "", fmt.Errorf("no response from model")
@@ -331,8 +424,9 @@ func (s *Service) SummarizeAudio(ctx context.Context, transcriptText string, opt
 	log.Printf("🤖 Generating %s audio summary (%s) using %s", opts.Length, opts.ContentType, model)
 
 	reqBody := chatRequest{
-		Model:    model,
-		Provider: s.providerPreferences(),
+		Model:     model,
+		MaxTokens: summaryMaxTokens(opts.Length),
+		Provider:  s.providerPreferences(),
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: prompt},
@@ -369,7 +463,7 @@ func (s *Service) SummarizeAudio(ctx context.Context, transcriptText string, opt
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("OpenRouter returned %d: %s", resp.StatusCode, string(body))
+		return nil, newProviderError(resp.StatusCode, body)
 	}
 
 	var chatResp chatResponse
@@ -378,7 +472,7 @@ func (s *Service) SummarizeAudio(ctx context.Context, transcriptText string, opt
 	}
 
 	if chatResp.Error != nil {
-		return nil, fmt.Errorf("OpenRouter error: %s", chatResp.Error.Message)
+		return nil, newProviderError(providerErrorStatus(resp.StatusCode, chatResp.Error.Code), body)
 	}
 
 	if len(chatResp.Choices) == 0 {
