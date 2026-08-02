@@ -83,7 +83,7 @@ export function HomePage() {
   }
 
   return (
-    <main className="max-w-5xl mx-auto px-4 sm:px-6 py-10 sm:py-14">
+    <main className="mx-auto max-w-5xl py-4 sm:py-6">
       {/* Hero Section */}
       {!transcript && (
         <div className="grid gap-10 lg:grid-cols-[1.2fr_0.8fr] items-start mb-12">
@@ -180,7 +180,7 @@ export function HomePage() {
       {transcript && (
         <button
           onClick={handleReset}
-          className="flex items-center gap-1.5 text-sm font-medium mb-6"
+          className="mb-6 flex min-h-11 items-center gap-1.5 rounded-xl pr-3 text-sm font-medium"
           style={{ color: 'var(--color-brand-500)' }}
         >
           <ArrowLeft className="w-4 h-4" />

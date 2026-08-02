@@ -616,7 +616,7 @@ print(f'Transcript: {transcript["transcript_text"][:200]}...')`,
             style={{
               backgroundColor: activeTab === key ? 'var(--color-surface-elevated)' : 'transparent',
               color: activeTab === key ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-              minHeight: '40px',
+              minHeight: '44px',
             }}
           >
             {examples[key].icon}

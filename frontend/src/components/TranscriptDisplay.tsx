@@ -324,7 +324,7 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
                   backgroundColor: 'var(--color-surface-overlay)',
                   color: 'var(--color-text-secondary)',
                   border: '1px solid var(--color-border)',
-                  minHeight: '36px',
+                  minHeight: '44px',
                 }}
                 title={`Download as ${format.toUpperCase()}`}
               >
@@ -367,7 +367,7 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
                 backgroundColor: copied ? 'var(--color-success)' : 'var(--color-surface-overlay)',
                 color: copied ? 'white' : 'var(--color-text-secondary)',
                 borderColor: copied ? 'var(--color-success)' : 'var(--color-border)',
-                minHeight: '32px',
+                minHeight: '44px',
               }}
             >
               {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
@@ -378,7 +378,7 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
               <button
                 onClick={() => setExpanded(false)}
                 className="flex items-center gap-1 text-xs font-medium transition-colors"
-                style={{ color: 'var(--color-brand-500)', minHeight: '32px' }}
+                style={{ color: 'var(--color-brand-500)', minHeight: '44px', minWidth: '44px' }}
               >
                 <ChevronUp className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Collapse</span>

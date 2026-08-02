@@ -135,7 +135,7 @@ export function DashboardPage() {
       )}
 
       <section className="grid gap-6 lg:grid-cols-[1fr_0.72fr]">
-        <Panel title="Recent library items" action={<Link to="/app/library" className="inline-flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--color-brand-500)' }}>View library <ArrowRight className="h-4 w-4" /></Link>}>
+        <Panel title="Recent library items" action={<Link to="/app/library" className="inline-flex min-h-11 items-center gap-1 rounded-xl px-2 text-sm font-semibold" style={{ color: 'var(--color-brand-500)' }}>View library <ArrowRight className="h-4 w-4" /></Link>}>
           {isLoading ? (
             <LoadingRows />
           ) : recentItems.length > 0 ? (
@@ -147,7 +147,7 @@ export function DashboardPage() {
           )}
         </Panel>
 
-        <Panel title="Collections" action={<Link to="/app/collections" className="inline-flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--color-brand-500)' }}>Manage <ArrowRight className="h-4 w-4" /></Link>}>
+        <Panel title="Collections" action={<Link to="/app/collections" className="inline-flex min-h-11 items-center gap-1 rounded-xl px-2 text-sm font-semibold" style={{ color: 'var(--color-brand-500)' }}>Manage <ArrowRight className="h-4 w-4" /></Link>}>
           {isLoading ? (
             <LoadingRows compact />
           ) : data.collections.length > 0 ? (

@@ -169,7 +169,7 @@ export function PdfPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-            className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight mb-4"
+            className="mb-4 text-3xl font-semibold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl"
             style={{ color: 'var(--color-text-primary)' }}
           >
             PDF{' '}
@@ -455,7 +455,7 @@ export function PdfPage() {
                       backgroundColor: copied ? 'var(--color-success)' : 'var(--color-surface-overlay)',
                       color: copied ? 'white' : 'var(--color-text-secondary)',
                       borderColor: copied ? 'var(--color-success)' : 'var(--color-border)',
-                      minHeight: '32px',
+                      minHeight: '44px',
                     }}
                   >
                     {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}

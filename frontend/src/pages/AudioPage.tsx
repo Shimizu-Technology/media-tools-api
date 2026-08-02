@@ -835,7 +835,7 @@ export function AudioPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.1 }}
-            className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight mb-4"
+            className="mb-4 text-3xl font-semibold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl"
             style={{ color: 'var(--color-text-primary)' }}
           >
             Recording{' '}
@@ -951,14 +951,14 @@ export function AudioPage() {
               <button
                 onClick={() => setActiveTab('record')}
                 className="px-3 py-2 rounded-lg text-sm font-medium border"
-                style={{ borderColor: 'var(--color-brand-300)', color: 'var(--color-brand-500)', minHeight: '40px' }}
+                style={{ borderColor: 'var(--color-brand-400)', color: 'var(--color-brand-500)', minHeight: '44px' }}
               >
                 Resume upload
               </button>
               <button
                 onClick={handleReset}
                 className="px-3 py-2 rounded-lg text-sm font-medium border"
-                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', minHeight: '40px' }}
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', minHeight: '44px' }}
               >
                 Discard
               </button>
@@ -1234,7 +1234,7 @@ export function AudioPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="max-w-2xl mx-auto mt-4 p-3 rounded-xl border flex items-center justify-between gap-3"
+          className="mx-auto mt-4 flex max-w-2xl flex-col items-stretch justify-between gap-3 rounded-xl border p-3 sm:flex-row sm:items-center"
           style={{
             backgroundColor: 'var(--color-surface-elevated)',
             borderColor: 'var(--color-border)',
@@ -1243,16 +1243,16 @@ export function AudioPage() {
           <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             Transcription failed. You can re-transcribe from the saved recording.
           </p>
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
             {result.audio_s3_key && (
               <button
                 onClick={handleRetryStoredAudio}
                 disabled={isRetrying}
                 className="px-3 py-2 rounded-lg text-sm font-medium border"
                 style={{
-                  borderColor: 'var(--color-brand-300)',
+                  borderColor: 'var(--color-brand-400)',
                   color: 'var(--color-brand-500)',
-                  minHeight: '40px',
+                  minHeight: '44px',
                 }}
               >
                 <span className="inline-flex items-center gap-1.5">
@@ -1267,7 +1267,7 @@ export function AudioPage() {
               style={{
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-text-secondary)',
-                minHeight: '40px',
+                minHeight: '44px',
               }}
             >
               Start over
@@ -1328,7 +1328,7 @@ export function AudioPage() {
               style={{
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-text-secondary)',
-                minHeight: '40px',
+                minHeight: '44px',
               }}
             >
               {isCanceling ? 'Stopping...' : 'Stop processing'}
@@ -1522,7 +1522,7 @@ export function AudioPage() {
                     <button
                       onClick={startRename}
                       className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium"
-                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', minHeight: '40px' }}
+                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', minHeight: '44px' }}
                     >
                       <Pencil className="w-4 h-4" />
                       Rename
@@ -1679,7 +1679,7 @@ export function AudioPage() {
                       backgroundColor: copied === 'transcript' ? 'var(--color-success)' : 'var(--color-surface-overlay)',
                       color: copied === 'transcript' ? 'white' : 'var(--color-text-secondary)',
                       borderColor: copied === 'transcript' ? 'var(--color-success)' : 'var(--color-border)',
-                      minHeight: '36px',
+                      minHeight: '44px',
                     }}>
                     {copied === 'transcript' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                     {copied === 'transcript' ? 'Copied' : 'Copy'}
@@ -1759,7 +1759,7 @@ function SectionCard({
             backgroundColor: copied === copyLabel ? 'var(--color-success)' : 'var(--color-surface-overlay)',
             color: copied === copyLabel ? 'white' : 'var(--color-text-secondary)',
             borderColor: copied === copyLabel ? 'var(--color-success)' : 'var(--color-border)',
-            minHeight: '36px',
+            minHeight: '44px',
           }}>
           {copied === copyLabel ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
           {copied === copyLabel ? 'Copied' : 'Copy'}

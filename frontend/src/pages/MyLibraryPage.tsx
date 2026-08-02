@@ -280,7 +280,7 @@ export function MyLibraryPage() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="max-w-6xl mx-auto px-4 sm:px-6 pt-8 sm:pt-12 pb-16"
+      className="mx-auto max-w-6xl pb-12 sm:pb-16"
     >
       {/* Header */}
       <div className="mb-8">
@@ -314,7 +314,7 @@ export function MyLibraryPage() {
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-between gap-4 p-4 rounded-xl mb-6"
+          className="mb-6 flex flex-col items-stretch justify-between gap-3 rounded-2xl p-4 sm:flex-row sm:items-center"
           style={{ backgroundColor: 'var(--color-error-subtle)', border: '1px solid var(--color-error-border)' }}
         >
           <div className="flex items-center gap-3">
@@ -323,7 +323,7 @@ export function MyLibraryPage() {
             </span>
             <button
               onClick={clearSelection}
-              className="text-sm transition-colors"
+              className="min-h-11 rounded-xl px-3 text-sm transition-colors"
               style={{ color: 'var(--color-text-muted)' }}
             >
               Clear
@@ -346,14 +346,14 @@ export function MyLibraryPage() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.15 }}
-        className="flex gap-1 p-1 rounded-xl mb-6 overflow-x-auto"
+        className="mb-6 grid grid-cols-2 gap-1 rounded-2xl p-1 sm:flex"
         style={{ backgroundColor: 'var(--color-surface-elevated)' }}
       >
         {tabs.map((tab) => (
           <button
             key={tab.value}
             onClick={() => handleTabChange(tab.value)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap"
+            className="flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl px-3 text-sm font-medium transition-all sm:flex-1 sm:px-4"
             style={{
               backgroundColor: activeTab === tab.value ? 'var(--color-surface)' : 'transparent',
               color: activeTab === tab.value ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
@@ -375,22 +375,22 @@ export function MyLibraryPage() {
         ))}
       </motion.div>
 
-      <div className="mb-4 flex gap-2 overflow-x-auto" aria-label="Library view">
+      <div className="mb-4 grid grid-cols-3 gap-2" aria-label="Library view">
         {([
           { value: 'active', label: 'All items', icon: Library },
           { value: 'favorites', label: 'Starred', icon: Star },
           { value: 'archive', label: 'Archive', icon: Archive },
         ] as { value: WorkspaceFilter; label: string; icon: typeof Library }[]).map(({ value, label, icon: Icon }) => (
-          <button key={value} onClick={() => handleWorkspaceFilterChange(value)} className="inline-flex min-h-11 items-center gap-2 whitespace-nowrap rounded-xl border px-4 text-sm font-semibold" style={{ borderColor: workspaceFilter === value ? 'var(--color-brand-500)' : 'var(--color-border)', backgroundColor: workspaceFilter === value ? 'var(--color-brand-50)' : 'var(--color-surface-elevated)', color: workspaceFilter === value ? 'var(--color-brand-500)' : 'var(--color-text-secondary)' }}><Icon className="h-4 w-4" />{label}</button>
+          <button key={value} onClick={() => handleWorkspaceFilterChange(value)} className="inline-flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-xl border px-2 text-xs font-semibold sm:gap-2 sm:px-4 sm:text-sm" style={{ borderColor: workspaceFilter === value ? 'var(--color-brand-500)' : 'var(--color-border)', backgroundColor: workspaceFilter === value ? 'var(--color-brand-50)' : 'var(--color-surface-elevated)', color: workspaceFilter === value ? 'var(--color-brand-500)' : 'var(--color-text-secondary)' }}><Icon className="h-4 w-4 shrink-0" /><span className="truncate">{label}</span></button>
         ))}
       </div>
 
-      <div className="mb-6 flex gap-2 overflow-x-auto" aria-label="Filter by status">
+      <div className="mb-6 grid grid-cols-2 gap-2 sm:flex" aria-label="Filter by status">
         {(['all', 'completed', 'processing', 'failed'] as StatusFilter[]).map((status) => (
           <button
             key={status}
             onClick={() => handleStatusChange(status)}
-            className="min-h-11 whitespace-nowrap rounded-full border px-4 text-sm font-medium capitalize"
+            className="min-h-11 whitespace-nowrap rounded-xl border px-4 text-sm font-medium capitalize sm:rounded-full"
             style={{
               borderColor: statusFilter === status ? 'var(--color-brand-500)' : 'var(--color-border)',
               backgroundColor: statusFilter === status ? 'var(--color-brand-50)' : 'var(--color-surface-elevated)',
@@ -418,7 +418,7 @@ export function MyLibraryPage() {
             type="text"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search titles, transcripts, summaries, and document text…"
+            placeholder="Search your library…"
             aria-label="Search your library"
             className="w-full pl-12 pr-10 py-3 rounded-xl border text-sm outline-none transition-colors"
             style={{
@@ -442,7 +442,7 @@ export function MyLibraryPage() {
 
         <button
           onClick={() => setSortDir(sortDir === 'desc' ? 'asc' : 'desc')}
-          className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-colors"
+          className="flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium transition-colors sm:w-auto"
           style={{
             backgroundColor: 'var(--color-surface-elevated)',
             borderColor: 'var(--color-border)',
@@ -670,12 +670,12 @@ export function MyLibraryPage() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="flex items-center justify-center gap-2 mt-8"
+          className="mt-8 grid grid-cols-[1fr_auto_1fr] items-center gap-2"
         >
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="flex items-center gap-1 px-4 py-2.5 rounded-xl border text-sm font-medium disabled:opacity-40"
+            className="flex min-h-11 items-center justify-center gap-1 rounded-xl border px-3 text-sm font-medium disabled:opacity-40 sm:px-4"
             style={{
               backgroundColor: 'var(--color-surface-elevated)',
               borderColor: 'var(--color-border)',
@@ -686,13 +686,13 @@ export function MyLibraryPage() {
             <ChevronLeft className="w-4 h-4" />
             Previous
           </button>
-          <span className="text-sm px-4" style={{ color: 'var(--color-text-muted)' }}>
+          <span className="px-1 text-center text-xs sm:px-4 sm:text-sm" style={{ color: 'var(--color-text-muted)' }}>
             Page {page} of {totalPages}
           </span>
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="flex items-center gap-1 px-4 py-2.5 rounded-xl border text-sm font-medium disabled:opacity-40"
+            className="flex min-h-11 items-center justify-center gap-1 rounded-xl border px-3 text-sm font-medium disabled:opacity-40 sm:px-4"
             style={{
               backgroundColor: 'var(--color-surface-elevated)',
               borderColor: 'var(--color-border)',

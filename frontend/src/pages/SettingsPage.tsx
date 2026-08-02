@@ -28,18 +28,18 @@ export function SettingsPage() {
       </section>
 
       <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-        <div className="flex items-start gap-4">
+        <div className="flex min-w-0 items-start gap-4">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
             <UserRound className="h-5 w-5" />
           </div>
-          <div>
+          <div className="min-w-0 flex-1">
             <h2 className="text-xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>Account</h2>
             <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               {isClerkEnabled ? 'Signed in through Clerk.' : 'Running in local API-key mode.'}
             </p>
             <div className="mt-4 rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}>
               <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{user?.name || 'Workspace user'}</p>
-              <p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>{user?.email || 'No Clerk account loaded in this environment'}</p>
+              <p className="mt-1 break-all text-sm" style={{ color: 'var(--color-text-secondary)' }}>{user?.email || 'No Clerk account loaded in this environment'}</p>
             </div>
           </div>
         </div>

@@ -152,21 +152,21 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
               <>
                 {/* Create new inline */}
                 {showCreate ? (
-                  <div className="p-3 mb-1 rounded-lg bg-[var(--surface)]">
+                  <div className="mb-1 rounded-xl bg-[var(--surface)] p-3">
                     <input
                       autoFocus
                       value={newName}
                       onChange={e => setNewName(e.target.value)}
                       placeholder="Collection name..."
-                      className="w-full bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none mb-2"
+                      className="mb-2 min-h-11 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 text-base text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
                       onKeyDown={e => e.key === 'Enter' && handleCreate()}
                     />
-                    <div className="flex gap-2 justify-end">
-                      <button onClick={() => setShowCreate(false)} className="text-xs text-[var(--text-secondary)]">Cancel</button>
+                    <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+                      <button onClick={() => setShowCreate(false)} className="min-h-11 rounded-lg px-3 text-sm text-[var(--text-secondary)] hover:bg-[var(--color-nav-hover)]">Cancel</button>
                       <button
                         onClick={handleCreate}
                         disabled={!newName.trim() || creating}
-                        className="text-xs px-3 py-1 rounded-md bg-[var(--brand)] text-white font-medium disabled:opacity-50 flex items-center gap-1.5"
+                        className="flex min-h-11 items-center justify-center gap-1.5 rounded-lg bg-[var(--brand)] px-3 text-sm font-medium text-white disabled:opacity-50"
                       >
                         {creating && <Loader2 className="w-3 h-3 animate-spin" />}
                         Create & Add
@@ -176,7 +176,7 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
                 ) : (
                   <button
                     onClick={() => setShowCreate(true)}
-                    className="w-full flex items-center gap-2.5 p-3 rounded-lg text-sm text-[var(--brand)] hover:bg-[var(--brand)]/5 transition-colors mb-1"
+                    className="mb-1 flex min-h-11 w-full items-center gap-2.5 rounded-lg p-3 text-sm text-[var(--brand)] transition-colors hover:bg-[var(--brand)]/5"
                   >
                     <Plus className="w-4 h-4" />
                     New Collection
@@ -195,7 +195,7 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
                       key={col.id}
                       onClick={() => !isAdded && handleAdd(col.id)}
                       disabled={isAdded || isAdding}
-                      className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-white/3 transition-colors text-left disabled:opacity-70"
+                      className="flex min-h-14 w-full items-center gap-3 rounded-lg p-3 text-left transition-colors hover:bg-white/3 disabled:opacity-70"
                     >
                       <div className="w-8 h-8 rounded-md bg-[var(--brand)]/10 flex items-center justify-center shrink-0">
                         <FolderOpen className="w-4 h-4 text-[var(--brand)]" />

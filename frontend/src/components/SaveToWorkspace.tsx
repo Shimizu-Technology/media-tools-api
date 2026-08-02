@@ -46,7 +46,7 @@ export function SaveToWorkspace({ itemType, itemId }: SaveToWorkspaceProps) {
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.9 }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border"
+          className="flex min-h-11 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium"
           style={{
             backgroundColor: 'rgba(239, 68, 68, 0.12)',
             borderColor: 'rgba(239, 68, 68, 0.3)',
@@ -64,7 +64,7 @@ export function SaveToWorkspace({ itemType, itemId }: SaveToWorkspaceProps) {
           exit={{ opacity: 0, scale: 0.9 }}
           onClick={handleSave}
           disabled={saved || saving}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 border"
+          className="flex min-h-11 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-all duration-200"
           style={{
             backgroundColor: saved ? 'rgba(24, 185, 133, 0.12)' : 'var(--color-surface)',
             borderColor: saved ? 'rgba(24, 185, 133, 0.3)' : 'var(--color-border)',
