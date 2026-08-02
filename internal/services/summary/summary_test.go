@@ -1,6 +1,7 @@
 package summary
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -59,6 +60,15 @@ func TestPublicErrorMessageClassifiesProviderFailures(t *testing.T) {
 		if !strings.Contains(message, test.want) {
 			t.Fatalf("PublicErrorMessage(%d) = %q, want text containing %q", test.status, message, test.want)
 		}
+	}
+}
+
+func TestShouldFallbackToOpenAIForInternalServerErrorButNotCancellation(t *testing.T) {
+	if !shouldFallbackToOpenAI(&ProviderError{StatusCode: http.StatusInternalServerError}) {
+		t.Fatal("shouldFallbackToOpenAI(500) = false, want transient provider failure fallback")
+	}
+	if shouldFallbackToOpenAI(context.Canceled) {
+		t.Fatal("shouldFallbackToOpenAI(context.Canceled) = true, want cancellation preserved")
 	}
 }
 

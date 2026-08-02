@@ -49,6 +49,7 @@ export function SummaryPanel({
   const [isTyping, setIsTyping] = useState(false);
   const [transcriptMode, setTranscriptMode] = useState<'full' | 'timestamped'>('full');
   const [transcriptCopied, setTranscriptCopied] = useState(false);
+  const [transcriptCopyError, setTranscriptCopyError] = useState('');
   const typeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -213,9 +214,14 @@ export function SummaryPanel({
 
   const copyTranscript = async () => {
     if (!transcriptCopyText) return;
-    await navigator.clipboard.writeText(transcriptCopyText);
-    setTranscriptCopied(true);
-    window.setTimeout(() => setTranscriptCopied(false), 1800);
+    setTranscriptCopyError('');
+    try {
+      await navigator.clipboard.writeText(transcriptCopyText);
+      setTranscriptCopied(true);
+      window.setTimeout(() => setTranscriptCopied(false), 1800);
+    } catch {
+      setTranscriptCopyError('Clipboard access was blocked. Check your browser permissions and try again.');
+    }
   };
 
   return (
@@ -390,7 +396,7 @@ export function SummaryPanel({
                 className="text-sm leading-relaxed"
                 style={{ color: 'var(--color-text-secondary)' }}
               >
-                {hasTimestampedTranscript && <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div className="grid grid-cols-2 rounded-xl border p-1" role="group" aria-label="Transcript view" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}><button type="button" aria-pressed={transcriptMode === 'full'} onClick={() => setTranscriptMode('full')} className="min-h-11 rounded-lg px-3 text-sm font-semibold transition" style={{ backgroundColor: transcriptMode === 'full' ? 'var(--color-surface-elevated)' : undefined, color: transcriptMode === 'full' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: transcriptMode === 'full' ? '0 1px 2px rgba(0, 0, 0, 0.16)' : undefined }}>Full</button><button type="button" aria-pressed={transcriptMode === 'timestamped'} onClick={() => setTranscriptMode('timestamped')} className="min-h-11 rounded-lg px-3 text-sm font-semibold transition" style={{ backgroundColor: transcriptMode === 'timestamped' ? 'var(--color-surface-elevated)' : undefined, color: transcriptMode === 'timestamped' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: transcriptMode === 'timestamped' ? '0 1px 2px rgba(0, 0, 0, 0.16)' : undefined }}>Timestamped</button></div><button type="button" onClick={() => void copyTranscript()} disabled={!transcriptCopyText} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)] disabled:opacity-40" style={{ borderColor: 'var(--color-border)' }}>{transcriptCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{transcriptCopied ? 'Copied' : transcriptMode === 'timestamped' ? 'Copy timestamped' : 'Copy full transcript'}</button></div>}
+                {hasTimestampedTranscript && <div className="mb-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div className="grid grid-cols-2 rounded-xl border p-1" role="group" aria-label="Transcript view" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}><button type="button" aria-pressed={transcriptMode === 'full'} onClick={() => setTranscriptMode('full')} className="min-h-11 rounded-lg px-3 text-sm font-semibold transition" style={{ backgroundColor: transcriptMode === 'full' ? 'var(--color-surface-elevated)' : undefined, color: transcriptMode === 'full' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: transcriptMode === 'full' ? '0 1px 2px rgba(0, 0, 0, 0.16)' : undefined }}>Full</button><button type="button" aria-pressed={transcriptMode === 'timestamped'} onClick={() => setTranscriptMode('timestamped')} className="min-h-11 rounded-lg px-3 text-sm font-semibold transition" style={{ backgroundColor: transcriptMode === 'timestamped' ? 'var(--color-surface-elevated)' : undefined, color: transcriptMode === 'timestamped' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: transcriptMode === 'timestamped' ? '0 1px 2px rgba(0, 0, 0, 0.16)' : undefined }}>Timestamped</button></div><button type="button" onClick={() => void copyTranscript()} disabled={!transcriptCopyText} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)] disabled:opacity-40" style={{ borderColor: 'var(--color-border)' }}>{transcriptCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{transcriptCopied ? 'Copied' : transcriptMode === 'timestamped' ? 'Copy timestamped' : 'Copy full transcript'}</button></div>{transcriptCopyError && <p role="status" className="mt-2 text-sm" style={{ color: 'var(--color-danger)' }}>{transcriptCopyError}</p>}</div>}
                 <div className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap">
                 {transcriptMode === 'timestamped' && hasTimestampedTranscript ? (
                   <div className="space-y-1">

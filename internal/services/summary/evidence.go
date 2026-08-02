@@ -436,12 +436,12 @@ func (s *Service) sendProviderCompletion(
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return completionResult{}, 0, nil, fmt.Errorf("%s request failed: %w", provider, err)
+		return completionResult{}, 0, nil, &ProviderTransportError{Provider: provider, Cause: err}
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return completionResult{}, resp.StatusCode, nil, fmt.Errorf("read %s response: %w", provider, err)
+		return completionResult{}, resp.StatusCode, nil, &ProviderTransportError{Provider: provider, Cause: err}
 	}
 	if resp.StatusCode != http.StatusOK {
 		return completionResult{}, resp.StatusCode, body, newProviderError(provider, resp.StatusCode, body)

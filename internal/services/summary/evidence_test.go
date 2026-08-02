@@ -188,6 +188,38 @@ func TestCompleteJSONMessagesFallsBackToOpenAIAndBypassesKnownPaymentFailure(t *
 	}
 }
 
+func TestCompleteJSONMessagesFallsBackToOpenAIAfterTransportFailure(t *testing.T) {
+	openAICalls := 0
+	service := NewWithModels("openrouter-key", "test/model", "test/model", "").
+		WithOpenAIFallback("openai-key", "gpt-4.1-mini")
+	service.httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host == "openrouter.ai" {
+			return nil, errors.New("private connection detail")
+		}
+		openAICalls++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(
+				`{"model":"gpt-4.1-mini","choices":[{"message":{"content":"{\"answer\":\"recovered\"}"},"finish_reason":"stop"}]}`,
+			)),
+			Header: make(http.Header),
+		}, nil
+	})}
+
+	completion, err := service.completeJSONMessages(
+		context.Background(),
+		"test/model",
+		[]chatMessage{{Role: "user", Content: "Return JSON"}},
+		shortSummaryMaxTokens,
+	)
+	if err != nil {
+		t.Fatalf("completeJSONMessages() error = %v", err)
+	}
+	if completion.Content != `{"answer":"recovered"}` || openAICalls != 1 {
+		t.Fatalf("fallback completion = %#v after %d OpenAI calls", completion, openAICalls)
+	}
+}
+
 func TestCompleteJSONMessagesBoundsProviderOutputBudget(t *testing.T) {
 	service := NewWithModels("test-key", "test/model", "test/model", "")
 	service.httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {

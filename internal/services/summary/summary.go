@@ -68,6 +68,13 @@ func (s *Service) deferOpenRouterAfterPaymentFailure() {
 }
 
 func shouldFallbackToOpenAI(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var transportErr *ProviderTransportError
+	if errors.As(err, &transportErr) {
+		return true
+	}
 	var providerErr *ProviderError
 	if !errors.As(err, &providerErr) {
 		return false
@@ -77,6 +84,7 @@ func shouldFallbackToOpenAI(err error) bool {
 		http.StatusUnauthorized,
 		http.StatusForbidden,
 		http.StatusTooManyRequests,
+		http.StatusInternalServerError,
 		http.StatusBadGateway,
 		http.StatusServiceUnavailable,
 		http.StatusGatewayTimeout:
@@ -195,6 +203,22 @@ type ProviderError struct {
 	Provider   string
 	StatusCode int
 	ErrorType  string
+}
+
+// ProviderTransportError identifies failures before a provider returns an HTTP
+// response. This lets the service try its independent fallback route while
+// keeping connection details out of persisted errors and user responses.
+type ProviderTransportError struct {
+	Provider string
+	Cause    error
+}
+
+func (e *ProviderTransportError) Error() string {
+	return "AI provider transport failed"
+}
+
+func (e *ProviderTransportError) Unwrap() error {
+	return e.Cause
 }
 
 // StructuredOutputError means the provider answered, but the response could
