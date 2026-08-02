@@ -29,7 +29,9 @@ export function ClerkUserButton() {
           appearance={{
             elements: {
               rootBox: 'flex h-11 w-11 items-center justify-center',
-              userButtonTrigger: 'flex h-11 w-11 items-center justify-center rounded-xl focus-visible:ring-2 focus-visible:ring-[var(--color-brand-500)]',
+              // Clerk's generated trigger rules load after utility classes, so the
+              // explicit overrides keep the actual clickable control at 44px.
+              userButtonTrigger: 'flex !h-11 !w-11 !min-h-11 !min-w-11 items-center justify-center rounded-xl focus-visible:ring-2 focus-visible:ring-[var(--color-brand-500)]',
               avatarBox: 'h-8 w-8',
             },
           }}
