@@ -173,7 +173,7 @@ struct SettingsView: View {
 
     private func checkHealth() async {
         do {
-            health = try await APIClient.shared.get("/health")
+            health = try await APIClient.shared.get("/ready")
         } catch {
             print("Health check failed: \(error)")
         }

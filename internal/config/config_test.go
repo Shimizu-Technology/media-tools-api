@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func setRequiredReleaseEnv(t *testing.T) {
@@ -125,5 +126,44 @@ func TestLoadConfiguresOpenAISummaryFallbackModel(t *testing.T) {
 	}
 	if cfg.OpenAISummaryFallbackModel != "gpt-4.1-mini-custom" {
 		t.Fatalf("OpenAISummaryFallbackModel = %q, want configured model", cfg.OpenAISummaryFallbackModel)
+	}
+}
+
+func TestLoadDefaultsJobRecoveryInterval(t *testing.T) {
+	t.Setenv("YT_DLP_PATH", "/bin/true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.JobRecoveryInterval != 15*time.Minute {
+		t.Fatalf("JobRecoveryInterval = %s, want 15m", cfg.JobRecoveryInterval)
+	}
+}
+
+func TestLoadParsesJobRecoveryInterval(t *testing.T) {
+	t.Setenv("YT_DLP_PATH", "/bin/true")
+	t.Setenv("JOB_RECOVERY_INTERVAL", "45s")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.JobRecoveryInterval != 45*time.Second {
+		t.Fatalf("JobRecoveryInterval = %s, want 45s", cfg.JobRecoveryInterval)
+	}
+}
+
+func TestLoadRejectsInvalidJobRecoveryInterval(t *testing.T) {
+	t.Setenv("YT_DLP_PATH", "/bin/true")
+
+	for _, value := range []string{"soon", "0s", "-1m"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("JOB_RECOVERY_INTERVAL", value)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), "JOB_RECOVERY_INTERVAL") {
+				t.Fatalf("Load error = %v, want JOB_RECOVERY_INTERVAL validation error", err)
+			}
+		})
 	}
 }

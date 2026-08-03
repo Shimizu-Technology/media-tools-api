@@ -172,7 +172,10 @@ Frontend runs at **http://localhost:5173** and proxies API calls to `:8080`.
 ```bash
 # In a third terminal (or use the browser)
 make health
-# Should return: {"status":"ok","version":"dev","database":"healthy","workers":3}
+# Should return: {"status":"ok","version":"1.0.0","database":"unchecked","workers":3}
+
+# Query database readiness explicitly when needed
+curl http://localhost:8080/api/v1/ready | jq
 ```
 
 Open **http://localhost:5173** — you're in!

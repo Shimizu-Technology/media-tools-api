@@ -66,6 +66,8 @@ const repeatedSegmentRunMin = 8
 const repeatedSegmentLongRunMin = 16
 const repeatedSegmentPhraseWordLimit = 8
 
+const defaultRecoveryInterval = 15 * time.Minute
+
 // Normalize tricky browser/video uploads to MP3 for Whisper. Playable browser
 // MediaRecorder M4A/WebM files can still decode poorly in Whisper and trigger
 // hallucinated transcripts. MP3 is less compact, but it is the most consistently
@@ -139,6 +141,7 @@ type AudioPayload struct {
 type Pool struct {
 	wake             chan struct{}
 	workers          int
+	recoveryInterval time.Duration
 	instanceID       string
 	leaseDuration    time.Duration
 	db               *database.DB
@@ -229,8 +232,11 @@ func (p *Pool) NotifyWebhook(event string, userID, apiKeyID *string, data interf
 }
 
 // NewPool creates a new worker pool.
-func NewPool(workers, queueSize int, db *database.DB, ext transcript.Extractor, sum *summary.Service) *Pool {
+func NewPool(workers, queueSize int, recoveryInterval time.Duration, db *database.DB, ext transcript.Extractor, sum *summary.Service) *Pool {
 	ctx, cancel := context.WithCancel(context.Background())
+	if recoveryInterval <= 0 {
+		recoveryInterval = defaultRecoveryInterval
+	}
 	wakeBuffer := queueSize
 	if wakeBuffer <= 0 {
 		wakeBuffer = 1
@@ -238,6 +244,7 @@ func NewPool(workers, queueSize int, db *database.DB, ext transcript.Extractor, 
 	return &Pool{
 		wake:             make(chan struct{}, wakeBuffer),
 		workers:          workers,
+		recoveryInterval: recoveryInterval,
 		instanceID:       uuid.NewString(),
 		leaseDuration:    5 * time.Minute,
 		db:               db,
@@ -255,11 +262,13 @@ func NewPool(workers, queueSize int, db *database.DB, ext transcript.Extractor, 
 // Go Pattern: The `go` keyword starts a new goroutine (lightweight thread).
 // Each worker runs in its own goroutine, reading from the shared jobs channel.
 func (p *Pool) Start() {
-	log.Printf("🚀 Starting %d background workers", p.workers)
+	log.Printf("🚀 Starting %d background workers (durable recovery every %s)", p.workers, p.recoveryInterval)
 	for i := 0; i < p.workers; i++ {
 		p.wg.Add(1)
 		go p.worker(i) // Launch worker goroutine
 	}
+	p.wg.Add(1)
+	go p.recoverMissedWakeups()
 }
 
 // Stop gracefully shuts down all workers.
@@ -514,15 +523,13 @@ func audioSummaryRecoveryPayload(at models.AudioTranscription) AudioSummaryPaylo
 	}
 }
 
-// worker claims durable rows. The wake channel avoids polling latency while a
-// periodic tick recovers work submitted by another process.
+// worker claims durable rows. The wake channel gives locally submitted jobs
+// immediate pickup without continuously polling PostgreSQL.
 func (p *Pool) worker(id int) {
 	defer p.wg.Done() // Signal completion when this worker exits
 
 	log.Printf("👷 Worker %d started", id)
 
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
 	for {
 		claimed, err := p.db.ClaimBackgroundJob(p.ctx, p.instanceID, p.leaseDuration)
 		if err != nil {
@@ -541,7 +548,24 @@ func (p *Pool) worker(id int) {
 			log.Printf("👷 Worker %d shutting down", id)
 			return
 		case <-p.wake:
+		}
+	}
+}
+
+// recoverMissedWakeups is a low-frequency safety net for durable work queued by
+// another process or left behind after a missed in-process signal. One signal is
+// enough because a worker keeps claiming rows until the durable queue is empty.
+func (p *Pool) recoverMissedWakeups() {
+	defer p.wg.Done()
+
+	ticker := time.NewTicker(p.recoveryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
 		case <-ticker.C:
+			p.signalWorkers()
 		}
 	}
 }

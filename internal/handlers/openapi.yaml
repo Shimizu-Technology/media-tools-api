@@ -315,7 +315,8 @@ components:
           example: "1.0.0"
         database:
           type: string
-          example: "healthy"
+          enum: [unchecked, healthy, unhealthy]
+          example: "unchecked"
         workers:
           type: integer
           example: 3
@@ -327,8 +328,8 @@ paths:
   /health:
     get:
       tags: [Health]
-      summary: Health check
-      description: Returns API health status including database connectivity and worker count.
+      summary: Liveness check
+      description: Returns process health without querying the database. Safe for frequent infrastructure probes.
       security: []
       responses:
         "200":
@@ -340,9 +341,29 @@ paths:
               example:
                 status: "ok"
                 version: "1.0.0"
-                database: "healthy"
+                database: "unchecked"
                 workers: 3
                 yt_dlp_cookies_configured: true
+
+  /ready:
+    get:
+      tags: [Health]
+      summary: Readiness check
+      description: Checks database connectivity for explicit diagnostics. Do not use as a high-frequency infrastructure probe.
+      security: []
+      responses:
+        "200":
+          description: API and database are ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Database is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
 
   /keys:
     post:

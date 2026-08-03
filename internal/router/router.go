@@ -66,6 +66,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	// --- Public Routes (no auth required) ---
 	r.GET("/health", h.HealthCheck) // Render-style health check alias
 	r.GET("/api/v1/health", h.HealthCheck)
+	r.GET("/ready", h.ReadinessCheck)
+	r.GET("/api/v1/ready", h.ReadinessCheck)
 	r.POST("/api/v1/keys", h.CreateAPIKey)
 
 	// API Documentation (MTA-10)
