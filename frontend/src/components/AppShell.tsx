@@ -29,6 +29,7 @@ const LazyClerkUserButton = CLERK_CONFIGURED
   : null;
 
 const SIDEBAR_COLLAPSED_KEY = 'mta-app-sidebar-collapsed';
+const LIBRARY_STATS_POLL_INTERVAL_MS = 8000;
 
 type NavItem = {
   label: string;
@@ -64,20 +65,57 @@ export function AppShell() {
 
   useEffect(() => {
     let current = true;
+    let refreshing = false;
+    let timer: number | undefined;
+
+    const clearScheduledRefresh = () => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+
+    const scheduleRefresh = () => {
+      clearScheduledRefresh();
+      if (current && document.visibilityState === 'visible') {
+        timer = window.setTimeout(() => { void refresh(); }, LIBRARY_STATS_POLL_INTERVAL_MS);
+      }
+    };
+
     const refresh = async () => {
+      clearScheduledRefresh();
+      if (!current || refreshing || document.visibilityState !== 'visible') return;
+
+      refreshing = true;
       try {
         const stats = await getLibraryStats();
         if (current) setActiveJobs(stats.pending + stats.processing);
       } catch {
         // The navigation remains usable if the lightweight status check fails.
+      } finally {
+        refreshing = false;
+        scheduleRefresh();
       }
     };
+
+    const handleVisibilityChange = () => {
+      // Even a browser-throttled request every minute prevents Neon from
+      // autosuspending. Resume with an immediate refresh when the user returns.
+      if (document.visibilityState === 'visible') {
+        void refresh();
+      } else {
+        clearScheduledRefresh();
+      }
+    };
+
     void getHealth().catch(() => undefined);
-    void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, 8000);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    if (document.visibilityState === 'visible') void refresh();
+
     return () => {
       current = false;
-      window.clearInterval(timer);
+      clearScheduledRefresh();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 
