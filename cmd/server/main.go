@@ -143,7 +143,7 @@ func main() {
 	}
 
 	// Step 4: Create and Start Worker Pool
-	wp := worker.NewPool(cfg.WorkerCount, cfg.JobQueueSize, db, extractor, summarizer)
+	wp := worker.NewPool(cfg.WorkerCount, cfg.JobQueueSize, cfg.JobRecoveryInterval, db, extractor, summarizer)
 	wp.SetWebhookService(webhookService)     // MTA-18: wire webhooks into worker for job notifications
 	wp.SetAudioTranscriber(audioTranscriber) // Wire audio transcriber for async Whisper jobs
 	wp.SetAudioStorage(audioStorage)
@@ -241,7 +241,8 @@ func main() {
 
 	go func() {
 		log.Printf("🌐 Server listening on http://localhost:%s", cfg.Port)
-		log.Printf("📖 Health check: http://localhost:%s/api/v1/health", cfg.Port)
+		log.Printf("📖 Liveness check: http://localhost:%s/api/v1/health", cfg.Port)
+		log.Printf("📖 Readiness check: http://localhost:%s/api/v1/ready", cfg.Port)
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("❌ Server failed: %v", err)

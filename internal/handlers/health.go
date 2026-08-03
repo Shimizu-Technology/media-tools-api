@@ -10,7 +10,9 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -22,6 +24,10 @@ import (
 	webhookservice "github.com/Shimizu-Technology/media-tools-api/internal/services/webhook"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
+
+type readinessChecker interface {
+	HealthCheck(context.Context) error
+}
 
 // Handler holds shared dependencies for all HTTP handlers.
 // Go Pattern: Dependency injection via struct fields. Instead of global
@@ -39,6 +45,7 @@ type Handler struct {
 	OwnerAPIKeyID          string                  // Optional owner key ID override
 	OwnerAPIKeyPrefix      string                  // Optional owner key prefix override
 	YtDlpCookiesConfigured bool                    // True when yt-dlp cookies are configured
+	readinessChecker       readinessChecker
 }
 
 // NewHandler creates a new handler with all dependencies.
@@ -55,29 +62,46 @@ func NewHandler(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *sto
 		OwnerAPIKeyID:          ownerKeyID,
 		OwnerAPIKeyPrefix:      ownerKeyPrefix,
 		YtDlpCookiesConfigured: ytDlpCookiesConfigured,
+		readinessChecker:       db,
 	}
 }
 
-// HealthCheck returns the API health status.
+// HealthCheck is a process-only liveness probe. It deliberately avoids the
+// database so infrastructure probes do not prevent Neon from scaling to zero.
 // GET /api/v1/health
 func (h *Handler) HealthCheck(c *gin.Context) {
-	// Check database connectivity. Return a failing HTTP status when dependencies
-	// are down so Render/Docker health checks do not keep routing traffic to an
-	// unhealthy instance.
-	dbStatus := "healthy"
-	status := "ok"
-	httpStatus := http.StatusOK
-	if err := h.DB.HealthCheck(c.Request.Context()); err != nil {
-		dbStatus = "unhealthy: " + err.Error()
-		status = "unhealthy"
-		httpStatus = http.StatusServiceUnavailable
+	c.JSON(http.StatusOK, h.healthResponse("ok", "unchecked"))
+}
+
+// ReadinessCheck verifies that the API can reach its database. It is intended
+// for explicit diagnostics, not high-frequency infrastructure polling.
+// GET /api/v1/ready
+func (h *Handler) ReadinessCheck(c *gin.Context) {
+	if h.readinessChecker == nil {
+		c.JSON(http.StatusServiceUnavailable, h.healthResponse("unhealthy", "unhealthy"))
+		return
 	}
 
-	c.JSON(httpStatus, models.HealthResponse{
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancel()
+	if err := h.readinessChecker.HealthCheck(ctx); err != nil {
+		c.JSON(http.StatusServiceUnavailable, h.healthResponse("unhealthy", "unhealthy"))
+		return
+	}
+
+	c.JSON(http.StatusOK, h.healthResponse("ok", "healthy"))
+}
+
+func (h *Handler) healthResponse(status, databaseStatus string) models.HealthResponse {
+	workers := 0
+	if h.Worker != nil {
+		workers = h.Worker.WorkerCount()
+	}
+	return models.HealthResponse{
 		Status:                 status,
 		Version:                "1.0.0",
-		Database:               dbStatus,
-		Workers:                h.Worker.WorkerCount(),
+		Database:               databaseStatus,
+		Workers:                workers,
 		YtDlpCookiesConfigured: h.YtDlpCookiesConfigured,
-	})
+	}
 }

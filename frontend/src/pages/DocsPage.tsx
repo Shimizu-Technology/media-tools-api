@@ -122,7 +122,21 @@ export function DocsPage() {
             responseExample={`{
   "status": "ok",
   "version": "1.0.0",
-	"database": "healthy",
+  "database": "unchecked",
+  "workers": 4
+}`}
+          />
+
+          <EndpointCard
+            method="GET"
+            path="/ready"
+            description="Check API and database readiness on demand"
+            auth={false}
+            requestExample={null}
+            responseExample={`{
+  "status": "ok",
+  "version": "1.0.0",
+  "database": "healthy",
   "workers": 4
 }`}
           />
