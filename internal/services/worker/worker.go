@@ -238,7 +238,10 @@ func NewPool(workers, queueSize int, recoveryInterval time.Duration, db *databas
 		recoveryInterval = defaultRecoveryInterval
 	}
 	wakeBuffer := queueSize
-	if wakeBuffer <= 0 {
+	if wakeBuffer < workers {
+		wakeBuffer = workers
+	}
+	if wakeBuffer < 1 {
 		wakeBuffer = 1
 	}
 	return &Pool{
@@ -342,6 +345,12 @@ func (p *Pool) signalWorkers() {
 	select {
 	case p.wake <- struct{}{}:
 	default:
+	}
+}
+
+func (p *Pool) signalAllWorkers() {
+	for i := 0; i < p.workers; i++ {
+		p.signalWorkers()
 	}
 }
 
@@ -553,8 +562,8 @@ func (p *Pool) worker(id int) {
 }
 
 // recoverMissedWakeups is a low-frequency safety net for durable work queued by
-// another process or left behind after a missed in-process signal. One signal is
-// enough because a worker keeps claiming rows until the durable queue is empty.
+// another process or left behind after a missed in-process signal. Wake every
+// configured worker so a recovered backlog retains normal processing parallelism.
 func (p *Pool) recoverMissedWakeups() {
 	defer p.wg.Done()
 
@@ -565,7 +574,7 @@ func (p *Pool) recoverMissedWakeups() {
 		case <-p.ctx.Done():
 			return
 		case <-ticker.C:
-			p.signalWorkers()
+			p.signalAllWorkers()
 		}
 	}
 }
