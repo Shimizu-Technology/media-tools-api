@@ -289,7 +289,6 @@ export function AudioPage() {
   const [activeJobsError, setActiveJobsError] = useState('');
   const [activeJobsClock, setActiveJobsClock] = useState(() => Date.now());
   const activeJobsRefreshInFlightRef = useRef(false);
-  const activeJobsMutationVersionRef = useRef(0);
   const backgroundActiveJobCount = activeJobs.filter((job) => job.id !== result?.id).length;
 
   // Export state (MTA-26)
@@ -350,21 +349,16 @@ export function AudioPage() {
   const refreshActiveJobs = useCallback(async (showLoading = false) => {
     if (activeJobsRefreshInFlightRef.current) return;
     activeJobsRefreshInFlightRef.current = true;
-    const mutationVersion = activeJobsMutationVersionRef.current;
     if (showLoading) setActiveJobsLoading(true);
     try {
       const transcriptions = await listAudioTranscriptions({ status: 'active' });
-      if (mutationVersion !== activeJobsMutationVersionRef.current) return;
       setActiveJobs(transcriptions.filter(isActiveTranscription));
       setActiveJobsError('');
     } catch {
-      if (mutationVersion !== activeJobsMutationVersionRef.current) return;
       setActiveJobsError('Active transcription progress could not be refreshed. Your jobs are still processing in the background.');
     } finally {
       activeJobsRefreshInFlightRef.current = false;
-      if (showLoading && mutationVersion === activeJobsMutationVersionRef.current) {
-        setActiveJobsLoading(false);
-      }
+      if (showLoading) setActiveJobsLoading(false);
     }
   }, []);
 
@@ -592,10 +586,6 @@ export function AudioPage() {
       if (!result?.id) throw new Error('No result');
       const updated = await getAudioTranscription(result.id);
       setResult(updated);
-      if (!isActiveTranscription(updated)) {
-        activeJobsMutationVersionRef.current += 1;
-        setActiveJobsLoading(false);
-      }
       setActiveJobs((jobs) => syncActiveJobList(jobs, updated));
       syncActiveTranscription(updated);
       // Update processing state based on status
@@ -668,8 +658,6 @@ export function AudioPage() {
       }
       setDirectUploadProgress(0);
       setResult(transcription);
-      activeJobsMutationVersionRef.current += 1;
-      setActiveJobsLoading(false);
       setActiveJobs((jobs) => syncActiveJobList(jobs, transcription));
       setActiveJobsClock(Date.now());
       syncActiveTranscription(transcription);
@@ -809,8 +797,6 @@ export function AudioPage() {
     try {
       const updated = await retryAudioTranscription(result.id);
       setResult(updated);
-      activeJobsMutationVersionRef.current += 1;
-      setActiveJobsLoading(false);
       setActiveJobs((jobs) => syncActiveJobList(jobs, updated));
       syncActiveTranscription(updated);
       setSearchParams({ id: updated.id }, { replace: true });
@@ -830,8 +816,6 @@ export function AudioPage() {
     try {
       const updated = await cancelAudioTranscription(result.id);
       setResult(updated);
-      activeJobsMutationVersionRef.current += 1;
-      setActiveJobsLoading(false);
       setActiveJobs((jobs) => syncActiveJobList(jobs, updated));
       syncActiveTranscription(updated);
       setIsProcessing(false);
