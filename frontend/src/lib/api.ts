@@ -735,8 +735,13 @@ export async function getAudioOpsHealth(): Promise<AudioOpsHealth> {
   return handleResponse<AudioOpsHealth>(res);
 }
 
-export async function listAudioTranscriptions(): Promise<AudioTranscription[]> {
-  const res = await fetch(`${API_BASE}/audio/transcriptions`, { headers: await getHeaders() });
+export async function listAudioTranscriptions(params?: {
+  status?: 'active' | AudioTranscription['status'];
+}): Promise<AudioTranscription[]> {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.set('status', params.status);
+  const query = searchParams.size > 0 ? `?${searchParams}` : '';
+  const res = await fetch(`${API_BASE}/audio/transcriptions${query}`, { headers: await getHeaders() });
   return handleResponse<AudioTranscription[]>(res);
 }
 

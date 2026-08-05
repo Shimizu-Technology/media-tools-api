@@ -31,6 +31,7 @@ import {
   RefreshCw,
   Pause,
   Play,
+  ArrowRight,
 } from 'lucide-react';
 import {
   transcribeAudio,
@@ -92,6 +93,42 @@ interface PendingRecording {
 
 function isActiveTranscription(transcription: AudioTranscription | null | undefined): boolean {
   return transcription?.status === 'pending' || transcription?.status === 'processing';
+}
+
+function getAudioProcessingLabel(transcription: AudioTranscription): string {
+  const stage = transcription.processing_stage || '';
+  if (stage === 'downloading') return 'Preparing source audio';
+  if (stage === 'transcoding') return 'Preparing recording';
+  if (stage === 'chunking') return 'Splitting long audio';
+  if (stage === 'transcribing') return 'Transcribing audio';
+  if (stage === 'stitching') return 'Combining transcript';
+  if (transcription.status === 'pending') return 'Waiting for a worker';
+  return 'Processing recording';
+}
+
+function getAudioProcessingProgress(transcription: AudioTranscription): number {
+  return Math.min(100, Math.max(0, transcription.processing_progress || 0));
+}
+
+function formatElapsedTime(createdAt: string, now: number): string {
+  const startedAt = Date.parse(createdAt);
+  if (!Number.isFinite(startedAt)) return 'Started recently';
+
+  const totalSeconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s elapsed`;
+
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  if (hours > 0) return `${hours}h ${minutes}m elapsed`;
+  return `${minutes}m elapsed`;
+}
+
+function syncActiveJobList(
+  jobs: AudioTranscription[],
+  transcription: AudioTranscription,
+): AudioTranscription[] {
+  const withoutCurrent = jobs.filter((job) => job.id !== transcription.id);
+  return isActiveTranscription(transcription) ? [transcription, ...withoutCurrent] : withoutCurrent;
 }
 
 function getStoredActiveTranscriptionID(): string | null {
@@ -247,6 +284,13 @@ export function AudioPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [historyItems, setHistoryItems] = useState<AudioTranscription[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [activeJobs, setActiveJobs] = useState<AudioTranscription[]>([]);
+  const [activeJobsLoading, setActiveJobsLoading] = useState(true);
+  const [activeJobsError, setActiveJobsError] = useState('');
+  const [activeJobsClock, setActiveJobsClock] = useState(() => Date.now());
+  const activeJobsRefreshInFlightRef = useRef(false);
+  const activeJobsMutationVersionRef = useRef(0);
+  const backgroundActiveJobCount = activeJobs.filter((job) => job.id !== result?.id).length;
 
   // Export state (MTA-26)
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -302,6 +346,49 @@ export function AudioPage() {
       }
     };
   }, [draftAudioUrl]);
+
+  const refreshActiveJobs = useCallback(async (showLoading = false) => {
+    if (activeJobsRefreshInFlightRef.current) return;
+    activeJobsRefreshInFlightRef.current = true;
+    const mutationVersion = activeJobsMutationVersionRef.current;
+    if (showLoading) setActiveJobsLoading(true);
+    try {
+      const transcriptions = await listAudioTranscriptions({ status: 'active' });
+      if (mutationVersion !== activeJobsMutationVersionRef.current) return;
+      setActiveJobs(transcriptions.filter(isActiveTranscription));
+      setActiveJobsError('');
+    } catch {
+      if (mutationVersion !== activeJobsMutationVersionRef.current) return;
+      setActiveJobsError('Active transcription progress could not be refreshed. Your jobs are still processing in the background.');
+    } finally {
+      activeJobsRefreshInFlightRef.current = false;
+      if (showLoading && mutationVersion === activeJobsMutationVersionRef.current) {
+        setActiveJobsLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshActiveJobs(true);
+  }, [refreshActiveJobs]);
+
+  useEffect(() => {
+    // The selected job already has its own two-second poll. Poll the collection
+    // only when at least one additional job needs background monitoring.
+    if (backgroundActiveJobCount === 0 && !activeJobsError) return;
+
+    const refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void refreshActiveJobs();
+      }
+    }, 3000);
+    const clockTimer = window.setInterval(() => setActiveJobsClock(Date.now()), 1000);
+
+    return () => {
+      window.clearInterval(refreshTimer);
+      window.clearInterval(clockTimer);
+    };
+  }, [activeJobsError, backgroundActiveJobCount, refreshActiveJobs]);
 
   // Restore active transcription progress after navigation, refresh, or returning to this page.
   useEffect(() => {
@@ -505,6 +592,11 @@ export function AudioPage() {
       if (!result?.id) throw new Error('No result');
       const updated = await getAudioTranscription(result.id);
       setResult(updated);
+      if (!isActiveTranscription(updated)) {
+        activeJobsMutationVersionRef.current += 1;
+        setActiveJobsLoading(false);
+      }
+      setActiveJobs((jobs) => syncActiveJobList(jobs, updated));
       syncActiveTranscription(updated);
       // Update processing state based on status
       if (updated.status === 'completed' || updated.status === 'failed') {
@@ -576,6 +668,10 @@ export function AudioPage() {
       }
       setDirectUploadProgress(0);
       setResult(transcription);
+      activeJobsMutationVersionRef.current += 1;
+      setActiveJobsLoading(false);
+      setActiveJobs((jobs) => syncActiveJobList(jobs, transcription));
+      setActiveJobsClock(Date.now());
       syncActiveTranscription(transcription);
       setSearchParams({ id: transcription.id }, { replace: true });
       if (activeTab === 'record') {
@@ -673,8 +769,15 @@ export function AudioPage() {
   // ── Reset ──
 
   const handleReset = () => {
+    if (result && isActiveTranscription(result)) {
+      setActiveJobs((jobs) => syncActiveJobList(jobs, result));
+      setActiveJobsClock(Date.now());
+    }
     setFile(null);
     setResult(null);
+    // Starting another submission only detaches this form from the selected job.
+    // The durable worker keeps running, and activeJobs continues to monitor it.
+    setIsProcessing(false);
     setError('');
     setCopied('');
     setRecordedBlob(null);
@@ -687,6 +790,7 @@ export function AudioPage() {
     setShowPlayback(false);
     setIsLoadingPlayback(false);
     setRecoveredDraft(false);
+    setIsDirectUploading(false);
     setIsServerUploading(false);
     setDirectUploadProgress(0);
     clearStoredActiveTranscriptionID();
@@ -705,6 +809,9 @@ export function AudioPage() {
     try {
       const updated = await retryAudioTranscription(result.id);
       setResult(updated);
+      activeJobsMutationVersionRef.current += 1;
+      setActiveJobsLoading(false);
+      setActiveJobs((jobs) => syncActiveJobList(jobs, updated));
       syncActiveTranscription(updated);
       setSearchParams({ id: updated.id }, { replace: true });
       setIsProcessing(true);
@@ -723,6 +830,9 @@ export function AudioPage() {
     try {
       const updated = await cancelAudioTranscription(result.id);
       setResult(updated);
+      activeJobsMutationVersionRef.current += 1;
+      setActiveJobsLoading(false);
+      setActiveJobs((jobs) => syncActiveJobList(jobs, updated));
       syncActiveTranscription(updated);
       setIsProcessing(false);
       setError('');
@@ -790,15 +900,9 @@ export function AudioPage() {
   };
 
   const processingLabel = (() => {
-    const stage = result?.processing_stage || '';
     if (isDirectUploading) return 'Uploading directly to secure storage...';
     if (isServerUploading) return 'Uploading through the API...';
-    if (stage === 'downloading') return 'Preparing source audio...';
-    if (stage === 'transcoding') return 'Preparing recording for transcription...';
-    if (stage === 'chunking') return 'Splitting long audio into chunks...';
-    if (stage === 'transcribing') return 'Transcribing audio chunks...';
-    if (stage === 'stitching') return 'Combining transcript chunks...';
-    if (result?.status === 'pending') return 'Queued for processing...';
+    if (result) return `${getAudioProcessingLabel(result)}...`;
     return 'Transcribing recording...';
   })();
 
@@ -814,6 +918,7 @@ export function AudioPage() {
 
   const hasSubmittable = (activeTab === 'upload' && file) || (activeTab === 'record' && recordedBlob);
   const canEditInput = (!result || result.status === 'failed') && !isProcessing;
+  const backgroundActiveJobs = activeJobs.filter((job) => job.id !== result?.id);
 
   return (
     <main className="relative pb-12 sm:pb-16">
@@ -1227,6 +1332,17 @@ export function AudioPage() {
             </motion.div>
           )}
         </motion.div>
+      )}
+
+      {(backgroundActiveJobs.length > 0 || activeJobsError) && (
+        <ActiveTranscriptionsPanel
+          jobs={backgroundActiveJobs}
+          now={activeJobsClock}
+          isLoading={activeJobsLoading}
+          error={activeJobsError}
+          onOpen={loadFromHistory}
+          onRefresh={() => void refreshActiveJobs(true)}
+        />
       )}
 
       {/* Failed state helper actions */}
@@ -1719,6 +1835,120 @@ export function AudioPage() {
 }
 
 // ── Sub-components ──
+
+function ActiveTranscriptionsPanel({
+  jobs,
+  now,
+  isLoading,
+  error,
+  onOpen,
+  onRefresh,
+}: {
+  jobs: AudioTranscription[];
+  now: number;
+  isLoading: boolean;
+  error: string;
+  onOpen: (job: AudioTranscription) => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      aria-labelledby="active-transcriptions-heading"
+      className="mx-auto mt-8 max-w-4xl overflow-hidden rounded-[1.75rem] border"
+      style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}
+    >
+      <div className="flex flex-col justify-between gap-4 border-b px-5 py-5 sm:flex-row sm:items-center sm:px-6" style={{ borderColor: 'var(--color-border)' }}>
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 id="active-transcriptions-heading" className="text-lg font-semibold">Active transcriptions</h2>
+            {jobs.length > 0 && (
+              <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
+                {jobs.length} {jobs.length === 1 ? 'job' : 'jobs'}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
+            Upload or record another item at any time. Jobs run in parallel when capacity is available and remain safe in the background.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={isLoading}
+          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)] disabled:opacity-50"
+          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+        >
+          <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div role="status" className="border-b px-5 py-3 text-sm sm:px-6" style={{ borderColor: 'var(--color-border)', color: 'var(--color-warning)' }}>
+          {error}
+        </div>
+      )}
+
+      {isLoading && jobs.length === 0 ? (
+        <div className="flex min-h-32 items-center justify-center gap-3 px-6" style={{ color: 'var(--color-text-secondary)' }}>
+          <Loader2 className="h-5 w-5 animate-spin" /> Checking active jobs...
+        </div>
+      ) : jobs.length > 0 ? (
+        <div className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+          {jobs.map((job) => {
+            const progress = getAudioProcessingProgress(job);
+            const statusLabel = job.status === 'pending' ? 'Queued' : 'In progress';
+            return (
+              <button
+                type="button"
+                key={job.id}
+                onClick={() => onOpen(job)}
+                className="group grid min-h-28 w-full gap-4 px-5 py-5 text-left transition hover:bg-[var(--color-nav-hover)] sm:grid-cols-[minmax(0,1fr)_auto] sm:px-6"
+              >
+                <div className="min-w-0">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <FileAudio className="h-4 w-4 shrink-0" style={{ color: 'var(--color-brand-500)' }} />
+                    <p className="min-w-0 truncate text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{job.original_name}</p>
+                    <span className="rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-surface-subtle)', color: job.status === 'pending' ? 'var(--color-warning)' : 'var(--color-brand-500)' }}>
+                      {statusLabel}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                    <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />{formatElapsedTime(job.created_at, now)}</span>
+                    <span>{getAudioProcessingLabel(job)}</span>
+                    <span>{progress}% complete</span>
+                  </div>
+
+                  <div
+                    className="mt-3 h-2 overflow-hidden rounded-full"
+                    role="progressbar"
+                    aria-label={`${job.original_name} transcription progress`}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={progress}
+                    style={{ backgroundColor: 'var(--color-surface-subtle)' }}
+                  >
+                    <div
+                      className="h-full rounded-full transition-[width] duration-500 ease-out"
+                      style={{ width: `${progress}%`, backgroundColor: 'var(--color-brand-500)' }}
+                    />
+                  </div>
+                </div>
+
+                <span className="inline-flex min-h-11 items-center gap-2 self-center text-sm font-semibold" style={{ color: 'var(--color-brand-500)' }}>
+                  Open <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </motion.section>
+  );
+}
 
 function MetaItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (

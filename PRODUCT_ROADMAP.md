@@ -174,6 +174,10 @@ This is one of the strongest product directions because it turns many media item
 
 For audio and meetings, add speaker-aware transcripts.
 
+The researched product direction, provider shortlist, quality expectations,
+architecture constraints, privacy boundary, and phased delivery plan are in
+[`SPEAKER_DIARIZATION_PLAN.md`](SPEAKER_DIARIZATION_PLAN.md).
+
 Capabilities:
 
 - Detect speakers when possible.
