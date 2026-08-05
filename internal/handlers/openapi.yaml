@@ -978,6 +978,12 @@ paths:
     get:
       tags: [Audio]
       summary: List audio transcriptions
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filter by status; use active for pending and processing jobs
+          schema: {type: string, enum: [active, pending, processing, completed, failed]}
       responses: {"200": {description: Audio transcriptions}}
   /audio/transcriptions/search:
     get:

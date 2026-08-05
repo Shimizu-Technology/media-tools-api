@@ -962,6 +962,16 @@ func (db *DB) ListRecoverableAudioSummaries(ctx context.Context, limit int) ([]m
 
 // ListAudioTranscriptions returns recent audio transcriptions.
 func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int, userID, apiKeyID *string) ([]models.AudioTranscription, error) {
+	return db.listAudioTranscriptions(ctx, limit, userID, apiKeyID, "")
+}
+
+// ListAudioTranscriptionsByStatus keeps polling payloads focused on the small
+// active subset instead of repeatedly returning completed transcript bodies.
+func (db *DB) ListAudioTranscriptionsByStatus(ctx context.Context, limit int, userID, apiKeyID *string, status string) ([]models.AudioTranscription, error) {
+	return db.listAudioTranscriptions(ctx, limit, userID, apiKeyID, status)
+}
+
+func (db *DB) listAudioTranscriptions(ctx context.Context, limit int, userID, apiKeyID *string, status string) ([]models.AudioTranscription, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
@@ -969,7 +979,7 @@ func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int, userID, ap
 	var whereClause string
 	var args []interface{}
 	if userID != nil && apiKeyID != nil {
-		whereClause = "WHERE user_id = $1 OR api_key_id = $2"
+		whereClause = "WHERE (user_id = $1 OR api_key_id = $2)"
 		args = append(args, *userID, *apiKeyID)
 	} else if userID != nil {
 		whereClause = "WHERE user_id = $1"
@@ -979,6 +989,12 @@ func (db *DB) ListAudioTranscriptions(ctx context.Context, limit int, userID, ap
 		args = append(args, *apiKeyID)
 	} else {
 		return []models.AudioTranscription{}, nil
+	}
+	if status == "active" {
+		whereClause += " AND status IN ('pending', 'processing')"
+	} else if status != "" {
+		whereClause += fmt.Sprintf(" AND status = $%d", len(args)+1)
+		args = append(args, status)
 	}
 	query := fmt.Sprintf(`SELECT %s FROM audio_transcriptions %s ORDER BY created_at DESC LIMIT $%d`,
 		audioTranscriptionSelectColumns, whereClause, len(args)+1,

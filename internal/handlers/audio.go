@@ -47,6 +47,15 @@ func isSupportedTranscriptionUploadExt(ext string) bool {
 	return supportedTranscriptionUploadTypes[strings.ToLower(ext)]
 }
 
+func isSupportedAudioListStatus(status string) bool {
+	switch status {
+	case "", "active", "pending", "processing", "completed", "failed":
+		return true
+	default:
+		return false
+	}
+}
+
 // maxAudioSize is the max upload size for audio and recording files.
 // 2GB keeps room for very long recordings while chunking handles Whisper limits.
 const maxAudioSize = 2 << 30
@@ -762,8 +771,23 @@ func (h *Handler) GetAudioPlaybackURL(c *gin.Context) {
 // GET /api/v1/audio/transcriptions
 func (h *Handler) ListAudioTranscriptions(c *gin.Context) {
 	actor := getActorOwnership(c)
+	status := strings.TrimSpace(c.Query("status"))
+	if !isSupportedAudioListStatus(status) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_status",
+			Message: "Status must be active, pending, processing, completed, or failed",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
 
-	transcriptions, err := h.DB.ListAudioTranscriptions(c.Request.Context(), 50, actor.UserID, actor.APIKeyID)
+	var transcriptions []models.AudioTranscription
+	var err error
+	if status == "" {
+		transcriptions, err = h.DB.ListAudioTranscriptions(c.Request.Context(), 50, actor.UserID, actor.APIKeyID)
+	} else {
+		transcriptions, err = h.DB.ListAudioTranscriptionsByStatus(c.Request.Context(), 100, actor.UserID, actor.APIKeyID, status)
+	}
 	if err != nil {
 		log.Printf("Failed to list audio transcriptions: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
