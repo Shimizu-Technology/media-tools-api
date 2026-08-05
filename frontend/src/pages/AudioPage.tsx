@@ -288,7 +288,12 @@ export function AudioPage() {
   const [activeJobsLoading, setActiveJobsLoading] = useState(true);
   const [activeJobsError, setActiveJobsError] = useState('');
   const [activeJobsClock, setActiveJobsClock] = useState(() => Date.now());
+  const activeJobsMountedRef = useRef(true);
   const activeJobsRefreshInFlightRef = useRef(false);
+  const activeJobsRefreshQueuedRef = useRef(false);
+  const activeJobsMutationVersionRef = useRef(0);
+  const terminalJobIDsRef = useRef(new Set<string>());
+  const refreshActiveJobsRef = useRef<(showLoading?: boolean) => Promise<void>>(async () => {});
   const backgroundActiveJobCount = activeJobs.filter((job) => job.id !== result?.id).length;
 
   // Export state (MTA-26)
@@ -312,7 +317,9 @@ export function AudioPage() {
 
   // Cleanup on unmount
   useEffect(() => {
+    activeJobsMountedRef.current = true;
     return () => {
+      activeJobsMountedRef.current = false;
       if (timerRef.current) clearInterval(timerRef.current);
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     };
@@ -347,20 +354,47 @@ export function AudioPage() {
   }, [draftAudioUrl]);
 
   const refreshActiveJobs = useCallback(async (showLoading = false) => {
-    if (activeJobsRefreshInFlightRef.current) return;
+    if (activeJobsRefreshInFlightRef.current) {
+      activeJobsRefreshQueuedRef.current = true;
+      return;
+    }
     activeJobsRefreshInFlightRef.current = true;
+    const mutationVersion = activeJobsMutationVersionRef.current;
     if (showLoading) setActiveJobsLoading(true);
     try {
       const transcriptions = await listAudioTranscriptions({ status: 'active' });
-      setActiveJobs(transcriptions.filter(isActiveTranscription));
-      setActiveJobsError('');
+      if (!activeJobsMountedRef.current) return;
+      if (mutationVersion === activeJobsMutationVersionRef.current) {
+        setActiveJobs(transcriptions.filter(isActiveTranscription));
+        setActiveJobsError('');
+      } else {
+        // A submission, retry, cancellation, or completion changed local state
+        // while this request was running. Preserve that newer state and fetch
+        // one authoritative replacement as soon as this request releases.
+        activeJobsRefreshQueuedRef.current = true;
+      }
     } catch {
-      setActiveJobsError('Active transcription progress could not be refreshed. Your jobs are still processing in the background.');
+      if (!activeJobsMountedRef.current) return;
+      if (mutationVersion === activeJobsMutationVersionRef.current) {
+        setActiveJobsError('Active transcription progress could not be refreshed. Your jobs are still processing in the background.');
+      } else {
+        // The failed request is stale too. Queue a replacement so discovery
+        // cannot stop after an optimistic local mutation.
+        activeJobsRefreshQueuedRef.current = true;
+      }
     } finally {
       activeJobsRefreshInFlightRef.current = false;
-      if (showLoading) setActiveJobsLoading(false);
+      if (showLoading && activeJobsMountedRef.current) setActiveJobsLoading(false);
+      if (activeJobsMountedRef.current && activeJobsRefreshQueuedRef.current) {
+        activeJobsRefreshQueuedRef.current = false;
+        queueMicrotask(() => void refreshActiveJobsRef.current());
+      }
     }
   }, []);
+
+  useEffect(() => {
+    refreshActiveJobsRef.current = refreshActiveJobs;
+  }, [refreshActiveJobs]);
 
   useEffect(() => {
     void refreshActiveJobs(true);
@@ -586,6 +620,14 @@ export function AudioPage() {
       if (!result?.id) throw new Error('No result');
       const updated = await getAudioTranscription(result.id);
       setResult(updated);
+      if (isActiveTranscription(updated)) {
+        terminalJobIDsRef.current.delete(updated.id);
+      } else if (!terminalJobIDsRef.current.has(updated.id)) {
+        // A completed media job may keep polling while its summary finishes.
+        // Invalidate collection refreshes only once for that terminal transition.
+        terminalJobIDsRef.current.add(updated.id);
+        activeJobsMutationVersionRef.current += 1;
+      }
       setActiveJobs((jobs) => syncActiveJobList(jobs, updated));
       syncActiveTranscription(updated);
       // Update processing state based on status
@@ -658,6 +700,8 @@ export function AudioPage() {
       }
       setDirectUploadProgress(0);
       setResult(transcription);
+      terminalJobIDsRef.current.delete(transcription.id);
+      activeJobsMutationVersionRef.current += 1;
       setActiveJobs((jobs) => syncActiveJobList(jobs, transcription));
       setActiveJobsClock(Date.now());
       syncActiveTranscription(transcription);
@@ -797,6 +841,8 @@ export function AudioPage() {
     try {
       const updated = await retryAudioTranscription(result.id);
       setResult(updated);
+      terminalJobIDsRef.current.delete(updated.id);
+      activeJobsMutationVersionRef.current += 1;
       setActiveJobs((jobs) => syncActiveJobList(jobs, updated));
       syncActiveTranscription(updated);
       setSearchParams({ id: updated.id }, { replace: true });
@@ -816,6 +862,8 @@ export function AudioPage() {
     try {
       const updated = await cancelAudioTranscription(result.id);
       setResult(updated);
+      terminalJobIDsRef.current.add(updated.id);
+      activeJobsMutationVersionRef.current += 1;
       setActiveJobs((jobs) => syncActiveJobList(jobs, updated));
       syncActiveTranscription(updated);
       setIsProcessing(false);
