@@ -148,6 +148,7 @@ type Pool struct {
 	db                     *database.DB
 	enqueueBackgroundJob   func(context.Context, string, string, []byte) (bool, error)
 	claimBackgroundJob     func(context.Context, string, time.Duration) (*models.BackgroundJob, error)
+	nextBackgroundJobWake  func(context.Context) (*time.Time, error)
 	claimRetryInitialDelay time.Duration
 	claimRetryMaxDelay     time.Duration
 	leaseRecoveryGrace     time.Duration
@@ -267,6 +268,7 @@ func NewPool(workers, queueSize int, db *database.DB, ext transcript.Extractor, 
 	if db != nil {
 		pool.enqueueBackgroundJob = db.EnqueueBackgroundJob
 		pool.claimBackgroundJob = db.ClaimBackgroundJob
+		pool.nextBackgroundJobWake = db.NextBackgroundJobWake
 	}
 	return pool
 }
@@ -590,11 +592,22 @@ func (p *Pool) runWorkerLoop(id int) (stopping bool) {
 			continue
 		}
 
-		select {
-		case <-p.ctx.Done():
+		nextWake, err := p.nextDurableJobWake()
+		if err != nil {
+			if p.ctx.Err() != nil {
+				return true
+			}
+			log.Printf("⚠️  Worker %d failed to schedule deferred durable work: %v", id, err)
+			if !p.waitForClaimRetry(retryDelay) {
+				return true
+			}
+			retryDelay = nextClaimRetryDelay(retryDelay, p.claimRetryMaxDelay)
+			continue
+		}
+		retryDelay = p.claimRetryInitialDelay
+		if p.waitForWork(nextWake) {
 			log.Printf("👷 Worker %d shutting down", id)
 			return true
-		case <-p.wake:
 		}
 	}
 }
@@ -667,6 +680,47 @@ func (p *Pool) claimDurableJob() (*models.BackgroundJob, error) {
 		return nil, errors.New("background job claiming is not configured")
 	}
 	return p.claimBackgroundJob(p.ctx, p.instanceID, p.leaseDuration)
+}
+
+func (p *Pool) nextDurableJobWake() (*time.Time, error) {
+	if p.nextBackgroundJobWake == nil {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
+	defer cancel()
+	return p.nextBackgroundJobWake(ctx)
+}
+
+// waitForWork sleeps indefinitely when no durable work exists, or until the
+// database-reported time that a queued retry or inherited lease can become
+// claimable. The grace period avoids racing PostgreSQL's clock at the boundary.
+func (p *Pool) waitForWork(nextWake *time.Time) bool {
+	if nextWake == nil {
+		select {
+		case <-p.ctx.Done():
+			return true
+		case <-p.wake:
+			return false
+		}
+	}
+
+	delay := time.Until(nextWake.Add(p.leaseRecoveryGrace))
+	if delay <= 0 {
+		delay = p.leaseRecoveryGrace
+		if delay <= 0 {
+			delay = defaultLeaseRecoveryGrace
+		}
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-p.ctx.Done():
+		return true
+	case <-p.wake:
+		return false
+	case <-timer.C:
+		return false
+	}
 }
 
 func (p *Pool) waitForClaimRetry(delay time.Duration) bool {

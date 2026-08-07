@@ -174,6 +174,31 @@ func (db *DB) ClaimBackgroundJob(ctx context.Context, workerID string, lease tim
 	return &job, nil
 }
 
+// NextBackgroundJobWake returns the earliest time currently deferred durable
+// work can become claimable. A nil result means there is no queued or leased
+// work, allowing event-driven workers to sleep without a recurring DB poll.
+func (db *DB) NextBackgroundJobWake(ctx context.Context) (*time.Time, error) {
+	var next sql.NullTime
+	err := db.GetContext(ctx, &next, `
+		SELECT MIN(wake_at)
+		FROM (
+			SELECT run_at AS wake_at
+			FROM background_jobs
+			WHERE status = 'queued' AND attempts < max_attempts
+			UNION ALL
+			SELECT lease_expires_at AS wake_at
+			FROM background_jobs
+			WHERE status = 'running' AND lease_expires_at IS NOT NULL
+		) AS deferred_jobs`)
+	if err != nil {
+		return nil, fmt.Errorf("find next background job wake: %w", err)
+	}
+	if !next.Valid {
+		return nil, nil
+	}
+	return &next.Time, nil
+}
+
 func (db *DB) HeartbeatBackgroundJob(ctx context.Context, jobID, workerID string, lease time.Duration) error {
 	result, err := db.ExecContext(ctx, `
 		UPDATE background_jobs

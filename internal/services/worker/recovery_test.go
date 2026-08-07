@@ -97,6 +97,40 @@ func TestWorkerDoesNotPollDatabaseWhileIdle(t *testing.T) {
 	}
 }
 
+func TestWorkerWakesAtInheritedLeaseExpiry(t *testing.T) {
+	pool := NewPool(1, 1, nil, nil, nil)
+	pool.leaseRecoveryGrace = time.Millisecond
+	claims := make(chan int, 2)
+	attempt := 0
+	pool.claimBackgroundJob = func(context.Context, string, time.Duration) (*models.BackgroundJob, error) {
+		attempt++
+		claims <- attempt
+		return nil, nil
+	}
+	lookup := 0
+	pool.nextBackgroundJobWake = func(context.Context) (*time.Time, error) {
+		lookup++
+		if lookup == 1 {
+			next := time.Now().Add(10 * time.Millisecond)
+			return &next, nil
+		}
+		return nil, nil
+	}
+	pool.Start()
+	t.Cleanup(pool.Stop)
+
+	for want := 1; want <= 2; want++ {
+		select {
+		case got := <-claims:
+			if got != want {
+				t.Fatalf("claim attempt = %d, want %d", got, want)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("timed out waiting for inherited-lease claim attempt %d", want)
+		}
+	}
+}
+
 func TestWorkerRetriesTransientClaimFailure(t *testing.T) {
 	pool := NewPool(1, 1, nil, nil, nil)
 	pool.claimRetryInitialDelay = time.Millisecond
