@@ -243,10 +243,10 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	}
 
 	if err := h.Worker.Submit(job); err != nil {
-		// The transactional queue row contains this process's exact temporary
-		// path. A worker will claim it on the next database poll even if this
-		// low-latency wake-up cannot be delivered.
-		log.Printf("Audio transcription %s queued durably but local wake failed: %v", at.ID, err)
+		// The transactional queue row contains the durable S3 recovery payload.
+		// Submit still emits a local wake signal after this richer temporary-path
+		// refresh fails, allowing a worker to claim the row after DB recovery.
+		log.Printf("Audio transcription %s queued durably; payload refresh failed and recovery was signaled: %v", at.ID, err)
 	}
 
 	log.Printf("📤 Audio transcription job queued: %s (%s, %.1f MB)",
@@ -492,7 +492,7 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		// Completing the upload session and inserting the audio row also commits
 		// its durable job. Submit only refreshes the payload and wakes this
 		// process; the trigger payload already contains the S3 recovery key.
-		log.Printf("Direct audio upload %s queued durably but local wake failed: %v", at.ID, err)
+		log.Printf("Direct audio upload %s queued durably; payload refresh failed and recovery was signaled: %v", at.ID, err)
 	}
 
 	c.JSON(http.StatusAccepted, at)
@@ -682,9 +682,9 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 	if err := h.Worker.Submit(job); err != nil {
 		// The pending state and an S3-backed recovery payload were committed by
 		// one UPDATE transaction. If the richer temporary-path refresh fails,
-		// discard that local copy and let a polling worker download from S3.
+		// discard that local copy; the signaled worker can download from S3.
 		os.Remove(tempFilePath)
-		log.Printf("Audio retry %s queued durably but local wake failed: %v", at.ID, err)
+		log.Printf("Audio retry %s queued durably; payload refresh failed and recovery was signaled: %v", at.ID, err)
 	}
 
 	clearStaleChat()
@@ -927,9 +927,10 @@ func (h *Handler) SummarizeAudio(c *gin.Context) {
 	if err := h.Worker.Submit(worker.Job{
 		ID: at.ID, Type: worker.JobAudioSummary, Payload: payload, CreatedAt: time.Now(),
 	}); err != nil {
-		// The queue row committed with the audio state, so another worker process
-		// or the two-second poll will still claim it.
-		log.Printf("Audio summary %s queued durably but local wake failed: %v", at.ID, err)
+		// The queue row committed with the audio state. Submit still emits a local
+		// wake signal after this refresh error, so the event-driven worker can
+		// recover the durable row without idle database polling.
+		log.Printf("Audio summary %s queued durably; payload refresh failed and recovery was signaled: %v", at.ID, err)
 	}
 
 	c.JSON(http.StatusAccepted, at)

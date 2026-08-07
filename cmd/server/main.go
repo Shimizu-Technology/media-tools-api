@@ -143,7 +143,7 @@ func main() {
 	}
 
 	// Step 4: Create and Start Worker Pool
-	wp := worker.NewPool(cfg.WorkerCount, cfg.JobQueueSize, cfg.JobRecoveryInterval, db, extractor, summarizer)
+	wp := worker.NewPool(cfg.WorkerCount, cfg.JobQueueSize, db, extractor, summarizer)
 	wp.SetWebhookService(webhookService)     // MTA-18: wire webhooks into worker for job notifications
 	wp.SetAudioTranscriber(audioTranscriber) // Wire audio transcriber for async Whisper jobs
 	wp.SetAudioStorage(audioStorage)
