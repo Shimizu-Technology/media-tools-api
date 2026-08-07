@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Config holds all application configuration.
@@ -79,11 +78,10 @@ type Config struct {
 	OwnerAPIKeyPrefix string
 
 	// Worker settings
-	WorkerCount              int           // Number of background worker goroutines
-	JobQueueSize             int           // Size of the in-memory job queue buffer
-	JobRecoveryInterval      time.Duration // Fallback sweep for durable jobs missed by in-process wake signals
-	WhisperChunkConcurrency  int           // Parallel chunks within one recording
-	WhisperGlobalConcurrency int           // Process-wide cap across recordings
+	WorkerCount              int // Number of background worker goroutines
+	JobQueueSize             int // Size of the in-memory job queue buffer
+	WhisperChunkConcurrency  int // Parallel chunks within one recording
+	WhisperGlobalConcurrency int // Process-wide cap across recordings
 
 	// Rate limiting
 	DefaultRateLimit int // Requests per hour per API key
@@ -99,10 +97,6 @@ type Config struct {
 // this pattern everywhere in Go: `result, err := doSomething()`.
 func Load() (*Config, error) {
 	ginMode := getEnv("GIN_MODE", "debug")
-	jobRecoveryInterval, err := time.ParseDuration(getEnv("JOB_RECOVERY_INTERVAL", "15m"))
-	if err != nil || jobRecoveryInterval <= 0 {
-		return nil, fmt.Errorf("JOB_RECOVERY_INTERVAL must be a positive Go duration (for example, 15m)")
-	}
 	cfg := &Config{
 		// Server defaults
 		Port:    getEnv("PORT", "8080"),
@@ -165,7 +159,6 @@ func Load() (*Config, error) {
 		// Worker defaults
 		WorkerCount:              getEnvInt("WORKER_COUNT", 3),
 		JobQueueSize:             getEnvInt("JOB_QUEUE_SIZE", 100),
-		JobRecoveryInterval:      jobRecoveryInterval,
 		WhisperChunkConcurrency:  getEnvInt("WHISPER_CHUNK_CONCURRENCY", 3),
 		WhisperGlobalConcurrency: getEnvInt("WHISPER_GLOBAL_CONCURRENCY", 6),
 

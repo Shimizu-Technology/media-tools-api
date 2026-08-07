@@ -171,7 +171,7 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 			}
 
 			if err := h.Worker.Submit(job); err != nil {
-				log.Printf("Batch transcript %s queued durably but local wake failed: %v", t.ID, err)
+				log.Printf("Batch transcript %s queued durably; payload refresh failed and recovery was signaled: %v", t.ID, err)
 			}
 		}
 

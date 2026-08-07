@@ -66,7 +66,9 @@ const repeatedSegmentRunMin = 8
 const repeatedSegmentLongRunMin = 16
 const repeatedSegmentPhraseWordLimit = 8
 
-const defaultRecoveryInterval = 15 * time.Minute
+const defaultClaimRetryInitialDelay = 250 * time.Millisecond
+const defaultClaimRetryMaxDelay = 30 * time.Second
+const defaultLeaseRecoveryGrace = 250 * time.Millisecond
 
 // Normalize tricky browser/video uploads to MP3 for Whisper. Playable browser
 // MediaRecorder M4A/WebM files can still decode poorly in Whisper and trigger
@@ -139,29 +141,34 @@ type AudioPayload struct {
 
 // Pool manages a pool of worker goroutines.
 type Pool struct {
-	wake             chan struct{}
-	workers          int
-	recoveryInterval time.Duration
-	instanceID       string
-	leaseDuration    time.Duration
-	db               *database.DB
-	extractor        transcript.Extractor
-	summarizer       *summary.Service
-	audioTranscriber *audio.Transcriber // Audio transcription via Whisper
-	audioStorage     *storage.S3
-	chunkConcurrency int
-	transcriptionSem chan struct{}
-	webhooks         *webhookservice.Service // MTA-18: webhook notifications
-	webhookSem       chan struct{}           // Caps concurrent webhook goroutines
-	wg               sync.WaitGroup
-	webhookWG        sync.WaitGroup
-	webhookMu        sync.Mutex
-	webhooksClosed   bool
-	ctx              context.Context
-	cancel           context.CancelFunc
-	stopOnce         sync.Once
-	stateMu          sync.RWMutex
-	stopped          bool
+	wake                   chan struct{}
+	workers                int
+	instanceID             string
+	leaseDuration          time.Duration
+	db                     *database.DB
+	enqueueBackgroundJob   func(context.Context, string, string, []byte) (bool, error)
+	claimBackgroundJob     func(context.Context, string, time.Duration) (*models.BackgroundJob, error)
+	nextBackgroundJobWake  func(context.Context) (*time.Time, error)
+	claimRetryInitialDelay time.Duration
+	claimRetryMaxDelay     time.Duration
+	leaseRecoveryGrace     time.Duration
+	extractor              transcript.Extractor
+	summarizer             *summary.Service
+	audioTranscriber       *audio.Transcriber // Audio transcription via Whisper
+	audioStorage           *storage.S3
+	chunkConcurrency       int
+	transcriptionSem       chan struct{}
+	webhooks               *webhookservice.Service // MTA-18: webhook notifications
+	webhookSem             chan struct{}           // Caps concurrent webhook goroutines
+	wg                     sync.WaitGroup
+	webhookWG              sync.WaitGroup
+	webhookMu              sync.Mutex
+	webhooksClosed         bool
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	stopOnce               sync.Once
+	stateMu                sync.RWMutex
+	stopped                bool
 }
 
 // SetWebhookService sets the webhook service for notifications (MTA-18).
@@ -232,11 +239,8 @@ func (p *Pool) NotifyWebhook(event string, userID, apiKeyID *string, data interf
 }
 
 // NewPool creates a new worker pool.
-func NewPool(workers, queueSize int, recoveryInterval time.Duration, db *database.DB, ext transcript.Extractor, sum *summary.Service) *Pool {
+func NewPool(workers, queueSize int, db *database.DB, ext transcript.Extractor, sum *summary.Service) *Pool {
 	ctx, cancel := context.WithCancel(context.Background())
-	if recoveryInterval <= 0 {
-		recoveryInterval = defaultRecoveryInterval
-	}
 	wakeBuffer := queueSize
 	if wakeBuffer < workers {
 		wakeBuffer = workers
@@ -244,34 +248,40 @@ func NewPool(workers, queueSize int, recoveryInterval time.Duration, db *databas
 	if wakeBuffer < 1 {
 		wakeBuffer = 1
 	}
-	return &Pool{
-		wake:             make(chan struct{}, wakeBuffer),
-		workers:          workers,
-		recoveryInterval: recoveryInterval,
-		instanceID:       uuid.NewString(),
-		leaseDuration:    5 * time.Minute,
-		db:               db,
-		extractor:        ext,
-		summarizer:       sum,
-		webhookSem:       make(chan struct{}, 20), // Cap concurrent webhook goroutines
-		chunkConcurrency: 3,
-		transcriptionSem: make(chan struct{}, 6),
-		ctx:              ctx,
-		cancel:           cancel,
+	pool := &Pool{
+		wake:                   make(chan struct{}, wakeBuffer),
+		workers:                workers,
+		instanceID:             uuid.NewString(),
+		leaseDuration:          5 * time.Minute,
+		db:                     db,
+		claimRetryInitialDelay: defaultClaimRetryInitialDelay,
+		claimRetryMaxDelay:     defaultClaimRetryMaxDelay,
+		leaseRecoveryGrace:     defaultLeaseRecoveryGrace,
+		extractor:              ext,
+		summarizer:             sum,
+		webhookSem:             make(chan struct{}, 20), // Cap concurrent webhook goroutines
+		chunkConcurrency:       3,
+		transcriptionSem:       make(chan struct{}, 6),
+		ctx:                    ctx,
+		cancel:                 cancel,
 	}
+	if db != nil {
+		pool.enqueueBackgroundJob = db.EnqueueBackgroundJob
+		pool.claimBackgroundJob = db.ClaimBackgroundJob
+		pool.nextBackgroundJobWake = db.NextBackgroundJobWake
+	}
+	return pool
 }
 
 // Start launches the worker goroutines.
 // Go Pattern: The `go` keyword starts a new goroutine (lightweight thread).
 // Each worker runs in its own goroutine, reading from the shared jobs channel.
 func (p *Pool) Start() {
-	log.Printf("🚀 Starting %d background workers (durable recovery every %s)", p.workers, p.recoveryInterval)
+	log.Printf("🚀 Starting %d event-driven background workers", p.workers)
 	for i := 0; i < p.workers; i++ {
 		p.wg.Add(1)
 		go p.worker(i) // Launch worker goroutine
 	}
-	p.wg.Add(1)
-	go p.recoverMissedWakeups()
 }
 
 // Stop gracefully shuts down all workers.
@@ -310,14 +320,18 @@ func (p *Pool) Submit(job Job) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	inserted, err := p.db.EnqueueBackgroundJob(ctx, string(job.Type), job.ID, job.Payload)
+	inserted, err := p.enqueueDurableJob(ctx, job)
+	// Database triggers persist the queue row in the same transaction as the
+	// resource state change. Wake a worker even when the idempotent payload
+	// refresh fails so it can recover that already-committed row as soon as the
+	// database is reachable again.
+	p.signalWorkers()
 	if err != nil {
 		return err
 	}
 	if inserted {
 		log.Printf("📥 Durable job queued: %s (type: %s)", job.ID, job.Type)
 	}
-	p.signalWorkers()
 	return nil
 }
 
@@ -330,27 +344,28 @@ func (p *Pool) SubmitBlocking(ctx context.Context, job Job) error {
 	if stopped {
 		return fmt.Errorf("worker pool is stopping")
 	}
-	inserted, err := p.db.EnqueueBackgroundJob(ctx, string(job.Type), job.ID, job.Payload)
+	inserted, err := p.enqueueDurableJob(ctx, job)
+	p.signalWorkers()
 	if err != nil {
 		return err
 	}
 	if inserted {
 		log.Printf("📥 Durable job queued: %s (type: %s)", job.ID, job.Type)
 	}
-	p.signalWorkers()
 	return nil
+}
+
+func (p *Pool) enqueueDurableJob(ctx context.Context, job Job) (bool, error) {
+	if p.enqueueBackgroundJob == nil {
+		return false, errors.New("background job persistence is not configured")
+	}
+	return p.enqueueBackgroundJob(ctx, string(job.Type), job.ID, job.Payload)
 }
 
 func (p *Pool) signalWorkers() {
 	select {
 	case p.wake <- struct{}{}:
 	default:
-	}
-}
-
-func (p *Pool) signalAllWorkers() {
-	for i := 0; i < p.workers; i++ {
-		p.signalWorkers()
 	}
 }
 
@@ -538,48 +553,205 @@ func (p *Pool) worker(id int) {
 	defer p.wg.Done() // Signal completion when this worker exits
 
 	log.Printf("👷 Worker %d started", id)
+	for p.ctx.Err() == nil {
+		if p.runWorkerLoop(id) {
+			return
+		}
+	}
+}
+
+// runWorkerLoop isolates unexpected infrastructure panics from the worker
+// supervisor. Job-handler panics are already converted to ordinary job errors
+// by dispatchJob, but a panic elsewhere must not permanently reduce the pool.
+func (p *Pool) runWorkerLoop(id int) (stopping bool) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf("⚠️  Worker %d recovered from infrastructure panic: %v", id, recovered)
+			stopping = false
+		}
+	}()
+
+	retryDelay := p.claimRetryInitialDelay
 
 	for {
-		claimed, err := p.db.ClaimBackgroundJob(p.ctx, p.instanceID, p.leaseDuration)
+		claimed, err := p.claimDurableJob()
 		if err != nil {
 			if p.ctx.Err() != nil {
-				return
+				return true
 			}
 			log.Printf("⚠️  Worker %d failed to claim a job: %v", id, err)
+			if !p.waitForClaimRetry(retryDelay) {
+				return true
+			}
+			retryDelay = nextClaimRetryDelay(retryDelay, p.claimRetryMaxDelay)
+			continue
 		}
+		retryDelay = p.claimRetryInitialDelay
 		if claimed != nil {
 			p.runClaimedJob(id, claimed)
 			continue
 		}
 
-		select {
-		case <-p.ctx.Done():
+		nextWake, err := p.nextDurableJobWake()
+		if err != nil {
+			if p.ctx.Err() != nil {
+				return true
+			}
+			log.Printf("⚠️  Worker %d failed to schedule deferred durable work: %v", id, err)
+			if !p.waitForClaimRetry(retryDelay) {
+				return true
+			}
+			retryDelay = nextClaimRetryDelay(retryDelay, p.claimRetryMaxDelay)
+			continue
+		}
+		retryDelay = p.claimRetryInitialDelay
+		if p.waitForWork(nextWake) {
 			log.Printf("👷 Worker %d shutting down", id)
-			return
-		case <-p.wake:
+			return true
 		}
 	}
 }
 
-// recoverMissedWakeups is a low-frequency safety net for durable work queued by
-// another process or left behind after a missed in-process signal. Wake every
-// configured worker so a recovered backlog retains normal processing parallelism.
-func (p *Pool) recoverMissedWakeups() {
-	defer p.wg.Done()
+type leaseRecoverySignal struct {
+	renew    chan struct{}
+	stop     chan struct{}
+	stopOnce sync.Once
+}
 
-	ticker := time.NewTicker(p.recoveryInterval)
-	defer ticker.Stop()
-	for {
+// startLeaseRecoverySignal schedules claim attempts only while a durable job
+// is actively leased. Successful heartbeats push the deadline forward, while a
+// lost worker or unacknowledged terminal update eventually wakes the pool once
+// the last confirmed lease can be reclaimed. This closes the lease-expiry gap
+// without performing database work while the service is genuinely idle.
+func (p *Pool) startLeaseRecoverySignal() *leaseRecoverySignal {
+	recovery := &leaseRecoverySignal{
+		renew: make(chan struct{}, 1),
+		stop:  make(chan struct{}),
+	}
+	delay := p.leaseDuration + p.leaseRecoveryGrace
+	if delay <= 0 {
+		delay = 5*time.Minute + defaultLeaseRecoveryGrace
+	}
+
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		for {
+			select {
+			case <-p.ctx.Done():
+				return
+			case <-recovery.stop:
+				return
+			case <-recovery.renew:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(delay)
+			case <-timer.C:
+				p.signalWorkers()
+				// Keep a bounded safety signal alive until the job is durably
+				// acknowledged or the pool stops. This matters if PostgreSQL
+				// recovers briefly after a missed heartbeat and fails again.
+				timer.Reset(delay)
+			}
+		}
+	}()
+	return recovery
+}
+
+func (r *leaseRecoverySignal) renewLease() {
+	select {
+	case r.renew <- struct{}{}:
+	default:
+	}
+}
+
+func (r *leaseRecoverySignal) stopSignaling() {
+	r.stopOnce.Do(func() { close(r.stop) })
+}
+
+func (p *Pool) claimDurableJob() (*models.BackgroundJob, error) {
+	if p.claimBackgroundJob == nil {
+		return nil, errors.New("background job claiming is not configured")
+	}
+	return p.claimBackgroundJob(p.ctx, p.instanceID, p.leaseDuration)
+}
+
+func (p *Pool) nextDurableJobWake() (*time.Time, error) {
+	if p.nextBackgroundJobWake == nil {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
+	defer cancel()
+	return p.nextBackgroundJobWake(ctx)
+}
+
+// waitForWork sleeps indefinitely when no durable work exists, or until the
+// database-reported time that a queued retry or inherited lease can become
+// claimable. The grace period avoids racing PostgreSQL's clock at the boundary.
+func (p *Pool) waitForWork(nextWake *time.Time) bool {
+	if nextWake == nil {
 		select {
 		case <-p.ctx.Done():
-			return
-		case <-ticker.C:
-			p.signalAllWorkers()
+			return true
+		case <-p.wake:
+			return false
 		}
 	}
+
+	delay := time.Until(nextWake.Add(p.leaseRecoveryGrace))
+	if delay <= 0 {
+		delay = p.leaseRecoveryGrace
+		if delay <= 0 {
+			delay = defaultLeaseRecoveryGrace
+		}
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-p.ctx.Done():
+		return true
+	case <-p.wake:
+		return false
+	case <-timer.C:
+		return false
+	}
+}
+
+func (p *Pool) waitForClaimRetry(delay time.Duration) bool {
+	if delay <= 0 {
+		delay = defaultClaimRetryInitialDelay
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-p.ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func nextClaimRetryDelay(current, maximum time.Duration) time.Duration {
+	if maximum <= 0 {
+		maximum = defaultClaimRetryMaxDelay
+	}
+	if current <= 0 {
+		return defaultClaimRetryInitialDelay
+	}
+	if current >= maximum || current > maximum/2 {
+		return maximum
+	}
+	return current * 2
 }
 
 func (p *Pool) runClaimedJob(workerNumber int, claimed *models.BackgroundJob) {
+	leaseRecovery := p.startLeaseRecoverySignal()
 	job := Job{
 		QueueID:   claimed.ID,
 		ID:        claimed.ResourceID,
@@ -595,7 +767,7 @@ func (p *Pool) runClaimedJob(workerNumber int, claimed *models.BackgroundJob) {
 	heartbeatStopped := make(chan struct{})
 	go func() {
 		defer close(heartbeatStopped)
-		p.heartbeatJob(job.QueueID, heartbeatDone)
+		p.heartbeatJob(job.QueueID, heartbeatDone, leaseRecovery)
 	}()
 	err := p.dispatchJob(job)
 	close(heartbeatDone)
@@ -608,6 +780,7 @@ func (p *Pool) runClaimedJob(workerNumber int, claimed *models.BackgroundJob) {
 		if releaseErr != nil {
 			log.Printf("⚠️  Worker %d could not release job %s during shutdown: %v", workerNumber, job.QueueID, releaseErr)
 		} else {
+			leaseRecovery.stopSignaling()
 			log.Printf("⏹️  Worker %d released job %s for immediate recovery", workerNumber, job.QueueID)
 		}
 		return
@@ -617,6 +790,8 @@ func (p *Pool) runClaimedJob(workerNumber int, claimed *models.BackgroundJob) {
 	if err != nil {
 		if markErr := p.db.FailBackgroundJob(markCtx, job.QueueID, p.instanceID, err.Error()); markErr != nil {
 			log.Printf("⚠️  Failed to mark durable job %s failed: %v", job.QueueID, markErr)
+		} else {
+			leaseRecovery.stopSignaling()
 		}
 		log.Printf("❌ Worker %d: job %s failed after %s: %v", workerNumber, job.ID, time.Since(started).Round(time.Millisecond), err)
 		return
@@ -625,10 +800,11 @@ func (p *Pool) runClaimedJob(workerNumber int, claimed *models.BackgroundJob) {
 		log.Printf("⚠️  Failed to mark durable job %s complete: %v", job.QueueID, err)
 		return
 	}
+	leaseRecovery.stopSignaling()
 	log.Printf("✅ Worker %d: job %s completed in %s", workerNumber, job.ID, time.Since(started).Round(time.Millisecond))
 }
 
-func (p *Pool) heartbeatJob(jobID string, done <-chan struct{}) {
+func (p *Pool) heartbeatJob(jobID string, done <-chan struct{}, leaseRecovery *leaseRecoverySignal) {
 	ticker := time.NewTicker(p.leaseDuration / 3)
 	defer ticker.Stop()
 	for {
@@ -643,6 +819,8 @@ func (p *Pool) heartbeatJob(jobID string, done <-chan struct{}) {
 			cancel()
 			if err != nil {
 				log.Printf("⚠️  Background job %s heartbeat failed: %v", jobID, err)
+			} else {
+				leaseRecovery.renewLease()
 			}
 		}
 	}

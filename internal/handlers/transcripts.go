@@ -121,9 +121,9 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 	}
 
 	if err := h.Worker.Submit(job); err != nil {
-		// The transcript insert and outbox row committed together. A local wake
-		// failure only adds up to the two-second cross-process polling delay.
-		log.Printf("Transcript %s queued durably but local wake failed: %v", t.ID, err)
+		// The transcript insert and outbox row committed together. Submit signals
+		// a worker even if its idempotent payload refresh cannot reach PostgreSQL.
+		log.Printf("Transcript %s queued durably; payload refresh failed and recovery was signaled: %v", t.ID, err)
 	}
 
 	// Return 202 Accepted — the work is happening in the background
@@ -308,7 +308,7 @@ func (h *Handler) CreateSummary(c *gin.Context) {
 	}
 
 	if err := h.Worker.Submit(job); err != nil {
-		log.Printf("Summary %s queued durably but local wake failed: %v", summaryRecord.ID, err)
+		log.Printf("Summary %s queued durably; payload refresh failed and recovery was signaled: %v", summaryRecord.ID, err)
 	}
 
 	c.JSON(http.StatusAccepted, gin.H{
