@@ -126,6 +126,90 @@ func TestWorkerRetriesTransientClaimFailure(t *testing.T) {
 	}
 }
 
+func TestWorkerSupervisorRestartsAfterInfrastructurePanic(t *testing.T) {
+	pool := NewPool(1, 1, nil, nil, nil)
+	claims := make(chan int, 2)
+	attempt := 0
+	pool.claimBackgroundJob = func(context.Context, string, time.Duration) (*models.BackgroundJob, error) {
+		attempt++
+		claims <- attempt
+		if attempt == 1 {
+			panic("unexpected database panic")
+		}
+		return nil, nil
+	}
+	pool.Start()
+	t.Cleanup(pool.Stop)
+
+	for want := 1; want <= 2; want++ {
+		select {
+		case got := <-claims:
+			if got != want {
+				t.Fatalf("claim attempt = %d, want %d", got, want)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("timed out waiting for claim attempt %d", want)
+		}
+	}
+}
+
+func TestLeaseRecoverySignalsAtConfirmedExpiry(t *testing.T) {
+	pool := NewPool(1, 1, nil, nil, nil)
+	pool.leaseDuration = 10 * time.Millisecond
+	pool.leaseRecoveryGrace = 0
+	recovery := pool.startLeaseRecoverySignal()
+	t.Cleanup(func() {
+		recovery.stopSignaling()
+		pool.Stop()
+	})
+
+	select {
+	case <-pool.wake:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("lease expiry did not signal a worker")
+	}
+}
+
+func TestLeaseRecoveryRenewalPostponesSignal(t *testing.T) {
+	pool := NewPool(1, 1, nil, nil, nil)
+	pool.leaseDuration = 80 * time.Millisecond
+	pool.leaseRecoveryGrace = 0
+	recovery := pool.startLeaseRecoverySignal()
+	t.Cleanup(func() {
+		recovery.stopSignaling()
+		pool.Stop()
+	})
+
+	time.Sleep(40 * time.Millisecond)
+	recovery.renewLease()
+	select {
+	case <-pool.wake:
+		t.Fatal("lease recovery signal fired before the renewed lease expired")
+	case <-time.After(60 * time.Millisecond):
+	}
+
+	select {
+	case <-pool.wake:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("renewed lease expiry did not eventually signal a worker")
+	}
+}
+
+func TestLeaseRecoveryStopsAfterDurableAcknowledgement(t *testing.T) {
+	pool := NewPool(1, 1, nil, nil, nil)
+	pool.leaseDuration = 10 * time.Millisecond
+	pool.leaseRecoveryGrace = 0
+	recovery := pool.startLeaseRecoverySignal()
+	recovery.stopSignaling()
+	t.Cleanup(pool.Stop)
+
+	select {
+	case <-pool.wake:
+		t.Fatal("stopped lease recovery signal woke a worker")
+	case <-time.After(30 * time.Millisecond):
+	}
+}
+
 func TestNewPoolWakeBufferFitsEveryWorker(t *testing.T) {
 	pool := NewPool(3, 1, nil, nil, nil)
 	if cap(pool.wake) != 3 {
