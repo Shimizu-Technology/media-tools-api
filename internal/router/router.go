@@ -22,25 +22,26 @@ import (
 // RouterConfig holds all dependencies for the router setup.
 // Avoids a fragile 13-parameter function signature.
 type RouterConfig struct {
-	DB                     *database.DB
-	WorkerPool             *worker.Pool
-	AudioTranscriber       *audio.Transcriber
-	AudioStorage           *storage.S3
-	Webhooks               *webhookservice.Service
-	Summarizer             *summary.Service
-	JWTSecret              string
-	LegacyAuthEnabled      bool
-	AdminAPIKey            string
-	OwnerKeyID             string
-	OwnerKeyPrefix         string
-	ClerkJWKSURL           string
-	ClerkSecretKey         string
-	ClerkIssuer            string
-	ClerkAudience          string
-	ClerkAuthorizedParty   string
-	AllowedOrigins         []string
-	DefaultRateLimit       int
-	YtDlpCookiesConfigured bool
+	DB                          *database.DB
+	WorkerPool                  *worker.Pool
+	AudioTranscriber            *audio.Transcriber
+	AudioStorage                *storage.S3
+	Webhooks                    *webhookservice.Service
+	Summarizer                  *summary.Service
+	JWTSecret                   string
+	LegacyAuthEnabled           bool
+	AdminAPIKey                 string
+	OwnerKeyID                  string
+	OwnerKeyPrefix              string
+	ClerkJWKSURL                string
+	ClerkSecretKey              string
+	ClerkIssuer                 string
+	ClerkAudience               string
+	ClerkAuthorizedParty        string
+	AllowedOrigins              []string
+	DefaultRateLimit            int
+	DefaultBrowserReadRateLimit int
+	YtDlpCookiesConfigured      bool
 }
 
 // Setup creates and configures the Gin router with all routes.
@@ -55,7 +56,12 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	r.Use(middleware.CORS(cfg.AllowedOrigins))
 
 	h := handlers.NewHandler(cfg.DB, cfg.WorkerPool, cfg.AudioTranscriber, cfg.AudioStorage, cfg.Webhooks, cfg.Summarizer, cfg.JWTSecret, cfg.AdminAPIKey, cfg.OwnerKeyID, cfg.OwnerKeyPrefix, cfg.YtDlpCookiesConfigured)
-	rateLimiter := middleware.NewRateLimiter(cfg.OwnerKeyID, cfg.OwnerKeyPrefix, cfg.DefaultRateLimit)
+	rateLimiter := middleware.NewRateLimiter(
+		cfg.OwnerKeyID,
+		cfg.OwnerKeyPrefix,
+		cfg.DefaultRateLimit,
+		cfg.DefaultBrowserReadRateLimit,
+	)
 
 	// Initialize Clerk JWKS cache if configured
 	var jwksCache *middleware.JWKSCache

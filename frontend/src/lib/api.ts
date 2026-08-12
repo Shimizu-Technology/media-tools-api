@@ -5,6 +5,7 @@
  * In production, VITE_API_URL points to the Render backend.
  */
 import { getAuthHeadersAsync, getAuthUploadHeadersAsync } from './apiAuth';
+import { notifyLibraryActivityChanged } from './libraryActivityEvents';
 
 const API_BASE = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api/v1`
@@ -140,6 +141,8 @@ export interface APIError {
   message: string;
   /** HTTP status code */
   code: number;
+  /** Server-provided delay before a rate-limited request should be retried. */
+  retry_after_seconds?: number;
 }
 
 /**
@@ -388,9 +391,19 @@ async function handleResponse<T>(response: Response): Promise<T> {
       message: `HTTP ${response.status}: ${response.statusText}`,
       code: response.status,
     }));
+    const retryAfter = Number.parseInt(response.headers.get('Retry-After') || '', 10);
+    if (Number.isFinite(retryAfter) && retryAfter > 0) {
+      error.retry_after_seconds = retryAfter;
+    }
     throw error;
   }
   return response.json();
+}
+
+async function handleActivityResponse<T>(response: Response): Promise<T> {
+  const result = await handleResponse<T>(response);
+  notifyLibraryActivityChanged();
+  return result;
 }
 
 // ── Health ──
@@ -452,7 +465,7 @@ export async function createTranscript(url: string): Promise<Transcript> {
     headers: await getHeaders(),
     body: JSON.stringify({ url }),
   });
-  return handleResponse<Transcript>(res);
+  return handleActivityResponse<Transcript>(res);
 }
 
 export async function getTranscript(id: string): Promise<Transcript> {
@@ -531,7 +544,7 @@ export async function createSummary(
     headers: await getHeaders(),
     body: JSON.stringify({ transcript_id: transcriptId, ...options }),
   });
-  return handleResponse(res);
+  return handleActivityResponse(res);
 }
 
 export async function getSummaries(transcriptId: string): Promise<Summary[]> {
@@ -547,7 +560,7 @@ export async function createBatch(urls: string[]): Promise<BatchResponse> {
     headers: await getHeaders(),
     body: JSON.stringify({ urls }),
   });
-  return handleResponse<BatchResponse>(res);
+  return handleActivityResponse<BatchResponse>(res);
 }
 
 export async function getBatch(batchId: string): Promise<BatchResponse> {
@@ -601,7 +614,7 @@ export async function transcribeAudio(file: File): Promise<AudioTranscription> {
   const res = await fetch(`${API_BASE}/audio/transcribe`, {
     method: 'POST', headers: await getUploadHeaders(), body: formData,
   });
-  return handleResponse<AudioTranscription>(res);
+  return handleActivityResponse<AudioTranscription>(res);
 }
 
 export async function presignAudioUpload(file: File): Promise<AudioUploadPresignResponse> {
@@ -692,7 +705,7 @@ export async function completeAudioUpload(params: {
     headers: await getHeaders(),
     body: JSON.stringify(params),
   });
-  return handleResponse<AudioTranscription>(res);
+  return handleActivityResponse<AudioTranscription>(res);
 }
 
 export async function getAudioTranscription(id: string): Promise<AudioTranscription> {
@@ -714,7 +727,7 @@ export async function retryAudioTranscription(id: string): Promise<AudioTranscri
     method: 'POST',
     headers: await getHeaders(),
   });
-  return handleResponse<AudioTranscription>(res);
+  return handleActivityResponse<AudioTranscription>(res);
 }
 
 export async function cancelAudioTranscription(id: string): Promise<AudioTranscription> {
@@ -722,7 +735,7 @@ export async function cancelAudioTranscription(id: string): Promise<AudioTranscr
     method: 'POST',
     headers: await getHeaders(),
   });
-  return handleResponse<AudioTranscription>(res);
+  return handleActivityResponse<AudioTranscription>(res);
 }
 
 export async function getAudioPlaybackUrl(id: string): Promise<AudioPlaybackResponse> {
@@ -765,7 +778,7 @@ export async function summarizeAudio(
     headers: await getHeaders(),
     body: JSON.stringify(options || {}),
   });
-  return handleResponse<AudioTranscription>(res);
+  return handleActivityResponse<AudioTranscription>(res);
 }
 
 // MTA-25: Search audio transcriptions
@@ -921,7 +934,7 @@ export async function listWebhookDeliveries(): Promise<WebhookDelivery[]> {
 // ── Unified library ──
 
 export async function listLibraryItems(params: {
-  page?: number; per_page?: number; type?: string; status?: string; search?: string; sort_dir?: 'asc' | 'desc'; favorite?: 'true'; archive?: 'all' | 'only'; tag?: string;
+  page?: number; per_page?: number; type?: string; status?: 'active' | 'pending' | 'processing' | 'completed' | 'failed'; search?: string; sort_dir?: 'asc' | 'desc'; favorite?: 'true'; archive?: 'all' | 'only'; tag?: string;
 } = {}): Promise<PaginatedResponse<LibraryItem>> {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {

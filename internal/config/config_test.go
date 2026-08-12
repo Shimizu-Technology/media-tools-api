@@ -127,3 +127,20 @@ func TestLoadConfiguresOpenAISummaryFallbackModel(t *testing.T) {
 		t.Fatalf("OpenAISummaryFallbackModel = %q, want configured model", cfg.OpenAISummaryFallbackModel)
 	}
 }
+
+func TestLoadConfiguresSeparateBrowserReadRateLimit(t *testing.T) {
+	t.Setenv("YT_DLP_PATH", "/bin/true")
+	t.Setenv("DEFAULT_RATE_LIMIT", "250")
+	t.Setenv("DEFAULT_BROWSER_READ_RATE_LIMIT", "7500")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.DefaultRateLimit != 250 {
+		t.Fatalf("DefaultRateLimit = %d, want 250", cfg.DefaultRateLimit)
+	}
+	if cfg.DefaultBrowserReadRateLimit != 7500 {
+		t.Fatalf("DefaultBrowserReadRateLimit = %d, want 7500", cfg.DefaultBrowserReadRateLimit)
+	}
+}

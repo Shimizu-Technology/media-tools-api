@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
+import { getErrorMessage, isAPIError } from '../lib/api';
 
 /**
  * Custom hook for polling an async function at intervals.
- * Automatically stops when the shouldStop condition is met.
+ * Automatically stops when the shouldStop condition is met, pauses while the
+ * document is hidden, and respects server-provided 429 retry timing.
  */
 export function usePolling<T>(
   fetcher: () => Promise<T>,
@@ -18,6 +20,7 @@ export function usePolling<T>(
   const [isPolling, setIsPolling] = useState(enabled);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stoppedRef = useRef(false);
+  const inFlightRef = useRef(false);
   const fetcherRef = useRef(fetcher);
   const shouldStopRef = useRef(shouldStop);
 
@@ -35,8 +38,17 @@ export function usePolling<T>(
     stoppedRef.current = false;
     queueMicrotask(() => setIsPolling(true));
 
+    const schedule = (delay: number) => {
+      if (!stoppedRef.current && document.visibilityState === 'visible') {
+        timerRef.current = setTimeout(poll, delay);
+      }
+    };
+
     const poll = async () => {
-      if (stoppedRef.current) return;
+      if (stoppedRef.current || inFlightRef.current || document.visibilityState !== 'visible') return;
+
+      inFlightRef.current = true;
+      let nextDelay = interval;
 
       try {
         const result = await fetcherRef.current();
@@ -49,18 +61,32 @@ export function usePolling<T>(
           return;
         }
       } catch (err) {
-        setError(err instanceof Error ? err : new Error(String(err)));
+        setError(err instanceof Error ? err : new Error(getErrorMessage(err)));
+        if (isAPIError(err) && err.code === 429 && err.retry_after_seconds) {
+          nextDelay = Math.max(interval, err.retry_after_seconds * 1000);
+        }
+      } finally {
+        inFlightRef.current = false;
       }
 
-      if (!stoppedRef.current) {
-        timerRef.current = setTimeout(poll, interval);
+      schedule(nextDelay);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void poll();
+      } else if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
       }
     };
 
-    poll();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    void poll();
 
     return () => {
       stoppedRef.current = true;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }

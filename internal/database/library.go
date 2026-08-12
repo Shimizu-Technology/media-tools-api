@@ -71,7 +71,7 @@ const libraryItemsCTE = `
 	), filtered AS (
 		SELECT * FROM library_items li
 		WHERE ($3::text = '' OR item_type = $3)
-		  AND ($4::text = '' OR status = $4)
+			  AND ($4::text = '' OR ($4 = 'active' AND status IN ('pending', 'processing')) OR status = $4)
 		  AND ($5::text = ''
 			OR search_vector @@ websearch_to_tsquery('simple'::regconfig, $5)
 			OR to_tsvector('simple'::regconfig, tags::text) @@ websearch_to_tsquery('simple'::regconfig, $5)

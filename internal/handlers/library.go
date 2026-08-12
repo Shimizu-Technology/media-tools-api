@@ -32,6 +32,10 @@ func (h *Handler) ListLibraryItems(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_query", Message: "type must be youtube, audio, or pdf", Code: http.StatusBadRequest})
 		return
 	}
+	if !validLibraryStatus(params.Status) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_query", Message: "status must be active, pending, processing, completed, or failed", Code: http.StatusBadRequest})
+		return
+	}
 	if params.Archive != "" && params.Archive != "all" && params.Archive != "only" {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_query", Message: "archive must be all or only", Code: http.StatusBadRequest})
 		return
@@ -51,6 +55,15 @@ func (h *Handler) ListLibraryItems(c *gin.Context) {
 		Data: items, Page: params.Page, PerPage: params.PerPage, TotalItems: total,
 		TotalPages: int(math.Ceil(float64(total) / float64(params.PerPage))),
 	})
+}
+
+func validLibraryStatus(value string) bool {
+	switch value {
+	case "", "active", "pending", "processing", "completed", "failed":
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *Handler) GetLibraryPreferences(c *gin.Context) {
