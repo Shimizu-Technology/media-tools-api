@@ -5,8 +5,45 @@ import { LibraryActivityContext } from './libraryActivityContextValue';
 
 const ACTIVE_JOB_POLL_INTERVAL_MS = 8000;
 const POLL_ERROR_RETRY_MS = 30000;
+const ACTIVE_JOBS_PER_PAGE = 100;
 
-export function LibraryActivityProvider({ children }: { children: ReactNode }) {
+interface LibraryActivityProviderProps {
+  children: ReactNode;
+}
+
+async function listAllActiveJobs(): Promise<LibraryItem[]> {
+  const firstPage = await listLibraryItems({
+    status: 'active',
+    page: 1,
+    per_page: ACTIVE_JOBS_PER_PAGE,
+    archive: 'all',
+  });
+  if (firstPage.total_pages <= 1) return firstPage.data;
+
+  const remainingPages = await Promise.all(
+    Array.from({ length: firstPage.total_pages - 1 }, (_, index) => (
+      listLibraryItems({
+        status: 'active',
+        page: index + 2,
+        per_page: ACTIVE_JOBS_PER_PAGE,
+        archive: 'all',
+      })
+    )),
+  );
+
+  const jobsByID = new Map(
+    [firstPage, ...remainingPages]
+      .flatMap((page) => page.data)
+      .map((item) => [`${item.item_type}-${item.id}`, item]),
+  );
+  return [...jobsByID.values()];
+}
+
+/**
+ * Shares the complete active-job snapshot and its adaptive polling lifecycle
+ * across the application shell and Processing Center.
+ */
+export function LibraryActivityProvider({ children }: LibraryActivityProviderProps) {
   const [activeItems, setActiveItems] = useState<LibraryItem[]>([]);
   const [activeJobCount, setActiveJobCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -46,12 +83,12 @@ export function LibraryActivityProvider({ children }: { children: ReactNode }) {
     let shouldPoll = activeJobCountRef.current > 0;
     let nextDelay = ACTIVE_JOB_POLL_INTERVAL_MS;
     try {
-      const result = await listLibraryItems({ status: 'active', per_page: 100, archive: 'all' });
+      const activeJobs = await listAllActiveJobs();
       if (!mountedRef.current) return;
-      activeJobCountRef.current = result.total_items;
-      shouldPoll = result.total_items > 0;
-      setActiveItems(result.data);
-      setActiveJobCount(result.total_items);
+      activeJobCountRef.current = activeJobs.length;
+      shouldPoll = activeJobs.length > 0;
+      setActiveItems(activeJobs);
+      setActiveJobCount(activeJobs.length);
       setError('');
     } catch (err) {
       if (!mountedRef.current) return;
