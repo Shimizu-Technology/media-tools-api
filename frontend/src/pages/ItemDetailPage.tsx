@@ -81,8 +81,15 @@ export function ItemDetailPage() {
     const mediaActive = status === 'pending' || status === 'processing';
     const summaryActive = audioSummaryStatus === 'pending' || audioSummaryStatus === 'processing';
     if (!mediaActive && !summaryActive) return;
-    const timer = window.setInterval(() => { void loadItem(true); }, 4000);
-    return () => window.clearInterval(timer);
+    const refresh = () => {
+      if (document.visibilityState === 'visible') void loadItem(true);
+    };
+    const timer = window.setInterval(refresh, 4000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, [audioSummaryStatus, loadItem, status]);
 
   useEffect(() => {

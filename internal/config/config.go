@@ -83,8 +83,11 @@ type Config struct {
 	WhisperChunkConcurrency  int // Parallel chunks within one recording
 	WhisperGlobalConcurrency int // Process-wide cap across recordings
 
-	// Rate limiting
-	DefaultRateLimit int // Requests per hour per API key
+	// Rate limiting. API keys keep one configured budget for every request.
+	// Browser users get a separate, larger read budget so background progress
+	// checks cannot consume the mutation budget used to start or manage jobs.
+	DefaultRateLimit            int // Requests per hour per API key or browser-user mutation bucket
+	DefaultBrowserReadRateLimit int // GET/HEAD requests per hour per authenticated browser user
 
 	// CORS
 	AllowedOrigins []string
@@ -163,7 +166,8 @@ func Load() (*Config, error) {
 		WhisperGlobalConcurrency: getEnvInt("WHISPER_GLOBAL_CONCURRENCY", 6),
 
 		// Rate limiting
-		DefaultRateLimit: getEnvInt("DEFAULT_RATE_LIMIT", 100),
+		DefaultRateLimit:            getEnvInt("DEFAULT_RATE_LIMIT", 100),
+		DefaultBrowserReadRateLimit: getEnvInt("DEFAULT_BROWSER_READ_RATE_LIMIT", 10000),
 
 		// CORS — in production, set this to your frontend URL. Multiple origins can
 		// be comma-separated for preview deployments.

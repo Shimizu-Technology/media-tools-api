@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ComponentType, type CSSProperties } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AlertCircle, ArrowRight, CheckCircle2, Clock3, Loader2, RefreshCw, RotateCcw } from 'lucide-react';
+import { useLibraryActivity } from '../contexts/useLibraryActivity';
 import { getErrorMessage, listLibraryItems, type LibraryItem } from '../lib/api';
 import { itemDetailPath, itemTypeLabel } from '../lib/library';
 
@@ -10,31 +11,40 @@ export function ProcessingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get('status');
   const activeFilter: JobFilter = requested === 'failed' || requested === 'completed' ? requested : 'active';
-  const [items, setItems] = useState<LibraryItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState('');
+  const {
+    activeItems,
+    isLoading: isActivityLoading,
+    error: activityError,
+    refresh: refreshActivity,
+  } = useLibraryActivity();
+  const [filteredItems, setFilteredItems] = useState<LibraryItem[]>([]);
+  const [isFilteredLoading, setIsFilteredLoading] = useState(false);
+  const [filteredError, setFilteredError] = useState('');
 
   const loadJobs = useCallback(async () => {
-    setIsLoading(true);
-    setError('');
-    try {
-      const statuses = activeFilter === 'active' ? ['pending', 'processing'] : [activeFilter];
-      const results = await Promise.all(statuses.map((status) => listLibraryItems({ status, per_page: 100 })));
-      setItems(results.flatMap((result) => result.data).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)));
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setIsLoading(false);
+    if (activeFilter === 'active') {
+      await refreshActivity(true);
+      return;
     }
-  }, [activeFilter]);
-
-  useEffect(() => { void loadJobs(); }, [loadJobs]);
+    setIsFilteredLoading(true);
+    setFilteredError('');
+    try {
+      const result = await listLibraryItems({ status: activeFilter, per_page: 100 });
+      setFilteredItems(result.data);
+    } catch (err) {
+      setFilteredError(getErrorMessage(err));
+    } finally {
+      setIsFilteredLoading(false);
+    }
+  }, [activeFilter, refreshActivity]);
 
   useEffect(() => {
-    if (activeFilter !== 'active') return;
-    const timer = window.setInterval(() => { void loadJobs(); }, 8000);
-    return () => window.clearInterval(timer);
+    if (activeFilter !== 'active') void loadJobs();
   }, [activeFilter, loadJobs]);
+
+  const items = activeFilter === 'active' ? activeItems : filteredItems;
+  const isLoading = activeFilter === 'active' ? isActivityLoading : isFilteredLoading;
+  const error = activeFilter === 'active' ? activityError : filteredError;
 
   const counts = useMemo(() => ({
     pending: items.filter((item) => item.status === 'pending').length,

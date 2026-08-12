@@ -329,12 +329,14 @@ export function DocsPage() {
       {/* Rate Limiting */}
       <Section title="Rate Limiting" delay={0.45}>
         <p className="text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-          Rate limits are per-API-key. Check headers for your current limits:
+          API-key limits use one shared request budget. Signed-in browser sessions keep reads and mutations separate so status refreshes cannot block job actions. Check these headers for the applicable budget:
         </p>
         <CodeBlock
           code={`X-RateLimit-Limit: 100
 X-RateLimit-Remaining: 97
-X-RateLimit-Reset: 1706918400`}
+
+# Included on 429 responses
+Retry-After: 4`}
           language="text"
         />
       </Section>

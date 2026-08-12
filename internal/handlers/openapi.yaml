@@ -10,7 +10,9 @@ info:
 
     ## Rate Limiting
     Each API key has a per-hour rate limit (default: 100 requests/hour).
-    Check `X-RateLimit-Limit` and `X-RateLimit-Remaining` response headers.
+    Signed-in browser users have separate read and mutation budgets so progress
+    checks cannot block job actions. Check `X-RateLimit-Limit` and
+    `X-RateLimit-Remaining`; 429 responses also include `Retry-After` seconds.
   version: "1.0.0"
   contact:
     name: Shimizu Technology
@@ -1110,6 +1112,12 @@ paths:
     get:
       tags: [Library]
       summary: Search and paginate all media types
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filter by status; use active for pending and processing items
+          schema: {type: string, enum: [active, pending, processing, completed, failed]}
       responses: {"200": {description: Paginated library items}}
   /library/stats:
     get:

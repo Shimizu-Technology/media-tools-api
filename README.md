@@ -233,6 +233,8 @@ not copy its hard-coded identity into future migrations.
 | `CLERK_JWKS_URL` | Browser auth | Clerk JWKS URL for validating signed-in users |
 | `CLERK_AUTHORIZED_PARTY` | Browser auth | Frontend origin allowed in Clerk token `azp` claim |
 | `LEGACY_AUTH_ENABLED` | Optional | Enable legacy email/password auth routes; defaults off in release |
+| `DEFAULT_RATE_LIMIT` | Optional | Requests/hour for API keys and signed-in browser mutations; defaults to 100 |
+| `DEFAULT_BROWSER_READ_RATE_LIMIT` | Optional | GET/HEAD requests/hour for signed-in browser users; defaults to 10,000 |
 | `OPENROUTER_API_KEY` | For summaries | OpenRouter API key |
 | `OPENAI_API_KEY` | For audio | OpenAI API key (Whisper) |
 | `CORS_ORIGIN` | Yes | Frontend URL (e.g., https://your-app.netlify.app) |

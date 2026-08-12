@@ -12,7 +12,9 @@ package middleware
 
 import (
 	"fmt"
+	"math"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -28,9 +30,11 @@ type RateLimiter struct {
 	// reads vastly outnumber writes (which is true for rate limiting).
 	mu      sync.RWMutex
 	buckets map[string]*bucket
-	// Authenticated Clerk/JWT users do not have an APIKey.RateLimit row, so give
-	// them the same default hourly budget as newly-created API keys.
-	defaultUserRateLimit int
+	// Authenticated Clerk/JWT users do not have an APIKey.RateLimit row. Keep
+	// their mutation and read traffic in separate buckets so ordinary progress
+	// polling can never prevent them from starting, retrying, or canceling work.
+	defaultUserRateLimit     int
+	defaultUserReadRateLimit int
 	// Owner override (optional)
 	ownerKeyID     string
 	ownerKeyPrefix string
@@ -47,21 +51,26 @@ type bucket struct {
 // allowResult contains the result of a rate limit check,
 // including header information for the response.
 type allowResult struct {
-	allowed   bool
-	remaining float64
-	limit     float64
+	allowed    bool
+	remaining  float64
+	limit      float64
+	retryAfter time.Duration
 }
 
 // NewRateLimiter creates a new rate limiter.
-func NewRateLimiter(ownerKeyID, ownerKeyPrefix string, defaultUserRateLimit int) *RateLimiter {
+func NewRateLimiter(ownerKeyID, ownerKeyPrefix string, defaultUserRateLimit, defaultUserReadRateLimit int) *RateLimiter {
 	if defaultUserRateLimit <= 0 {
 		defaultUserRateLimit = 100
 	}
+	if defaultUserReadRateLimit <= 0 {
+		defaultUserReadRateLimit = 10000
+	}
 	rl := &RateLimiter{
-		buckets:              make(map[string]*bucket),
-		defaultUserRateLimit: defaultUserRateLimit,
-		ownerKeyID:           ownerKeyID,
-		ownerKeyPrefix:       ownerKeyPrefix,
+		buckets:                  make(map[string]*bucket),
+		defaultUserRateLimit:     defaultUserRateLimit,
+		defaultUserReadRateLimit: defaultUserReadRateLimit,
+		ownerKeyID:               ownerKeyID,
+		ownerKeyPrefix:           ownerKeyPrefix,
 	}
 
 	// Start background cleanup goroutine
@@ -89,7 +98,11 @@ func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 			bucketID = "api_key:" + apiKey.ID
 			rateLimit = apiKey.RateLimit
 		} else if user := GetUser(c); user != nil {
-			bucketID = "user:" + user.ID
+			bucketID = "user:" + user.ID + ":write"
+			if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
+				bucketID = "user:" + user.ID + ":read"
+				rateLimit = rl.defaultUserReadRateLimit
+			}
 		} else {
 			// No actor = no rate limiting (auth middleware handles rejection)
 			c.Next()
@@ -102,6 +115,7 @@ func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 			// Add headers even for rejected requests so clients know their limits
 			c.Header("X-RateLimit-Limit", formatFloat(result.limit))
 			c.Header("X-RateLimit-Remaining", "0")
+			c.Header("Retry-After", strconv.Itoa(max(1, int(math.Ceil(result.retryAfter.Seconds())))))
 			c.JSON(http.StatusTooManyRequests, models.ErrorResponse{
 				Error:   "rate_limit_exceeded",
 				Message: "Rate limit exceeded. Try again later.",
@@ -150,10 +164,12 @@ func (rl *RateLimiter) allow(keyID string, rateLimit int) allowResult {
 
 	// Check if we have a token available
 	if b.tokens < 1.0 {
+		retryAfter := time.Duration(math.Ceil((1.0-b.tokens)/b.refillRate)) * time.Second
 		return allowResult{
-			allowed:   false,
-			remaining: 0,
-			limit:     b.maxTokens,
+			allowed:    false,
+			remaining:  0,
+			limit:      b.maxTokens,
+			retryAfter: retryAfter,
 		}
 	}
 

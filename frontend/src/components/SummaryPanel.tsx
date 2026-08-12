@@ -148,6 +148,11 @@ export function SummaryPanel({
           return;
         }
 
+        if (document.visibilityState !== 'visible') {
+          pollTimerRef.current = setTimeout(() => pollForSummary(attempts), 2000);
+          return;
+        }
+
         try {
           const summaries = await getSummaries(transcriptId);
           const latest = summaries.find((candidate) => candidate.id === job.summary_id);
