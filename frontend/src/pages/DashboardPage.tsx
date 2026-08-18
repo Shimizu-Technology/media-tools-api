@@ -114,8 +114,8 @@ export function DashboardPage() {
             Turn videos, meetings, voice notes, and PDFs into searchable library items with summaries, collections, and chat.
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
-            <QuickAction to="/app/video" icon={FileText} label="New video transcript" primary />
-            <QuickAction to="/app/audio" icon={Mic} label="Record or upload audio" />
+            <QuickAction to="/app/audio" icon={Mic} label="Record or upload audio" primary />
+            <QuickAction to="/app/video" icon={FileText} label="Import a video" />
             <QuickAction to="/app/pdf" icon={BookOpen} label="Extract PDF" />
           </div>
         </div>

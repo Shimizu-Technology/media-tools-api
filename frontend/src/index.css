@@ -26,7 +26,10 @@
   --color-border-subtle: #e9eef0;
 	--color-sidebar-bg: rgba(255, 255, 255, 0.94);
 	--color-header-bg: rgba(245, 247, 248, 0.88);
+	--color-mobile-nav-bg: rgba(255, 255, 255, 0.94);
 	--color-nav-hover: rgba(23, 33, 38, 0.06);
+	--color-nav-active: rgba(47, 158, 143, 0.12);
+	--color-create-featured: rgba(47, 158, 143, 0.06);
   
   /* Success/Error */
   --color-success: #18b985;
@@ -65,7 +68,10 @@
 	--color-border-subtle: #1f232a;
 	--color-sidebar-bg: rgba(15, 18, 23, 0.94);
 	--color-header-bg: rgba(11, 13, 16, 0.86);
+	--color-mobile-nav-bg: rgba(15, 18, 23, 0.94);
 	--color-nav-hover: rgba(255, 255, 255, 0.06);
+	--color-nav-active: rgba(47, 158, 143, 0.18);
+	--color-create-featured: rgba(47, 158, 143, 0.1);
 }
 
 /* Base styles */
