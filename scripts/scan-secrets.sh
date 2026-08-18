@@ -4,12 +4,9 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 gitleaks_version="8.30.1"
-cache_root="${MTA_TOOL_CACHE:-${XDG_CACHE_HOME:-${TMPDIR:-/tmp}/media-tools-tools}}"
-binary_dir="$cache_root/gitleaks/$gitleaks_version"
-gitleaks_binary="$binary_dir/gitleaks"
 
-install_gitleaks() {
-  local os arch archive download_dir expected actual
+prepare_gitleaks() {
+  local os arch archive expected actual
 
   case "$(uname -s)" in
     Darwin) os="darwin" ;;
@@ -36,32 +33,38 @@ install_gitleaks() {
     linux_arm64) expected="e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080" ;;
     linux_x64) expected="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb" ;;
   esac
-  download_dir="$(mktemp -d "${TMPDIR:-/tmp}/media-tools-gitleaks.XXXXXX")"
-  trap 'rm -rf -- "$download_dir"' RETURN
+  scanner_dir="$(mktemp -d "${TMPDIR:-/tmp}/media-tools-gitleaks.XXXXXX")"
+  chmod 700 "$scanner_dir"
 
   curl --fail --silent --show-error --location --retry 3 \
-    --output "$download_dir/$archive" \
+    --output "$scanner_dir/$archive" \
     "https://github.com/gitleaks/gitleaks/releases/download/v${gitleaks_version}/$archive"
 
   if command -v sha256sum >/dev/null 2>&1; then
-    actual="$(sha256sum "$download_dir/$archive" | awk '{ print $1 }')"
+    actual="$(sha256sum "$scanner_dir/$archive" | awk '{ print $1 }')"
   else
-    actual="$(shasum -a 256 "$download_dir/$archive" | awk '{ print $1 }')"
+    actual="$(shasum -a 256 "$scanner_dir/$archive" | awk '{ print $1 }')"
   fi
   if [[ "$actual" != "$expected" ]]; then
     echo "Checksum verification failed for $archive." >&2
     return 1
   fi
 
-  mkdir -p "$binary_dir"
-  tar -xzf "$download_dir/$archive" -C "$download_dir" gitleaks
-  install -m 0755 "$download_dir/gitleaks" "$gitleaks_binary"
+  tar -xzf "$scanner_dir/$archive" -C "$scanner_dir" gitleaks
+  chmod 500 "$scanner_dir/gitleaks"
+  gitleaks_binary="$scanner_dir/gitleaks"
 }
 
-if [[ ! -x "$gitleaks_binary" ]]; then
-  echo "Installing verified Gitleaks v$gitleaks_version into the local tool cache"
-  install_gitleaks
-fi
+scanner_dir=""
+snapshot_dir=""
+cleanup() {
+  [[ -z "$scanner_dir" ]] || rm -rf -- "$scanner_dir"
+  [[ -z "$snapshot_dir" ]] || rm -rf -- "$snapshot_dir"
+}
+trap cleanup EXIT
+
+echo "Preparing an isolated, verified Gitleaks v$gitleaks_version"
+prepare_gitleaks
 
 cd "$repo_root"
 echo "Scanning committed history for credentials"
@@ -73,11 +76,10 @@ echo "Scanning committed history for credentials"
 
 echo "Scanning the current working tree for credentials"
 snapshot_dir="$(mktemp -d "${TMPDIR:-/tmp}/media-tools-worktree.XXXXXX")"
-trap 'rm -rf -- "$snapshot_dir"' EXIT
 while IFS= read -r -d '' path; do
   [[ -f "$path" ]] || continue
   mkdir -p "$snapshot_dir/$(dirname "$path")"
-  cp "$path" "$snapshot_dir/$path"
+  cp -- "$path" "$snapshot_dir/$path"
 done < <(git ls-files --cached --others --exclude-standard -z)
 
 "$gitleaks_binary" dir \

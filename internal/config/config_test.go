@@ -34,6 +34,18 @@ func TestLoadRejectsMissingOrShortProductionSecrets(t *testing.T) {
 			wantErrorText: "JWT_SECRET must be set to at least 32 characters",
 		},
 		{
+			name:          "whitespace-padded short JWT secret",
+			environment:   "JWT_SECRET",
+			value:         "            too-short            ",
+			wantErrorText: "JWT_SECRET must be set to at least 32 characters",
+		},
+		{
+			name:          "whitespace-padded development JWT secret",
+			environment:   "JWT_SECRET",
+			value:         "    dev-jwt-secret-change-in-production    ",
+			wantErrorText: "JWT_SECRET must be set to at least 32 characters",
+		},
+		{
 			name:          "empty admin key",
 			environment:   "ADMIN_API_KEY",
 			value:         "",
@@ -58,6 +70,24 @@ func TestLoadRejectsMissingOrShortProductionSecrets(t *testing.T) {
 				t.Fatalf("Load error = %v, want %q", err, tt.wantErrorText)
 			}
 		})
+	}
+}
+
+func TestLoadNormalizesProductionSecretsBeforeUse(t *testing.T) {
+	setRequiredReleaseEnv(t)
+	t.Setenv("CORS_ORIGIN", "https://media-tools-gu.netlify.app")
+	t.Setenv("JWT_SECRET", "  test-secret-that-is-not-the-development-default  ")
+	t.Setenv("ADMIN_API_KEY", "  test-admin-key-that-is-at-least-32-chars  ")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.JWTSecret != "test-secret-that-is-not-the-development-default" {
+		t.Fatalf("JWTSecret retained surrounding whitespace")
+	}
+	if cfg.AdminAPIKey != "test-admin-key-that-is-at-least-32-chars" {
+		t.Fatalf("AdminAPIKey retained surrounding whitespace")
 	}
 }
 

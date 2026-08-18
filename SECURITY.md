@@ -31,8 +31,9 @@ tracked files plus non-ignored untracked files. It deliberately excludes local
 ignored `.env` files, while still catching a credential if someone stages it or
 places it in a source/documentation file. Findings are fully redacted.
 
-Gitleaks is downloaded from its pinned official release and verified against
-the publisher's SHA-256 digest pinned in the install script before execution.
+Every scan downloads Gitleaks into a private temporary directory, verifies it
+against the publisher's SHA-256 digest pinned in the script, executes that
+isolated copy, and removes it. No previously cached executable is trusted.
 `.gitleaks.toml` allows only specific documentation placeholder patterns; no
 file is exempted wholesale.
 
