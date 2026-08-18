@@ -5,7 +5,7 @@
 
 GO_PACKAGES := $(shell go list ./... | grep -v '/frontend/node_modules/')
 
-.PHONY: help build run test clean docker docker-up docker-down migrate lint fmt vet frontend dev
+.PHONY: help build run test gate clean docker docker-up docker-down migrate lint fmt vet frontend dev
 
 # Default target — show help
 help: ## Show this help message
@@ -28,6 +28,9 @@ dev: ## Run with live reload (requires air: go install github.com/air-verse/air@
 
 test: ## Run all Go tests
 	go test -v $(GO_PACKAGES)
+
+gate: ## Run the complete backend, frontend, and available iOS verification gate
+	./scripts/gate.sh
 
 test-cover: ## Run tests with coverage report
 	go test -coverprofile=coverage.out $(GO_PACKAGES)

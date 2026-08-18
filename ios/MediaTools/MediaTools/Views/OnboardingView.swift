@@ -9,22 +9,22 @@ struct OnboardingView: View {
         (
             "waveform.circle.fill", Theme.brand400,
             "Transcribe Anything",
-            "Paste a YouTube, Vimeo, or any video URL and get a full transcript in seconds."
+            "Paste a supported video URL and save a complete transcript to your workspace."
         ),
         (
             "mic.fill", Theme.audioColor,
             "Record & Transcribe",
-            "Record audio right in the app — meetings, lectures, voice memos — and get instant transcriptions."
+            "Capture meetings, lectures, and voice memos, then turn them into searchable text."
         ),
         (
             "bubble.left.and.bubble.right.fill", Color.purple,
             "Chat with AI",
-            "Ask questions about your transcripts. Get summaries, key points, and action items."
+            "Ask questions, build summaries, and trace answers back to the source."
         ),
         (
-            "square.and.arrow.up", Color.blue,
-            "Share from Anywhere",
-            "Use the iOS Share Sheet to send videos, audio, and PDFs directly to Media Tools from any app."
+            "folder.fill", Color.blue,
+            "Keep It Organized",
+            "Group related recordings and transcripts into collections that stay easy to find."
         ),
     ]
 
@@ -151,6 +151,8 @@ struct OnboardingPage: View {
                     .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
+                    .frame(maxWidth: .infinity)
+                    .fixedSize(horizontal: false, vertical: true)
                     .opacity(appeared ? 1 : 0)
                     .offset(y: appeared ? 0 : 10)
             }

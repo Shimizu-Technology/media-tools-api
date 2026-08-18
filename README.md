@@ -91,7 +91,14 @@ make run
 make frontend-install
 make frontend-dev
 # Frontend at http://localhost:5173
+
+# 5. Before opening a pull request, run the complete local gate
+make gate
 ```
+
+`make gate` checks Go formatting, vet, and race tests; frontend lint, build,
+and production dependencies; and, on macOS with Xcode, the native iOS build
+and test suite.
 
 ## API Documentation
 
@@ -311,6 +318,7 @@ make run               # Run the server
 make docker-up         # Start Docker stack
 make frontend-dev      # Start frontend dev server
 make test              # Run tests
+make gate              # Run the complete repository verification gate
 make health            # Check API health
 ```
 
