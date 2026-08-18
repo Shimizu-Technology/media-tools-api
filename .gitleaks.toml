@@ -1,0 +1,26 @@
+title = "Media Tools secret-scanning policy"
+minVersion = "v8.30.1"
+
+[extend]
+useDefault = true
+
+# Documentation uses recognizable fake credentials so examples remain easy to
+# follow. These exceptions match only the exact placeholder families; they do
+# not exempt any file or credential type from scanning.
+[[allowlists]]
+description = "Documented API-key header placeholders"
+targetRules = ["curl-auth-header"]
+regexTarget = "line"
+regexes = [
+  '''(?i)X-API-Key:\s*(?:mta_your[_a-z0-9.-]*|YOUR_(?:API_)?KEY(?:_HERE)?)''',
+  '''(?i)X-Admin-Key:\s*(?:your[-_]admin[-_]key|YOUR_ADMIN_KEY)''',
+]
+
+[[allowlists]]
+description = "Documented one-time API-key response placeholders"
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+regexes = [
+  '''raw_key["']?\s*:\s*["']?mta_abc123\.\.\.xyz''',
+  '''raw_key["']?\s*:\s*["']?mta_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4''',
+]

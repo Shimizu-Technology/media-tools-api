@@ -196,16 +196,23 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// Security: JWT secret MUST be set in production mode
-	// In release mode, we refuse to start with the default secret.
-	if cfg.GinMode == "release" && cfg.JWTSecret == "dev-jwt-secret-change-in-production" {
-		return nil, fmt.Errorf("JWT_SECRET must be set in production; refusing to start with default secret")
-	}
+	// Security: production secrets must be explicit and sufficiently long. An
+	// environment variable that is present but empty does not use getEnv's
+	// fallback, so normalize and validate the exact values later used for token
+	// signing and admin-key comparison.
+	if cfg.GinMode == "release" {
+		cfg.JWTSecret = strings.TrimSpace(cfg.JWTSecret)
+		cfg.AdminAPIKey = strings.TrimSpace(cfg.AdminAPIKey)
+		if cfg.JWTSecret == "" ||
+			cfg.JWTSecret == "dev-jwt-secret-change-in-production" ||
+			len(cfg.JWTSecret) < 32 {
+			return nil, fmt.Errorf("JWT_SECRET must be set to at least 32 characters in production")
+		}
 
-	// Security: Admin API key MUST be set in production mode
-	// This protects the API key creation endpoint from unauthorized access.
-	if cfg.GinMode == "release" && cfg.AdminAPIKey == "" {
-		return nil, fmt.Errorf("ADMIN_API_KEY must be set in production; this protects API key creation")
+		// This protects the API key creation endpoint from unauthorized access.
+		if len(cfg.AdminAPIKey) < 32 {
+			return nil, fmt.Errorf("ADMIN_API_KEY must be set to at least 32 characters in production")
+		}
 	}
 	if cfg.WhisperChunkConcurrency < 1 {
 		cfg.WhisperChunkConcurrency = 1

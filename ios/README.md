@@ -4,9 +4,9 @@ Native SwiftUI app for Media Tools API — transcribe videos, record audio, mana
 
 ## Requirements
 
-- Xcode 16+
-- iOS 18+
-- Swift 6
+- Xcode 16.4+
+- iOS 18.5+
+- Swift 5 language mode (compiled by the Xcode 16.4 toolchain)
 - Active Media Tools API instance
 
 ## Setup
@@ -16,54 +16,46 @@ Native SwiftUI app for Media Tools API — transcribe videos, record audio, mana
 Open `ios/MediaTools/MediaTools.xcodeproj`. The main app and unit/UI test
 targets are already configured.
 
-### 2. Add Swift Package Dependencies
+The checked-in project already includes `ClerkKit` and `ClerkKitUI` as Swift
+Package Manager dependencies. Xcode resolves them automatically; do not add a
+second package reference.
 
-File → Add Package Dependencies:
-- **Clerk iOS SDK**: `https://github.com/clerk/clerk-ios`
-  - Add both `ClerkKit` and `ClerkKitUI` to the MediaTools target
-
-### 3. Optional Extension Targets
+### 2. Understand the Extension Prototypes
 
 The Share Extension and Widget source files are included in this repository,
 but they are not yet wired into the checked-in Xcode project. Do not treat
 either extension as shipping until these targets, capabilities, signing, and
 on-device behavior have been verified.
 
-**Share Extension:**
-1. File → New → Target → Share Extension
-2. Name: `ShareExtension`
-3. Replace generated files with our `ShareExtension/ShareViewController.swift` and `Info.plist`
+Do not add capabilities solely because source files exist. Shipping either
+extension requires dedicated targets, bundle IDs, entitlements, signing,
+App-Group/Keychain groups, install testing, and review of shared-session
+behavior. That work remains explicitly out of the current app target.
 
-**Widget:**
-1. File → New → Target → Widget Extension
-2. Name: `MediaToolsWidget`
-3. Replace generated files with our `MediaToolsWidget/MediaToolsWidget.swift`
-
-### 4. Configure Capabilities
-
-**Main App Target (MediaTools):**
-- Signing & Capabilities → Add:
-  - **Associated Domains**: `webcredentials:welcomed-earwig-86.clerk.accounts.dev`
-  - **Keychain Sharing**: `group.com.shimizu-technology.media-tools`
-  - **App Groups**: `group.com.shimizu-technology.media-tools`
-
-**Share Extension & Widget:**
-- Add **Keychain Sharing**: `group.com.shimizu-technology.media-tools`
-- Add **App Groups**: `group.com.shimizu-technology.media-tools`
-
-### 5. Configure Clerk
+### 3. Configure Clerk
 
 1. Go to [Clerk Dashboard](https://dashboard.clerk.com) → Native Applications
 2. Enable **Native API**
-3. Add your iOS app (App ID Prefix + Bundle ID)
+3. Add bundle ID `com.ShimizuTechnology.MediaTools`
 
-### 6. Generate App Icon
+Debug builds include the public Clerk publishable key as a development
+fallback. Release builds must supply `CLERK_PUBLISHABLE_KEY` through an Xcode
+build setting or generated Info.plist value. A Clerk publishable key is client
+configuration; never place `CLERK_SECRET_KEY`, AI keys, database credentials,
+or the Media Tools admin key in the iOS target.
+
+`API_BASE_URL` can also be supplied as a build setting. It otherwise defaults
+to the production Render API. Use a local HTTP URL only for simulator
+development; `Info.plist` permits local networking but does not relax transport
+security for arbitrary remote hosts.
+
+### 4. Generate App Icon (only when replacing it)
 
 ```bash
 swift ios/scripts/generate-icon.swift
 ```
 
-### 7. Build & Run
+### 5. Build & Run
 
 Select your device or simulator and hit Run (⌘R).
 
@@ -90,12 +82,12 @@ MediaTools/
 │   └── SpotlightService.swift       # CoreSpotlight indexing for system search
 │
 ├── Views/
-│   ├── MainTabView.swift            # 5-tab layout
+│   ├── MainTabView.swift            # Current five-tab navigation
 │   ├── OnboardingView.swift         # First-launch walkthrough (4 pages)
 │   ├── Library/
-│   │   ├── LibraryView.swift        # Segmented list with search + swipe actions
+│   │   ├── LibraryView.swift        # Unified paginated library + typed actions
 │   │   ├── ItemDetailView.swift     # Detail + chat/summary/copy/share/collect
-│   │   ├── TranscribeView.swift     # URL input with paste + polling
+│   │   ├── TranscribeView.swift     # URL capture and visible status updates
 │   │   └── PDFUploadView.swift      # File picker with security-scoped access
 │   ├── Audio/
 │   │   └── RecordView.swift         # AVAudioRecorder + content type picker
@@ -129,9 +121,11 @@ MediaTools/
 ## Features
 
 ### Core
-- **Library** — Browse all transcripts, audio, and PDFs with search and segmented tabs
-- **Transcribe** — Paste any video URL for transcription with real-time polling
-- **Record** — AVAudioRecorder with content type presets (meeting, lecture, phone call, etc.)
+- **Library** — Server-side search, pagination, filters, sorting, selection, and
+  typed actions across videos, recordings, and PDFs
+- **Transcribe** — Paste a supported video URL and follow its processing state
+- **Record** — Record or import audio/video with semantic presets, durable
+  object-storage upload when configured, retry, and processing progress
 - **Collections** — Group items together, chat with AI about entire collections
 - **AI Chat** — Ask questions about any transcript, get summaries and key points
 - **PDF Upload** — Import PDFs from Files app for text extraction
@@ -139,19 +133,29 @@ MediaTools/
 ### iOS Integration
 - **Share Sheet source** — Prepared for a future Share Extension target; not currently shipped
 - **Home Screen Widget source** — Prepared for a future Widget target; not currently shipped
-- **Spotlight Search** — Find transcripts from iOS system search
+- **Spotlight Search** — Find completed videos, recordings, and PDFs; deletion
+  removes the corresponding typed search entry
 - **Local Notifications** — Get notified when transcriptions complete
-- **Background upload service** — Implemented as a service, but not yet connected to the active upload flow
+- **Background upload service source** — Present but not wired to the active
+  flow; current recording uploads must be treated as foreground app work
 - **Haptic Feedback** — Tactile responses on key actions
 - **Swipe Actions** — Swipe to delete or add to collection
 
 ### Auth
 - **Clerk iOS SDK v1** — Native sign-in/sign-up with prebuilt `AuthView`
-- **Keychain Sharing** — Auth token shared between app and share extension
-- **Token Sync** — Automatically refreshes shared token every 50 seconds
+- **Keychain preparation** — Device-only shared-token storage code exists for a
+  future extension, but extension entitlements/targets do not currently ship
+- **Token Sync** — Refreshes that prepared shared token while signed in
 
 ### UX
 - **Onboarding** — 4-page walkthrough on first launch
 - **Pull to Refresh** — Refresh library data with gesture
 - **Content Unavailable Views** — Helpful empty states throughout
 - **Text Selection** — Long-press to select/copy transcript text
+
+## Verification
+
+From the repository root, `make gate` runs native unit tests and verifies that
+the built app installs and launches when Xcode is available. Native UI changes
+should additionally run the relevant `MediaToolsUITests` on an iPhone 16 Pro
+and a compact iPhone simulator, followed by a visual interaction pass.

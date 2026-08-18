@@ -1,5 +1,10 @@
 # Media Tools API — Product Requirements Document
 
+> Historical MVP document. It explains the original YouTube-transcript API,
+> but several “future” items now ship. For current behavior and product intent,
+> use [`docs/SYSTEM_OVERVIEW.md`](docs/SYSTEM_OVERVIEW.md) and
+> [`PRODUCT_ROADMAP.md`](PRODUCT_ROADMAP.md).
+
 ## Overview
 
 Media Tools API is a media processing microservice focused on YouTube transcript extraction and AI-powered summarization. It provides a clean REST API for programmatic access and a polished React frontend for direct use.

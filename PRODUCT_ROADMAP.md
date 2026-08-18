@@ -37,12 +37,9 @@ Already in place:
 
 Media items now share a consistent detail route and workspace experience.
 
-Possible route shape:
+The canonical web route is `/app/items/:itemType/:itemId`.
 
-- `/app/items/:type/:id`
-- or `/app/library/:type/:id`
-
-Each detail page should include:
+Each detail page includes:
 
 - Main transcript/text/document viewer.
 - Summary panel.
@@ -58,38 +55,32 @@ Why this matters: it makes video, audio, and PDF results feel like one coherent 
 
 The library now searches titles, transcript/document content, summaries, structured audio outputs, and tags from one server-side result set.
 
-Search should cover:
+Search covers:
 
 - Video transcripts.
 - Audio transcriptions.
 - PDF text.
 - Summaries.
-- Collections.
-- Eventually chat history.
+- Collection and chat-history search remain future extensions.
 
-Start with Postgres full-text search and filters. Consider semantic/vector search later.
+PostgreSQL full-text search and filters are the current foundation. Consider
+semantic/vector search later.
 
-Useful filters:
+Current core filters:
 
 - Type: video, audio, PDF.
 - Status: processing, completed, failed.
-- Date range.
-- Collection.
-- Tags/favorites once those exist.
+- Sort direction.
+
+Date range and collection-scoped filtering remain useful follow-up work.
 
 ### 3. Better Library Organization
 
 The library now supports starred items, tags, archive, status filters, sorting, collections, and bulk deletion.
 
-Add:
-
-- Tags.
-- Favorites/starred items.
-- Archive.
-- Client/project labels.
-- Saved filters.
-- Bulk actions.
-- Better type/status/date sorting.
+Next organization improvements are client/project labels, saved filters, and
+broader non-destructive bulk actions. Tags, favorites, archive, deletion, and
+type/status/date sorting already ship.
 
 Collections remain useful for grouped work, but tags and favorites make everyday organization faster.
 
@@ -97,7 +88,7 @@ Collections remain useful for grouped work, but tags and favorites make everyday
 
 The processing center now shows queued, active, failed, and recently completed work with automatic refresh and links to recovery actions.
 
-Show:
+It shows:
 
 - Active jobs.
 - Queued jobs.
@@ -111,13 +102,13 @@ Why this matters: video/audio/PDF processing can take time, so users need confid
 
 ### 5. Share and Export Improvements
 
-Make it easy to move results out of the app.
+Copy and several export actions already ship. The next step is to make results
+portable without weakening the private-by-default ownership model.
 
-Add per-item actions for:
+Next additions:
 
-- Copy transcript/text.
-- Copy summary.
-- Export as `.txt`, `.md`, `.json`, and eventually `.docx` or `.pdf`.
+- More consistent `.txt`, `.md`, and `.json` behavior across every media type.
+- `.docx` or `.pdf` deliverables where they add real value.
 - Private share links.
 - Public read-only share links with revoke controls.
 
@@ -261,16 +252,13 @@ Potential exports:
 - Google Docs summaries.
 - Drive folders per collection/project.
 
-### 15. PWA and Mobile Capture
+### 15. Native Mobile Evolution
 
-Improve mobile usage before building a separate native app.
-
-Add:
-
-- Installable PWA behavior.
-- Better mobile recording flow.
-- Offline recording draft protection.
-- Share-sheet-friendly upload path later.
+The separate native SwiftUI app now ships its core capture, unified library,
+detail, chat, and collection workflows. Next mobile work should simplify the
+five-tab navigation, make settings user-centered, improve compact/iPad layouts,
+add offline recording/upload recovery, and only then graduate the prepared
+Share Extension and Widget source into signed, tested targets.
 
 ## Suggested Implementation Order
 

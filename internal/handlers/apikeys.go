@@ -3,6 +3,8 @@ package handlers
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"log"
 	"net/http"
@@ -37,7 +39,7 @@ func (h *Handler) CreateAPIKey(c *gin.Context) {
 			})
 			return
 		}
-		if providedKey != h.AdminAPIKey {
+		if !adminKeyMatches(providedKey, h.AdminAPIKey) {
 			c.JSON(http.StatusForbidden, models.ErrorResponse{
 				Error:   "forbidden",
 				Message: "Invalid admin key",
@@ -101,6 +103,17 @@ func (h *Handler) CreateAPIKey(c *gin.Context) {
 		APIKey: *key,
 		RawKey: rawKey,
 	})
+}
+
+// adminKeyMatches compares fixed-size digests so invalid values do not reveal
+// the configured key through ordinary string-comparison timing differences.
+func adminKeyMatches(provided, expected string) bool {
+	if provided == "" || expected == "" {
+		return false
+	}
+	providedHash := sha256.Sum256([]byte(provided))
+	expectedHash := sha256.Sum256([]byte(expected))
+	return subtle.ConstantTimeCompare(providedHash[:], expectedHash[:]) == 1
 }
 
 // CreateUserAPIKey generates a new API key owned by the signed-in Clerk/JWT user.
