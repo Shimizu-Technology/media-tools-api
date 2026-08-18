@@ -20,6 +20,7 @@
   --color-text-primary: #172126;
   --color-text-secondary: #4f5e66;
   --color-text-muted: #718089;
+  --color-on-brand: #ffffff;
   
   /* Border */
   --color-border: #dce3e6;
@@ -30,6 +31,9 @@
 	--color-nav-hover: rgba(23, 33, 38, 0.06);
 	--color-nav-active: rgba(47, 158, 143, 0.12);
 	--color-create-featured: rgba(47, 158, 143, 0.06);
+	--color-modal-scrim: rgba(0, 0, 0, 0.6);
+	--color-modal-control: rgba(0, 0, 0, 0.3);
+	--color-modal-control-border: rgba(255, 255, 255, 0.25);
   
   /* Success/Error */
   --color-success: #18b985;
@@ -44,6 +48,9 @@
   --color-summary: #a855f7;
   --color-summary-subtle: rgba(168, 85, 247, 0.1);
   --shadow-tab-active: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-brand-action: 0 10px 24px rgba(0, 0, 0, 0.1);
+  --shadow-floating-action: 0 14px 30px rgba(0, 0, 0, 0.2);
+  --shadow-card-hover: 0 18px 40px rgba(0, 0, 0, 0.08);
 
   /* Compatibility aliases for newer screens that use compact token names. */
   --bg: var(--color-surface);
@@ -82,6 +89,10 @@ body {
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.create-source-card:hover {
+  box-shadow: var(--shadow-card-hover);
 }
 
 /* Improve text rendering */

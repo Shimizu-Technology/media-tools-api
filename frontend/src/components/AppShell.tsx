@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentType } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   Activity,
@@ -89,6 +89,7 @@ export function AppShell() {
 function AppShellContent() {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const mobileDialogRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'; } catch { return false; }
   });
@@ -99,6 +100,50 @@ function AppShellContent() {
   useEffect(() => {
     void getHealth().catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+
+    const dialog = mobileDialogRef.current;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const focusableSelector = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(focusableSelector) || []);
+    focusable()[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMobileOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const items = focusable();
+      if (items.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
+  }, [mobileOpen]);
 
   const toggleCollapsed = () => {
     setCollapsed((current) => {
@@ -117,12 +162,12 @@ function AppShellContent() {
       </aside>
 
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Workspace navigation">
-          <button className="absolute inset-0 bg-black/60 backdrop-blur-sm" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />
+        <div ref={mobileDialogRef} className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Workspace navigation">
+          <button tabIndex={-1} className="absolute inset-0 backdrop-blur-sm" style={{ backgroundColor: 'var(--color-modal-scrim)' }} aria-label="Close navigation" onClick={() => setMobileOpen(false)} />
           <aside className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[340px] flex-col border-r shadow-2xl" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
             <SidebarContent collapsed={false} onToggleCollapsed={toggleCollapsed} userName={userName} isClerkEnabled={isClerkEnabled} activeJobs={activeJobCount} mobile onNavigate={() => setMobileOpen(false)} />
           </aside>
-          <button className="absolute left-[calc(min(86vw,340px)+0.75rem)] top-4 flex h-11 w-11 items-center justify-center rounded-full border bg-black/30 text-white backdrop-blur" style={{ borderColor: 'rgba(255,255,255,0.25)' }} onClick={() => setMobileOpen(false)} aria-label="Close navigation">
+          <button className="absolute left-[calc(min(86vw,340px)+0.75rem)] top-4 flex h-11 w-11 items-center justify-center rounded-full border backdrop-blur" style={{ backgroundColor: 'var(--color-modal-control)', borderColor: 'var(--color-modal-control-border)', color: 'var(--color-on-brand)' }} onClick={() => setMobileOpen(false)} aria-label="Close navigation">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -149,7 +194,7 @@ function AppShellContent() {
                 </Link>
               )}
               {location.pathname !== '/app/new' && (
-                <Link to="/app/new" className="hidden min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:-translate-y-0.5 sm:inline-flex" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+                <Link to="/app/new" className="hidden min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold transition hover:-translate-y-0.5 sm:inline-flex" style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)' }}>
                   <Plus className="h-4 w-4" /> Add media
                 </Link>
               )}
@@ -185,8 +230,8 @@ function SidebarContent({ collapsed, onToggleCollapsed, userName, isClerkEnabled
     <div className="flex h-full flex-col p-3">
       <div className={`flex items-center gap-3 border-b pb-4 ${collapsed ? 'justify-center' : 'px-2'}`} style={{ borderColor: 'var(--color-border)' }}>
         <Link to="/app" onClick={onNavigate} className="flex min-h-11 min-w-0 items-center gap-3 rounded-2xl focus-visible:outline-none">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-lg shadow-black/10" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-            <FileText className="h-5 w-5 text-white" />
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-500)', boxShadow: 'var(--shadow-brand-action)' }}>
+            <FileText className="h-5 w-5" style={{ color: 'var(--color-on-brand)' }} />
           </div>
           {!collapsed && <div className="min-w-0"><p className="truncate text-base font-semibold tracking-tight">Media Tools</p><p className="truncate text-xs" style={{ color: 'var(--color-text-muted)' }}>Private workspace</p></div>}
         </Link>
@@ -199,7 +244,7 @@ function SidebarContent({ collapsed, onToggleCollapsed, userName, isClerkEnabled
         <button className="mx-auto mt-3 flex h-11 w-11 items-center justify-center rounded-xl border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Expand sidebar"><PanelLeftOpen className="h-4 w-4" /></button>
       )}
 
-      <Link to="/app/new" onClick={onNavigate} title={collapsed ? 'Add media' : undefined} className={`mt-4 flex min-h-12 items-center rounded-2xl font-semibold text-white shadow-lg shadow-black/10 transition hover:-translate-y-0.5 ${collapsed ? 'justify-center' : 'gap-3 px-4'}`} style={{ backgroundColor: 'var(--color-brand-500)' }}>
+      <Link to="/app/new" onClick={onNavigate} title={collapsed ? 'Add media' : undefined} className={`mt-4 flex min-h-12 items-center rounded-2xl font-semibold transition hover:-translate-y-0.5 ${collapsed ? 'justify-center' : 'gap-3 px-4'}`} style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)', boxShadow: 'var(--shadow-brand-action)' }}>
         <FilePlus2 className="h-5 w-5 shrink-0" />
         {!collapsed && <><span>Add media</span><ChevronRight className="ml-auto h-4 w-4 opacity-70" /></>}
       </Link>
@@ -228,7 +273,7 @@ function MobileBottomNav({ activeJobs }: { activeJobs: number }) {
           return (
             <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => `relative flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 text-[0.65rem] font-semibold transition ${isAdd ? '-mt-5' : ''} ${isActive ? 'text-[var(--color-brand-500)]' : 'text-[var(--color-text-muted)]'}`}>
               {isAdd ? (
-                <span className="flex h-13 w-13 items-center justify-center rounded-2xl text-white shadow-xl shadow-black/20" style={{ backgroundColor: 'var(--color-brand-500)' }}><Icon className="h-6 w-6" /></span>
+                <span className="flex h-13 w-13 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)', boxShadow: 'var(--shadow-floating-action)' }}><Icon className="h-6 w-6" /></span>
               ) : (
                 <span className="relative"><Icon className="h-5 w-5" />{item.to === '/app/processing' && activeJobs > 0 && <span className="absolute -right-2 -top-1 h-2.5 w-2.5 rounded-full bg-[var(--color-brand-500)] ring-2 ring-[var(--color-mobile-nav-bg)]" />}</span>
               )}
