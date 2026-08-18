@@ -27,6 +27,7 @@ const DeveloperPage = lazy(() => import('./pages/DeveloperPage').then((module) =
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })))
 const ProcessingPage = lazy(() => import('./pages/ProcessingPage').then((module) => ({ default: module.ProcessingPage })))
 const ItemDetailPage = lazy(() => import('./pages/ItemDetailPage').then((module) => ({ default: module.ItemDetailPage })))
+const CreatePage = lazy(() => import('./pages/CreatePage').then((module) => ({ default: module.CreatePage })))
 
 if (!isClerkEnabled) {
   console.warn('Clerk not configured — using local API-key development mode. Add VITE_CLERK_PUBLISHABLE_KEY to .env.local for browser auth.')
@@ -63,6 +64,7 @@ function AppRoutes() {
         }
       >
         <Route index element={<DashboardPage />} />
+        <Route path="new" element={<CreatePage />} />
         <Route path="video" element={<HomePage />} />
         <Route path="audio" element={<AudioPage />} />
         <Route path="pdf" element={<PdfPage />} />

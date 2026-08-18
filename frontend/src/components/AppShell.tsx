@@ -1,20 +1,20 @@
-import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react';
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentType } from 'react';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   Activity,
-  BookOpen,
   Boxes,
   ChevronRight,
   Code2,
+  FilePlus2,
   FileText,
   FolderOpen,
   Home,
   Library,
   ListTodo,
   Menu,
-  Mic,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
   Settings,
   X,
 } from 'lucide-react';
@@ -27,25 +27,24 @@ const CLERK_CONFIGURED = Boolean(
   import.meta.env.VITE_CLERK_PUBLISHABLE_KEY && import.meta.env.VITE_CLERK_PUBLISHABLE_KEY !== 'YOUR_PUBLISHABLE_KEY'
 );
 const LazyClerkUserButton = CLERK_CONFIGURED
-  ? lazy(() => import('./ClerkUserButton').then((m) => ({ default: m.ClerkUserButton })))
+  ? lazy(() => import('./ClerkUserButton').then((module) => ({ default: module.ClerkUserButton })))
   : null;
 
 const SIDEBAR_COLLAPSED_KEY = 'mta-app-sidebar-collapsed';
+
 type NavItem = {
   label: string;
+  shortLabel?: string;
   to: string;
   icon: ComponentType<{ className?: string }>;
   end?: boolean;
 };
 
-const primaryNav: NavItem[] = [
-  { label: 'Dashboard', to: '/app', icon: Home, end: true },
-  { label: 'Processing', to: '/app/processing', icon: ListTodo },
-  { label: 'Video', to: '/app/video', icon: FileText },
-  { label: 'Recordings', to: '/app/audio', icon: Mic },
-  { label: 'PDF', to: '/app/pdf', icon: BookOpen },
+const workspaceNav: NavItem[] = [
+  { label: 'Home', to: '/app', icon: Home, end: true },
   { label: 'Library', to: '/app/library', icon: Library },
   { label: 'Collections', to: '/app/collections', icon: FolderOpen },
+  { label: 'Activity', to: '/app/processing', icon: ListTodo },
 ];
 
 const developerNav: NavItem[] = [
@@ -53,74 +52,152 @@ const developerNav: NavItem[] = [
   { label: 'Webhooks', to: '/app/developer/webhooks', icon: Boxes },
 ];
 
-const opsNav: NavItem = { label: 'Ops Health', to: '/app/admin/ops', icon: Activity };
+const opsNav: NavItem = { label: 'Ops health', to: '/app/admin/ops', icon: Activity };
+
+const mobileNav: NavItem[] = [
+  { label: 'Home', to: '/app', icon: Home, end: true },
+  { label: 'Library', to: '/app/library', icon: Library },
+  { label: 'Add', to: '/app/new', icon: Plus },
+  { label: 'Collections', shortLabel: 'Collections', to: '/app/collections', icon: FolderOpen },
+  { label: 'Activity', to: '/app/processing', icon: ListTodo },
+];
+
+type PageContext = { eyebrow: string; title: string };
+
+function getPageContext(pathname: string): PageContext {
+  if (pathname === '/app') return { eyebrow: 'Workspace', title: 'Home' };
+  if (pathname === '/app/new') return { eyebrow: 'Create', title: 'Add media' };
+  if (pathname.startsWith('/app/items/')) return { eyebrow: 'Library', title: 'Media item' };
+  if (pathname.startsWith('/app/library')) return { eyebrow: 'Workspace', title: 'Library' };
+  if (pathname.startsWith('/app/collections/')) return { eyebrow: 'Workspace', title: 'Collection' };
+  if (pathname.startsWith('/app/collections')) return { eyebrow: 'Workspace', title: 'Collections' };
+  if (pathname.startsWith('/app/processing')) return { eyebrow: 'Workspace', title: 'Activity' };
+  if (pathname.startsWith('/app/video')) return { eyebrow: 'Add media', title: 'Video transcript' };
+  if (pathname.startsWith('/app/audio')) return { eyebrow: 'Add media', title: 'Recording or audio' };
+  if (pathname.startsWith('/app/pdf')) return { eyebrow: 'Add media', title: 'PDF document' };
+  if (pathname.startsWith('/app/developer/webhooks')) return { eyebrow: 'Developer', title: 'Webhooks' };
+  if (pathname.startsWith('/app/developer')) return { eyebrow: 'Developer', title: 'API access' };
+  if (pathname.startsWith('/app/admin/ops')) return { eyebrow: 'Operations', title: 'System health' };
+  if (pathname.startsWith('/app/settings')) return { eyebrow: 'Account', title: 'Settings' };
+  return { eyebrow: 'Media Tools', title: 'Workspace' };
+}
 
 export function AppShell() {
   return <LibraryActivityProvider><AppShellContent /></LibraryActivityProvider>;
 }
 
 function AppShellContent() {
+  const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const mobileDialogRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'; } catch { return false; }
   });
   const { user, isClerkEnabled } = useAuthContext();
-  const { activeJobCount: activeJobs } = useLibraryActivity();
+  const { activeJobCount } = useLibraryActivity();
+  const page = getPageContext(location.pathname);
 
   useEffect(() => {
     void getHealth().catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    if (!mobileOpen) return;
+
+    const dialog = mobileDialogRef.current;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const focusableSelector = 'a[href], button:not([disabled]):not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])';
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(focusableSelector) || []);
+    focusable()[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMobileOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const items = focusable();
+      if (items.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
+  }, [mobileOpen]);
+
   const toggleCollapsed = () => {
     setCollapsed((current) => {
       const next = !current;
-      try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next)); } catch { /* ignore */ }
+      try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next)); } catch { /* Best-effort preference. */ }
       return next;
     });
   };
 
+  const userName = user?.name || user?.email || 'Media workspace';
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}>
-      <aside className={`fixed inset-y-0 left-0 z-40 hidden border-r backdrop-blur-xl transition-[width] duration-200 xl:flex xl:flex-col ${collapsed ? 'w-20' : 'w-72'}`} style={{ backgroundColor: 'var(--color-sidebar-bg)', borderColor: 'var(--color-border)' }}>
-        <SidebarContent collapsed={collapsed} onToggleCollapsed={toggleCollapsed} userName={user?.name || user?.email || 'Media workspace'} isClerkEnabled={isClerkEnabled} activeJobs={activeJobs} />
+      <aside className={`fixed inset-y-0 left-0 z-40 hidden border-r backdrop-blur-xl transition-[width] duration-200 lg:flex lg:flex-col ${collapsed ? 'w-20' : 'w-64'}`} style={{ backgroundColor: 'var(--color-sidebar-bg)', borderColor: 'var(--color-border)' }}>
+        <SidebarContent collapsed={collapsed} onToggleCollapsed={toggleCollapsed} userName={userName} isClerkEnabled={isClerkEnabled} activeJobs={activeJobCount} />
       </aside>
 
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 xl:hidden" role="dialog" aria-modal="true">
-          <button className="absolute inset-0 bg-black/55" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[340px] flex-col border-r" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-            <SidebarContent collapsed={false} onToggleCollapsed={toggleCollapsed} userName={user?.name || user?.email || 'Media workspace'} isClerkEnabled={isClerkEnabled} activeJobs={activeJobs} mobile onNavigate={() => setMobileOpen(false)} />
+        <div ref={mobileDialogRef} className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Workspace navigation">
+          <button tabIndex={-1} className="absolute inset-0 backdrop-blur-sm" style={{ backgroundColor: 'var(--color-modal-scrim)' }} aria-label="Close navigation" onClick={() => setMobileOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[340px] flex-col border-r shadow-2xl" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+            <SidebarContent collapsed={false} onToggleCollapsed={toggleCollapsed} userName={userName} isClerkEnabled={isClerkEnabled} activeJobs={activeJobCount} mobile onNavigate={() => setMobileOpen(false)} />
           </aside>
-          <button className="absolute left-[calc(min(86vw,340px)+0.75rem)] top-4 flex h-11 w-11 items-center justify-center rounded-full border bg-white/10 text-white backdrop-blur" style={{ borderColor: 'rgba(255,255,255,0.25)' }} onClick={() => setMobileOpen(false)} aria-label="Close navigation">
+          <button className="absolute left-[calc(min(86vw,340px)+0.75rem)] top-4 flex h-11 w-11 items-center justify-center rounded-full border backdrop-blur" style={{ backgroundColor: 'var(--color-modal-control)', borderColor: 'var(--color-modal-control-border)', color: 'var(--color-on-brand)' }} onClick={() => setMobileOpen(false)} aria-label="Close navigation">
             <X className="h-5 w-5" />
           </button>
         </div>
       )}
 
-      <div className={`transition-[padding] duration-200 ${collapsed ? 'xl:pl-20' : 'xl:pl-72'}`}>
+      <div className={`transition-[padding] duration-200 ${collapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
         <header className="sticky top-0 z-30 border-b backdrop-blur-xl" style={{ backgroundColor: 'var(--color-header-bg)', borderColor: 'var(--color-border)' }}>
-          <div className="flex h-16 items-center justify-between gap-3 px-4 sm:px-6">
-            <button className="inline-flex h-11 w-11 items-center justify-center rounded-xl border transition-colors hover:bg-[var(--color-nav-hover)] xl:hidden" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={() => setMobileOpen(true)} aria-label="Open navigation">
-              <Menu className="h-5 w-5" />
-            </button>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--color-text-muted)' }}>Media Tools</p>
-              <p className="hidden truncate text-sm sm:block" style={{ color: 'var(--color-text-secondary)' }}>Capture, summarize, organize, and chat with media.</p>
+          <div className="flex h-16 items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
+            <div className="flex min-w-0 items-center gap-3">
+              <button className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors hover:bg-[var(--color-nav-hover)] lg:hidden" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={() => setMobileOpen(true)} aria-label="Open navigation">
+                <Menu className="h-5 w-5" />
+              </button>
+              <div className="min-w-0">
+                <p className="truncate text-[0.65rem] font-semibold uppercase tracking-[0.2em]" style={{ color: 'var(--color-text-muted)' }}>{page.eyebrow}</p>
+                <p className="truncate text-base font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>{page.title}</p>
+              </div>
             </div>
             <div className="flex items-center gap-2">
-              {activeJobs > 0 && <Link to="/app/processing" className="hidden min-h-11 items-center gap-2 rounded-xl border px-3 text-xs font-semibold sm:inline-flex" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}><span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-brand-500)] opacity-50" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--color-brand-500)]" /></span>{activeJobs} active</Link>}
-              <details className="group relative hidden sm:block">
-                <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-                  <FileText className="h-4 w-4" />
-                  New
-                  <ChevronRight className="h-4 w-4 rotate-90 transition-transform group-open:-rotate-90" />
-                </summary>
-                <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-56 rounded-2xl border p-2 shadow-2xl" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-                  <NewItemLink to="/app/video" icon={FileText} label="Video transcript" />
-                  <NewItemLink to="/app/audio" icon={Mic} label="Recording or audio" />
-                  <NewItemLink to="/app/pdf" icon={BookOpen} label="PDF document" />
-                </div>
-              </details>
+              {activeJobCount > 0 && (
+                <Link to="/app/processing" className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-3 text-xs font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface-elevated)' }}>
+                  <span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-brand-500)] opacity-50" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--color-brand-500)]" /></span>
+                  <span className="hidden sm:inline">{activeJobCount} active</span>
+                  <span className="sm:hidden">{activeJobCount}</span>
+                </Link>
+              )}
+              {location.pathname !== '/app/new' && (
+                <Link to="/app/new" className="hidden min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold transition hover:-translate-y-0.5 sm:inline-flex" style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)' }}>
+                  <Plus className="h-4 w-4" /> Add media
+                </Link>
+              )}
               {LazyClerkUserButton && (
                 <Suspense fallback={<div className="h-11 w-11 rounded-full" style={{ backgroundColor: 'var(--color-surface-overlay)' }} />}>
                   <LazyClerkUserButton />
@@ -130,20 +207,13 @@ function AppShellContent() {
           </div>
         </header>
 
-        <main className="min-h-[calc(100vh-4rem)] px-4 py-5 sm:px-6 sm:py-7 xl:px-8">
+        <main className="min-h-[calc(100vh-4rem)] px-4 pb-28 pt-5 sm:px-6 sm:pt-7 lg:px-8 lg:pb-8">
           <Outlet />
         </main>
       </div>
-    </div>
-  );
-}
 
-function NewItemLink({ to, icon: Icon, label }: { to: string; icon: ComponentType<{ className?: string }>; label: string }) {
-  return (
-    <Link to={to} className="flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition hover:bg-[var(--color-nav-hover)]">
-      <Icon className="h-4 w-4 text-[var(--color-brand-500)]" />
-      {label}
-    </Link>
+      <MobileBottomNav activeJobs={activeJobCount} />
+    </div>
   );
 }
 
@@ -159,86 +229,73 @@ function SidebarContent({ collapsed, onToggleCollapsed, userName, isClerkEnabled
   return (
     <div className="flex h-full flex-col p-3">
       <div className={`flex items-center gap-3 border-b pb-4 ${collapsed ? 'justify-center' : 'px-2'}`} style={{ borderColor: 'var(--color-border)' }}>
-        <Link to="/app" onClick={onNavigate} className="flex min-h-11 items-center gap-3 rounded-2xl focus-visible:outline-none">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-            <FileText className="h-5 w-5 text-white" />
+        <Link to="/app" onClick={onNavigate} className="flex min-h-11 min-w-0 items-center gap-3 rounded-2xl focus-visible:outline-none">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-500)', boxShadow: 'var(--shadow-brand-action)' }}>
+            <FileText className="h-5 w-5" style={{ color: 'var(--color-on-brand)' }} />
           </div>
-          {!collapsed && (
-            <div className="min-w-0">
-              <p className="truncate text-base font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>Media Tools</p>
-              <p className="truncate text-xs" style={{ color: 'var(--color-text-muted)' }}>Private workspace</p>
-            </div>
-          )}
+          {!collapsed && <div className="min-w-0"><p className="truncate text-base font-semibold tracking-tight">Media Tools</p><p className="truncate text-xs" style={{ color: 'var(--color-text-muted)' }}>Private workspace</p></div>}
         </Link>
         {!mobile && !collapsed && (
-          <button className="ml-auto hidden h-11 w-11 items-center justify-center rounded-xl border text-sm transition-colors hover:bg-[var(--color-nav-hover)] xl:flex" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Collapse sidebar">
-            <PanelLeftClose className="h-4 w-4" />
-          </button>
+          <button className="ml-auto hidden h-11 w-11 items-center justify-center rounded-xl border transition-colors hover:bg-[var(--color-nav-hover)] lg:flex" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Collapse sidebar"><PanelLeftClose className="h-4 w-4" /></button>
         )}
       </div>
 
       {!mobile && collapsed && (
-        <button className="mx-auto mt-3 flex h-11 w-11 items-center justify-center rounded-xl border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Expand sidebar">
-          <PanelLeftOpen className="h-4 w-4" />
-        </button>
+        <button className="mx-auto mt-3 flex h-11 w-11 items-center justify-center rounded-xl border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Expand sidebar"><PanelLeftOpen className="h-4 w-4" /></button>
       )}
 
-      <nav className="mt-5 flex flex-1 flex-col gap-1 overflow-y-auto">
-        <NavSection items={primaryNav} collapsed={collapsed} onNavigate={onNavigate} activeJobs={activeJobs} />
+      <Link to="/app/new" onClick={onNavigate} title={collapsed ? 'Add media' : undefined} className={`mt-4 flex min-h-12 items-center rounded-2xl font-semibold transition hover:-translate-y-0.5 ${collapsed ? 'justify-center' : 'gap-3 px-4'}`} style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)', boxShadow: 'var(--shadow-brand-action)' }}>
+        <FilePlus2 className="h-5 w-5 shrink-0" />
+        {!collapsed && <><span>Add media</span><ChevronRight className="ml-auto h-4 w-4 opacity-70" /></>}
+      </Link>
+
+      <nav className="mt-4 flex flex-1 flex-col gap-1 overflow-y-auto" aria-label="Workspace">
+        <NavSection items={workspaceNav} collapsed={collapsed} onNavigate={onNavigate} activeJobs={activeJobs} />
         <Divider collapsed={collapsed} label="Developer" />
         <NavSection items={isClerkEnabled ? developerNav : [...developerNav, opsNav]} collapsed={collapsed} onNavigate={onNavigate} />
       </nav>
 
       <div className={`mt-4 border-t pt-4 ${collapsed ? 'px-0' : 'px-2'}`} style={{ borderColor: 'var(--color-border)' }}>
-        <NavLink to="/app/settings" onClick={onNavigate} className={({ isActive }) => navClass(isActive, collapsed)} title="Settings">
-          <Settings className="h-5 w-5 shrink-0" />
-          {!collapsed && <span>Settings</span>}
-        </NavLink>
-        {!collapsed && (
-          <div className="mt-4 rounded-2xl border p-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}>
-            <p className="truncate text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{userName}</p>
-            <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>{isClerkEnabled ? 'Signed in with Clerk' : 'API key development mode'}</p>
-          </div>
-        )}
+        <NavLink to="/app/settings" onClick={onNavigate} className={({ isActive }) => navClass(isActive, collapsed)} title="Settings"><Settings className="h-5 w-5 shrink-0" />{!collapsed && <span>Settings</span>}</NavLink>
+        {!collapsed && <div className="mt-3 rounded-2xl border p-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}><p className="truncate text-sm font-semibold">{userName}</p><p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>{isClerkEnabled ? 'Signed in with Clerk' : 'API key development mode'}</p></div>}
       </div>
     </div>
   );
 }
 
-function NavSection({ items, collapsed, onNavigate, activeJobs = 0 }: { items: NavItem[]; collapsed: boolean; onNavigate?: () => void; activeJobs?: number }) {
+function MobileBottomNav({ activeJobs }: { activeJobs: number }) {
   return (
-    <div className="space-y-1">
-      {items.map((item) => {
-        const Icon = item.icon;
-        return (
-          <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={({ isActive }) => navClass(isActive, collapsed)} title={collapsed ? item.label : undefined}>
-            <Icon className="h-5 w-5 shrink-0" />
-            {!collapsed && <span>{item.label}</span>}
-            {!collapsed && item.to === '/app/processing' && activeJobs > 0 && <span className="ml-auto rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>{activeJobs}</span>}
-            {!collapsed && !(item.to === '/app/processing' && activeJobs > 0) && <ChevronRight className="ml-auto h-4 w-4 opacity-50" />}
-            {collapsed && item.to === '/app/processing' && activeJobs > 0 && <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[var(--color-brand-500)] ring-2 ring-[var(--color-sidebar-bg)]" />}
-          </NavLink>
-        );
-      })}
-    </div>
+    <nav className="fixed inset-x-0 bottom-0 z-40 border-t px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl lg:hidden" style={{ backgroundColor: 'var(--color-mobile-nav-bg)', borderColor: 'var(--color-border)' }} aria-label="Primary">
+      <div className="mx-auto grid max-w-xl grid-cols-5">
+        {mobileNav.map((item) => {
+          const Icon = item.icon;
+          const isAdd = item.to === '/app/new';
+          return (
+            <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => `relative flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 text-[0.65rem] font-semibold transition ${isAdd ? '-mt-5' : ''} ${isActive ? 'text-[var(--color-brand-500)]' : 'text-[var(--color-text-muted)]'}`}>
+              {isAdd ? (
+                <span className="flex h-13 w-13 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)', boxShadow: 'var(--shadow-floating-action)' }}><Icon className="h-6 w-6" /></span>
+              ) : (
+                <span className="relative"><Icon className="h-5 w-5" />{item.to === '/app/processing' && activeJobs > 0 && <span className="absolute -right-2 -top-1 h-2.5 w-2.5 rounded-full bg-[var(--color-brand-500)] ring-2 ring-[var(--color-mobile-nav-bg)]" />}</span>
+              )}
+              <span className={isAdd ? 'text-[var(--color-brand-500)]' : 'truncate'}>{item.shortLabel || item.label}</span>
+            </NavLink>
+          );
+        })}
+      </div>
+    </nav>
   );
+}
+
+function NavSection({ items, collapsed, onNavigate, activeJobs = 0 }: { items: NavItem[]; collapsed: boolean; onNavigate?: () => void; activeJobs?: number }) {
+  return <div className="space-y-1">{items.map((item) => { const Icon = item.icon; return <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={({ isActive }) => navClass(isActive, collapsed)} title={collapsed ? item.label : undefined}><Icon className="h-5 w-5 shrink-0" />{!collapsed && <span>{item.label}</span>}{!collapsed && item.to === '/app/processing' && activeJobs > 0 ? <span className="ml-auto rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>{activeJobs}</span> : !collapsed && <ChevronRight className="ml-auto h-4 w-4 opacity-40" />}{collapsed && item.to === '/app/processing' && activeJobs > 0 && <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[var(--color-brand-500)] ring-2 ring-[var(--color-sidebar-bg)]" />}</NavLink>; })}</div>;
 }
 
 function Divider({ collapsed, label }: { collapsed: boolean; label: string }) {
-  if (collapsed) {
-    return <div className="my-4 h-px" style={{ backgroundColor: 'var(--color-border)' }} />;
-  }
-  return (
-    <div className="px-3 pb-1 pt-5 text-[0.65rem] font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--color-text-muted)' }}>
-      {label}
-    </div>
-  );
+  if (collapsed) return <div className="my-4 h-px" style={{ backgroundColor: 'var(--color-border)' }} />;
+  return <div className="px-3 pb-1 pt-5 text-[0.65rem] font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--color-text-muted)' }}>{label}</div>;
 }
 
 function navClass(isActive: boolean, collapsed: boolean) {
-  const base = collapsed
-    ? 'group relative flex min-h-11 items-center justify-center rounded-2xl transition'
-    : 'group flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm font-medium transition';
-
-	return `${base} ${isActive ? 'bg-[var(--color-brand-500)] text-white shadow-lg shadow-black/15' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-nav-hover)] hover:text-[var(--color-text-primary)]'}`;
+  const base = collapsed ? 'group relative flex min-h-11 items-center justify-center rounded-2xl transition' : 'group flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm font-medium transition';
+  return `${base} ${isActive ? 'bg-[var(--color-nav-active)] text-[var(--color-brand-600)] dark:text-[var(--color-brand-400)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-nav-hover)] hover:text-[var(--color-text-primary)]'}`;
 }
