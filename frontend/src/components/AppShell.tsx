@@ -109,7 +109,7 @@ function AppShellContent() {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
-    const focusableSelector = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusableSelector = 'a[href], button:not([disabled]):not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])';
     const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(focusableSelector) || []);
     focusable()[0]?.focus();
 
