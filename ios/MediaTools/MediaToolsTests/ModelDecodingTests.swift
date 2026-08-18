@@ -147,6 +147,27 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(audio.collectionItemType, "audio")
     }
 
+    func testSpotlightIdentifiersMatchLegacyAndUnifiedMediaPrefixes() {
+        XCTAssertEqual(
+            SpotlightService.libraryIdentifier(
+                for: LibraryReference(itemType: "youtube", itemId: "video-id")
+            ),
+            "transcript-video-id"
+        )
+        XCTAssertEqual(
+            SpotlightService.libraryIdentifier(
+                for: LibraryReference(itemType: "audio", itemId: "audio-id")
+            ),
+            "audio-audio-id"
+        )
+        XCTAssertEqual(
+            SpotlightService.libraryIdentifier(
+                for: LibraryReference(itemType: "pdf", itemId: "pdf-id")
+            ),
+            "pdf-pdf-id"
+        )
+    }
+
     func testDetailNavigationDoesNotEquateDifferentMediaTypesWithTheSameID() throws {
         let transcript = try APIClient.makeDecoder().decode(
             Transcript.self,

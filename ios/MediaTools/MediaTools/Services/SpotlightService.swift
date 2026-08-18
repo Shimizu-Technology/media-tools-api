@@ -5,6 +5,15 @@ import UniformTypeIdentifiers
 
 /// Index transcripts in iOS Spotlight for system-wide search.
 enum SpotlightService {
+    /// Keep identifier construction in one place so indexing and deletion can
+    /// never drift. YouTube rows intentionally retain the legacy transcript
+    /// prefix to replace entries created by older app versions.
+    static func libraryIdentifier(for reference: LibraryReference) -> String {
+        reference.itemType == "youtube"
+            ? "transcript-\(reference.itemId)"
+            : "\(reference.itemType)-\(reference.itemId)"
+    }
+
     /// Index lightweight rows from the unified library. This keeps system
     /// search current without downloading every full transcript just to render
     /// the library screen.
@@ -29,15 +38,22 @@ enum SpotlightService {
                 // Preserve the identifiers used by the earlier per-media
                 // indexers so an app update replaces entries instead of
                 // leaving duplicate Spotlight results behind.
-                uniqueIdentifier: item.itemType == "youtube"
-                    ? "transcript-\(item.id)"
-                    : "\(item.itemType)-\(item.id)",
+                uniqueIdentifier: libraryIdentifier(for: item.reference),
                 domainIdentifier: "com.shimizu-technology.media-tools.library",
                 attributeSet: attributes
             )
         }
 
         CSSearchableIndex.default().indexSearchableItems(searchableItems)
+    }
+
+    /// Remove successfully deleted media from system search immediately. An
+    /// index update only upserts current rows; it does not infer that an item
+    /// omitted from the latest page was permanently deleted.
+    static func removeLibraryItems(_ references: [LibraryReference]) {
+        let identifiers = references.map(libraryIdentifier(for:))
+        guard !identifiers.isEmpty else { return }
+        CSSearchableIndex.default().deleteSearchableItems(withIdentifiers: identifiers)
     }
 
     /// Index a batch of transcripts for Spotlight search.

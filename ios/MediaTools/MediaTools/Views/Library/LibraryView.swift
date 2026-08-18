@@ -644,6 +644,7 @@ struct LibraryView: View {
 
         items.removeAll { deleted.contains($0.reference) }
         totalItems = max(0, totalItems - deleted.count)
+        SpotlightService.removeLibraryItems(Array(deleted))
         updateSystemIntegrations(Array(items.prefix(20)), for: query)
         selectedReferences = Set(failed)
         if failed.isEmpty {
