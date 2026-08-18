@@ -198,7 +198,7 @@ struct RecordView: View {
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .tint(Theme.brand500)
-                                .disabled(isUploading)
+                                .disabled(isUploading || recorder.isStarting)
 
                                 Button {
                                     withAnimation(Theme.springSnappy) {
@@ -209,6 +209,7 @@ struct RecordView: View {
                                 }
                                 .buttonStyle(.bordered)
                                 .tint(Theme.error)
+                                .disabled(isUploading || recorder.isStarting)
                             }
                         }
                         .cardStyle()
@@ -352,7 +353,7 @@ struct RecordView: View {
                             .foregroundStyle(Theme.textSecondary)
                     }
                     .frame(minHeight: 44)
-                    .disabled(isUploading || recorder.isRecording)
+                    .disabled(isUploading || recorder.isRecording || recorder.isStarting)
                     .padding(.bottom, 20)
                     .fileImporter(
                         isPresented: $showFilePicker,
@@ -545,10 +546,17 @@ final class AudioRecorderService {
 
     private func startRecording(session: AVAudioSession) {
         defer { isStarting = false }
-        discard()
+        let previousRecordingURL = recordingURL
         do {
+            let bluetoothInput: AVAudioSession.CategoryOptions
+            #if compiler(>=6.2)
+            bluetoothInput = .allowBluetoothHFP
+            #else
+            // Xcode 16.4's iOS 18 SDK uses the pre-rename spelling.
+            bluetoothInput = .allowBluetooth
+            #endif
             try session.setCategory(
-                .playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
+                .playAndRecord, mode: .default, options: [.defaultToSpeaker, bluetoothInput])
             try session.setActive(true)
         } catch {
             errorMessage = "Could not start the audio session: \(error.localizedDescription)"
@@ -567,11 +575,19 @@ final class AudioRecorderService {
         ]
 
         do {
-            audioRecorder = try AVAudioRecorder(url: url, settings: settings)
-            audioRecorder?.isMeteringEnabled = true
-            guard audioRecorder?.record() == true else {
+            let replacementRecorder = try AVAudioRecorder(url: url, settings: settings)
+            replacementRecorder.isMeteringEnabled = true
+            guard replacementRecorder.record() else {
                 throw APIError.invalidFile(message: "The recorder could not start.")
             }
+
+            // Keep the previous take recoverable until the replacement has
+            // actually started. A permission, session, or recorder failure must
+            // never destroy audio that was already ready to upload.
+            if let previousRecordingURL, previousRecordingURL != url {
+                try? FileManager.default.removeItem(at: previousRecordingURL)
+            }
+            audioRecorder = replacementRecorder
             recordingURL = url
             isRecording = true
             duration = 0
@@ -583,6 +599,8 @@ final class AudioRecorderService {
                 }
             }
         } catch {
+            audioRecorder = nil
+            try? FileManager.default.removeItem(at: url)
             errorMessage = "Recording failed: \(error.localizedDescription)"
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
         }

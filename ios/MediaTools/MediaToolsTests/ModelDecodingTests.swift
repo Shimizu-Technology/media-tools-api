@@ -102,4 +102,23 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertFalse(APIError.httpError(statusCode: 400, message: "Invalid").isRetryable)
         XCTAssertFalse(APIError.invalidFile(message: "Empty").isRetryable)
     }
+
+    func testMultipartFallbackOnlyHandlesUnavailablePresigning() {
+        XCTAssertTrue(
+            APIError.httpError(statusCode: 503, code: "storage_unavailable", message: "No storage")
+                .permitsMultipartUploadFallback
+        )
+        XCTAssertTrue(
+            APIError.httpError(statusCode: 404, message: "Unknown endpoint")
+                .permitsMultipartUploadFallback
+        )
+        XCTAssertFalse(
+            APIError.httpError(statusCode: 401, code: "unauthorized", message: "Sign in")
+                .permitsMultipartUploadFallback
+        )
+        XCTAssertFalse(
+            APIError.httpError(statusCode: 429, code: "rate_limited", message: "Slow down")
+                .permitsMultipartUploadFallback
+        )
+    }
 }

@@ -256,10 +256,15 @@ actor APIClient {
             throw APIError.invalidResponse
         }
         guard (200...299).contains(http.statusCode) else {
-            let message = (try? JSONDecoder().decode(ErrorResponse.self, from: data))?.message
+            let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data)
+            let message = errorResponse?.message
                 ?? String(data: data, encoding: .utf8)
                 ?? "Unknown error"
-            throw APIError.httpError(statusCode: http.statusCode, message: message)
+            throw APIError.httpError(
+                statusCode: http.statusCode,
+                code: errorResponse?.error,
+                message: message
+            )
         }
     }
 }
@@ -269,7 +274,7 @@ actor APIClient {
 enum APIError: LocalizedError {
     case invalidResponse
     case invalidFile(message: String)
-    case httpError(statusCode: Int, message: String)
+    case httpError(statusCode: Int, code: String? = nil, message: String)
 
     var errorDescription: String? {
         switch self {
@@ -277,8 +282,8 @@ enum APIError: LocalizedError {
             return "Invalid server response"
         case .invalidFile(let message):
             return message
-        case .httpError(let code, let message):
-            return "HTTP \(code): \(message)"
+        case .httpError(let statusCode, _, let message):
+            return "HTTP \(statusCode): \(message)"
         }
     }
 
@@ -288,8 +293,19 @@ enum APIError: LocalizedError {
             return true
         case .invalidFile:
             return false
-        case .httpError(let statusCode, _):
+        case .httpError(let statusCode, _, _):
             return statusCode == 408 || statusCode == 429 || statusCode >= 500
+        }
+    }
+
+    var permitsMultipartUploadFallback: Bool {
+        switch self {
+        case .httpError(let statusCode, let code, _):
+            // A 404 keeps the current app compatible with older/self-hosted
+            // servers that support multipart upload but predate presigning.
+            return statusCode == 404 || code == "storage_unavailable"
+        default:
+            return false
         }
     }
 }

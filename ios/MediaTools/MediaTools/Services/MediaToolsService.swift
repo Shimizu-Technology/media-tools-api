@@ -83,7 +83,7 @@ final class MediaToolsService {
                     sizeBytes: size.int64Value
                 )
             )
-        } catch {
+        } catch let apiError as APIError where apiError.permitsMultipartUploadFallback {
             // Local and self-hosted environments may intentionally omit S3.
             // Preserve that supported deployment mode with a streaming server
             // upload instead of loading the recording into memory.
@@ -93,6 +93,8 @@ final class MediaToolsService {
                 mimeType: mimeType,
                 contentType: contentType
             )
+        } catch {
+            throw error
         }
 
         // Once this request begins, never fall back to a second upload path.
