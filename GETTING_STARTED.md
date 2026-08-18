@@ -19,7 +19,7 @@ Neither is better — they're different tools for different jobs.
 
 - **Fast** — Compiles to a single binary, runs without an interpreter
 - **Simple** — 25 keywords (Ruby has 41). Small language, quick to learn
-- **Concurrent** — Goroutines make background workers trivial (our worker pool is ~100 lines)
+- **Concurrent** — Goroutines make bounded background work straightforward; PostgreSQL keeps accepted jobs durable
 - **Great for APIs** — First-class HTTP support, low memory usage, fast cold starts
 - **Learning** — It's a valuable skill, especially for systems and API work
 
@@ -74,7 +74,7 @@ media-tools-api/              ← Root IS the backend (Go convention)
 | Routes | `config/routes.rb` | `internal/router/router.go` |
 | Controllers | `app/controllers/` | `internal/handlers/` |
 | Models | `app/models/` | `internal/models/models.go` |
-| Database queries | ActiveRecord | `internal/database/database.go` (raw SQL) |
+| Database queries | ActiveRecord | `internal/database/` (domain-focused raw SQL files) |
 | Business logic | `app/services/` | `internal/services/` |
 | Migrations | `db/migrate/` | `migrations/` |
 | Background jobs | Sidekiq / Active Job | `internal/services/worker/` (goroutine pool) |
@@ -94,7 +94,7 @@ In Go, the convention is that the repository root IS the Go module. The `fronten
 
 ### Prerequisites
 
-- **Go 1.25+** — Check: `go version`
+- **Go 1.25.6** — Check: `go version`
 - **PostgreSQL** — Check: `psql --version`
 - **Node.js 22+** — Check: `node --version`
 - **yt-dlp** (optional, for YouTube transcripts) — `brew install yt-dlp`
@@ -260,7 +260,8 @@ err := db.GetContext(ctx, &user, `SELECT * FROM users WHERE email = $1`, "leon@e
 
 **Why?** Go philosophy: be explicit. You always know exactly what SQL is running. No N+1 surprises.
 
-Our SQL lives in `internal/database/database.go`. The `db:"column_name"` tags on structs tell sqlx how to map columns to fields.
+Our SQL is organized by domain in `internal/database/`. The
+`db:"column_name"` tags on structs tell sqlx how to map columns to fields.
 
 ### No Implicit Returns — Error Handling
 
@@ -331,7 +332,10 @@ go func() {
 }()
 ```
 
-Our worker pool (`internal/services/worker/`) manages a fixed number of goroutines processing jobs from a channel (Go's built-in message queue). No Redis, no Sidekiq, no external dependencies.
+Our worker pool (`internal/services/worker/`) uses goroutines to claim durable
+jobs stored in PostgreSQL. A small in-process signal channel wakes workers, but
+PostgreSQL—not process memory—is the source of truth, so accepted work can be
+recovered after a server restart. No Redis or Sidekiq is required.
 
 ### Middleware — Same Concept, Different Syntax
 
@@ -485,19 +489,13 @@ curl http://localhost:8080/api/v1/audio/transcriptions/TRANSCRIPTION_ID/export?f
 
 ---
 
-## Available AI Models (via OpenRouter)
+## AI Model Configuration
 
-OpenRouter gives you one API key for all models. Set the default in `.env` or override per-request:
-
-| Model | Best For | Cost |
-|-------|----------|------|
-| `google/gemini-2.5-flash` | Fast, smart, cheap — good default | ~$0.15/M input |
-| `deepseek/deepseek-chat` | Excellent quality, very cheap | ~$0.14/M input |
-| `anthropic/claude-sonnet-4-20250514` | Best structured output | ~$3/M input |
-| `openai/gpt-4o` | Solid all-rounder | ~$2.50/M input |
-| `openai/gpt-4o-mini` | Cheapest, good for testing | ~$0.15/M input |
-
-Browse all models: [openrouter.ai/models](https://openrouter.ai/models)
+OpenRouter provides the default summary and interactive-chat models. Configure
+them with `OPENROUTER_MODEL` and `OPENROUTER_CHAT_MODEL`; do not hard-code model
+pricing or availability into application documentation because provider
+catalogs change. `OPENAI_SUMMARY_FALLBACK_MODEL` is used only when an eligible
+OpenRouter request cannot be served.
 
 ---
 
@@ -526,7 +524,8 @@ Browse all models: [openrouter.ai/models](https://openrouter.ai/models)
 ## Next Steps
 
 - **Read `README.md`** for full API endpoint documentation
-- **Read `BUILD_PLAN.md`** for the architecture breakdown
+- **Read `docs/SYSTEM_OVERVIEW.md`** for the current product and architecture
+- **Read `SECURITY.md`** before configuring or rotating credentials
 - **Explore `internal/`** — start with `router/router.go` (all routes) and `handlers/` (all endpoints)
 - **Try the Swagger docs** — run the server and visit `http://localhost:8080/api/docs`
 

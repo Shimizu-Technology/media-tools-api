@@ -1,5 +1,8 @@
 # Zoom Recordings — Phase 1 Plan
 
+> Historical plan. Manual `.m4a` and `.mp4` recording ingestion now ships
+> through the audio workflow; this is not the current product roadmap.
+
 ## Goal
 
 Allow Media Tools API to accept Zoom meeting recordings in Phase 1 without creating a separate Zoom-only product surface.

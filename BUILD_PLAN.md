@@ -1,5 +1,10 @@
 # Media Tools API — Build Plan
 
+> Historical implementation plan for the original MVP. It is retained for
+> context, not as a current feature checklist. See
+> [`docs/SYSTEM_OVERVIEW.md`](docs/SYSTEM_OVERVIEW.md) and executable tests for
+> the present system.
+
 ## Phase 1: Core MVP
 
 ### MTA-1: Project Scaffolding ✅

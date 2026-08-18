@@ -4,6 +4,15 @@ A media processing API for YouTube transcripts, recording transcription, PDF ext
 
 **Live Demo:** [media-tools-gu.netlify.app](https://media-tools-gu.netlify.app)
 
+Media Tools exists to turn source material into a durable private workspace,
+not a one-time conversion result. A video, recording, or PDF becomes a
+searchable item that can be summarized, questioned with citations, organized,
+and retrieved later from the web app, native iPhone app, or API.
+
+Read [the system overview](docs/SYSTEM_OVERVIEW.md) for the product model,
+end-to-end workflows, architecture, ownership, and current boundaries. See
+[the security guide](SECURITY.md) before handling credentials or deployment.
+
 ## Features
 
 - **YouTube Transcripts** — Paste a URL, get the full transcript with metadata
@@ -23,8 +32,8 @@ A media processing API for YouTube transcripts, recording transcription, PDF ext
 
 ```
 ┌─────────────┐     ┌──────────────────────┐     ┌─────────────┐
-│   React UI  │────>│    Go API (Gin)       │────>│ PostgreSQL  │
-│  Vite + TS  │<────│  /api/v1/*            │<────│   Database  │
+│ React + iOS │────>│    Go API (Gin)       │────>│ PostgreSQL  │
+│ + API users │<────│  /api/v1/*            │<────│   Database  │
 └─────────────┘     └──────────┬───────────┘     └─────────────┘
                                │
                     ┌──────────┴───────────┐
@@ -44,8 +53,9 @@ A media processing API for YouTube transcripts, recording transcription, PDF ext
 ```
 
 **Tech Stack:**
-- **Backend:** Go 1.25+ with Gin framework
+- **Backend:** Go 1.25.6 with Gin framework
 - **Frontend:** React 19 + Vite + TypeScript + Tailwind CSS v4 + Framer Motion
+- **Native:** SwiftUI for iOS 18.5+
 - **Database:** PostgreSQL 16
 - **AI Summaries:** OpenRouter API (GPT-4o, Claude, Gemini, etc.)
 - **Audio Transcription:** OpenAI Whisper API
@@ -73,7 +83,7 @@ docker compose up --build -d
 ## Quick Start (Manual)
 
 ```bash
-# Prerequisites: Go 1.25+, PostgreSQL, Node.js 22+, yt-dlp
+# Prerequisites: Go 1.25.6, PostgreSQL 16, Node.js 22+, yt-dlp
 
 # 1. Clone and setup
 git clone https://github.com/Shimizu-Technology/media-tools-api.git
@@ -96,9 +106,10 @@ make frontend-dev
 make gate
 ```
 
-`make gate` checks Go formatting, vet, and race tests; frontend lint, build,
-and production dependencies; and, on macOS with Xcode, the native iOS build
-and test suite.
+`make gate` scans committed history and the current non-ignored worktree for
+credentials, checks Go formatting/vet/race tests, verifies frontend
+lint/build/production dependencies, and, on macOS with Xcode, builds, tests,
+installs, and launches the native iOS app.
 
 ## API Documentation
 
@@ -234,8 +245,8 @@ not copy its hard-coded identity into future migrations.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `JWT_SECRET` | Yes | 32+ char random string |
-| `ADMIN_API_KEY` | Yes | Secret key for bootstrap API key creation |
+| `JWT_SECRET` | Yes | Independent random value, minimum 32 characters |
+| `ADMIN_API_KEY` | Yes | Independent bootstrap key, minimum 32 characters |
 | `CLERK_SECRET_KEY` | Browser auth | Clerk Backend API key for syncing signed-in users |
 | `CLERK_JWKS_URL` | Browser auth | Clerk JWKS URL for validating signed-in users |
 | `CLERK_AUTHORIZED_PARTY` | Browser auth | Frontend origin allowed in Clerk token `azp` claim |
@@ -296,6 +307,8 @@ media-tools-api/
 │       └── worker/             # Background job processing
 ├── migrations/                 # SQL migrations
 ├── frontend/                   # React app
+├── ios/                        # Native SwiftUI app and tests
+├── docs/                       # Current system documentation
 ├── Dockerfile                  # Production container
 └── docker-compose.yml          # Local development
 ```
@@ -318,6 +331,7 @@ make run               # Run the server
 make docker-up         # Start Docker stack
 make frontend-dev      # Start frontend dev server
 make test              # Run tests
+make security-scan     # Scan Git history and non-ignored worktree files
 make gate              # Run the complete repository verification gate
 make health            # Check API health
 ```

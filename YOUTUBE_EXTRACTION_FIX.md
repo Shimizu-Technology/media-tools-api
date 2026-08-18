@@ -1,5 +1,8 @@
 # YouTube Extraction Fix Guide
 
+> Operational history, not a timeless provider recommendation. Validate the
+> current yt-dlp/client behavior and proxy policy before changing production.
+
 > **Last Updated:** February 2026  
 > **Status:** Working with residential proxy + `android_vr` client
 

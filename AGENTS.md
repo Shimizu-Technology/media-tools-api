@@ -8,8 +8,9 @@ Media Tools API is a Go + React monorepo for YouTube transcripts, audio transcri
 
 ## Tech Stack
 
-- **Backend:** Go 1.21+ with Gin framework
-- **Frontend:** React 18 + Vite + TypeScript + Tailwind CSS v4 + Framer Motion
+- **Backend:** Go 1.25.6 with Gin framework
+- **Frontend:** React 19 + Vite + TypeScript + Tailwind CSS v4 + Framer Motion
+- **Native:** SwiftUI for iOS 18.5+
 - **Database:** PostgreSQL 16 with golang-migrate (hosted on Neon)
 - **AI Summaries:** OpenRouter API (multi-model LLM access)
 - **Audio Transcription:** OpenAI Whisper API
