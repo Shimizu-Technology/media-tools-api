@@ -3,13 +3,11 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -41,7 +39,9 @@ func main() {
 	log.Printf("📋 Config loaded: port=%s, workers=%d, gin_mode=%s", cfg.Port, cfg.WorkerCount, cfg.GinMode)
 	log.Printf("🔧 yt-dlp path: %s", cfg.YtDlpPath)
 
-	os.Setenv("GIN_MODE", cfg.GinMode)
+	if err := os.Setenv("GIN_MODE", cfg.GinMode); err != nil {
+		log.Fatalf("❌ Failed to set Gin mode: %v", err)
+	}
 
 	// Step 2: Connect to Database
 	dbURL := cfg.DatabaseURL
@@ -81,14 +81,12 @@ func main() {
 	}
 	cookiesPath := cfg.YtDlpCookiesFile
 	if cookiesPath == "" && cfg.YtDlpCookiesBase64 != "" {
-		decoded, err := base64.StdEncoding.DecodeString(cfg.YtDlpCookiesBase64)
+		var cleanupCookies func()
+		cookiesPath, cleanupCookies, err = materializeCookieFile(cfg.YtDlpCookiesBase64)
 		if err != nil {
-			log.Fatalf("❌ Failed to decode YT_DLP_COOKIES_B64: %v", err)
+			log.Fatalf("❌ Failed to prepare YT_DLP_COOKIES_B64: %v", err)
 		}
-		cookiesPath = filepath.Join(os.TempDir(), "mta-yt-dlp-cookies.txt")
-		if err := os.WriteFile(cookiesPath, decoded, 0600); err != nil {
-			log.Fatalf("❌ Failed to write yt-dlp cookies file: %v", err)
-		}
+		defer cleanupCookies()
 	}
 	if cookiesPath != "" {
 		extractor.SetCookiesFile(cookiesPath)
@@ -150,46 +148,50 @@ func main() {
 	wp.SetTranscriptionConcurrency(cfg.WhisperChunkConcurrency, cfg.WhisperGlobalConcurrency)
 	wp.Start()
 
-	recoveredTranscripts, err := wp.RecoverTranscriptJobs(context.Background(), 200)
-	if err != nil {
-		log.Printf("⚠️  Transcript job recovery failed: %v", err)
-	} else if recoveredTranscripts > 0 {
-		log.Printf("♻️  Requeued %d recoverable transcript job(s) on startup", recoveredTranscripts)
-	}
-
-	summaryRecoveryCtx, stopSummaryRecovery := context.WithCancel(context.Background())
-	summaryRecoveryDone := make(chan struct{})
+	recoveryCtx, stopRecovery := context.WithCancel(context.Background())
+	recoveryDone := make(chan struct{})
 	go func() {
-		defer close(summaryRecoveryDone)
-		// Summary generation can take minutes. Recover in the background so a
-		// large backlog never delays health checks or server startup. The parent
-		// context is canceled during shutdown so recovery cannot race pool closure.
-		ctx, cancel := context.WithTimeout(summaryRecoveryCtx, 10*time.Minute)
-		defer cancel()
-		recoveredSummaries, recoveryErr := wp.RecoverSummaryJobs(ctx, 200)
+		defer close(recoveryDone)
+		// Recovery repairs any legacy/interrupted resource that is missing its
+		// durable queue row. It runs behind server startup so a backlog cannot
+		// delay health checks, and shutdown cancellation stops every database
+		// call and SubmitBlocking operation before the worker pool closes.
+		recoveredTranscripts, recoveryErr := wp.RecoverTranscriptJobs(recoveryCtx, 200)
 		if recoveryErr != nil {
-			if summaryRecoveryCtx.Err() == nil {
+			if recoveryCtx.Err() == nil {
+				log.Printf("⚠️  Transcript job recovery failed: %v", recoveryErr)
+			}
+		} else if recoveredTranscripts > 0 {
+			log.Printf("♻️  Requeued %d recoverable transcript job(s) on startup", recoveredTranscripts)
+		}
+
+		recoveredAudio, recoveryErr := wp.RecoverAudioJobs(recoveryCtx, 200)
+		if recoveryErr != nil {
+			if recoveryCtx.Err() == nil {
+				log.Printf("⚠️  Audio job recovery failed: %v", recoveryErr)
+			}
+		} else if recoveredAudio > 0 {
+			log.Printf("♻️  Requeued %d recoverable audio job(s) on startup", recoveredAudio)
+		}
+
+		recoveredSummaries, recoveryErr := wp.RecoverSummaryJobs(recoveryCtx, 200)
+		if recoveryErr != nil {
+			if recoveryCtx.Err() == nil {
 				log.Printf("⚠️  Summary job recovery failed: %v", recoveryErr)
 			}
 		} else if recoveredSummaries > 0 {
 			log.Printf("♻️  Requeued %d recoverable summary job(s) on startup", recoveredSummaries)
 		}
-		recoveredAudioSummaries, recoveryErr := wp.RecoverAudioSummaryJobs(ctx, 200)
+
+		recoveredAudioSummaries, recoveryErr := wp.RecoverAudioSummaryJobs(recoveryCtx, 200)
 		if recoveryErr != nil {
-			if summaryRecoveryCtx.Err() == nil {
+			if recoveryCtx.Err() == nil {
 				log.Printf("⚠️  Audio summary job recovery failed: %v", recoveryErr)
 			}
 		} else if recoveredAudioSummaries > 0 {
 			log.Printf("♻️  Requeued %d recoverable audio summary job(s) on startup", recoveredAudioSummaries)
 		}
 	}()
-
-	requeued, err := wp.RecoverAudioJobs(context.Background(), 200)
-	if err != nil {
-		log.Printf("⚠️  Audio job recovery failed: %v", err)
-	} else if requeued > 0 {
-		log.Printf("♻️  Requeued %d recoverable audio job(s) on startup", requeued)
-	}
 
 	if cfg.LegacyAuthEnabled {
 		log.Println("⚠️  Legacy email/password auth routes are enabled")
@@ -206,6 +208,7 @@ func main() {
 
 	// Step 5: Setup HTTP Router
 	r := router.Setup(router.RouterConfig{
+		Version:                     Version,
 		DB:                          db,
 		WorkerPool:                  wp,
 		AudioTranscriber:            audioTranscriber,
@@ -256,7 +259,7 @@ func main() {
 
 	sig := <-quit
 	log.Printf("🛑 Received signal %v, shutting down gracefully...", sig)
-	stopSummaryRecovery()
+	stopRecovery()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -268,7 +271,7 @@ func main() {
 	// Stop producers before their consumer. HTTP handlers finish first, then
 	// startup recovery, background workers and their webhook dispatch goroutines,
 	// and finally the webhook service drains its accepted queue into auditable outcomes.
-	<-summaryRecoveryDone
+	<-recoveryDone
 	wp.Stop()
 	webhookService.Shutdown()
 	log.Println("✅ Background jobs and webhook deliveries stopped")

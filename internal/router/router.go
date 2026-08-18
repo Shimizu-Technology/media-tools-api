@@ -12,6 +12,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/handlers"
 	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
+	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
@@ -22,6 +23,8 @@ import (
 // RouterConfig holds all dependencies for the router setup.
 // Avoids a fragile 13-parameter function signature.
 type RouterConfig struct {
+	// Version is the build identifier exposed by health endpoints.
+	Version                     string
 	DB                          *database.DB
 	WorkerPool                  *worker.Pool
 	AudioTranscriber            *audio.Transcriber
@@ -46,16 +49,20 @@ type RouterConfig struct {
 
 // Setup creates and configures the Gin router with all routes.
 func Setup(cfg RouterConfig) *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
 
 	// Keep multipart parsing memory bounded; larger uploads are streamed to temp files.
 	r.MaxMultipartMemory = 120 << 20
 
+	r.Use(middleware.RequestID())
+	r.Use(middleware.AccessLog())
+	r.Use(middleware.Recovery())
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.LimitJSONBody())
 	r.Use(middleware.CORS(cfg.AllowedOrigins))
 
 	h := handlers.NewHandler(cfg.DB, cfg.WorkerPool, cfg.AudioTranscriber, cfg.AudioStorage, cfg.Webhooks, cfg.Summarizer, cfg.JWTSecret, cfg.AdminAPIKey, cfg.OwnerKeyID, cfg.OwnerKeyPrefix, cfg.YtDlpCookiesConfigured)
+	h.Version = cfg.Version
 	rateLimiter := middleware.NewRateLimiter(
 		cfg.OwnerKeyID,
 		cfg.OwnerKeyPrefix,
@@ -194,35 +201,39 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	// This is the Go equivalent of Rails' public/ directory — any request
 	// that doesn't match an API route gets the React app.
 	frontendDir := "frontend/dist"
-	if _, err := os.Stat(frontendDir); err == nil {
+	frontendAvailable := false
+	if info, err := os.Stat(frontendDir); err == nil && info.IsDir() {
+		frontendAvailable = true
 		// Serve static assets (JS, CSS, images)
 		r.Static("/assets", filepath.Join(frontendDir, "assets"))
+	}
 
-		// Serve the SPA index.html for all non-API routes.
-		// If the request maps to a built root asset (manifest, icons, robots.txt,
-		// sitemap.xml, etc.), serve that file instead of returning index.html.
-		// This keeps Docker-hosted PWA/SEO assets working the same way Netlify does.
-		r.NoRoute(func(c *gin.Context) {
-			// Don't serve index.html for API routes — return proper 404
-			if strings.HasPrefix(c.Request.URL.Path, "/api/") {
-				c.JSON(http.StatusNotFound, gin.H{"error": "not_found", "message": "API endpoint not found"})
-				return
-			}
+	// Serve the SPA index.html for all non-API routes when a production build is
+	// bundled. API misses always keep the documented error contract, including
+	// local/test deployments where frontend/dist is absent.
+	r.NoRoute(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") || !frontendAvailable {
+			c.JSON(http.StatusNotFound, models.ErrorResponse{
+				Error:   "not_found",
+				Message: "Endpoint not found",
+				Code:    http.StatusNotFound,
+			})
+			return
+		}
 
-			cleanPath := strings.TrimPrefix(filepath.Clean(c.Request.URL.Path), string(filepath.Separator))
-			if cleanPath != "." && cleanPath != "" {
-				candidate := filepath.Join(frontendDir, cleanPath)
-				if rel, err := filepath.Rel(frontendDir, candidate); err == nil && !strings.HasPrefix(rel, "..") {
-					if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-						c.File(candidate)
-						return
-					}
+		cleanPath := strings.TrimPrefix(filepath.Clean(c.Request.URL.Path), string(filepath.Separator))
+		if cleanPath != "." && cleanPath != "" {
+			candidate := filepath.Join(frontendDir, cleanPath)
+			if rel, err := filepath.Rel(frontendDir, candidate); err == nil && !strings.HasPrefix(rel, "..") {
+				if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+					c.File(candidate)
+					return
 				}
 			}
+		}
 
-			c.File(filepath.Join(frontendDir, "index.html"))
-		})
-	}
+		c.File(filepath.Join(frontendDir, "index.html"))
+	})
 
 	return r
 }
