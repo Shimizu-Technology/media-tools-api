@@ -1,9 +1,61 @@
 import Foundation
 import CoreSpotlight
 import MobileCoreServices
+import UniformTypeIdentifiers
 
 /// Index transcripts in iOS Spotlight for system-wide search.
 enum SpotlightService {
+    /// Keep identifier construction in one place so indexing and deletion can
+    /// never drift. YouTube rows intentionally retain the legacy transcript
+    /// prefix to replace entries created by older app versions.
+    static func libraryIdentifier(for reference: LibraryReference) -> String {
+        reference.itemType == "youtube"
+            ? "transcript-\(reference.itemId)"
+            : "\(reference.itemType)-\(reference.itemId)"
+    }
+
+    /// Index lightweight rows from the unified library. This keeps system
+    /// search current without downloading every full transcript just to render
+    /// the library screen.
+    static func indexLibraryItems(_ items: [LibraryListItem]) {
+        let searchableItems = items.compactMap { item -> CSSearchableItem? in
+            guard item.status == "completed" else { return nil }
+
+            let contentType: UTType = switch item.itemType {
+            case "audio": .audio
+            case "pdf": .pdf
+            default: .text
+            }
+            let attributes = CSSearchableItemAttributeSet(contentType: contentType)
+            attributes.title = item.title
+            attributes.contentDescription = item.subtitle
+            attributes.keywords = item.tags + [item.itemType, "media tools"]
+            if item.itemType == "audio", item.duration > 0 {
+                attributes.duration = NSNumber(value: item.duration)
+            }
+
+            return CSSearchableItem(
+                // Preserve the identifiers used by the earlier per-media
+                // indexers so an app update replaces entries instead of
+                // leaving duplicate Spotlight results behind.
+                uniqueIdentifier: libraryIdentifier(for: item.reference),
+                domainIdentifier: "com.shimizu-technology.media-tools.library",
+                attributeSet: attributes
+            )
+        }
+
+        CSSearchableIndex.default().indexSearchableItems(searchableItems)
+    }
+
+    /// Remove successfully deleted media from system search immediately. An
+    /// index update only upserts current rows; it does not infer that an item
+    /// omitted from the latest page was permanently deleted.
+    static func removeLibraryItems(_ references: [LibraryReference]) {
+        let identifiers = references.map(libraryIdentifier(for:))
+        guard !identifiers.isEmpty else { return }
+        CSSearchableIndex.default().deleteSearchableItems(withIdentifiers: identifiers)
+    }
+
     /// Index a batch of transcripts for Spotlight search.
     static func indexTranscripts(_ transcripts: [Transcript]) {
         let items = transcripts.compactMap { transcript -> CSSearchableItem? in

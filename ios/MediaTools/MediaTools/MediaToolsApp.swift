@@ -19,10 +19,15 @@ struct MediaToolsApp: App {
     @ViewBuilder
     private var rootView: some View {
         #if DEBUG
-        // A deterministic, authentication-free launch mode lets UI tests and manual
-        // simulator reviews exercise recording without authenticating. Release
-        // builds do not contain this branch.
-        if ProcessInfo.processInfo.arguments.contains("-ui-test-record") {
+        // Deterministic, authentication-free launch modes let UI tests and
+        // manual simulator reviews exercise core screens. Release builds do
+        // not contain these branches or their sample library data.
+        if ProcessInfo.processInfo.arguments.contains("-ui-test-library") {
+            NavigationStack {
+                LibraryView(previewItems: LibraryListItem.uiTestSamples)
+            }
+            .preferredColorScheme(.dark)
+        } else if ProcessInfo.processInfo.arguments.contains("-ui-test-record") {
             NavigationStack {
                 RecordView()
             }
