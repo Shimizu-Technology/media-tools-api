@@ -1,7 +1,13 @@
 package handlers
 
 import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
@@ -51,5 +57,42 @@ func TestParseAudioContentType(t *testing.T) {
 				t.Fatalf("parseAudioContentType(%q) = (%q, %v), want (%q, %v)", tt.value, got, valid, tt.expected, tt.valid)
 			}
 		})
+	}
+}
+
+func TestWriteCompletedAudioUploadResponseReplaysAcceptedTranscription(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	existing := &models.AudioTranscription{ID: "audio-123", Status: "pending"}
+
+	writeCompletedAudioUploadResponse(context, existing, nil)
+
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusAccepted)
+	}
+	var response models.AudioTranscription
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.ID != existing.ID {
+		t.Fatalf("response id = %q, want %q", response.ID, existing.ID)
+	}
+}
+
+func TestWriteCompletedAudioUploadResponseConflictsWithoutTranscription(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+
+	writeCompletedAudioUploadResponse(context, nil, errors.New("not found"))
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+	var response models.ErrorResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Error != "upload_already_completed" {
+		t.Fatalf("error = %q, want upload_already_completed", response.Error)
 	}
 }

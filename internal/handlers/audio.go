@@ -447,15 +447,7 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		existing, findErr := h.DB.GetAudioTranscriptionByS3KeyForActor(
 			c.Request.Context(), req.ObjectKey, actor.UserID, actor.APIKeyID,
 		)
-		if findErr != nil {
-			c.JSON(http.StatusConflict, models.ErrorResponse{
-				Error:   "upload_already_completed",
-				Message: "Upload session has already been completed",
-				Code:    http.StatusConflict,
-			})
-			return
-		}
-		c.JSON(http.StatusAccepted, existing)
+		writeCompletedAudioUploadResponse(c, existing, findErr)
 		return
 	}
 	objectInfo, err := h.AudioStorage.HeadObject(c.Request.Context(), req.ObjectKey)
@@ -494,11 +486,14 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 	}
 	if err := h.DB.CompleteAudioUploadAndCreateTranscription(c.Request.Context(), session.ID, at); err != nil {
 		if errors.Is(err, database.ErrAudioUploadSessionNotPending) {
-			c.JSON(http.StatusConflict, models.ErrorResponse{
-				Error:   "upload_already_completed",
-				Message: "Upload session has already been completed",
-				Code:    http.StatusConflict,
-			})
+			// A concurrent completion request can read the session while it is
+			// still pending, then lose the conditional update after the winning
+			// transaction commits. At that point the upload succeeded, so replay
+			// the winner's response instead of surfacing a misleading conflict.
+			existing, findErr := h.DB.GetAudioTranscriptionByS3KeyForActor(
+				c.Request.Context(), req.ObjectKey, actor.UserID, actor.APIKeyID,
+			)
+			writeCompletedAudioUploadResponse(c, existing, findErr)
 		} else {
 			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 				Error:   "database_error",
@@ -539,6 +534,22 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusAccepted, at)
+}
+
+// writeCompletedAudioUploadResponse keeps duplicate completion behavior the
+// same whether the request observes a completed session immediately or loses a
+// concurrent conditional update. A missing transcription is the only case that
+// remains a conflict because the server cannot safely reconstruct the response.
+func writeCompletedAudioUploadResponse(c *gin.Context, existing *models.AudioTranscription, findErr error) {
+	if findErr != nil || existing == nil {
+		c.JSON(http.StatusConflict, models.ErrorResponse{
+			Error:   "upload_already_completed",
+			Message: "Upload session has already been completed",
+			Code:    http.StatusConflict,
+		})
+		return
+	}
+	c.JSON(http.StatusAccepted, existing)
 }
 
 // GetAudioTranscription retrieves a single audio transcription by ID.
