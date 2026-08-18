@@ -56,6 +56,14 @@ func isSupportedAudioListStatus(status string) bool {
 	}
 }
 
+func parseAudioContentType(value string) (models.AudioContentType, bool) {
+	contentType := models.AudioContentType(strings.TrimSpace(value))
+	if contentType == "" {
+		contentType = models.ContentGeneral
+	}
+	return contentType, models.ValidContentTypes[contentType]
+}
+
 // maxAudioSize is the max upload size for audio and recording files.
 // 2GB keeps room for very long recordings while chunking handles Whisper limits.
 const maxAudioSize = 2 << 30
@@ -70,6 +78,7 @@ type AudioUploadCompleteRequest struct {
 	ObjectKey    string `json:"object_key" binding:"required"`
 	OriginalName string `json:"original_name" binding:"required"`
 	SizeBytes    int64  `json:"size_bytes"`
+	ContentType  string `json:"content_type"`
 }
 
 // TranscribeAudio handles audio/recording file upload and queues transcription job.
@@ -132,6 +141,15 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "invalid_file_type",
 			Message: fmt.Sprintf("Unsupported upload format '%s'. Supported formats: %s", ext, supportedTranscriptionUploadFormats),
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+	contentType, validContentType := parseAudioContentType(c.PostForm("content_type"))
+	if !validContentType {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_content_type",
+			Message: "content_type must be general, phone_call, meeting, voice_memo, interview, or lecture",
 			Code:    http.StatusBadRequest,
 		})
 		return
@@ -199,6 +217,7 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		AudioS3Size:        audioS3Size,
 		ProcessingStage:    "queued",
 		ProcessingProgress: 0,
+		ContentType:        contentType,
 		UserID:             actor.UserID,
 		APIKeyID:           actor.APIKeyID,
 	}
@@ -256,7 +275,7 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	c.JSON(http.StatusAccepted, at)
 }
 
-// PresignAudioUpload returns a short-lived S3 URL for direct browser upload.
+// PresignAudioUpload returns a short-lived S3 URL for direct client upload.
 // POST /api/v1/audio/uploads/presign
 func (h *Handler) PresignAudioUpload(c *gin.Context) {
 	actor := getActorWriteOwnership(c)
@@ -295,7 +314,6 @@ func (h *Handler) PresignAudioUpload(c *gin.Context) {
 		})
 		return
 	}
-
 	ext := strings.ToLower(filepath.Ext(req.Filename))
 	if !isSupportedTranscriptionUploadExt(ext) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
@@ -398,6 +416,15 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		})
 		return
 	}
+	contentType, validContentType := parseAudioContentType(req.ContentType)
+	if !validContentType {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_content_type",
+			Message: "content_type must be general, phone_call, meeting, voice_memo, interview, or lecture",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
 
 	session, err := h.DB.GetAudioUploadSessionForActor(c.Request.Context(), req.ObjectKey, actor.UserID, actor.APIKeyID)
 	if err != nil {
@@ -414,6 +441,21 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 			Message: "Upload completion does not match the presigned upload session",
 			Code:    http.StatusBadRequest,
 		})
+		return
+	}
+	if session.Status == "completed" {
+		existing, findErr := h.DB.GetAudioTranscriptionByS3KeyForActor(
+			c.Request.Context(), req.ObjectKey, actor.UserID, actor.APIKeyID,
+		)
+		if findErr != nil {
+			c.JSON(http.StatusConflict, models.ErrorResponse{
+				Error:   "upload_already_completed",
+				Message: "Upload session has already been completed",
+				Code:    http.StatusConflict,
+			})
+			return
+		}
+		c.JSON(http.StatusAccepted, existing)
 		return
 	}
 	objectInfo, err := h.AudioStorage.HeadObject(c.Request.Context(), req.ObjectKey)
@@ -446,6 +488,7 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		AudioS3Size:        req.SizeBytes,
 		ProcessingStage:    "queued",
 		ProcessingProgress: 0,
+		ContentType:        contentType,
 		UserID:             session.UserID,
 		APIKeyID:           session.APIKeyID,
 	}

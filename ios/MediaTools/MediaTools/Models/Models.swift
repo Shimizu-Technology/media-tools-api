@@ -46,6 +46,9 @@ struct AudioTranscription: Identifiable, Codable {
     let filename: String?
     let originalName: String?
     let errorMessage: String?
+    let processingStage: String?
+    let processingProgress: Int?
+    let qualityWarning: String?
     let summaryText: String?
     let keyPoints: [String]?
     let actionItems: [String]?
@@ -62,6 +65,38 @@ struct AudioTranscription: Identifiable, Codable {
     var isComplete: Bool {
         status == "completed"
     }
+
+    var processingDescription: String {
+        switch processingStage {
+        case "queued": "Waiting to start"
+        case "preparing", "normalizing": "Preparing audio"
+        case "splitting": "Splitting long recording"
+        case "transcribing": "Transcribing audio"
+        case "stitching", "finalizing": "Finalizing transcript"
+        default: status == "pending" ? "Waiting to start" : "Processing transcription"
+        }
+    }
+}
+
+struct AudioUploadPresignRequest: Codable {
+    let filename: String
+    let contentType: String
+    let sizeBytes: Int64
+}
+
+struct AudioUploadPresignResponse: Codable {
+    let uploadUrl: URL
+    let objectKey: String
+    let storedName: String
+    let uploadId: String
+    let expiresIn: String
+}
+
+struct AudioUploadCompleteRequest: Codable {
+    let objectKey: String
+    let originalName: String
+    let sizeBytes: Int64
+    let contentType: String
 }
 
 // MARK: - PDFs

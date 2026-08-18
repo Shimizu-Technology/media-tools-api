@@ -57,21 +57,110 @@ final class MediaToolsService {
     }
 
     func getAudioItem(_ id: String) async throws -> AudioTranscription {
-        try await api.get("/audio/transcriptions/\(id)")
+        let item: AudioTranscription = try await api.get("/audio/transcriptions/\(id)")
+        upsertAudioItem(item)
+        return item
     }
 
-    func uploadAudio(data: Data, filename: String, contentType: String = "general") async throws -> AudioTranscription {
-        try await api.upload(
-            "/audio/transcribe",
-            fileData: data,
-            filename: filename,
-            mimeType: "audio/m4a",
-            fields: ["content_type": contentType]
+    func uploadAudio(
+        fileURL: URL,
+        filename: String,
+        mimeType: String,
+        contentType: String = "general"
+    ) async throws -> AudioTranscription {
+        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        guard let size = attributes[.size] as? NSNumber, size.int64Value > 0 else {
+            throw APIError.invalidFile(message: "The selected recording is empty.")
+        }
+
+        let presign: AudioUploadPresignResponse
+        do {
+            presign = try await api.post(
+                "/audio/uploads/presign",
+                body: AudioUploadPresignRequest(
+                    filename: filename,
+                    contentType: mimeType,
+                    sizeBytes: size.int64Value
+                )
+            )
+        } catch {
+            // Local and self-hosted environments may intentionally omit S3.
+            // Preserve that supported deployment mode with a streaming server
+            // upload instead of loading the recording into memory.
+            return try await uploadAudioThroughAPI(
+                fileURL: fileURL,
+                filename: filename,
+                mimeType: mimeType,
+                contentType: contentType
+            )
+        }
+
+        // Once this request begins, never fall back to a second upload path.
+        // A lost response can still mean object storage accepted the file, and
+        // falling back at that point could create duplicate transcription jobs.
+        try await api.putFile(at: fileURL, to: presign.uploadUrl, mimeType: mimeType)
+
+        let completion = AudioUploadCompleteRequest(
+            objectKey: presign.objectKey,
+            originalName: filename,
+            sizeBytes: size.int64Value,
+            contentType: contentType
         )
+        var completionError: Error?
+        for attempt in 0..<3 {
+            do {
+                let item: AudioTranscription = try await api.post(
+                    "/audio/uploads/complete",
+                    body: completion
+                )
+                upsertAudioItem(item)
+                return item
+            } catch {
+                completionError = error
+                if let apiError = error as? APIError, !apiError.isRetryable {
+                    throw error
+                }
+                if attempt < 2 {
+                    try await Task.sleep(for: .seconds(attempt + 1))
+                }
+            }
+        }
+        throw completionError ?? APIError.invalidResponse
+    }
+
+    func retryAudioItem(_ id: String) async throws -> AudioTranscription {
+        let item: AudioTranscription = try await api.post(
+            "/audio/transcriptions/\(id)/retry",
+            body: EmptyResponse()
+        )
+        upsertAudioItem(item)
+        return item
     }
 
     func deleteAudioItem(_ id: String) async throws {
         try await api.delete("/audio/transcriptions/\(id)")
+    }
+
+    private func uploadAudioThroughAPI(
+        fileURL: URL,
+        filename: String,
+        mimeType: String,
+        contentType: String
+    ) async throws -> AudioTranscription {
+        let item: AudioTranscription = try await api.uploadFile(
+            "/audio/transcribe",
+            fileURL: fileURL,
+            filename: filename,
+            mimeType: mimeType,
+            fields: ["content_type": contentType]
+        )
+        upsertAudioItem(item)
+        return item
+    }
+
+    private func upsertAudioItem(_ item: AudioTranscription) {
+        audioItems.removeAll { $0.id == item.id }
+        audioItems.insert(item, at: 0)
     }
 
     // MARK: - PDFs

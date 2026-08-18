@@ -36,4 +36,70 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "CFBundleExecutable"))
         XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion"))
     }
+
+    func testAudioProcessingStateDecodesIntoUsefulProgressCopy() throws {
+        let data = Data(
+            #"{"id":"audio-1","status":"processing","processing_stage":"splitting","processing_progress":35}"#
+                .utf8)
+        let item = try APIClient.makeDecoder().decode(AudioTranscription.self, from: data)
+
+        XCTAssertEqual(item.processingStage, "splitting")
+        XCTAssertEqual(item.processingProgress, 35)
+        XCTAssertEqual(item.processingDescription, "Splitting long recording")
+    }
+
+    func testAudioUploadCompletionEncodesSemanticContentType() throws {
+        let request = AudioUploadCompleteRequest(
+            objectKey: "audio/user/upload.m4a",
+            originalName: "Team sync.m4a",
+            sizeBytes: 42,
+            contentType: "meeting"
+        )
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoder.encode(request)) as? [String: Any]
+        )
+
+        XCTAssertEqual(object["object_key"] as? String, "audio/user/upload.m4a")
+        XCTAssertEqual(object["content_type"] as? String, "meeting")
+        XCTAssertEqual(object["size_bytes"] as? Int, 42)
+    }
+
+    func testMultipartAudioBodyStreamsFileAndSanitizesFilename() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let source = directory.appendingPathComponent("source.m4a")
+        let destination = directory.appendingPathComponent("body.upload")
+        let sourceBytes = Data([0x00, 0x01, 0x7F, 0xFF])
+        try sourceBytes.write(to: source)
+
+        try APIClient.writeMultipartBody(
+            to: destination,
+            sourceURL: source,
+            filename: "memo\"\r\n.m4a",
+            mimeType: "audio/mp4",
+            fields: ["content_type": "voice_memo"],
+            boundary: "test-boundary"
+        )
+
+        let body = try Data(contentsOf: destination)
+        let header = try XCTUnwrap(String(data: body, encoding: .isoLatin1))
+        XCTAssertTrue(header.contains("name=\"content_type\"\r\n\r\nvoice_memo"))
+        XCTAssertTrue(header.contains("filename=\"memo.m4a\""))
+        XCTAssertFalse(header.contains("memo\""))
+        XCTAssertNotNil(body.range(of: sourceBytes))
+        XCTAssertTrue(header.hasSuffix("\r\n--test-boundary--\r\n"))
+    }
+
+    func testAPIErrorsOnlyRetryTransientFailures() {
+        XCTAssertTrue(APIError.invalidResponse.isRetryable)
+        XCTAssertTrue(APIError.httpError(statusCode: 429, message: "Busy").isRetryable)
+        XCTAssertTrue(APIError.httpError(statusCode: 503, message: "Unavailable").isRetryable)
+        XCTAssertFalse(APIError.httpError(statusCode: 400, message: "Invalid").isRetryable)
+        XCTAssertFalse(APIError.invalidFile(message: "Empty").isRetryable)
+    }
 }

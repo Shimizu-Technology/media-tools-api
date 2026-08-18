@@ -1,6 +1,10 @@
 package handlers
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Shimizu-Technology/media-tools-api/internal/models"
+)
 
 func TestIsSupportedTranscriptionUploadExt(t *testing.T) {
 	tests := []struct {
@@ -20,5 +24,32 @@ func TestIsSupportedTranscriptionUploadExt(t *testing.T) {
 		if got := isSupportedTranscriptionUploadExt(tt.ext); got != tt.expected {
 			t.Fatalf("isSupportedTranscriptionUploadExt(%q) = %v, want %v", tt.ext, got, tt.expected)
 		}
+	}
+}
+
+func TestParseAudioContentType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		value    string
+		expected models.AudioContentType
+		valid    bool
+	}{
+		{name: "defaults to general", value: "", expected: models.ContentGeneral, valid: true},
+		{name: "trims a supported value", value: " meeting ", expected: models.ContentMeeting, valid: true},
+		{name: "accepts voice memo", value: "voice_memo", expected: models.ContentVoiceMemo, valid: true},
+		{name: "rejects MIME type", value: "audio/mp4", expected: models.AudioContentType("audio/mp4"), valid: false},
+		{name: "rejects unknown value", value: "podcast", expected: models.AudioContentType("podcast"), valid: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, valid := parseAudioContentType(tt.value)
+			if got != tt.expected || valid != tt.valid {
+				t.Fatalf("parseAudioContentType(%q) = (%q, %v), want (%q, %v)", tt.value, got, valid, tt.expected, tt.valid)
+			}
+		})
 	}
 }

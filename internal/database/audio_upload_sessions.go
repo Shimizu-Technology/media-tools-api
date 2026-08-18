@@ -36,7 +36,6 @@ func (db *DB) GetAudioUploadSessionForActor(ctx context.Context, objectKey strin
 		       status, expires_at, created_at, completed_at
 		FROM audio_upload_sessions
 		WHERE object_key = $1
-		  AND status = 'pending'
 		  AND expires_at > NOW()
 		  AND (($2::uuid IS NOT NULL AND user_id = $2)
 		    OR ($3::uuid IS NOT NULL AND api_key_id = $3))`,
@@ -46,6 +45,31 @@ func (db *DB) GetAudioUploadSessionForActor(ctx context.Context, objectKey strin
 		return nil, fmt.Errorf("audio upload session not found: %w", err)
 	}
 	return &session, nil
+}
+
+// GetAudioTranscriptionByS3KeyForActor returns the job created from an upload
+// session. It makes the completion endpoint idempotent when the first response
+// is lost after the database transaction commits.
+func (db *DB) GetAudioTranscriptionByS3KeyForActor(ctx context.Context, objectKey string, userID, apiKeyID *string) (*models.AudioTranscription, error) {
+	if userID == nil && apiKeyID == nil {
+		return nil, fmt.Errorf("actor is required")
+	}
+
+	var at models.AudioTranscription
+	err := db.GetContext(ctx, &at, `
+		SELECT `+audioTranscriptionSelectColumns+`
+		FROM audio_transcriptions
+		WHERE audio_s3_key = $1
+		  AND (($2::uuid IS NOT NULL AND user_id = $2)
+		    OR ($3::uuid IS NOT NULL AND api_key_id = $3))
+		ORDER BY created_at DESC
+		LIMIT 1`,
+		objectKey, userID, apiKeyID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("audio transcription for upload not found: %w", err)
+	}
+	return &at, nil
 }
 
 // CompleteAudioUploadAndCreateTranscription atomically burns an upload session

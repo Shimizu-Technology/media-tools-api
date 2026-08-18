@@ -12,14 +12,38 @@ struct MediaToolsApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if hasCompletedOnboarding {
-                ContentView()
-                    .environment(Clerk.shared)
-                    .preferredColorScheme(.dark)
-            } else {
-                OnboardingView(isComplete: $hasCompletedOnboarding)
-                    .preferredColorScheme(.dark)
+            rootView
+        }
+    }
+
+    @ViewBuilder
+    private var rootView: some View {
+        #if DEBUG
+        // A deterministic, authentication-free launch mode lets UI tests and manual
+        // simulator reviews exercise recording without authenticating. Release
+        // builds do not contain this branch.
+        if ProcessInfo.processInfo.arguments.contains("-ui-test-record") {
+            NavigationStack {
+                RecordView()
             }
+            .preferredColorScheme(.dark)
+        } else {
+            standardRoot
+        }
+        #else
+        standardRoot
+        #endif
+    }
+
+    @ViewBuilder
+    private var standardRoot: some View {
+        if hasCompletedOnboarding {
+            ContentView()
+                .environment(Clerk.shared)
+                .preferredColorScheme(.dark)
+        } else {
+            OnboardingView(isComplete: $hasCompletedOnboarding)
+                .preferredColorScheme(.dark)
         }
     }
 
