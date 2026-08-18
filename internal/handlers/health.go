@@ -45,8 +45,9 @@ type Handler struct {
 	OwnerAPIKeyID          string                  // Optional owner key ID override
 	OwnerAPIKeyPrefix      string                  // Optional owner key prefix override
 	YtDlpCookiesConfigured bool                    // True when yt-dlp cookies are configured
-	Version                string                  // Build version reported by health endpoints
-	readinessChecker       readinessChecker
+	// Version is the build identifier reported by health endpoints.
+	Version          string
+	readinessChecker readinessChecker
 }
 
 // NewHandler creates a new handler with all dependencies.

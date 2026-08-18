@@ -23,6 +23,7 @@ import (
 // RouterConfig holds all dependencies for the router setup.
 // Avoids a fragile 13-parameter function signature.
 type RouterConfig struct {
+	// Version is the build identifier exposed by health endpoints.
 	Version                     string
 	DB                          *database.DB
 	WorkerPool                  *worker.Pool
