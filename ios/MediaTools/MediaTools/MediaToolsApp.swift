@@ -22,7 +22,11 @@ struct MediaToolsApp: App {
         // Deterministic, authentication-free launch modes let UI tests and
         // manual simulator reviews exercise core screens. Release builds do
         // not contain these branches or their sample library data.
-        if ProcessInfo.processInfo.arguments.contains("-ui-test-library") {
+        if ProcessInfo.processInfo.arguments.contains("-ui-test-main") {
+            MainTabView()
+                .environment(Clerk.shared)
+                .preferredColorScheme(.dark)
+        } else if ProcessInfo.processInfo.arguments.contains("-ui-test-library") {
             NavigationStack {
                 LibraryView(previewItems: LibraryListItem.uiTestSamples)
             }

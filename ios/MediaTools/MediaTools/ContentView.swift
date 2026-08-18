@@ -40,10 +40,8 @@ struct WelcomeView: View {
             Theme.surface.ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 16) {
-                    // Hero
-                    VStack(spacing: 10) {
-                        // Layered circles
+                VStack(spacing: 24) {
+                    VStack(spacing: 16) {
                         ZStack {
                             Circle()
                                 .fill(Theme.brand500.opacity(0.06))
@@ -58,62 +56,72 @@ struct WelcomeView: View {
                                 .foregroundStyle(Theme.brand500)
                         }
 
-                        VStack(spacing: 10) {
+                        VStack(spacing: 8) {
+                            Text("PRIVATE MEDIA WORKSPACE")
+                                .font(Theme.caption(11, weight: .semibold))
+                                .foregroundStyle(Theme.brand400)
+                                .tracking(1.2)
+
                             Text("Media Tools")
                                 .font(Theme.heading(30))
                                 .foregroundStyle(Theme.textPrimary)
 
-                            Text("Transcribe. Organize. Understand.")
+                            Text("Sign in to record, transcribe, and organize your media in one private workspace.")
                                 .font(Theme.body(16))
                                 .foregroundStyle(Theme.textSecondary)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
 
-                    // The whole page scrolls so no feature or action is clipped
-                    // on a compact device.
-                    VStack(spacing: 6) {
+                    VStack(spacing: 12) {
+                        FeatureRow(
+                            icon: "mic.fill",
+                            color: Theme.brand400,
+                            title: "Capture from your phone",
+                            subtitle: "Record live or upload existing audio and video files."
+                        )
                         FeatureRow(
                             icon: "play.rectangle.fill",
                             color: Theme.videoColor,
-                            title: "Video Transcription",
-                            subtitle: "Supported YouTube and Vimeo links"
+                            title: "Bring in videos and PDFs",
+                            subtitle: "Extract text, summaries, and answers from your source."
                         )
                         FeatureRow(
-                            icon: "mic.fill",
-                            color: Theme.audioColor,
-                            title: "Audio Recording",
-                            subtitle: "Record audio and turn it into text"
-                        )
-                        FeatureRow(
-                            icon: "bubble.left.and.bubble.right.fill",
-                            color: .purple,
-                            title: "AI Chat",
-                            subtitle: "Ask questions about your content"
-                        )
-                        FeatureRow(
-                            icon: "folder.fill",
-                            color: .blue,
-                            title: "Collections",
-                            subtitle: "Keep related content organized"
+                            icon: "lock.shield.fill",
+                            color: Theme.success,
+                            title: "Keep work connected",
+                            subtitle: "Reopen everything from your library on web or iPhone."
                         )
                     }
-                    .padding(.horizontal, 32)
+                    .padding(16)
+                    .background(Theme.surfaceCard)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusLarge))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Theme.radiusLarge)
+                            .stroke(Theme.borderSubtle, lineWidth: 1)
+                    }
 
                     Button {
                         showAuth = true
                     } label: {
-                        Text("Get Started")
+                        Label("Sign in", systemImage: "arrow.right")
                             .frame(maxWidth: .infinity)
                     }
                     .brandButtonStyle()
-                    .padding(.horizontal, 32)
+
+                    Text("Your account keeps recordings, transcripts, PDFs, chats, and collections together.")
+                        .font(Theme.caption(12))
+                        .foregroundStyle(Theme.textMuted)
+                        .multilineTextAlignment(.center)
 
                     Text("Powered by Shimizu Technology")
                         .font(Theme.caption(11))
                         .foregroundStyle(Theme.textMuted)
                 }
-                .padding(.top, 12)
-                .padding(.bottom, 20)
+                .padding(.horizontal, 24)
+                .padding(.top, 24)
+                .padding(.bottom, 32)
             }
             .scrollIndicators(.hidden)
         }
@@ -127,13 +135,13 @@ struct FeatureRow: View {
     let subtitle: String
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 16) {
             Image(systemName: icon)
                 .font(.title3)
                 .foregroundStyle(color)
                 .frame(width: 36)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(Theme.body(15, weight: .medium))
                     .foregroundStyle(Theme.textPrimary)

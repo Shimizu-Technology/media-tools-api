@@ -7,9 +7,9 @@ struct OnboardingView: View {
 
     private let pages: [(icon: String, color: Color, title: String, subtitle: String)] = [
         (
-            "waveform.circle.fill", Theme.brand400,
-            "Transcribe Anything",
-            "Paste a supported video URL and save a complete transcript to your workspace."
+            "lock.shield.fill", Theme.brand400,
+            "One Private Workspace",
+            "Keep recordings, video transcripts, PDFs, summaries, chats, and collections connected to your account."
         ),
         (
             "mic.fill", Theme.audioColor,
@@ -17,14 +17,14 @@ struct OnboardingView: View {
             "Capture meetings, lectures, and voice memos, then turn them into searchable text."
         ),
         (
-            "bubble.left.and.bubble.right.fill", Color.purple,
-            "Chat with AI",
-            "Ask questions, build summaries, and trace answers back to the source."
+            "square.and.arrow.down.fill", Color.purple,
+            "Bring In Existing Media",
+            "Upload audio and PDFs or paste a supported video link to make the content searchable."
         ),
         (
             "folder.fill", Color.blue,
-            "Keep It Organized",
-            "Group related recordings and transcripts into collections that stay easy to find."
+            "Find It Again",
+            "Use one library and collections to reopen every result on iPhone or the web."
         ),
     ]
 
@@ -72,7 +72,7 @@ struct OnboardingView: View {
                         withAnimation(Theme.springGentle) { isComplete = true }
                     }
                 } label: {
-                    Text(currentPage < pages.count - 1 ? "Next" : "Get Started")
+                    Text(currentPage < pages.count - 1 ? "Next" : "Continue to sign in")
                         .font(Theme.heading(16))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)

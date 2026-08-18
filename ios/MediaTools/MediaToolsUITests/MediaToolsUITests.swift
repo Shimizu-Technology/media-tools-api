@@ -1,6 +1,39 @@
 import XCTest
 
 final class MediaToolsUITests: XCTestCase {
+    func testMainWorkspaceConnectsCaptureAndOrganizationDestinations() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-test-main"]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["workspace.record"].exists)
+        XCTAssertTrue(app.buttons["workspace.video"].exists)
+        XCTAssertTrue(app.buttons["workspace.pdf"].exists)
+        XCTAssertTrue(app.buttons["workspace.library"].exists)
+        XCTAssertTrue(app.buttons["workspace.collections"].exists)
+
+        XCTAssertTrue(app.tabBars.buttons["Home"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Library"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Record"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Collections"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Settings"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Transcribe"].exists)
+
+        app.buttons["workspace.video"].tap()
+        XCTAssertTrue(app.navigationBars["Transcribe"].waitForExistence(timeout: 5))
+        app.navigationBars["Transcribe"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 5))
+
+        app.buttons["workspace.record"].tap()
+        XCTAssertTrue(app.navigationBars["Record"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Start recording"].exists)
+
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Notification settings"].exists)
+    }
+
     func testAppLaunches() {
         let app = XCUIApplication()
         app.launch()

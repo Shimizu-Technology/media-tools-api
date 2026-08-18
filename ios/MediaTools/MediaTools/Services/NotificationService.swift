@@ -1,9 +1,29 @@
 import Foundation
 import UserNotifications
 
+enum NotificationPermissionState: Equatable {
+    case notRequested
+    case enabled
+    case denied
+}
+
 /// Handles local notifications for transcription completion.
 /// (Push notifications via APNs can be added later when the backend supports it.)
 enum NotificationService {
+    static func permissionState() async -> NotificationPermissionState {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return .enabled
+        case .denied:
+            return .denied
+        case .notDetermined:
+            return .notRequested
+        @unknown default:
+            return .notRequested
+        }
+    }
+
     /// Request notification permissions.
     static func requestPermission() async -> Bool {
         do {

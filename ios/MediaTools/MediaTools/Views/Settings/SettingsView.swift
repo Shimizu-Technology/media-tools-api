@@ -4,183 +4,374 @@ import ClerkKitUI
 
 struct SettingsView: View {
     @Environment(Clerk.self) private var clerk
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
+
     @State private var health: HealthResponse?
+    @State private var healthError: String?
+    @State private var isCheckingHealth = false
+    @State private var showAdvanced = false
+    @State private var notificationState: NotificationPermissionState = .notRequested
+    @State private var isSigningOut = false
+    @State private var signOutError: String?
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                // Branded header
-                VStack(spacing: 8) {
-                    Image(systemName: "waveform.circle.fill")
-                        .font(.system(size: 52))
-                        .foregroundStyle(Theme.brandGradient)
-
-                    Text("Media Tools")
-                        .font(Theme.heading(22))
-                        .foregroundStyle(Theme.textPrimary)
-
-                    Text("Transcribe, record, and analyze")
-                        .font(Theme.body(13))
-                        .foregroundStyle(Theme.textMuted)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 20)
-                .background(Theme.subtleGlow)
-
-                // Account section
-                if let user = clerk.user {
-                    VStack(alignment: .leading, spacing: 8) {
-                        SectionHeader(text: "Account", icon: "person.circle")
-
-                        HStack(spacing: 12) {
-                            UserButton()
-                                .frame(width: 44, height: 44)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                if let first = user.firstName {
-                                    Text([first, user.lastName].compactMap { $0 }.joined(separator: " "))
-                                        .font(Theme.body(15, weight: .medium))
-                                        .foregroundStyle(Theme.textPrimary)
-                                }
-                                if let email = user.primaryEmailAddress?.emailAddress {
-                                    Text(email)
-                                        .font(Theme.caption())
-                                        .foregroundStyle(Theme.textSecondary)
-                                }
-                            }
-
-                            Spacer()
-                        }
-                        .cardStyle(padding: 12)
-                    }
-                    .padding(.horizontal)
-                }
-
-                // API Status
-                VStack(alignment: .leading, spacing: 8) {
-                    SectionHeader(text: "API Status", icon: "server.rack")
-
-                    VStack(spacing: 0) {
-                        if let health {
-                            SettingsRow(label: "Status") {
-                                HStack(spacing: 6) {
-                                    Circle()
-                                        .fill(health.status == "ok" ? Theme.success : Theme.error)
-                                        .frame(width: 8, height: 8)
-                                    Text(health.status.capitalized)
-                                        .font(Theme.body(14))
-                                        .foregroundStyle(Theme.textPrimary)
-                                }
-                            }
-                            Divider().overlay(Theme.borderSubtle)
-                            SettingsRow(label: "Version") {
-                                Text(health.version)
-                                    .font(Theme.body(14))
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                            Divider().overlay(Theme.borderSubtle)
-                            SettingsRow(label: "Database") {
-                                HStack(spacing: 6) {
-                                    Circle()
-										.fill(health.database == "healthy" ? Theme.success : Theme.error)
-                                        .frame(width: 8, height: 8)
-                                    Text(health.database.capitalized)
-                                        .font(Theme.body(14))
-                                        .foregroundStyle(Theme.textSecondary)
-                                }
-                            }
-                            Divider().overlay(Theme.borderSubtle)
-                            SettingsRow(label: "Workers") {
-                                Text("\(health.workers)")
-                                    .font(Theme.body(14))
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                        } else {
-                            HStack {
-                                Text("Checking...")
-                                    .font(Theme.body(14))
-                                    .foregroundStyle(Theme.textMuted)
-                                Spacer()
-                                ProgressView()
-                            }
-                            .padding(.vertical, 8)
-                        }
-                    }
-                    .cardStyle(padding: 12)
-                }
-                .padding(.horizontal)
-
-                // Server
-                VStack(alignment: .leading, spacing: 8) {
-                    SectionHeader(text: "Server", icon: "network")
-
-                    HStack {
-                        Text("API URL")
-                            .font(Theme.body(14))
-                            .foregroundStyle(Theme.textSecondary)
-                        Spacer()
-                        Text(Configuration.apiBaseURL)
-                            .font(Theme.mono(12))
-                            .foregroundStyle(Theme.textMuted)
-                            .lineLimit(1)
-                    }
-                    .cardStyle(padding: 12)
-                }
-                .padding(.horizontal)
-
-                // About
-                VStack(alignment: .leading, spacing: 8) {
-                    SectionHeader(text: "About", icon: "info.circle")
-
-                    VStack(spacing: 0) {
-                        SettingsRow(label: "App") {
-                            Text("Media Tools")
-                                .font(Theme.body(14))
-                                .foregroundStyle(Theme.textSecondary)
-                        }
-                        Divider().overlay(Theme.borderSubtle)
-                        SettingsRow(label: "Version") {
-                            Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
-                                .font(Theme.body(14))
-                                .foregroundStyle(Theme.textSecondary)
-                        }
-                        Divider().overlay(Theme.borderSubtle)
-                        Link(destination: URL(string: "https://shimizu-technology.com")!) {
-                            HStack {
-                                Text("Shimizu Technology")
-                                    .font(Theme.body(14))
-                                    .foregroundStyle(Theme.textPrimary)
-                                Spacer()
-                                Image(systemName: "arrow.up.right")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.textMuted)
-                            }
-                            .padding(.vertical, 8)
-                        }
-                    }
-                    .cardStyle(padding: 12)
-                }
-                .padding(.horizontal)
-
-                Spacer(minLength: 20)
+            VStack(spacing: 24) {
+                accountSection
+                preferencesSection
+                helpSection
+                advancedSection
+                signOutSection
             }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 32)
         }
         .background(Theme.surface)
         .navigationTitle("Settings")
-        .task { await checkHealth() }
-        .refreshable { await checkHealth() }
+        .task { await refreshNotificationState() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await refreshNotificationState() }
+        }
+    }
+
+    @ViewBuilder
+    private var accountSection: some View {
+        if let user = clerk.user {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionHeader(text: "Account", icon: "person.circle")
+
+                HStack(spacing: 12) {
+                    UserButton()
+                        .frame(width: 48, height: 48)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(displayName(for: user))
+                            .font(Theme.body(16, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+
+                        if let email = user.primaryEmailAddress?.emailAddress {
+                            Text(email)
+                                .font(Theme.caption(13))
+                                .foregroundStyle(Theme.textSecondary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer()
+                }
+                .cardStyle()
+            }
+        }
+    }
+
+    private var preferencesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionHeader(text: "Preferences", icon: "slider.horizontal.3")
+
+            VStack(spacing: 0) {
+                Button(action: handleNotificationAction) {
+                    SettingsActionRow(
+                        icon: notificationIcon,
+                        label: "Completion alerts",
+                        detail: notificationDetail,
+                        trailing: notificationTrailing
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Notification settings")
+
+                Divider().overlay(Theme.borderSubtle)
+
+                SettingsActionRow(
+                    icon: "lock.shield.fill",
+                    label: "Private workspace",
+                    detail: "Media stays connected to your account.",
+                    trailing: "On"
+                )
+            }
+            .cardStyle(padding: 12)
+        }
+    }
+
+    private var helpSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionHeader(text: "Help & information", icon: "questionmark.circle")
+
+            VStack(spacing: 0) {
+                settingsLink(
+                    title: "Privacy",
+                    detail: "How Media Tools handles your content",
+                    systemImage: "hand.raised.fill",
+                    destination: URL(string: "https://media-tools-gu.netlify.app/privacy")!
+                )
+
+                Divider().overlay(Theme.borderSubtle)
+
+                settingsLink(
+                    title: "Shimizu Technology",
+                    detail: "Product support and company information",
+                    systemImage: "safari.fill",
+                    destination: URL(string: "https://shimizu-technology.com")!
+                )
+
+                Divider().overlay(Theme.borderSubtle)
+
+                SettingsRow(label: "Version") {
+                    Text(appVersion)
+                        .font(Theme.body(14))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+            .cardStyle(padding: 12)
+        }
+    }
+
+    private var advancedSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            DisclosureGroup(isExpanded: $showAdvanced) {
+                VStack(spacing: 0) {
+                    Divider().overlay(Theme.borderSubtle)
+
+                    if isCheckingHealth {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .tint(Theme.brand400)
+                            Text("Checking service…")
+                                .font(Theme.body(14))
+                                .foregroundStyle(Theme.textSecondary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 12)
+                    } else if let health {
+                        SettingsRow(label: "Service") {
+                            Label(
+                                health.status == "ok" ? "Available" : "Degraded",
+                                systemImage: health.status == "ok" ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                            )
+                            .font(Theme.body(14))
+                            .foregroundStyle(health.status == "ok" ? Theme.success : Theme.warning)
+                        }
+                        Divider().overlay(Theme.borderSubtle)
+                        SettingsRow(label: "Workers") {
+                            Text("\(health.workers)")
+                                .font(Theme.body(14))
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                    } else if let healthError {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(healthError)
+                                .font(Theme.caption(13))
+                                .foregroundStyle(Theme.textSecondary)
+                            Button("Try again") {
+                                Task { await checkHealth() }
+                            }
+                            .font(Theme.body(14, weight: .semibold))
+                            .foregroundStyle(Theme.brand400)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 12)
+                    }
+
+                    Divider().overlay(Theme.borderSubtle)
+
+                    SettingsRow(label: "API") {
+                        Text(Configuration.apiBaseURL)
+                            .font(Theme.mono(11))
+                            .foregroundStyle(Theme.textMuted)
+                            .lineLimit(1)
+                    }
+                }
+            } label: {
+                Label("Advanced", systemImage: "wrench.and.screwdriver")
+                    .font(Theme.body(15, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(minHeight: 44)
+            }
+            .tint(Theme.textMuted)
+            .cardStyle(padding: 12)
+            .onChange(of: showAdvanced) { _, isExpanded in
+                guard isExpanded, health == nil else { return }
+                Task { await checkHealth() }
+            }
+        }
+    }
+
+    private var signOutSection: some View {
+        VStack(spacing: 8) {
+            Button(role: .destructive) {
+                Task { await signOut() }
+            } label: {
+                HStack(spacing: 8) {
+                    if isSigningOut {
+                        ProgressView()
+                            .tint(Theme.error)
+                    } else {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                    }
+                    Text(isSigningOut ? "Signing out…" : "Sign out")
+                }
+                .font(Theme.body(15, weight: .semibold))
+                .foregroundStyle(Theme.error)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(Theme.surfaceCard)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Theme.radiusMedium)
+                        .stroke(Theme.error.opacity(0.35), lineWidth: 1)
+                }
+            }
+            .disabled(isSigningOut)
+
+            if let signOutError {
+                Text(signOutError)
+                    .font(Theme.caption(12))
+                    .foregroundStyle(Theme.error)
+                    .multilineTextAlignment(.center)
+            }
+        }
+    }
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+    }
+
+    private var notificationIcon: String {
+        switch notificationState {
+        case .enabled: "bell.badge.fill"
+        case .denied: "bell.slash.fill"
+        case .notRequested: "bell.fill"
+        }
+    }
+
+    private var notificationDetail: String {
+        switch notificationState {
+        case .enabled: "Alert me when a transcription finishes."
+        case .denied: "Turn alerts on in device settings."
+        case .notRequested: "Alert me when a transcription finishes."
+        }
+    }
+
+    private var notificationTrailing: String {
+        switch notificationState {
+        case .enabled: "On"
+        case .denied: "Settings"
+        case .notRequested: "Enable"
+        }
+    }
+
+    private func displayName(for user: User) -> String {
+        let name = [user.firstName, user.lastName].compactMap { $0 }.joined(separator: " ")
+        return name.isEmpty ? "Media Tools account" : name
+    }
+
+    private func settingsLink(
+        title: String,
+        detail: String,
+        systemImage: String,
+        destination: URL
+    ) -> some View {
+        Link(destination: destination) {
+            SettingsActionRow(
+                icon: systemImage,
+                label: title,
+                detail: detail,
+                trailing: ""
+            )
+        }
+    }
+
+    private func handleNotificationAction() {
+        switch notificationState {
+        case .enabled:
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            openURL(url)
+        case .denied:
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            openURL(url)
+        case .notRequested:
+            Task {
+                _ = await NotificationService.requestPermission()
+                await refreshNotificationState()
+            }
+        }
+    }
+
+    private func refreshNotificationState() async {
+        notificationState = await NotificationService.permissionState()
     }
 
     private func checkHealth() async {
+        isCheckingHealth = true
+        healthError = nil
+        defer { isCheckingHealth = false }
+
         do {
             health = try await APIClient.shared.get("/ready")
         } catch {
-            print("Health check failed: \(error)")
+            health = nil
+            healthError = "Service status is unavailable right now."
+        }
+    }
+
+    private func signOut() async {
+        isSigningOut = true
+        signOutError = nil
+        defer { isSigningOut = false }
+
+        do {
+            try await clerk.auth.signOut()
+        } catch {
+            signOutError = "Couldn’t sign out. Please try again."
         }
     }
 }
 
-// MARK: - Settings Row Helper
+private struct SettingsActionRow: View {
+    let icon: String
+    let label: String
+    let detail: String
+    let trailing: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Theme.brand400)
+                .frame(width: 32, height: 32)
+                .background(Theme.brand50)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(Theme.body(14, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(detail)
+                    .font(Theme.caption(12))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .layoutPriority(1)
+
+            Spacer(minLength: 8)
+
+            if !trailing.isEmpty {
+                Text(trailing)
+                    .font(Theme.caption(12, weight: .semibold))
+                    .foregroundStyle(Theme.textMuted)
+                    .fixedSize()
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(Theme.textMuted)
+        }
+        .frame(minHeight: 56)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+    }
+}
 
 struct SettingsRow<Content: View>: View {
     let label: String
