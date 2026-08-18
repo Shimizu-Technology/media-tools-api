@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { SignInButton } from '@clerk/clerk-react'
-import { useSearchParams, Link, useNavigate } from 'react-router-dom'
-import { Sparkles, ArrowLeft, History, MessageCircle, Wand2, PlayCircle, LogIn } from 'lucide-react'
+import { useSearchParams, useNavigate } from 'react-router-dom'
+import { ArrowLeft, LogIn, Video } from 'lucide-react'
 import { ApiKeySetup } from '../components/ApiKeySetup'
 import { TranscriptInput } from '../components/TranscriptInput'
 import { TranscriptDisplay } from '../components/TranscriptDisplay'
@@ -15,6 +15,7 @@ import {
   type Transcript,
 } from '../lib/api'
 import { useAuthContext } from '../contexts/useAuthContext'
+import { CapturePageHeader } from '../components/CapturePageHeader'
 
 export function HomePage() {
   const navigate = useNavigate()
@@ -84,96 +85,16 @@ export function HomePage() {
 
   return (
     <main className="mx-auto max-w-5xl py-4 sm:py-6">
-      {/* Hero Section */}
       {!transcript && (
-        <div className="grid gap-10 lg:grid-cols-[1.2fr_0.8fr] items-start mb-12">
-          <div>
-            <div
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-6"
-              style={{
-                backgroundColor: 'var(--color-brand-50)',
-                color: 'var(--color-brand-500)',
-              }}
-            >
-              <Sparkles className="w-4 h-4" />
-              Powered by yt-dlp & OpenRouter AI
-            </div>
-
-            <h1
-              className="text-4xl md:text-5xl font-semibold tracking-tight mb-4"
-              style={{ color: 'var(--color-text-primary)' }}
-            >
-              Extract video transcripts and chat with the content.
-            </h1>
-
-            <p
-              className="text-lg max-w-2xl mb-6"
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
-              Paste any video URL to capture the full transcript, generate concise summaries,
-              and ask follow-up questions without leaving the page.
-            </p>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Link
-                to="/app/library?type=youtube"
-                className="inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
-                style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
-              >
-                <History className="w-4 h-4" />
-                View past transcripts
-              </Link>
-            </div>
-          </div>
-
-          <div
-            className="rounded-2xl border p-6"
-            style={{
-              backgroundColor: 'var(--color-surface-elevated)',
-              borderColor: 'var(--color-border)',
-            }}
-          >
-            <h2 className="text-sm font-semibold uppercase tracking-[0.2em] mb-4" style={{ color: 'var(--color-text-muted)' }}>
-              Flow
-            </h2>
-            <div className="space-y-4">
-              {[
-                {
-                  icon: <PlayCircle className="w-4 h-4" />,
-                  title: 'Paste a link',
-                  detail: 'Supports YouTube, Vimeo, and 1000+ video sites via yt-dlp.',
-                },
-                {
-                  icon: <Wand2 className="w-4 h-4" />,
-                  title: 'Generate insights',
-                  detail: 'Summaries, key points, and decisions in one click.',
-                },
-                {
-                  icon: <MessageCircle className="w-4 h-4" />,
-                  title: 'Chat with context',
-                  detail: 'Ask questions against the transcript and summary.',
-                },
-              ].map((item) => (
-                <div key={item.title} className="flex items-start gap-3">
-                  <div
-                    className="w-9 h-9 rounded-xl flex items-center justify-center"
-                    style={{ backgroundColor: 'var(--color-surface-overlay)', color: 'var(--color-brand-500)' }}
-                  >
-                    {item.icon}
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-                      {item.title}
-                    </p>
-                    <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                      {item.detail}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <CapturePageHeader
+          icon={Video}
+          eyebrow="Video"
+          title="Import a video transcript"
+          description="Paste a video link to capture its transcript, generate a focused summary, and ask questions about the content."
+          historyTo="/app/library?type=youtube"
+          historyLabel="View video library"
+          highlights={['1,000+ video sites', 'AI summaries', 'Ask follow-up questions']}
+        />
       )}
 
       {/* Back button */}

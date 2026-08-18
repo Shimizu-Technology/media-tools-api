@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText,
@@ -13,7 +13,6 @@ import {
   Type,
   Layers,
   X,
-  History,
 } from 'lucide-react';
 import {
   extractPDF,
@@ -22,6 +21,7 @@ import {
   type APIError,
 } from '../lib/api';
 import { TranscriptChatPanel } from '../components/TranscriptChatPanel';
+import { CapturePageHeader } from '../components/CapturePageHeader';
 
 /**
  * PDF text extraction page (MTA-17).
@@ -148,67 +148,16 @@ export function PdfPage() {
 
   return (
     <main className="relative pb-12 sm:pb-16">
-      {/* Hero */}
       {!result && (
-        <div className="text-center mb-12">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-sm font-medium mb-6"
-            style={{
-              backgroundColor: 'var(--color-brand-50)',
-              color: 'var(--color-brand-500)',
-            }}
-          >
-            <FileText className="w-4 h-4" />
-            Pure Go PDF Processing
-          </motion.div>
-
-          <motion.h1
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-            className="mb-4 text-3xl font-semibold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl"
-            style={{ color: 'var(--color-text-primary)' }}
-          >
-            PDF{' '}
-            <span
-              className="bg-clip-text text-transparent"
-              style={{
-                backgroundImage: 'linear-gradient(135deg, var(--color-brand-400), var(--color-brand-600))',
-              }}
-            >
-              Text Extraction
-            </span>
-          </motion.h1>
-
-          <motion.p
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            className="text-lg max-w-xl mx-auto mb-4"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
-            Upload a PDF to extract all text content.
-            Page breaks are preserved for easy navigation.
-          </motion.p>
-
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-          >
-            <Link
-              to="/app/library?type=pdf"
-              className="inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
-              style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
-            >
-              <History className="w-4 h-4" />
-              View past extractions
-            </Link>
-          </motion.div>
-        </div>
+        <CapturePageHeader
+          icon={FileText}
+          eyebrow="Document"
+          title="Extract text from a PDF"
+          description="Upload a PDF to make its text searchable, copyable, and ready for summaries or follow-up questions."
+          historyTo="/app/library?type=pdf"
+          historyLabel="View PDF library"
+          highlights={['Files up to 50 MB', 'Page-aware text', 'Export and chat']}
+        />
       )}
 
       {/* Upload Zone */}
