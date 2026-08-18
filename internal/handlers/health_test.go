@@ -44,7 +44,7 @@ func runHealthHandler(t *testing.T, handler gin.HandlerFunc) (int, models.Health
 
 func TestHealthCheckDoesNotQueryDatabase(t *testing.T) {
 	checker := &stubReadinessChecker{}
-	handler := &Handler{readinessChecker: checker}
+	handler := &Handler{readinessChecker: checker, Version: "test-build"}
 
 	status, response := runHealthHandler(t, handler.HealthCheck)
 
@@ -53,6 +53,9 @@ func TestHealthCheckDoesNotQueryDatabase(t *testing.T) {
 	}
 	if response.Status != "ok" || response.Database != "unchecked" {
 		t.Fatalf("response = %#v, want live process with unchecked database", response)
+	}
+	if response.Version != "test-build" {
+		t.Fatalf("version = %q, want build version", response.Version)
 	}
 	if checker.called != 0 {
 		t.Fatalf("database health checker called %d times, want 0", checker.called)

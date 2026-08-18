@@ -54,6 +54,21 @@ func TestSubmitBlockingSignalsWorkerWhenPayloadRefreshFails(t *testing.T) {
 	}
 }
 
+func TestSubmitBlockingPropagatesCancellationToPersistence(t *testing.T) {
+	pool := NewPool(1, 1, nil, nil, nil)
+	pool.enqueueBackgroundJob = func(ctx context.Context, _ string, _ string, _ []byte) (bool, error) {
+		<-ctx.Done()
+		return false, ctx.Err()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := pool.SubmitBlocking(ctx, Job{ID: "resource-id", Type: JobTranscriptExtraction})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("SubmitBlocking error = %v, want context canceled", err)
+	}
+}
+
 func TestStartProbesDurableQueueWithEveryWorker(t *testing.T) {
 	const workers = 3
 	pool := NewPool(workers, 1, nil, nil, nil)

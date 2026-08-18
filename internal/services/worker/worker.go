@@ -404,7 +404,7 @@ func (p *Pool) RecoverTranscriptJobs(ctx context.Context, limit int) (int, error
 			Type:      JobTranscriptExtraction,
 			CreatedAt: time.Now(),
 		}
-		if err := p.Submit(job); err == nil {
+		if err := p.SubmitBlocking(ctx, job); err == nil {
 			requeued++
 		} else {
 			recoveryErrs = append(recoveryErrs, fmt.Sprintf("requeue %s: %v", t.ID, err))
@@ -451,7 +451,7 @@ func (p *Pool) RecoverAudioJobs(ctx context.Context, limit int) (int, error) {
 			Payload:   payloadJSON,
 			CreatedAt: time.Now(),
 		}
-		if err := p.Submit(job); err != nil {
+		if err := p.SubmitBlocking(ctx, job); err != nil {
 			recoveryErrs = append(recoveryErrs, fmt.Sprintf("requeue %s: %v", at.ID, err))
 			log.Printf("⚠️  Failed to requeue audio transcription %s during recovery: %v", at.ID, err)
 			continue

@@ -13,6 +13,12 @@ info:
     Signed-in browser users have separate read and mutation budgets so progress
     checks cannot block job actions. Check `X-RateLimit-Limit` and
     `X-RateLimit-Remaining`; 429 responses also include `Retry-After` seconds.
+
+    ## Request tracing
+    Every response includes `X-Request-ID`. Clients may send a safe `X-Request-ID`
+    value to correlate one operation across client and server logs; otherwise the
+    API generates one. Query strings, bodies, and authentication headers are not
+    written to access logs.
   version: "1.0.0"
   contact:
     name: Shimizu Technology

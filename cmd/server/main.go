@@ -3,13 +3,11 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -41,7 +39,9 @@ func main() {
 	log.Printf("📋 Config loaded: port=%s, workers=%d, gin_mode=%s", cfg.Port, cfg.WorkerCount, cfg.GinMode)
 	log.Printf("🔧 yt-dlp path: %s", cfg.YtDlpPath)
 
-	os.Setenv("GIN_MODE", cfg.GinMode)
+	if err := os.Setenv("GIN_MODE", cfg.GinMode); err != nil {
+		log.Fatalf("❌ Failed to set Gin mode: %v", err)
+	}
 
 	// Step 2: Connect to Database
 	dbURL := cfg.DatabaseURL
@@ -81,14 +81,12 @@ func main() {
 	}
 	cookiesPath := cfg.YtDlpCookiesFile
 	if cookiesPath == "" && cfg.YtDlpCookiesBase64 != "" {
-		decoded, err := base64.StdEncoding.DecodeString(cfg.YtDlpCookiesBase64)
+		var cleanupCookies func()
+		cookiesPath, cleanupCookies, err = materializeCookieFile(cfg.YtDlpCookiesBase64)
 		if err != nil {
-			log.Fatalf("❌ Failed to decode YT_DLP_COOKIES_B64: %v", err)
+			log.Fatalf("❌ Failed to prepare YT_DLP_COOKIES_B64: %v", err)
 		}
-		cookiesPath = filepath.Join(os.TempDir(), "mta-yt-dlp-cookies.txt")
-		if err := os.WriteFile(cookiesPath, decoded, 0600); err != nil {
-			log.Fatalf("❌ Failed to write yt-dlp cookies file: %v", err)
-		}
+		defer cleanupCookies()
 	}
 	if cookiesPath != "" {
 		extractor.SetCookiesFile(cookiesPath)
@@ -150,7 +148,9 @@ func main() {
 	wp.SetTranscriptionConcurrency(cfg.WhisperChunkConcurrency, cfg.WhisperGlobalConcurrency)
 	wp.Start()
 
-	recoveredTranscripts, err := wp.RecoverTranscriptJobs(context.Background(), 200)
+	transcriptRecoveryCtx, cancelTranscriptRecovery := context.WithTimeout(context.Background(), 30*time.Second)
+	recoveredTranscripts, err := wp.RecoverTranscriptJobs(transcriptRecoveryCtx, 200)
+	cancelTranscriptRecovery()
 	if err != nil {
 		log.Printf("⚠️  Transcript job recovery failed: %v", err)
 	} else if recoveredTranscripts > 0 {
@@ -184,7 +184,9 @@ func main() {
 		}
 	}()
 
-	requeued, err := wp.RecoverAudioJobs(context.Background(), 200)
+	audioRecoveryCtx, cancelAudioRecovery := context.WithTimeout(context.Background(), 30*time.Second)
+	requeued, err := wp.RecoverAudioJobs(audioRecoveryCtx, 200)
+	cancelAudioRecovery()
 	if err != nil {
 		log.Printf("⚠️  Audio job recovery failed: %v", err)
 	} else if requeued > 0 {
@@ -206,6 +208,7 @@ func main() {
 
 	// Step 5: Setup HTTP Router
 	r := router.Setup(router.RouterConfig{
+		Version:                     Version,
 		DB:                          db,
 		WorkerPool:                  wp,
 		AudioTranscriber:            audioTranscriber,

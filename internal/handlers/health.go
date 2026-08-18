@@ -45,6 +45,7 @@ type Handler struct {
 	OwnerAPIKeyID          string                  // Optional owner key ID override
 	OwnerAPIKeyPrefix      string                  // Optional owner key prefix override
 	YtDlpCookiesConfigured bool                    // True when yt-dlp cookies are configured
+	Version                string                  // Build version reported by health endpoints
 	readinessChecker       readinessChecker
 }
 
@@ -97,9 +98,13 @@ func (h *Handler) healthResponse(status, databaseStatus string) models.HealthRes
 	if h.Worker != nil {
 		workers = h.Worker.WorkerCount()
 	}
+	version := h.Version
+	if version == "" {
+		version = "dev"
+	}
 	return models.HealthResponse{
 		Status:                 status,
-		Version:                "1.0.0",
+		Version:                version,
 		Database:               databaseStatus,
 		Workers:                workers,
 		YtDlpCookiesConfigured: h.YtDlpCookiesConfigured,
