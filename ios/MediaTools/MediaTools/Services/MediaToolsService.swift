@@ -187,6 +187,80 @@ final class MediaToolsService {
         try await api.delete("/pdf/extractions/\(id)")
     }
 
+    // MARK: - Unified Library
+
+    func listLibraryItems(
+        page: Int = 1,
+        perPage: Int = 20,
+        itemType: String? = nil,
+        status: String? = nil,
+        search: String? = nil,
+        sortDirection: String = "desc"
+    ) async throws -> LibraryListResponse {
+        try await api.get(Self.libraryItemsPath(
+            page: page,
+            perPage: perPage,
+            itemType: itemType,
+            status: status,
+            search: search,
+            sortDirection: sortDirection
+        ))
+    }
+
+    static func libraryItemsPath(
+        page: Int,
+        perPage: Int,
+        itemType: String?,
+        status: String?,
+        search: String?,
+        sortDirection: String
+    ) -> String {
+        var components = URLComponents()
+        components.path = "/library/items"
+        var queryItems = [
+            URLQueryItem(name: "page", value: String(max(1, page))),
+            URLQueryItem(name: "per_page", value: String(min(max(1, perPage), 100))),
+            URLQueryItem(name: "sort_dir", value: sortDirection == "asc" ? "asc" : "desc"),
+        ]
+        if let itemType, !itemType.isEmpty {
+            queryItems.append(URLQueryItem(name: "type", value: itemType))
+        }
+        if let status, !status.isEmpty {
+            queryItems.append(URLQueryItem(name: "status", value: status))
+        }
+        if let search = search?.trimmingCharacters(in: .whitespacesAndNewlines), !search.isEmpty {
+            queryItems.append(URLQueryItem(name: "search", value: search))
+        }
+        components.queryItems = queryItems
+        return components.string ?? "/library/items"
+    }
+
+    func getLibraryItem(_ reference: LibraryReference) async throws -> LibraryItem {
+        switch reference.itemType {
+        case "youtube", "transcript":
+            return .transcript(try await getTranscript(reference.itemId))
+        case "audio":
+            return .audio(try await getAudioItem(reference.itemId))
+        case "pdf":
+            return .pdf(try await getPDF(reference.itemId))
+        default:
+            throw APIError.httpError(statusCode: 400, message: "Unknown library item type")
+        }
+    }
+
+    func deleteLibraryItem(_ reference: LibraryReference) async throws {
+        switch reference.itemType {
+        case "youtube", "transcript":
+            try await deleteTranscript(reference.itemId)
+        case "audio":
+            try await deleteAudioItem(reference.itemId)
+        case "pdf":
+            try await deletePDF(reference.itemId)
+        default:
+            throw APIError.httpError(statusCode: 400, message: "Unknown library item type")
+        }
+    }
+
     // MARK: - Collections
 
     func loadCollections() async {

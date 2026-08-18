@@ -117,6 +117,52 @@ struct PDFExtraction: Identifiable, Codable {
     }
 }
 
+// MARK: - Unified Library
+
+/// Lightweight metadata returned by the paginated library endpoint. Keeping
+/// list rows separate from full transcript/PDF payloads makes search and
+/// pagination fast even when the underlying content is large.
+struct LibraryListItem: Identifiable, Codable, Hashable {
+    let id: String
+    let itemType: String
+    let title: String
+    let subtitle: String
+    let status: String
+    let wordCount: Int
+    let duration: Double
+    let pageCount: Int
+    let summaryStatus: String
+    let favorite: Bool
+    let archived: Bool
+    let tags: [String]
+    let createdAt: Date?
+
+    var reference: LibraryReference {
+        LibraryReference(itemType: itemType, itemId: id)
+    }
+}
+
+struct LibraryListResponse: Codable {
+    let data: [LibraryListItem]
+    let page: Int
+    let perPage: Int
+    let totalItems: Int
+    let totalPages: Int
+}
+
+/// IDs are only unique inside their media table, so every selection and
+/// navigation destination carries the type as part of its identity.
+struct LibraryReference: Identifiable, Codable, Hashable {
+    let itemType: String
+    let itemId: String
+
+    var id: String { "\(itemType):\(itemId)" }
+
+    var collectionItemType: String {
+        itemType == "youtube" ? "transcript" : itemType
+    }
+}
+
 // MARK: - Collections
 
 struct Collection: Identifiable, Codable {

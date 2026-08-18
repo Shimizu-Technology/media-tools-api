@@ -121,4 +121,67 @@ final class ModelDecodingTests: XCTestCase {
                 .permitsMultipartUploadFallback
         )
     }
+
+    func testUnifiedLibraryResponseDecodesTypedMetadataAndPagination() throws {
+        let data = Data(
+            #"{"data":[{"id":"shared-id","item_type":"audio","title":"Team sync","subtitle":"EN","status":"processing","word_count":0,"duration":42.5,"page_count":0,"summary_status":"","favorite":true,"archived":false,"tags":["meeting"],"created_at":"2026-08-18T01:02:03Z"}],"page":2,"per_page":20,"total_items":41,"total_pages":3}"#
+                .utf8)
+
+        let response = try APIClient.makeDecoder().decode(LibraryListResponse.self, from: data)
+
+        XCTAssertEqual(response.page, 2)
+        XCTAssertEqual(response.totalItems, 41)
+        XCTAssertEqual(response.totalPages, 3)
+        XCTAssertEqual(response.data.first?.reference.id, "audio:shared-id")
+        XCTAssertEqual(response.data.first?.tags, ["meeting"])
+        XCTAssertEqual(response.data.first?.favorite, true)
+    }
+
+    func testLibraryReferencesIncludeTypeInIdentity() {
+        let transcript = LibraryReference(itemType: "youtube", itemId: "shared-id")
+        let audio = LibraryReference(itemType: "audio", itemId: "shared-id")
+
+        XCTAssertNotEqual(transcript, audio)
+        XCTAssertEqual(Set([transcript, audio]).count, 2)
+        XCTAssertEqual(transcript.collectionItemType, "transcript")
+        XCTAssertEqual(audio.collectionItemType, "audio")
+    }
+
+    func testDetailNavigationDoesNotEquateDifferentMediaTypesWithTheSameID() throws {
+        let transcript = try APIClient.makeDecoder().decode(
+            Transcript.self,
+            from: Data(#"{"id":"shared-id","status":"completed"}"#.utf8)
+        )
+        let audio = try APIClient.makeDecoder().decode(
+            AudioTranscription.self,
+            from: Data(#"{"id":"shared-id","status":"completed"}"#.utf8)
+        )
+
+        XCTAssertNotEqual(LibraryItem.transcript(transcript), LibraryItem.audio(audio))
+    }
+
+    func testLibraryPathEncodesCrossMediaSearchAndFilters() throws {
+        let path = MediaToolsService.libraryItemsPath(
+            page: 2,
+            perPage: 30,
+            itemType: "audio",
+            status: "active",
+            search: " payroll & tax ",
+            sortDirection: "asc"
+        )
+        let components = try XCTUnwrap(URLComponents(string: path))
+        let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).compactMap {
+            item -> (String, String)? in
+            guard let value = item.value else { return nil }
+            return (item.name, value)
+        })
+
+        XCTAssertEqual(components.path, "/library/items")
+        XCTAssertEqual(query["page"], "2")
+        XCTAssertEqual(query["per_page"], "30")
+        XCTAssertEqual(query["type"], "audio")
+        XCTAssertEqual(query["status"], "active")
+        XCTAssertEqual(query["search"], "payroll & tax")
+        XCTAssertEqual(query["sort_dir"], "asc")
+    }
 }

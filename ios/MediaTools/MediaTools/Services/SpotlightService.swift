@@ -1,9 +1,45 @@
 import Foundation
 import CoreSpotlight
 import MobileCoreServices
+import UniformTypeIdentifiers
 
 /// Index transcripts in iOS Spotlight for system-wide search.
 enum SpotlightService {
+    /// Index lightweight rows from the unified library. This keeps system
+    /// search current without downloading every full transcript just to render
+    /// the library screen.
+    static func indexLibraryItems(_ items: [LibraryListItem]) {
+        let searchableItems = items.compactMap { item -> CSSearchableItem? in
+            guard item.status == "completed" else { return nil }
+
+            let contentType: UTType = switch item.itemType {
+            case "audio": .audio
+            case "pdf": .pdf
+            default: .text
+            }
+            let attributes = CSSearchableItemAttributeSet(contentType: contentType)
+            attributes.title = item.title
+            attributes.contentDescription = item.subtitle
+            attributes.keywords = item.tags + [item.itemType, "media tools"]
+            if item.itemType == "audio", item.duration > 0 {
+                attributes.duration = NSNumber(value: item.duration)
+            }
+
+            return CSSearchableItem(
+                // Preserve the identifiers used by the earlier per-media
+                // indexers so an app update replaces entries instead of
+                // leaving duplicate Spotlight results behind.
+                uniqueIdentifier: item.itemType == "youtube"
+                    ? "transcript-\(item.id)"
+                    : "\(item.itemType)-\(item.id)",
+                domainIdentifier: "com.shimizu-technology.media-tools.library",
+                attributeSet: attributes
+            )
+        }
+
+        CSSearchableIndex.default().indexSearchableItems(searchableItems)
+    }
+
     /// Index a batch of transcripts for Spotlight search.
     static func indexTranscripts(_ transcripts: [Transcript]) {
         let items = transcripts.compactMap { transcript -> CSSearchableItem? in

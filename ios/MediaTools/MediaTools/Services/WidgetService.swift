@@ -45,4 +45,28 @@ enum WidgetService {
         // Tell WidgetKit to refresh
         WidgetCenter.shared.reloadTimelines(ofKind: "MediaToolsWidget")
     }
+
+    /// Update the widget directly from the server-sorted unified library page.
+    /// The first five rows are already the user's newest cross-media items.
+    static func updateRecentItems(_ items: [LibraryListItem]) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+
+        struct WidgetItem: Codable {
+            let title: String
+            let type: String
+            let status: String
+        }
+
+        let recent = items.prefix(5).map { item in
+            WidgetItem(
+                title: item.title,
+                type: item.itemType == "youtube" ? "video" : item.itemType,
+                status: item.status
+            )
+        }
+        if let data = try? JSONEncoder().encode(recent) {
+            defaults.set(data, forKey: key)
+        }
+        WidgetCenter.shared.reloadTimelines(ofKind: "MediaToolsWidget")
+    }
 }
