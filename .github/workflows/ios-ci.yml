@@ -1,0 +1,66 @@
+name: iOS CI
+
+on:
+  pull_request:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-ci.yml'
+      - 'scripts/gate.sh'
+  push:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-ci.yml'
+      - 'scripts/gate.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: SwiftUI build and tests
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 16.4
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+
+      - name: Resolve Swift packages
+        run: >-
+          xcodebuild
+          -project ios/MediaTools/MediaTools.xcodeproj
+          -scheme MediaTools
+          -resolvePackageDependencies
+
+      - name: Build and test
+        run: >-
+          xcodebuild
+          -project ios/MediaTools/MediaTools.xcodeproj
+          -scheme MediaTools
+          -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5'
+          -derivedDataPath '${{ runner.temp }}/MediaToolsDerivedData'
+          -resultBundlePath '${{ runner.temp }}/MediaToolsTests.xcresult'
+          -only-testing:MediaToolsTests
+          -parallel-testing-enabled NO
+          test
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Verify simulator installation and launch
+        run: |
+          app_path="${{ runner.temp }}/MediaToolsDerivedData/Build/Products/Debug-iphonesimulator/MediaTools.app"
+          bundle_id="$(plutil -extract CFBundleIdentifier raw "$app_path/Info.plist")"
+          test "$bundle_id" = "com.ShimizuTechnology.MediaTools"
+          xcrun simctl install booted "$app_path"
+          xcrun simctl launch --terminate-running-process booted "$bundle_id"
+          xcrun simctl terminate booted "$bundle_id"
+
+      - name: Upload test result on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MediaToolsTests-xcresult
+          path: '${{ runner.temp }}/MediaToolsTests.xcresult'
+          retention-days: 7

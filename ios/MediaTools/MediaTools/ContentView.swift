@@ -39,86 +39,83 @@ struct WelcomeView: View {
         ZStack {
             Theme.surface.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                Spacer()
-
-                // Hero
-                VStack(spacing: 28) {
-                    // Layered circles
-                    ZStack {
-                        Circle()
-                            .fill(Theme.brand500.opacity(0.06))
-                            .frame(width: 160, height: 160)
-
-                        Circle()
-                            .fill(Theme.brand500.opacity(0.12))
-                            .frame(width: 110, height: 110)
-
-                        Image(systemName: "waveform.circle.fill")
-                            .font(.system(size: 56))
-                            .foregroundStyle(Theme.brand500)
-                    }
-
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Hero
                     VStack(spacing: 10) {
-                        Text("Media Tools")
-                            .font(Theme.heading(34))
-                            .foregroundStyle(Theme.textPrimary)
+                        // Layered circles
+                        ZStack {
+                            Circle()
+                                .fill(Theme.brand500.opacity(0.06))
+                                .frame(width: 90, height: 90)
 
-                        Text("Transcribe. Organize. Understand.")
-                            .font(Theme.body(16))
-                            .foregroundStyle(Theme.textSecondary)
+                            Circle()
+                                .fill(Theme.brand500.opacity(0.12))
+                                .frame(width: 62, height: 62)
+
+                            Image(systemName: "waveform.circle.fill")
+                                .font(.system(size: 36))
+                                .foregroundStyle(Theme.brand500)
+                        }
+
+                        VStack(spacing: 10) {
+                            Text("Media Tools")
+                                .font(Theme.heading(30))
+                                .foregroundStyle(Theme.textPrimary)
+
+                            Text("Transcribe. Organize. Understand.")
+                                .font(Theme.body(16))
+                                .foregroundStyle(Theme.textSecondary)
+                        }
                     }
+
+                    // The whole page scrolls so no feature or action is clipped
+                    // on a compact device.
+                    VStack(spacing: 6) {
+                        FeatureRow(
+                            icon: "play.rectangle.fill",
+                            color: Theme.videoColor,
+                            title: "Video Transcription",
+                            subtitle: "Supported YouTube and Vimeo links"
+                        )
+                        FeatureRow(
+                            icon: "mic.fill",
+                            color: Theme.audioColor,
+                            title: "Audio Recording",
+                            subtitle: "Record audio and turn it into text"
+                        )
+                        FeatureRow(
+                            icon: "bubble.left.and.bubble.right.fill",
+                            color: .purple,
+                            title: "AI Chat",
+                            subtitle: "Ask questions about your content"
+                        )
+                        FeatureRow(
+                            icon: "folder.fill",
+                            color: .blue,
+                            title: "Collections",
+                            subtitle: "Keep related content organized"
+                        )
+                    }
+                    .padding(.horizontal, 32)
+
+                    Button {
+                        showAuth = true
+                    } label: {
+                        Text("Get Started")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .brandButtonStyle()
+                    .padding(.horizontal, 32)
+
+                    Text("Powered by Shimizu Technology")
+                        .font(Theme.caption(11))
+                        .foregroundStyle(Theme.textMuted)
                 }
-
-                Spacer()
-
-                // Features
-                VStack(spacing: 14) {
-                    FeatureRow(
-                        icon: "play.rectangle.fill",
-                        color: Theme.videoColor,
-                        title: "Video Transcription",
-                        subtitle: "YouTube, Vimeo, and any video URL"
-                    )
-                    FeatureRow(
-                        icon: "mic.fill",
-                        color: Theme.audioColor,
-                        title: "Audio Recording",
-                        subtitle: "Record and transcribe with one tap"
-                    )
-                    FeatureRow(
-                        icon: "bubble.left.and.bubble.right.fill",
-                        color: .purple,
-                        title: "AI Chat",
-                        subtitle: "Ask questions about your content"
-                    )
-                    FeatureRow(
-                        icon: "square.and.arrow.up",
-                        color: .blue,
-                        title: "Share Sheet",
-                        subtitle: "Share from any app to transcribe"
-                    )
-                }
-                .padding(.horizontal, 32)
-
-                Spacer()
-
-                // Sign in button
-                Button {
-                    showAuth = true
-                } label: {
-                    Text("Get Started")
-                        .frame(maxWidth: .infinity)
-                }
-                .brandButtonStyle()
-                .padding(.horizontal, 32)
-
-                Text("Powered by Shimizu Technology")
-                    .font(Theme.caption(11))
-                    .foregroundStyle(Theme.textMuted)
-                    .padding(.top, 14)
-                    .padding(.bottom, 32)
+                .padding(.top, 12)
+                .padding(.bottom, 20)
             }
+            .scrollIndicators(.hidden)
         }
     }
 }
@@ -143,9 +140,9 @@ struct FeatureRow: View {
                 Text(subtitle)
                     .font(Theme.caption(13))
                     .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

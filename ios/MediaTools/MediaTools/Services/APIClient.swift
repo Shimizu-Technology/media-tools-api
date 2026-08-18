@@ -15,25 +15,30 @@ actor APIClient {
         self.baseURL = Configuration.apiBaseURL + "/api/v1"
         self.session = URLSession.shared
 
-        self.decoder = JSONDecoder()
+        self.decoder = Self.makeDecoder()
+        self.encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+    }
+
+    /// Keep API date parsing in one testable place. Value-type format styles are
+    /// safe to capture in JSONDecoder's @Sendable custom decoding closure, unlike
+    /// the older ISO8601DateFormatter reference type.
+    static func makeDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
 
         // Go API returns dates with fractional seconds (e.g. "2026-02-20T00:33:45.123Z")
         // which the default .iso8601 can't parse. Use a custom formatter.
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let isoFallback = ISO8601DateFormatter()
-        isoFallback.formatOptions = [.withInternetDateTime]
+        let fractionalSeconds = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+        let wholeSeconds = Date.ISO8601FormatStyle(includingFractionalSeconds: false)
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
             let str = try container.decode(String.self)
-            if let date = isoFormatter.date(from: str) { return date }
-            if let date = isoFallback.date(from: str) { return date }
+            if let date = try? fractionalSeconds.parse(str) { return date }
+            if let date = try? wholeSeconds.parse(str) { return date }
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date: \(str)")
         }
-
-        self.encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
+        return decoder
     }
 
     // MARK: - Auth
