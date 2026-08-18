@@ -53,6 +53,7 @@ import {
 } from '../lib/api';
 import { usePolling } from '../hooks/usePolling';
 import { TranscriptChatPanel } from '../components/TranscriptChatPanel';
+import { CapturePageHeader } from '../components/CapturePageHeader';
 
 /**
  * Audio transcription page (MTA-16, MTA-22, MTA-23, MTA-24, MTA-25, MTA-26).
@@ -280,10 +281,6 @@ export function AudioPage() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // History state (MTA-25)
-  const [showHistory, setShowHistory] = useState(false);
-  const [historyItems, setHistoryItems] = useState<AudioTranscription[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
   const [activeJobs, setActiveJobs] = useState<AudioTranscription[]>([]);
   const [activeJobsLoading, setActiveJobsLoading] = useState(true);
   const [activeJobsError, setActiveJobsError] = useState('');
@@ -772,22 +769,6 @@ export function AudioPage() {
 
   // ── History (MTA-25) ──
 
-  const loadHistory = async () => {
-    setHistoryLoading(true);
-    try {
-      const items = await listAudioTranscriptions();
-      setHistoryItems(items);
-    } catch {
-      setError('Failed to load history.');
-    }
-    setHistoryLoading(false);
-  };
-
-  const toggleHistory = () => {
-    if (!showHistory) loadHistory();
-    setShowHistory(!showHistory);
-  };
-
   const loadFromHistory = (item: AudioTranscription) => {
     setResult(item);
     setIsProcessing(isActiveTranscription(item));
@@ -795,7 +776,6 @@ export function AudioPage() {
     setSearchParams({ id: item.id }, { replace: true });
     setPlaybackUrl('');
     setShowPlayback(false);
-    setShowHistory(false);
   };
 
   // ── Reset ──
@@ -954,121 +934,17 @@ export function AudioPage() {
 
   return (
     <main className="relative pb-12 sm:pb-16">
-      {/* Hero */}
       {!result && !isProcessing && (
-        <div className="text-center mb-8">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-sm font-medium mb-6"
-            style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
-          >
-            <Mic className="w-4 h-4" />
-            Supports audio, meetings, and Zoom MP4 recordings
-          </motion.div>
-
-          <motion.h1
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.1 }}
-            className="mb-4 text-3xl font-semibold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl"
-            style={{ color: 'var(--color-text-primary)' }}
-          >
-            Recording{' '}
-            <span className="bg-clip-text text-transparent"
-              style={{ backgroundImage: 'linear-gradient(135deg, var(--color-brand-400), var(--color-brand-600))' }}>
-              Intelligence
-            </span>
-          </motion.h1>
-
-          <motion.p
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-            className="text-lg max-w-xl mx-auto mb-2"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
-            Upload audio files, meeting recordings, or Zoom MP4/M4A exports. Get accurate transcriptions and AI-powered summaries with key points, action items, and decisions.
-          </motion.p>
-
-          {/* History toggle */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-            className="flex items-center justify-center gap-4 mt-2"
-          >
-            <button
-              onClick={toggleHistory}
-              className="inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
-              style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
-            >
-              <History className="w-4 h-4" />
-              {showHistory ? 'Hide history' : 'View recent'}
-            </button>
-          </motion.div>
-        </div>
+        <CapturePageHeader
+          icon={Mic}
+          eyebrow="Recording"
+          title="Record or upload audio"
+          description="Capture a conversation in the browser or upload an existing recording, then turn it into a searchable transcript and structured notes."
+          historyTo="/app/library?type=audio"
+          historyLabel="View recording library"
+          highlights={['Record in your browser', 'Files up to 2 GB', 'Runs in the background']}
+        />
       )}
-
-      {/* History Panel (MTA-25) */}
-      <AnimatePresence>
-        {showHistory && !result && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="max-w-3xl mx-auto mb-8 overflow-hidden"
-          >
-            <div className="p-4 rounded-2xl border" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-              <h3 className="text-base font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--color-text-primary)' }}>
-                <History className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
-                Recent Transcriptions
-              </h3>
-
-              {historyLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'var(--color-brand-500)' }} />
-                </div>
-              ) : historyItems.length === 0 ? (
-                <p className="text-sm text-center py-6" style={{ color: 'var(--color-text-muted)' }}>No transcriptions yet</p>
-              ) : (
-                <div className="space-y-2 max-h-72 overflow-y-auto">
-                  {historyItems.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => loadFromHistory(item)}
-                      className="w-full text-left p-3 rounded-xl border transition-all hover:scale-[1.01]"
-                      style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)', minHeight: '44px' }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <FileAudio className="w-4 h-4 shrink-0" style={{ color: 'var(--color-brand-500)' }} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>
-                            {item.original_name}
-                          </p>
-                          <p className="text-xs flex items-center gap-2" style={{ color: 'var(--color-text-muted)' }}>
-                            <span>{formatDuration(item.duration)}</span>
-                            <span>{item.word_count.toLocaleString()} words</span>
-                            {item.summary_status === 'completed' && (
-                              <span className="inline-flex items-center gap-0.5">
-                                <Sparkles className="w-3 h-3" /> Summarized
-                              </span>
-                            )}
-                          </p>
-                        </div>
-                        <span className="text-xs shrink-0" style={{ color: 'var(--color-text-muted)' }}>
-                          {new Date(item.created_at).toLocaleDateString()}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {recoveredDraft && recordedBlob && !result && (
         <motion.div

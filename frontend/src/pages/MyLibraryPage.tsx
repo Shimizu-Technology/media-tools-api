@@ -23,6 +23,8 @@ import {
   FolderPlus,
   Star,
   Archive,
+  RefreshCw,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { AddToCollectionModal } from '../components/AddToCollectionModal';
 import {
@@ -132,8 +134,8 @@ export function MyLibraryPage() {
         setItems(result.data.map((item) => ({ id: item.id, type: item.item_type, title: item.title, subtitle: item.item_type === 'audio' && item.duration > 0 ? `${item.subtitle} • ${formatDuration(item.duration)}` : item.subtitle, wordCount: item.word_count, status: item.status, hasSummary: item.summary_status === 'completed', createdAt: item.created_at, duration: item.duration, pageCount: item.page_count, favorite: item.favorite, tags: item.tags || [] })));
       } catch (err: unknown) {
         if (!current) return;
-        const apiErr = err as { message?: string };
-        setError(apiErr.message || 'Failed to load content');
+        console.error('Failed to load library:', err);
+        setError("We couldn't load your library. Check your connection and try again.");
         setItems([]);
       } finally {
         if (current) setIsLoading(false);
@@ -152,6 +154,14 @@ export function MyLibraryPage() {
   }, [searchInput]);
 
 	const filteredItems = items;
+  const hasActiveFilters = activeTab !== 'all' || statusFilter !== 'all' || workspaceFilter !== 'active' || searchInput.trim() !== '';
+
+  const clearFilters = () => {
+    setSearchInput('');
+    setSearchQuery('');
+    setPage(1);
+    setSearchParams({});
+  };
 
   const handleItemClick = (item: UnifiedItem) => {
     // Don't navigate if in selection mode
@@ -250,13 +260,6 @@ export function MyLibraryPage() {
     });
   };
 
-  const tabs: { value: ContentType; label: string; icon: React.ReactNode }[] = [
-    { value: 'all', label: 'All', icon: <Library className="w-4 h-4" /> },
-    { value: 'youtube', label: 'Video', icon: <Youtube className="w-4 h-4" /> },
-    { value: 'audio', label: 'Recordings', icon: <Mic className="w-4 h-4" /> },
-    { value: 'pdf', label: 'PDF', icon: <FileType2 className="w-4 h-4" /> },
-  ];
-
   const statusColors: Record<string, { bg: string; text: string }> = {
     completed: { bg: 'var(--color-success-subtle)', text: 'var(--color-success)' },
     processing: { bg: 'var(--color-brand-50)', text: 'var(--color-brand-500)' },
@@ -280,7 +283,7 @@ export function MyLibraryPage() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="mx-auto max-w-6xl pb-12 sm:pb-16"
+      className="mx-auto max-w-5xl pb-12 sm:pb-16"
     >
       {/* Header */}
       <div className="mb-8">
@@ -341,40 +344,6 @@ export function MyLibraryPage() {
         </motion.div>
       )}
 
-      {/* Tabs */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.15 }}
-        className="mb-6 grid grid-cols-2 gap-1 rounded-2xl p-1 sm:flex"
-        style={{ backgroundColor: 'var(--color-surface-elevated)' }}
-      >
-        {tabs.map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => handleTabChange(tab.value)}
-            className="flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl px-3 text-sm font-medium transition-all sm:flex-1 sm:px-4"
-            style={{
-              backgroundColor: activeTab === tab.value ? 'var(--color-surface)' : 'transparent',
-              color: activeTab === tab.value ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-              boxShadow: activeTab === tab.value ? 'var(--shadow-tab-active)' : 'none',
-              minHeight: '44px',
-            }}
-          >
-            {tab.icon}
-            {tab.label}
-            {activeTab === tab.value && !isLoading && (
-              <span
-                className="px-1.5 py-0.5 rounded text-xs"
-                style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
-              >
-				{totalItems}
-              </span>
-            )}
-          </button>
-        ))}
-      </motion.div>
-
       <div className="mb-4 grid grid-cols-3 gap-2" aria-label="Library view">
         {([
           { value: 'active', label: 'All items', icon: Library },
@@ -385,29 +354,12 @@ export function MyLibraryPage() {
         ))}
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-2 sm:flex" aria-label="Filter by status">
-        {(['all', 'completed', 'processing', 'failed'] as StatusFilter[]).map((status) => (
-          <button
-            key={status}
-            onClick={() => handleStatusChange(status)}
-            className="min-h-11 whitespace-nowrap rounded-xl border px-4 text-sm font-medium capitalize sm:rounded-full"
-            style={{
-              borderColor: statusFilter === status ? 'var(--color-brand-500)' : 'var(--color-border)',
-              backgroundColor: statusFilter === status ? 'var(--color-brand-50)' : 'var(--color-surface-elevated)',
-              color: statusFilter === status ? 'var(--color-brand-500)' : 'var(--color-text-secondary)',
-            }}
-          >
-            {status === 'all' ? 'Any status' : status}
-          </button>
-        ))}
-      </div>
-
-      {/* Search + Sort */}
+      {/* Search + compact filters */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="flex flex-col sm:flex-row gap-3 mb-6"
+        className="mb-6 space-y-3"
       >
         <div className="relative flex-1">
           <Search
@@ -440,19 +392,65 @@ export function MyLibraryPage() {
           )}
         </div>
 
-        <button
-          onClick={() => setSortDir(sortDir === 'desc' ? 'asc' : 'desc')}
-          className="flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium transition-colors sm:w-auto"
-          style={{
-            backgroundColor: 'var(--color-surface-elevated)',
-            borderColor: 'var(--color-border)',
-            color: 'var(--color-text-secondary)',
-            minHeight: '44px',
-          }}
-        >
-          <ArrowUpDown className="w-4 h-4" />
-          {sortDir === 'desc' ? 'Newest first' : 'Oldest first'}
-        </button>
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+          <label className="relative min-w-0 sm:min-w-40">
+            <span className="sr-only">Content type</span>
+            <select
+              value={activeTab}
+              onChange={(event) => handleTabChange(event.target.value as ContentType)}
+              className="min-h-11 w-full appearance-none rounded-xl border py-2 pl-4 pr-9 text-sm font-medium outline-none"
+              style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+            >
+              <option value="all">All media</option>
+              <option value="youtube">Video</option>
+              <option value="audio">Recordings</option>
+              <option value="pdf">PDFs</option>
+            </select>
+            <SlidersHorizontal className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: 'var(--color-text-muted)' }} aria-hidden="true" />
+          </label>
+
+          <label className="relative min-w-0 sm:min-w-40">
+            <span className="sr-only">Processing status</span>
+            <select
+              value={statusFilter}
+              onChange={(event) => handleStatusChange(event.target.value as StatusFilter)}
+              className="min-h-11 w-full appearance-none rounded-xl border py-2 pl-4 pr-9 text-sm font-medium capitalize outline-none"
+              style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+            >
+              <option value="all">Any status</option>
+              <option value="completed">Completed</option>
+              <option value="processing">Processing</option>
+              <option value="failed">Failed</option>
+            </select>
+            <SlidersHorizontal className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: 'var(--color-text-muted)' }} aria-hidden="true" />
+          </label>
+
+          <button
+            onClick={() => setSortDir(sortDir === 'desc' ? 'asc' : 'desc')}
+            className="col-span-2 flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition-colors sm:col-auto"
+            style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+          >
+            <ArrowUpDown className="h-4 w-4" />
+            {sortDir === 'desc' ? 'Newest first' : 'Oldest first'}
+          </button>
+
+          {!isLoading && (
+            <span className="col-span-2 px-1 text-sm sm:ml-auto" style={{ color: 'var(--color-text-muted)' }}>
+              {totalItems.toLocaleString()} {totalItems === 1 ? 'item' : 'items'}
+            </span>
+          )}
+
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="col-span-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold sm:col-auto"
+              style={{ color: 'var(--color-brand-500)' }}
+            >
+              <X className="h-4 w-4" />
+              Clear filters
+            </button>
+          )}
+        </div>
       </motion.div>
 
       {/* Loading */}
@@ -467,14 +465,25 @@ export function MyLibraryPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex items-center gap-3 p-6 rounded-2xl border"
+          className="flex flex-col items-start gap-4 rounded-2xl border p-6 sm:flex-row sm:items-center"
           style={{
             backgroundColor: 'var(--color-error-soft)',
             borderColor: 'var(--color-error-border)',
           }}
         >
-          <AlertCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--color-error)' }} />
-          <p className="text-sm" style={{ color: 'var(--color-error)' }}>{error}</p>
+          <AlertCircle className="h-5 w-5 shrink-0" style={{ color: 'var(--color-error)' }} />
+          <div className="flex-1">
+            <p className="text-sm font-semibold" style={{ color: 'var(--color-error)' }}>Library unavailable</p>
+            <p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>{error}</p>
+          </div>
+          <button
+            onClick={() => setRefreshToken((value) => value + 1)}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold"
+            style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-error-border)', color: 'var(--color-error)' }}
+          >
+            <RefreshCw className="h-4 w-4" />
+            Try again
+          </button>
         </motion.div>
       )}
 
@@ -500,27 +509,30 @@ export function MyLibraryPage() {
             )}
           </div>
           <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text-primary)' }}>
-            {searchInput ? 'No results found' : 'Nothing here yet'}
+            {hasActiveFilters ? 'No items match these filters' : 'Your library is ready'}
           </h3>
           <p className="text-sm mb-6" style={{ color: 'var(--color-text-secondary)' }}>
-            {searchInput
-              ? 'Try adjusting your search'
-              : activeTab === 'youtube'
-              ? 'Extract a video transcript to see it here'
-              : activeTab === 'audio'
-              ? 'Upload audio or Zoom recordings to see them here'
-              : activeTab === 'pdf'
-              ? 'Upload a PDF to see it here'
-              : 'Start by extracting a transcript, recording audio, or uploading a PDF'}
+            {hasActiveFilters
+              ? 'Try a different search or clear the filters to see everything.'
+              : 'Add a video transcript, recording, or PDF to keep it organized here.'}
           </p>
-          {!searchInput && (
+          {hasActiveFilters ? (
             <button
-              onClick={() => navigate(activeTab === 'audio' ? '/app/audio' : activeTab === 'pdf' ? '/app/pdf' : '/app/video')}
+              onClick={clearFilters}
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-5 text-sm font-semibold"
+              style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+            >
+              <X className="h-4 w-4" />
+              Clear filters
+            </button>
+          ) : (
+            <button
+              onClick={() => navigate('/app/new')}
               className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-white font-medium text-sm"
               style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
             >
-              {activeTab === 'audio' ? <Mic className="w-4 h-4" /> : activeTab === 'pdf' ? <FileType2 className="w-4 h-4" /> : <Youtube className="w-4 h-4" />}
-              {activeTab === 'audio' ? 'Upload audio or recording' : activeTab === 'pdf' ? 'Upload a PDF' : 'Extract a transcript'}
+              <FileText className="h-4 w-4" />
+              Add media
             </button>
           )}
         </motion.div>
