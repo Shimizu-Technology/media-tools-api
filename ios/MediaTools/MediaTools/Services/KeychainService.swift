@@ -28,7 +28,9 @@ enum KeychainService {
             kSecAttrAccount as String: tokenKey,
             kSecAttrAccessGroup as String: accessGroup,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+            // The share extension still needs access after the first unlock,
+            // but a session token should never migrate through device backups.
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
         SecItemAdd(addQuery as CFDictionary, nil)
     }

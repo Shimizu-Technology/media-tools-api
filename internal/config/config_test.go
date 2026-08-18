@@ -9,9 +9,56 @@ func setRequiredReleaseEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("GIN_MODE", "release")
 	t.Setenv("JWT_SECRET", "test-secret-that-is-not-the-development-default")
-	t.Setenv("ADMIN_API_KEY", "test-admin-key")
+	t.Setenv("ADMIN_API_KEY", "test-admin-key-that-is-at-least-32-chars")
 	t.Setenv("YT_DLP_PATH", "/bin/true")
 	t.Setenv("CLERK_JWKS_URL", "https://example.clerk.accounts.dev/.well-known/jwks.json")
+}
+
+func TestLoadRejectsMissingOrShortProductionSecrets(t *testing.T) {
+	tests := []struct {
+		name          string
+		environment   string
+		value         string
+		wantErrorText string
+	}{
+		{
+			name:          "empty JWT secret",
+			environment:   "JWT_SECRET",
+			value:         "",
+			wantErrorText: "JWT_SECRET must be set to at least 32 characters",
+		},
+		{
+			name:          "short JWT secret",
+			environment:   "JWT_SECRET",
+			value:         "too-short",
+			wantErrorText: "JWT_SECRET must be set to at least 32 characters",
+		},
+		{
+			name:          "empty admin key",
+			environment:   "ADMIN_API_KEY",
+			value:         "",
+			wantErrorText: "ADMIN_API_KEY must be set to at least 32 characters",
+		},
+		{
+			name:          "short admin key",
+			environment:   "ADMIN_API_KEY",
+			value:         "too-short",
+			wantErrorText: "ADMIN_API_KEY must be set to at least 32 characters",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setRequiredReleaseEnv(t)
+			t.Setenv("CORS_ORIGIN", "https://media-tools-gu.netlify.app")
+			t.Setenv(tt.environment, tt.value)
+
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), tt.wantErrorText) {
+				t.Fatalf("Load error = %v, want %q", err, tt.wantErrorText)
+			}
+		})
+	}
 }
 
 func TestLoadInfersClerkAuthorizedPartyFromCORSOrigin(t *testing.T) {

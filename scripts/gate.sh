@@ -5,6 +5,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+echo "Running credential scan"
+./scripts/scan-secrets.sh
+
 echo "Running backend checks"
 unformatted="$(find cmd internal -name '*.go' -type f -print0 | xargs -0 gofmt -l)"
 if [[ -n "$unformatted" ]]; then
