@@ -28,12 +28,12 @@ export function CapturePageHeader({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-      className="mb-8 border-b pb-7 sm:mb-10 sm:pb-8"
+      className="mb-8 border-b pb-8 sm:mb-10"
       style={{ borderColor: 'var(--color-border-subtle)' }}
     >
       <div className="mb-4 flex items-center justify-between gap-4">
         <div
-          className="inline-flex min-h-8 items-center gap-2 rounded-full px-3 text-xs font-semibold uppercase tracking-[0.14em]"
+          className="inline-flex min-h-8 items-center gap-2 rounded-full px-4 text-xs font-semibold uppercase tracking-[0.14em]"
           style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-600)' }}
         >
           <Icon className="h-4 w-4" aria-hidden="true" />
@@ -41,7 +41,7 @@ export function CapturePageHeader({
         </div>
         <Link
           to={historyTo}
-          className="inline-flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-sm font-semibold"
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm font-semibold"
           style={{ color: 'var(--color-brand-500)' }}
         >
           <span className="hidden sm:inline">{historyLabel}</span>
@@ -57,17 +57,17 @@ export function CapturePageHeader({
         {title}
       </h1>
       <p
-        className="mt-3 max-w-2xl text-base leading-relaxed sm:text-lg"
+        className="mt-4 max-w-2xl text-base leading-relaxed sm:text-lg"
         style={{ color: 'var(--color-text-secondary)' }}
       >
         {description}
       </p>
 
-      <ul className="mt-5 flex flex-wrap gap-x-5 gap-y-2" aria-label="Workflow highlights">
+      <ul className="mt-6 flex flex-wrap gap-x-6 gap-y-2" aria-label="Workflow highlights">
         {highlights.map((highlight) => (
           <li
             key={highlight}
-            className="inline-flex items-center gap-1.5 text-sm"
+            className="inline-flex items-center gap-2 text-sm"
             style={{ color: 'var(--color-text-secondary)' }}
           >
             <Check className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} aria-hidden="true" />
