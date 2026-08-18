@@ -159,6 +159,96 @@ actor APIClient {
         }
     }
 
+    /// Upload a source file without materializing either the source or the
+    /// multipart body in memory. This keeps long recordings within a stable
+    /// memory envelope when direct object storage is unavailable.
+    func uploadFile<T: Decodable>(
+        _ path: String,
+        fileURL: URL,
+        filename: String,
+        mimeType: String,
+        fields: [String: String] = [:]
+    ) async throws -> T {
+        let boundary = UUID().uuidString
+        let bodyURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("upload")
+        defer { try? FileManager.default.removeItem(at: bodyURL) }
+
+        try Self.writeMultipartBody(
+            to: bodyURL,
+            sourceURL: fileURL,
+            filename: filename,
+            mimeType: mimeType,
+            fields: fields,
+            boundary: boundary
+        )
+
+        let url = URL(string: baseURL + path)!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        var headers = await authHeaders()
+        headers["Content-Type"] = "multipart/form-data; boundary=\(boundary)"
+        for (key, value) in headers {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+
+        let (data, response) = try await session.upload(for: request, fromFile: bodyURL)
+        try validateResponse(response, data: data)
+        return try decoder.decode(T.self, from: data)
+    }
+
+    /// Send a file to a presigned object-storage URL. Presigned uploads must not
+    /// include Clerk credentials because the URL itself grants scoped access.
+    func putFile(at fileURL: URL, to uploadURL: URL, mimeType: String) async throws {
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "PUT"
+        request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
+
+        let (data, response) = try await session.upload(for: request, fromFile: fileURL)
+        try validateResponse(response, data: data)
+    }
+
+    static func writeMultipartBody(
+        to destinationURL: URL,
+        sourceURL: URL,
+        filename: String,
+        mimeType: String,
+        fields: [String: String],
+        boundary: String
+    ) throws {
+        guard FileManager.default.createFile(atPath: destinationURL.path, contents: nil) else {
+            throw APIError.invalidFile(message: "Could not prepare the recording for upload.")
+        }
+        let output = try FileHandle(forWritingTo: destinationURL)
+        defer { try? output.close() }
+
+        for (key, value) in fields.sorted(by: { $0.key < $1.key }) {
+            try output.write(contentsOf: Data("--\(boundary)\r\n".utf8))
+            try output.write(
+                contentsOf: Data("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n".utf8))
+            try output.write(contentsOf: Data("\(value)\r\n".utf8))
+        }
+
+        let safeFilename =
+            filename
+            .replacingOccurrences(of: "\"", with: "")
+            .replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+        try output.write(contentsOf: Data("--\(boundary)\r\n".utf8))
+        try output.write(
+            contentsOf: Data(
+                "Content-Disposition: form-data; name=\"file\"; filename=\"\(safeFilename)\"\r\n".utf8))
+        try output.write(contentsOf: Data("Content-Type: \(mimeType)\r\n\r\n".utf8))
+
+        let input = try FileHandle(forReadingFrom: sourceURL)
+        defer { try? input.close() }
+        while let chunk = try input.read(upToCount: 1024 * 1024), !chunk.isEmpty {
+            try output.write(contentsOf: chunk)
+        }
+        try output.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
+    }
+
     // MARK: - Validation
 
     private func validateResponse(_ response: URLResponse, data: Data) throws {
@@ -166,10 +256,15 @@ actor APIClient {
             throw APIError.invalidResponse
         }
         guard (200...299).contains(http.statusCode) else {
-            let message = (try? JSONDecoder().decode(ErrorResponse.self, from: data))?.message
+            let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data)
+            let message = errorResponse?.message
                 ?? String(data: data, encoding: .utf8)
                 ?? "Unknown error"
-            throw APIError.httpError(statusCode: http.statusCode, message: message)
+            throw APIError.httpError(
+                statusCode: http.statusCode,
+                code: errorResponse?.error,
+                message: message
+            )
         }
     }
 }
@@ -178,14 +273,39 @@ actor APIClient {
 
 enum APIError: LocalizedError {
     case invalidResponse
-    case httpError(statusCode: Int, message: String)
+    case invalidFile(message: String)
+    case httpError(statusCode: Int, code: String? = nil, message: String)
 
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
             return "Invalid server response"
-        case .httpError(let code, let message):
-            return "HTTP \(code): \(message)"
+        case .invalidFile(let message):
+            return message
+        case .httpError(let statusCode, _, let message):
+            return "HTTP \(statusCode): \(message)"
+        }
+    }
+
+    var isRetryable: Bool {
+        switch self {
+        case .invalidResponse:
+            return true
+        case .invalidFile:
+            return false
+        case .httpError(let statusCode, _, _):
+            return statusCode == 408 || statusCode == 429 || statusCode >= 500
+        }
+    }
+
+    var permitsMultipartUploadFallback: Bool {
+        switch self {
+        case .httpError(let statusCode, let code, _):
+            // A 404 keeps the current app compatible with older/self-hosted
+            // servers that support multipart upload but predate presigning.
+            return statusCode == 404 || code == "storage_unavailable"
+        default:
+            return false
         }
     }
 }
