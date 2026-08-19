@@ -178,6 +178,29 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     @MainActor
+    func testSystemCaptureStopsIfLiveActivitiesBecomeUnavailableDuringStart() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let activityManager = TestRecordingActivityManager()
+        activityManager.activityAvailabilityChecks = [true, false]
+        let coordinator = RecordingCoordinator(
+            store: try RecordingStore(rootDirectory: directory),
+            simulatesCapture: true,
+            activityManager: activityManager
+        )
+
+        let outcome = await coordinator.toggleFromSystem()
+
+        XCTAssertEqual(outcome, .liveActivitiesDisabled)
+        XCTAssertFalse(coordinator.isRecording)
+        let savedRecording = try XCTUnwrap(coordinator.availableRecordings.first)
+        XCTAssertEqual(savedRecording.state, .ready)
+        XCTAssertEqual(activityManager.endedRecordingIDs, [savedRecording.id])
+    }
+
+    @MainActor
     func testDelayedLiveActivityStartCannotOutliveStoppedRecording() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -381,7 +404,18 @@ final class ModelDecodingTests: XCTestCase {
 
 @MainActor
 private final class TestRecordingActivityManager: RecordingActivityManaging {
-    var areActivitiesEnabled = true
+    private var activitiesEnabled = true
+    var activityAvailabilityChecks: [Bool] = []
+    var areActivitiesEnabled: Bool {
+        get {
+            guard !activityAvailabilityChecks.isEmpty else { return activitiesEnabled }
+            return activityAvailabilityChecks.removeFirst()
+        }
+        set {
+            activitiesEnabled = newValue
+            activityAvailabilityChecks = []
+        }
+    }
     var pausesStart = false
     private(set) var startedRecording: LocalRecording?
     private(set) var updates: [(isInterrupted: Bool, duration: TimeInterval)] = []

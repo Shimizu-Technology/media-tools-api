@@ -211,7 +211,17 @@ final class RecordingCoordinator {
 
         guard activityManager.areActivitiesEnabled else {
             // A visible in-app recording remains valid without a Live Activity.
-            return requiresLiveActivity ? .liveActivitiesDisabled : .started
+            guard requiresLiveActivity else { return .started }
+            let finalDuration = finalizeRecording(
+                state: .ready,
+                message: "Saved after Live Activities became unavailable",
+                endActivityAutomatically: false
+            )
+            await activityManager.end(
+                recordingID: recording.id,
+                finalDuration: finalDuration
+            )
+            return .liveActivitiesDisabled
         }
 
         do {
