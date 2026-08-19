@@ -3,9 +3,9 @@ import UniformTypeIdentifiers
 
 struct RecordView: View {
     @Environment(RecordingCoordinator.self) private var recorder
+    @Environment(RecordingUploadCoordinator.self) private var uploader
     @State private var contentType = "general"
     @State private var isUploading = false
-    @State private var uploadingRecordingID: UUID?
     @State private var uploadResult: AudioTranscription?
     @State private var pollingTask: Task<Void, Never>?
     @State private var error: String?
@@ -26,8 +26,9 @@ struct RecordView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ScrollView {
-                VStack(spacing: 24) {
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    VStack(spacing: 24) {
                     // Content type selector
                     VStack(alignment: .leading, spacing: 8) {
                         SectionHeader(text: "Content Type", icon: "tag")
@@ -173,11 +174,12 @@ struct RecordView: View {
                             .font(Theme.caption())
                             .foregroundStyle(Theme.textSecondary)
 
-                        if let statusMessage = recorder.statusMessage {
+                        if let statusMessage = visibleStatusMessage {
                             Label(
                                 statusMessage,
                                 systemImage: recorder.isInterrupted
-                                    ? "exclamationmark.circle" : "lock.shield"
+                                    ? "exclamationmark.circle"
+                                    : (uploader.statusMessage == nil ? "lock.shield" : "icloud")
                             )
                             .font(Theme.caption(12))
                             .foregroundStyle(
@@ -312,6 +314,7 @@ struct RecordView: View {
                         }
                         .cardStyle()
                         .padding(.horizontal)
+                        .id("upload-result")
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
 
@@ -358,27 +361,44 @@ struct RecordView: View {
                                     defer {
                                         if accessed { url.stopAccessingSecurityScopedResource() }
                                     }
-                                    await uploadRecording(
-                                        url: url,
-                                        contentType: contentType,
-                                        localRecording: nil
-                                    )
+                                    await queueImportedRecording(url: url, contentType: contentType)
                                 }
                             }
                         case .failure(let error):
                             self.error = error.localizedDescription
                         }
                     }
+                    }
+                    .frame(minHeight: geometry.size.height)
+                    .padding(.top, 12)
                 }
-                .frame(minHeight: geometry.size.height)
-                .padding(.top, 12)
+                .scrollBounceBehavior(.basedOnSize)
+                .onChange(of: uploader.latestItemSignature) { _, _ in
+                    withAnimation(Theme.springSnappy) {
+                        uploadResult = uploader.latestItem
+                    }
+                    guard uploader.latestItem != nil else { return }
+                    Task { @MainActor in
+                        // Let SwiftUI commit the result card before resolving its
+                        // scroll target. This avoids an occasional no-op when the
+                        // upload state and card insertion arrive in one update.
+                        await Task.yield()
+                        try? await Task.sleep(for: .milliseconds(100))
+                        withAnimation(Theme.springSnappy) {
+                            scrollProxy.scrollTo("upload-result", anchor: .center)
+                        }
+                    }
+                }
             }
-            .scrollBounceBehavior(.basedOnSize)
         }
         .background(Theme.surface)
         .navigationTitle("Record")
         .navigationDestination(for: LibraryItem.self) { item in
             ItemDetailView(item: item)
+        }
+        .task {
+            uploader.resumePendingWork()
+            uploadResult = uploader.latestItem ?? uploadResult
         }
         .onDisappear {
             pollingTask?.cancel()
@@ -417,11 +437,14 @@ struct RecordView: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(
                     systemName: recording.state == .interrupted
-                        ? "waveform.badge.exclamationmark" : "waveform"
+                        ? "waveform.badge.exclamationmark"
+                        : (recording.isUploadInProgress ? "icloud.and.arrow.up" : "waveform")
                 )
                 .font(.title3)
                 .foregroundStyle(
-                    recording.state == .interrupted ? Theme.warning : Theme.brand400
+                    recording.state == .interrupted
+                        ? Theme.warning
+                        : (recording.state == .uploadFailed ? Theme.error : Theme.brand400)
                 )
                 .frame(width: 36, height: 36)
                 .background(Theme.surfaceElevated)
@@ -442,22 +465,28 @@ struct RecordView: View {
                 Spacer(minLength: 4)
             }
 
+            if recording.state == .uploading {
+                ProgressView(value: recording.uploadProgress ?? 0)
+                    .tint(Theme.brand400)
+                    .accessibilityLabel("Upload progress")
+                    .accessibilityValue(
+                        "\(Int(((recording.uploadProgress ?? 0) * 100).rounded())) percent"
+                    )
+            }
+
             HStack(spacing: 12) {
                 Button {
-                    guard let url = recorder.fileURL(for: recording) else { return }
-                    Task {
-                        await uploadRecording(
-                            url: url,
-                            contentType: recording.contentType,
-                            localRecording: recording
-                        )
+                    if !recording.isUploadInProgress {
+                        error = nil
+                        uploader.queue(recording)
+                        Haptics.light()
                     }
                 } label: {
-                    if uploadingRecordingID == recording.id {
+                    if recording.isUploadInProgress {
                         HStack(spacing: 8) {
                             ProgressView()
                                 .tint(.white)
-                            Text("Uploading...")
+                            Text(uploadButtonTitle(for: recording))
                         }
                         .frame(maxWidth: .infinity)
                     } else {
@@ -471,7 +500,11 @@ struct RecordView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.brand500)
-                .disabled(isUploading || recorder.isStarting || recorder.isRecording)
+                .disabled(
+                    recording.isUploadInProgress
+                        || recorder.isStarting
+                        || recorder.isRecording
+                )
                 .accessibilityIdentifier("recording.transcribe.\(recording.id.uuidString)")
 
                 Button {
@@ -481,47 +514,25 @@ struct RecordView: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(Theme.error)
-                .disabled(isUploading || recorder.isStarting || recorder.isRecording)
+                .disabled(
+                    recording.isUploadInProgress
+                        || recorder.isStarting
+                        || recorder.isRecording
+                )
                 .accessibilityIdentifier("recording.discard.\(recording.id.uuidString)")
             }
         }
         .cardStyle()
     }
 
-    private func uploadRecording(
-        url: URL,
-        contentType: String,
-        localRecording: LocalRecording?
-    ) async {
-        isUploading = true
-        uploadingRecordingID = localRecording?.id
-        defer {
-            isUploading = false
-            uploadingRecordingID = nil
-        }
+    private func queueImportedRecording(url: URL, contentType: String) async {
         error = nil
-
         do {
-            let filename = url.lastPathComponent
-            let result = try await service.uploadAudio(
-                fileURL: url,
-                filename: filename,
-                mimeType: mimeType(for: url),
-                contentType: contentType
-            )
-            withAnimation(Theme.springSnappy) {
-                uploadResult = result
-                if let localRecording {
-                    recorder.markUploaded(localRecording)
-                }
-            }
+            let recording = try recorder.importRecording(from: url, contentType: contentType)
+            uploader.queue(recording)
             Haptics.light()
-            startPolling(id: result.id)
         } catch {
             self.error = error.localizedDescription
-            if let localRecording {
-                recorder.markUploadFailed(localRecording, message: error.localizedDescription)
-            }
             Haptics.error()
         }
     }
@@ -585,9 +596,24 @@ struct RecordView: View {
         }
     }
 
-    private func mimeType(for url: URL) -> String {
-        UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
-            ?? "application/octet-stream"
+    private func uploadButtonTitle(for recording: LocalRecording) -> String {
+        switch recording.state {
+        case .waitingForUpload:
+            return "Queued"
+        case .uploading:
+            return "Uploading"
+        case .finalizingUpload:
+            return "Finishing"
+        default:
+            return "Transcribe"
+        }
+    }
+
+    private var visibleStatusMessage: String? {
+        if recorder.isRecording || recorder.isStarting || recorder.isInterrupted {
+            return recorder.statusMessage
+        }
+        return uploader.statusMessage ?? recorder.statusMessage
     }
 
     private func waveformScale(for index: Int) -> CGFloat {

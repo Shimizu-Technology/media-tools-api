@@ -75,13 +75,10 @@ final class MediaToolsService {
 
         let presign: AudioUploadPresignResponse
         do {
-            presign = try await api.post(
-                "/audio/uploads/presign",
-                body: AudioUploadPresignRequest(
-                    filename: filename,
-                    contentType: mimeType,
-                    sizeBytes: size.int64Value
-                )
+            presign = try await presignAudioUpload(
+                filename: filename,
+                mimeType: mimeType,
+                sizeBytes: size.int64Value
             )
         } catch let apiError as APIError where apiError.permitsMultipartUploadFallback {
             // Local and self-hosted environments may intentionally omit S3.
@@ -111,11 +108,7 @@ final class MediaToolsService {
         var completionError: Error?
         for attempt in 0..<3 {
             do {
-                let item: AudioTranscription = try await api.post(
-                    "/audio/uploads/complete",
-                    body: completion
-                )
-                upsertAudioItem(item)
+                let item = try await completeAudioUpload(completion)
                 return item
             } catch {
                 completionError = error
@@ -128,6 +121,32 @@ final class MediaToolsService {
             }
         }
         throw completionError ?? APIError.invalidResponse
+    }
+
+    func presignAudioUpload(
+        filename: String,
+        mimeType: String,
+        sizeBytes: Int64
+    ) async throws -> AudioUploadPresignResponse {
+        try await api.post(
+            "/audio/uploads/presign",
+            body: AudioUploadPresignRequest(
+                filename: filename,
+                contentType: mimeType,
+                sizeBytes: sizeBytes
+            )
+        )
+    }
+
+    func completeAudioUpload(
+        _ completion: AudioUploadCompleteRequest
+    ) async throws -> AudioTranscription {
+        let item: AudioTranscription = try await api.post(
+            "/audio/uploads/complete",
+            body: completion
+        )
+        upsertAudioItem(item)
+        return item
     }
 
     func retryAudioItem(_ id: String) async throws -> AudioTranscription {

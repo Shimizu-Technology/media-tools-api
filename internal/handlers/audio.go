@@ -68,6 +68,12 @@ func parseAudioContentType(value string) (models.AudioContentType, bool) {
 // 2GB keeps room for very long recordings while chunking handles Whisper limits.
 const maxAudioSize = 2 << 30
 
+// A presigned URL is intentionally short-lived, but iOS may finish a background
+// transfer while the app remains suspended. Keep the authenticated completion
+// session long enough for the app to be relaunched and finalize that accepted
+// object without uploading the recording a second time.
+const audioUploadCompletionRetention = 7 * 24 * time.Hour
+
 type AudioUploadPresignRequest struct {
 	Filename    string `json:"filename" binding:"required"`
 	ContentType string `json:"content_type"`
@@ -347,7 +353,7 @@ func (h *Handler) PresignAudioUpload(c *gin.Context) {
 		SizeBytes:    req.SizeBytes,
 		UserID:       actor.UserID,
 		APIKeyID:     actor.APIKeyID,
-		ExpiresAt:    time.Now().UTC().Add(time.Hour),
+		ExpiresAt:    time.Now().UTC().Add(audioUploadCompletionRetention),
 	}
 	if err := h.DB.CreateAudioUploadSession(c.Request.Context(), session); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -359,11 +365,12 @@ func (h *Handler) PresignAudioUpload(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"upload_url":  putURL,
-		"object_key":  objectKey,
-		"stored_name": storedFilename,
-		"upload_id":   session.ID,
-		"expires_in":  "60m",
+		"upload_url":            putURL,
+		"object_key":            objectKey,
+		"stored_name":           storedFilename,
+		"upload_id":             session.ID,
+		"expires_in":            "60m",
+		"completion_expires_in": "7d",
 	})
 }
 

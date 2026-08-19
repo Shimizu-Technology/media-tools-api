@@ -68,4 +68,52 @@ enum NotificationService {
 
         UNUserNotificationCenter.current().add(request)
     }
+
+    static func notifyAudioUploadAccepted(title: String, itemId: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Recording Uploaded"
+        content.body = "\(title) is ready for transcription."
+        content.sound = .default
+        content.userInfo = ["item_id": itemId, "type": "audio"]
+
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(
+                identifier: "audio-upload-\(itemId)",
+                content: content,
+                trigger: nil
+            )
+        )
+    }
+
+    static func notifyAudioFailed(title: String, itemId: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Transcription Needs Attention"
+        content.body = "\(title) could not be transcribed. Open Media Tools to retry."
+        content.sound = .default
+        content.userInfo = ["item_id": itemId, "type": "audio"]
+
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(
+                identifier: "audio-failed-\(itemId)",
+                content: content,
+                trigger: nil
+            )
+        )
+    }
+
+    static func notifyAudioStatusUnavailable(title: String, itemId: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Check Transcription Status"
+        content.body = "Media Tools could not refresh \(title). Open the Library for details."
+        content.sound = .default
+        content.userInfo = ["item_id": itemId, "type": "audio"]
+
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(
+                identifier: "audio-status-\(itemId)",
+                content: content,
+                trigger: nil
+            )
+        )
+    }
 }

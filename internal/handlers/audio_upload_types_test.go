@@ -6,11 +6,24 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
+
+// TestAudioUploadCompletionRetentionSupportsBackgroundDelivery verifies that
+// completion sessions outlive suspended background transfers.
+func TestAudioUploadCompletionRetentionSupportsBackgroundDelivery(t *testing.T) {
+	t.Parallel()
+	if audioUploadCompletionRetention < 24*time.Hour {
+		t.Fatalf(
+			"audio upload completion retention = %s, want at least 24h for background delivery",
+			audioUploadCompletionRetention,
+		)
+	}
+}
 
 func TestIsSupportedTranscriptionUploadExt(t *testing.T) {
 	tests := []struct {
