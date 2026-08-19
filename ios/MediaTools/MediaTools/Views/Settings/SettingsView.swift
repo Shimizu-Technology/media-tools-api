@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(Clerk.self) private var clerk
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
 
     @State private var health: HealthResponse?
     @State private var healthError: String?
@@ -69,6 +70,19 @@ struct SettingsView: View {
                         .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
                 }
                 .accessibilityHint("Opens the Shortcuts app to configure Quick Record")
+
+                Button {
+                    hasCompletedOnboarding = false
+                } label: {
+                    Label("Review setup", systemImage: "checklist")
+                        .font(Theme.body(14, weight: .semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(
+                    "Shows microphone, alert, privacy, and Quick Record guidance again"
+                )
             }
             .cardStyle(padding: 14)
         }
@@ -289,7 +303,10 @@ struct SettingsView: View {
     }
 
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = info?["CFBundleVersion"] as? String ?? "1"
+        return "\(version) (\(build))"
     }
 
     private var notificationIcon: String {

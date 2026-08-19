@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct RecordView: View {
     @Environment(RecordingCoordinator.self) private var recorder
     @Environment(RecordingUploadCoordinator.self) private var uploader
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var contentType = "general"
     @State private var isUploading = false
     @State private var uploadResult: AudioTranscription?
@@ -85,7 +86,10 @@ struct RecordView: View {
                                 }
                             }
                             .frame(height: 44)
-                            .animation(.linear(duration: 0.1), value: recorder.audioLevel)
+                            .animation(
+                                reduceMotion ? nil : .linear(duration: 0.1),
+                                value: recorder.audioLevel
+                            )
                             .transition(.opacity)
                             .accessibilityHidden(true)
                         }
@@ -104,7 +108,7 @@ struct RecordView: View {
                         } label: {
                             ZStack {
                                 // Pulsing outer ring
-                                if recorder.isRecording {
+                                if recorder.isRecording && !reduceMotion {
                                     Circle()
                                         .stroke(Color.red.opacity(0.3), lineWidth: 3)
                                         .frame(width: 96, height: 96)
@@ -177,13 +181,14 @@ struct RecordView: View {
                         if let statusMessage = visibleStatusMessage {
                             Label(
                                 statusMessage,
-                                systemImage: recorder.isInterrupted
+                                systemImage: recorder.isInterrupted || recorder.storageIsLow
                                     ? "exclamationmark.circle"
                                     : (uploader.statusMessage == nil ? "lock.shield" : "icloud")
                             )
                             .font(Theme.caption(12))
                             .foregroundStyle(
-                                recorder.isInterrupted ? Theme.warning : Theme.textMuted
+                                recorder.isInterrupted || recorder.storageIsLow
+                                    ? Theme.warning : Theme.textMuted
                             )
                             .multilineTextAlignment(.center)
                             .transition(.opacity)
@@ -403,8 +408,14 @@ struct RecordView: View {
         .onDisappear {
             pollingTask?.cancel()
         }
-        .onChange(of: recorder.isRecording) { _, isRecording in
+        .onChange(of: recorder.isRecording) { wasRecording, isRecording in
             pulseRing = isRecording && !recorder.isInterrupted
+            guard wasRecording != isRecording else { return }
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: isRecording
+                    ? "Recording started" : recorder.statusMessage ?? "Recording stopped"
+            )
         }
         .onChange(of: recorder.isInterrupted) { _, isInterrupted in
             pulseRing = recorder.isRecording && !isInterrupted

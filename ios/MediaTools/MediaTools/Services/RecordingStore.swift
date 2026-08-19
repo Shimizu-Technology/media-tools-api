@@ -1,5 +1,15 @@
 import Foundation
 
+enum RecordingStorageCapacity {
+    /// Uses Apple's important-usage value because an in-progress recording is
+    /// user-created data that needs enough headroom to finish safely.
+    static func available(at directoryURL: URL) -> Int64? {
+        try? directoryURL.resourceValues(
+            forKeys: [.volumeAvailableCapacityForImportantUsageKey]
+        ).volumeAvailableCapacityForImportantUsage
+    }
+}
+
 /// File-backed metadata and audio storage for recordings that have not yet been
 /// accepted by the server. The JSON manifest is deliberately small and boring:
 /// it is atomic, inspectable, and can be shared with system extensions through

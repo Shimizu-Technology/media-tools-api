@@ -15,7 +15,7 @@ export function PrivacyPage() {
         className="text-sm mb-10"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Last updated: February 21, 2026
+        Last updated: August 19, 2026
       </p>
 
       <div className="space-y-8" style={{ color: 'var(--color-text-secondary)' }}>
@@ -53,8 +53,10 @@ export function PrivacyPage() {
             <li>
               <strong style={{ color: 'var(--color-text-primary)' }}>Microphone access</strong> —
               The iOS app requests microphone permission solely for recording
-              audio within the app. We do not access the microphone in the
-              background.
+              audio after you deliberately start a recording. An active recording
+              can continue while the app is in the background or the screen is
+              locked, and stops when you use a Media Tools stop control or iOS
+              interrupts the audio session. We never start listening on our own.
             </li>
           </ul>
         </Section>
