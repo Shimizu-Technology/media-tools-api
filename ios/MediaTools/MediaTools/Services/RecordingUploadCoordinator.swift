@@ -299,9 +299,11 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 } catch is CancellationError {
                     return
                 } catch {
-                    failures += 1
-                    if failures >= 3 { return }
-                    try? await Task.sleep(for: .seconds(5 * failures))
+                    failures = min(failures + 1, 12)
+                    // The persisted watch must remain live while the app does.
+                    // A short outage should delay status delivery, not silently
+                    // disable it until the next scene activation.
+                    try? await Task.sleep(for: Self.watchRetryDelay(after: failures))
                 }
             }
         }
@@ -366,6 +368,10 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             }
         }
         return isRetryable(error)
+    }
+
+    static func watchRetryDelay(after failureCount: Int) -> Duration {
+        .seconds(min(max(failureCount, 1) * 5, 60))
     }
 
     private static func mimeType(for url: URL) -> String {

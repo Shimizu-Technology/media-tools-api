@@ -2,6 +2,13 @@ import XCTest
 @testable import MediaTools
 
 final class ModelDecodingTests: XCTestCase {
+    @MainActor
+    func testTranscriptionWatchRetryDelayIsPositiveAndCapped() {
+        XCTAssertEqual(RecordingUploadCoordinator.watchRetryDelay(after: 0), .seconds(5))
+        XCTAssertEqual(RecordingUploadCoordinator.watchRetryDelay(after: 3), .seconds(15))
+        XCTAssertEqual(RecordingUploadCoordinator.watchRetryDelay(after: 100), .seconds(60))
+    }
+
     private struct DatedPayload: Decodable {
         let createdAt: Date
     }

@@ -378,7 +378,12 @@ struct RecordView: View {
                         uploadResult = uploader.latestItem
                     }
                     guard uploader.latestItem != nil else { return }
-                    DispatchQueue.main.async {
+                    Task { @MainActor in
+                        // Let SwiftUI commit the result card before resolving its
+                        // scroll target. This avoids an occasional no-op when the
+                        // upload state and card insertion arrive in one update.
+                        await Task.yield()
+                        try? await Task.sleep(for: .milliseconds(100))
                         withAnimation(Theme.springSnappy) {
                             scrollProxy.scrollTo("upload-result", anchor: .center)
                         }

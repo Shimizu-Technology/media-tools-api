@@ -13,6 +13,8 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
 
+// TestAudioUploadCompletionRetentionSupportsBackgroundDelivery verifies that
+// completion sessions outlive suspended background transfers.
 func TestAudioUploadCompletionRetentionSupportsBackgroundDelivery(t *testing.T) {
 	t.Parallel()
 	if audioUploadCompletionRetention < 24*time.Hour {

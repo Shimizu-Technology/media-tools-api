@@ -119,7 +119,12 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertFalse(
             app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch.exists
         )
-        XCTAssertTrue(app.buttons["View Details"].isHittable)
+        let viewDetails = app.buttons["View Details"]
+        expectation(
+            for: NSPredicate(format: "hittable == true"),
+            evaluatedWith: viewDetails
+        )
+        waitForExpectations(timeout: 5)
     }
 
     func testActiveRecordingSurvivesTabChanges() {
