@@ -17,6 +17,7 @@ enum TranscriptionWatchFailureDisposition: Equatable {
 @Observable
 final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     static let shared = RecordingUploadCoordinator()
+    static let maximumAuthenticationFailures = 3
 
     private(set) var latestItem: AudioTranscription?
     private(set) var statusMessage: String?
@@ -282,6 +283,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 do {
                     let item = try await self.service.getAudioItem(watch.id)
                     failures = 0
+                    self.resetAuthenticationFailures(for: watch.id)
                     self.latestItem = item
                     if item.status == "completed" {
                         self.removeWatch(id: watch.id)
@@ -313,20 +315,27 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                         // disable it until the next scene activation.
                         try? await Task.sleep(for: Self.watchRetryDelay(after: failures))
                     case .pauseForAuthentication:
-                        self.latestItem = nil
-                        self.statusMessage =
-                            "Sign in to continue checking transcription status."
-                        // Keep the persisted watch. RecordView and the app scene
-                        // both resume pending work after authentication returns.
+                        let authenticationFailures = self.recordAuthenticationFailure(
+                            for: watch.id
+                        )
+                        if authenticationFailures >= Self.maximumAuthenticationFailures {
+                            self.stopWatching(
+                                watch,
+                                message: "Authentication could not be restored. Check Library for status."
+                            )
+                        } else {
+                            self.latestItem = nil
+                            self.statusMessage =
+                                "Sign in to continue checking transcription status."
+                            // Keep the persisted watch for a bounded number of
+                            // recoveries. A successful poll resets the counter.
+                        }
                         return
                     case .stop:
-                        self.latestItem = nil
-                        self.removeWatch(id: watch.id)
-                        self.statusMessage =
-                            "Transcription status could not be refreshed. Check Library for details."
-                        NotificationService.notifyAudioStatusUnavailable(
-                            title: watch.title,
-                            itemId: watch.id
+                        self.stopWatching(
+                            watch,
+                            message:
+                                "Transcription status could not be refreshed. Check Library for details."
                         )
                         return
                     }
@@ -338,6 +347,34 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     private func removeWatch(id: String) {
         watches.removeAll { $0.id == id }
         persistWatches()
+    }
+
+    private func recordAuthenticationFailure(for id: String) -> Int {
+        guard let index = watches.firstIndex(where: { $0.id == id }) else {
+            return Self.maximumAuthenticationFailures
+        }
+        let count = (watches[index].authenticationFailureCount ?? 0) + 1
+        watches[index].authenticationFailureCount = count
+        persistWatches()
+        return count
+    }
+
+    private func resetAuthenticationFailures(for id: String) {
+        guard let index = watches.firstIndex(where: { $0.id == id }),
+              watches[index].authenticationFailureCount != nil
+        else { return }
+        watches[index].authenticationFailureCount = nil
+        persistWatches()
+    }
+
+    private func stopWatching(_ watch: TranscriptionWatch, message: String) {
+        latestItem = nil
+        removeWatch(id: watch.id)
+        statusMessage = message
+        NotificationService.notifyAudioStatusUnavailable(
+            title: watch.title,
+            itemId: watch.id
+        )
     }
 
     private func persistWatches() {
@@ -402,8 +439,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
 
     static func watchFailureDisposition(for error: Error) -> TranscriptionWatchFailureDisposition {
         if let apiError = error as? APIError {
-            if case .httpError(let statusCode, _, _) = apiError,
-               statusCode == 401 || statusCode == 403 {
+            if case .httpError(let statusCode, _, _) = apiError, statusCode == 401 {
                 return .pauseForAuthentication
             }
             return apiError.isRetryable ? .retry : .stop

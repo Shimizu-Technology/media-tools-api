@@ -37,6 +37,12 @@ final class ModelDecodingTests: XCTestCase {
         )
         XCTAssertEqual(
             RecordingUploadCoordinator.watchFailureDisposition(
+                for: APIError.httpError(statusCode: 403, message: "Forbidden")
+            ),
+            .stop
+        )
+        XCTAssertEqual(
+            RecordingUploadCoordinator.watchFailureDisposition(
                 for: DecodingError.dataCorrupted(
                     .init(codingPath: [], debugDescription: "Malformed response")
                 )
@@ -288,13 +294,19 @@ final class ModelDecodingTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = try TranscriptionWatchStore(rootDirectory: directory)
-        let watch = TranscriptionWatch(id: "audio-1", title: "Team sync", createdAt: Date())
+        let watch = TranscriptionWatch(
+            id: "audio-1",
+            title: "Team sync",
+            createdAt: Date(),
+            authenticationFailureCount: 2
+        )
 
         try store.save([watch])
         let restored = try XCTUnwrap(store.load().first)
         XCTAssertEqual(restored.id, watch.id)
         XCTAssertEqual(restored.title, watch.title)
         XCTAssertEqual(restored.createdAt.timeIntervalSince(watch.createdAt), 0, accuracy: 1)
+        XCTAssertEqual(restored.authenticationFailureCount, 2)
         try store.save([])
         XCTAssertTrue(try store.load().isEmpty)
     }
