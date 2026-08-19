@@ -547,7 +547,7 @@ struct LibraryView: View {
             currentPage = response.page
             totalPages = response.totalPages
             totalItems = response.totalItems
-            updateSystemIntegrations(response.data, for: requestedQuery)
+            updateSpotlightIndex(response.data, for: requestedQuery)
         } catch {
             guard !Task.isCancelled, requestedQuery == query else { return }
             loadError = error.localizedDescription
@@ -602,14 +602,13 @@ struct LibraryView: View {
         return requestedQuery.sort == .newest ? result : Array(result.reversed())
     }
 
-    private func updateSystemIntegrations(_ recentItems: [LibraryListItem], for requestedQuery: Query) {
+    private func updateSpotlightIndex(_ recentItems: [LibraryListItem], for requestedQuery: Query) {
         guard requestedQuery.type == .all,
               requestedQuery.status == .all,
               requestedQuery.sort == .newest,
               requestedQuery.search.isEmpty else { return }
 
         SpotlightService.indexLibraryItems(recentItems)
-        WidgetService.updateRecentItems(recentItems)
     }
 
     private func deletePendingItems() async {
@@ -645,7 +644,7 @@ struct LibraryView: View {
         items.removeAll { deleted.contains($0.reference) }
         totalItems = max(0, totalItems - deleted.count)
         SpotlightService.removeLibraryItems(Array(deleted))
-        updateSystemIntegrations(Array(items.prefix(20)), for: query)
+        updateSpotlightIndex(Array(items.prefix(20)), for: query)
         selectedReferences = Set(failed)
         if failed.isEmpty {
             leaveSelectionMode()

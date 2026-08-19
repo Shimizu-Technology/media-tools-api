@@ -177,6 +177,38 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertTrue(coordinator.pendingRecordings.isEmpty)
     }
 
+    @MainActor
+    func testDelayedLiveActivityStartCannotOutliveStoppedRecording() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let activityManager = TestRecordingActivityManager()
+        activityManager.pausesStart = true
+        let coordinator = RecordingCoordinator(
+            store: try RecordingStore(rootDirectory: directory),
+            simulatesCapture: true,
+            activityManager: activityManager
+        )
+
+        let startTask = Task { await coordinator.toggleFromSystem() }
+        for _ in 0..<100 where !activityManager.isStartSuspended {
+            await Task.yield()
+        }
+        XCTAssertTrue(activityManager.isStartSuspended)
+        let recordingID = try XCTUnwrap(activityManager.startedRecording?.id)
+
+        let stopOutcome = await coordinator.stopFromSystem()
+        XCTAssertEqual(stopOutcome, .stopped)
+        activityManager.resumeStart()
+        let delayedStartOutcome = await startTask.value
+        XCTAssertEqual(delayedStartOutcome, .stopped)
+
+        XCTAssertFalse(coordinator.isRecording)
+        XCTAssertEqual(coordinator.availableRecordings.first?.state, .ready)
+        XCTAssertEqual(activityManager.endedRecordingIDs, [recordingID, recordingID])
+    }
+
     func testAudioProcessingStateDecodesIntoUsefulProgressCopy() throws {
         let data = Data(
             #"{"id":"audio-1","status":"processing","processing_stage":"splitting","processing_progress":35}"#
@@ -350,19 +382,36 @@ final class ModelDecodingTests: XCTestCase {
 @MainActor
 private final class TestRecordingActivityManager: RecordingActivityManaging {
     var areActivitiesEnabled = true
+    var pausesStart = false
     private(set) var startedRecording: LocalRecording?
     private(set) var updates: [(isInterrupted: Bool, duration: TimeInterval)] = []
     private(set) var endCount = 0
+    private(set) var endedRecordingIDs: [UUID?] = []
+    private(set) var isStartSuspended = false
+    private var startContinuation: CheckedContinuation<Void, Never>?
 
     func start(for recording: LocalRecording) async throws {
         startedRecording = recording
+        guard pausesStart else { return }
+        isStartSuspended = true
+        await withCheckedContinuation { continuation in
+            startContinuation = continuation
+        }
+        isStartSuspended = false
     }
 
-    func update(isInterrupted: Bool, duration: TimeInterval) async {
+    func resumeStart() {
+        pausesStart = false
+        startContinuation?.resume()
+        startContinuation = nil
+    }
+
+    func update(recordingID: UUID, isInterrupted: Bool, duration: TimeInterval) async {
         updates.append((isInterrupted, duration))
     }
 
-    func end(finalDuration: TimeInterval) async {
+    func end(recordingID: UUID?, finalDuration: TimeInterval) async {
         endCount += 1
+        endedRecordingIDs.append(recordingID)
     }
 }

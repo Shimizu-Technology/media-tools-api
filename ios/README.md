@@ -82,7 +82,6 @@ MediaTools/
 │   ├── RecordingCoordinator.swift   # App-level capture + interruption handling
 │   ├── RecordingActivityManager.swift # Recording Live Activity lifecycle
 │   ├── RecordingStore.swift         # Protected audio files + atomic queue manifest
-│   ├── WidgetService.swift          # Updates widget via shared UserDefaults
 │   └── SpotlightService.swift       # CoreSpotlight indexing for system search
 │
 ├── Views/

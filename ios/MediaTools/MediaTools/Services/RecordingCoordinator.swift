@@ -126,12 +126,13 @@ final class RecordingCoordinator {
 
     func stopFromSystem() async -> SystemCaptureOutcome {
         guard isRecording || activeRecordingID != nil else { return .alreadyStopped }
+        let recordingID = activeRecordingID
         let finalDuration = finalizeRecording(
             state: .ready,
             message: "Saved on this iPhone",
             endActivityAutomatically: false
         )
-        await activityManager.end(finalDuration: finalDuration)
+        await activityManager.end(recordingID: recordingID, finalDuration: finalDuration)
         return .stopped
     }
 
@@ -215,16 +216,37 @@ final class RecordingCoordinator {
 
         do {
             try await activityManager.start(for: recording)
+            guard isRecording, activeRecordingID == recording.id else {
+                // Activity.request can suspend. A stop may complete while it is
+                // in flight, so immediately clean up only that stale activity.
+                let finalDuration = pendingRecordings.first { $0.id == recording.id }?.duration ?? 0
+                await activityManager.end(
+                    recordingID: recording.id,
+                    finalDuration: finalDuration
+                )
+                return .stopped
+            }
             return .started
         } catch {
             let message = "The recording indicator could not start: \(error.localizedDescription)"
+            guard isRecording, activeRecordingID == recording.id else {
+                let finalDuration = pendingRecordings.first { $0.id == recording.id }?.duration ?? 0
+                await activityManager.end(
+                    recordingID: recording.id,
+                    finalDuration: finalDuration
+                )
+                return .stopped
+            }
             if requiresLiveActivity {
                 let finalDuration = finalizeRecording(
                     state: .ready,
                     message: "Saved after Quick Record could not start",
                     endActivityAutomatically: false
                 )
-                await activityManager.end(finalDuration: finalDuration)
+                await activityManager.end(
+                    recordingID: recording.id,
+                    finalDuration: finalDuration
+                )
                 errorMessage = message
                 return .failed(message)
             }
@@ -411,6 +433,7 @@ final class RecordingCoordinator {
         endActivityAutomatically: Bool = true
     ) -> TimeInterval {
         guard isRecording || activeRecordingID != nil else { return duration }
+        let recordingIDToEnd = activeRecordingID
         if let audioRecorder {
             duration = max(duration, audioRecorder.currentTime)
             audioRecorder.stop()
@@ -439,7 +462,10 @@ final class RecordingCoordinator {
         let finalDuration = duration
         if endActivityAutomatically {
             Task { [activityManager] in
-                await activityManager.end(finalDuration: finalDuration)
+                await activityManager.end(
+                    recordingID: recordingIDToEnd,
+                    finalDuration: finalDuration
+                )
             }
         }
         return finalDuration
@@ -459,7 +485,7 @@ final class RecordingCoordinator {
                 try persistPendingRecordings()
                 statusMessage = "Recovered an interrupted recording"
                 Task { [activityManager] in
-                    await activityManager.end(finalDuration: 0)
+                    await activityManager.end(recordingID: nil, finalDuration: 0)
                 }
             }
         } catch {
@@ -529,8 +555,13 @@ final class RecordingCoordinator {
             audioLevel = 0
             statusMessage = "Recording paused by another audio source"
             let interruptedDuration = duration
+            guard let activeRecordingID else { return }
             Task { [activityManager] in
-                await activityManager.update(isInterrupted: true, duration: interruptedDuration)
+                await activityManager.update(
+                    recordingID: activeRecordingID,
+                    isInterrupted: true,
+                    duration: interruptedDuration
+                )
             }
         case .ended:
             let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
@@ -549,8 +580,13 @@ final class RecordingCoordinator {
                 statusMessage = "Recording resumed"
                 startMeterTimer()
                 let resumedDuration = duration
+                guard let activeRecordingID else { return }
                 Task { [activityManager] in
-                    await activityManager.update(isInterrupted: false, duration: resumedDuration)
+                    await activityManager.update(
+                        recordingID: activeRecordingID,
+                        isInterrupted: false,
+                        duration: resumedDuration
+                    )
                 }
             } catch {
                 finalizeRecording(

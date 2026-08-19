@@ -5,8 +5,8 @@ import Foundation
 protocol RecordingActivityManaging: AnyObject {
     var areActivitiesEnabled: Bool { get }
     func start(for recording: LocalRecording) async throws
-    func update(isInterrupted: Bool, duration: TimeInterval) async
-    func end(finalDuration: TimeInterval) async
+    func update(recordingID: UUID, isInterrupted: Bool, duration: TimeInterval) async
+    func end(recordingID: UUID?, finalDuration: TimeInterval) async
 }
 
 /// Owns the one Live Activity associated with the one microphone capture the
@@ -43,26 +43,31 @@ final class RecordingActivityManager: RecordingActivityManaging {
         )
     }
 
-    func update(isInterrupted: Bool, duration: TimeInterval) async {
+    func update(recordingID: UUID, isInterrupted: Bool, duration: TimeInterval) async {
         let state = RecordingActivityAttributes.ContentState(
             elapsedDuration: duration,
             resumedAt: isInterrupted ? nil : Date(),
             isInterrupted: isInterrupted
         )
         let content = ActivityContent(state: state, staleDate: nil)
-        for activity in Activity<RecordingActivityAttributes>.activities {
+        for activity in Activity<RecordingActivityAttributes>.activities
+        where activity.attributes.recordingID == recordingID {
             await activity.update(content)
         }
     }
 
-    func end(finalDuration: TimeInterval) async {
+    /// A concrete ID prevents a delayed start/stop operation from dismissing a
+    /// newer recording's Live Activity. Pass nil only for relaunch cleanup,
+    /// when no in-process recording can own an activity.
+    func end(recordingID: UUID?, finalDuration: TimeInterval) async {
         let finalState = RecordingActivityAttributes.ContentState(
             elapsedDuration: finalDuration,
             resumedAt: nil,
             isInterrupted: false
         )
         let finalContent = ActivityContent(state: finalState, staleDate: nil)
-        for activity in Activity<RecordingActivityAttributes>.activities {
+        for activity in Activity<RecordingActivityAttributes>.activities
+        where recordingID == nil || activity.attributes.recordingID == recordingID {
             await activity.end(finalContent, dismissalPolicy: .immediate)
         }
     }
