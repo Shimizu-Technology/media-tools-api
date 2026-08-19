@@ -52,26 +52,38 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     @MainActor
-    func testAuthenticationPauseUsesAgeRatherThanViewActivationCount() {
+    func testAuthenticationPauseStartsAtFirstFailureAndSurvivesViewActivations() {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let recent = TranscriptionWatch(
-            id: "recent",
-            title: "Recent recording",
-            createdAt: now.addingTimeInterval(-60)
-        )
-        let expired = TranscriptionWatch(
-            id: "expired",
+        let oldWatch = TranscriptionWatch(
+            id: "old",
             title: "Old recording",
-            createdAt: now.addingTimeInterval(
-                -RecordingUploadCoordinator.maximumAuthenticationPauseAge
-            )
+            createdAt: now.addingTimeInterval(-10 * 365 * 24 * 60 * 60),
+            authenticationPausedAt: nil
+        )
+        let paused = RecordingUploadCoordinator.markingAuthenticationPaused(
+            oldWatch,
+            now: now
+        )
+        let unchangedOnNextActivation = RecordingUploadCoordinator.markingAuthenticationPaused(
+            paused,
+            now: now.addingTimeInterval(60)
         )
 
         XCTAssertFalse(
-            RecordingUploadCoordinator.authenticationPauseHasExpired(recent, now: now)
+            RecordingUploadCoordinator.authenticationPauseHasExpired(oldWatch, now: now)
+        )
+        XCTAssertEqual(paused.authenticationPausedAt, now)
+        XCTAssertEqual(unchangedOnNextActivation.authenticationPausedAt, now)
+        XCTAssertFalse(
+            RecordingUploadCoordinator.authenticationPauseHasExpired(paused, now: now)
         )
         XCTAssertTrue(
-            RecordingUploadCoordinator.authenticationPauseHasExpired(expired, now: now)
+            RecordingUploadCoordinator.authenticationPauseHasExpired(
+                paused,
+                now: now.addingTimeInterval(
+                    RecordingUploadCoordinator.maximumAuthenticationPauseAge
+                )
+            )
         )
     }
 
@@ -321,7 +333,8 @@ final class ModelDecodingTests: XCTestCase {
         let watch = TranscriptionWatch(
             id: "audio-1",
             title: "Team sync",
-            createdAt: Date()
+            createdAt: Date(),
+            authenticationPausedAt: Date(timeIntervalSince1970: 1_800_000_000)
         )
 
         try store.save([watch])
@@ -329,6 +342,7 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(restored.id, watch.id)
         XCTAssertEqual(restored.title, watch.title)
         XCTAssertEqual(restored.createdAt.timeIntervalSince(watch.createdAt), 0, accuracy: 1)
+        XCTAssertEqual(restored.authenticationPausedAt, watch.authenticationPausedAt)
         try store.save([])
         XCTAssertTrue(try store.load().isEmpty)
     }

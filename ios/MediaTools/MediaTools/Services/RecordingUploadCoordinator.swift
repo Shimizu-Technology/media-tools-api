@@ -283,6 +283,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 do {
                     let item = try await self.service.getAudioItem(watch.id)
                     failures = 0
+                    self.clearAuthenticationPause(for: watch.id)
                     self.latestItem = item
                     if item.status == "completed" {
                         self.removeWatch(id: watch.id)
@@ -314,9 +315,10 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                         // disable it until the next scene activation.
                         try? await Task.sleep(for: Self.watchRetryDelay(after: failures))
                     case .pauseForAuthentication:
-                        if Self.authenticationPauseHasExpired(watch) {
+                        let pausedWatch = self.recordAuthenticationPause(for: watch)
+                        if Self.authenticationPauseHasExpired(pausedWatch) {
                             self.stopWatching(
-                                watch,
+                                pausedWatch,
                                 message:
                                     "Sign-in recovery expired. Check Library for transcription status."
                             )
@@ -344,6 +346,26 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
 
     private func removeWatch(id: String) {
         watches.removeAll { $0.id == id }
+        persistWatches()
+    }
+
+    private func recordAuthenticationPause(for watch: TranscriptionWatch) -> TranscriptionWatch {
+        guard let index = watches.firstIndex(where: { $0.id == watch.id }) else {
+            return Self.markingAuthenticationPaused(watch)
+        }
+        let updated = Self.markingAuthenticationPaused(watches[index])
+        if updated != watches[index] {
+            watches[index] = updated
+            persistWatches()
+        }
+        return updated
+    }
+
+    private func clearAuthenticationPause(for id: String) {
+        guard let index = watches.firstIndex(where: { $0.id == id }),
+              watches[index].authenticationPausedAt != nil
+        else { return }
+        watches[index].authenticationPausedAt = nil
         persistWatches()
     }
 
@@ -431,7 +453,18 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         _ watch: TranscriptionWatch,
         now: Date = Date()
     ) -> Bool {
-        now.timeIntervalSince(watch.createdAt) >= maximumAuthenticationPauseAge
+        guard let authenticationPausedAt = watch.authenticationPausedAt else { return false }
+        return now.timeIntervalSince(authenticationPausedAt) >= maximumAuthenticationPauseAge
+    }
+
+    static func markingAuthenticationPaused(
+        _ watch: TranscriptionWatch,
+        now: Date = Date()
+    ) -> TranscriptionWatch {
+        guard watch.authenticationPausedAt == nil else { return watch }
+        var updated = watch
+        updated.authenticationPausedAt = now
+        return updated
     }
 
     private static func mimeType(for url: URL) -> String {
