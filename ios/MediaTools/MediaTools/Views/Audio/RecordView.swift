@@ -1,14 +1,15 @@
 import SwiftUI
-import AVFoundation
 import UniformTypeIdentifiers
 
 struct RecordView: View {
-    @State private var recorder = AudioRecorderService()
+    @Environment(RecordingCoordinator.self) private var recorder
     @State private var contentType = "general"
     @State private var isUploading = false
+    @State private var uploadingRecordingID: UUID?
     @State private var uploadResult: AudioTranscription?
     @State private var pollingTask: Task<Void, Never>?
     @State private var error: String?
+    @State private var recordingToDiscard: LocalRecording?
     @State private var showFilePicker = false
     @State private var pulseRing = false
 
@@ -16,7 +17,7 @@ struct RecordView: View {
 
     private let contentTypes = [
         ("general", "General", "waveform"),
-        ("phone_call", "Phone Call", "phone"),
+        ("conversation", "Conversation", "person.2.wave.2"),
         ("meeting", "Meeting", "person.3"),
         ("voice_memo", "Voice Memo", "bubble.left"),
         ("interview", "Interview", "doc.text"),
@@ -65,7 +66,7 @@ struct RecordView: View {
                             .foregroundStyle(recorder.isRecording ? Theme.brand400 : Theme.textMuted)
 
                         // Waveform
-                        if recorder.isRecording {
+                        if recorder.isRecording && !recorder.isInterrupted {
                             HStack(spacing: 3) {
                                 ForEach(0..<20, id: \.self) { i in
                                     RoundedRectangle(cornerRadius: 2)
@@ -96,7 +97,7 @@ struct RecordView: View {
                                 Haptics.medium()
                             } else {
                                 error = nil
-                                recorder.start()
+                                recorder.start(contentType: contentType)
                                 Haptics.medium()
                             }
                         } label: {
@@ -131,6 +132,10 @@ struct RecordView: View {
                                 if recorder.isStarting {
                                     ProgressView()
                                         .tint(.white)
+                                } else if recorder.isInterrupted {
+                                    Image(systemName: "pause.fill")
+                                        .font(.title2.weight(.bold))
+                                        .foregroundStyle(.white)
                                 } else if recorder.isRecording {
                                     RoundedRectangle(cornerRadius: 4)
                                         .fill(.white)
@@ -161,58 +166,43 @@ struct RecordView: View {
                         Text(
                             recorder.isStarting
                                 ? "Preparing microphone..."
-                                : (recorder.isRecording ? "Tap to stop" : "Tap to record")
+                                : recorder.isInterrupted
+                                    ? "Paused by another audio source — tap to save"
+                                    : (recorder.isRecording ? "Tap to stop" : "Tap to record")
                         )
                             .font(Theme.caption())
                             .foregroundStyle(Theme.textSecondary)
+
+                        if let statusMessage = recorder.statusMessage {
+                            Label(
+                                statusMessage,
+                                systemImage: recorder.isInterrupted
+                                    ? "exclamationmark.circle" : "lock.shield"
+                            )
+                            .font(Theme.caption(12))
+                            .foregroundStyle(
+                                recorder.isInterrupted ? Theme.warning : Theme.textMuted
+                            )
+                            .multilineTextAlignment(.center)
+                            .transition(.opacity)
+                        }
                     }
 
                     Spacer()
 
-                    // Recorded audio actions
-                    if let recordingURL = recorder.recordingURL, !recorder.isRecording {
-                        VStack(spacing: 12) {
-                            HStack {
-                                Image(systemName: "checkmark.seal.fill")
-                                    .foregroundStyle(Theme.success)
-                                Text("Recording ready")
-                                    .font(Theme.body(15, weight: .medium))
-                                    .foregroundStyle(Theme.textPrimary)
-                            }
+                    // Device-local recovery queue. These files remain available
+                    // across relaunches until the server has accepted them.
+                    if !recorder.availableRecordings.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionHeader(
+                                text: "Saved on this iPhone",
+                                icon: "iphone.and.arrow.forward"
+                            )
 
-                            HStack(spacing: 12) {
-                                Button {
-                                    Task { await uploadRecording(url: recordingURL) }
-                                } label: {
-                                    if isUploading {
-                                        HStack(spacing: 8) {
-                                            ProgressView()
-                                                .tint(.white)
-                                            Text("Uploading...")
-                                        }
-                                        .frame(maxWidth: .infinity)
-                                    } else {
-                                        Label("Transcribe", systemImage: "arrow.up.circle")
-                                            .frame(maxWidth: .infinity)
-                                    }
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .tint(Theme.brand500)
-                                .disabled(isUploading || recorder.isStarting)
-
-                                Button {
-                                    withAnimation(Theme.springSnappy) {
-                                        recorder.discard()
-                                    }
-                                } label: {
-                                    Label("Discard", systemImage: "trash")
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(Theme.error)
-                                .disabled(isUploading || recorder.isStarting)
+                            ForEach(recorder.availableRecordings) { recording in
+                                localRecordingCard(recording)
                             }
                         }
-                        .cardStyle()
                         .padding(.horizontal)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
@@ -368,7 +358,11 @@ struct RecordView: View {
                                     defer {
                                         if accessed { url.stopAccessingSecurityScopedResource() }
                                     }
-                                    await uploadRecording(url: url)
+                                    await uploadRecording(
+                                        url: url,
+                                        contentType: contentType,
+                                        localRecording: nil
+                                    )
                                 }
                             }
                         case .failure(let error):
@@ -390,13 +384,121 @@ struct RecordView: View {
             pollingTask?.cancel()
         }
         .onChange(of: recorder.isRecording) { _, isRecording in
-            pulseRing = isRecording
+            pulseRing = isRecording && !recorder.isInterrupted
+        }
+        .onChange(of: recorder.isInterrupted) { _, isInterrupted in
+            pulseRing = recorder.isRecording && !isInterrupted
+        }
+        .alert(
+            "Discard recording?",
+            isPresented: Binding(
+                get: { recordingToDiscard != nil },
+                set: { if !$0 { recordingToDiscard = nil } }
+            ),
+            presenting: recordingToDiscard
+        ) { recording in
+            Button("Discard", role: .destructive) {
+                withAnimation(Theme.springSnappy) {
+                    recorder.discard(recording)
+                }
+                recordingToDiscard = nil
+            }
+            Button("Keep Recording", role: .cancel) {
+                recordingToDiscard = nil
+            }
+        } message: { _ in
+            Text("This removes the audio from this iPhone and cannot be undone.")
         }
     }
 
-    private func uploadRecording(url: URL) async {
+    @ViewBuilder
+    private func localRecordingCard(_ recording: LocalRecording) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(
+                    systemName: recording.state == .interrupted
+                        ? "waveform.badge.exclamationmark" : "waveform"
+                )
+                .font(.title3)
+                .foregroundStyle(
+                    recording.state == .interrupted ? Theme.warning : Theme.brand400
+                )
+                .frame(width: 36, height: 36)
+                .background(Theme.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(recording.displayTitle)
+                        .font(Theme.body(15, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("\(recording.formattedDuration)  ·  \(recording.recoveryDescription)")
+                        .font(Theme.caption(12))
+                        .foregroundStyle(
+                            recording.state == .uploadFailed ? Theme.error : Theme.textSecondary
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 4)
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    guard let url = recorder.fileURL(for: recording) else { return }
+                    Task {
+                        await uploadRecording(
+                            url: url,
+                            contentType: recording.contentType,
+                            localRecording: recording
+                        )
+                    }
+                } label: {
+                    if uploadingRecordingID == recording.id {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .tint(.white)
+                            Text("Uploading...")
+                        }
+                        .frame(maxWidth: .infinity)
+                    } else {
+                        Label(
+                            recording.state == .uploadFailed ? "Retry" : "Transcribe",
+                            systemImage: recording.state == .uploadFailed
+                                ? "arrow.clockwise" : "arrow.up.circle"
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.brand500)
+                .disabled(isUploading || recorder.isStarting || recorder.isRecording)
+                .accessibilityIdentifier("recording.transcribe.\(recording.id.uuidString)")
+
+                Button {
+                    recordingToDiscard = recording
+                } label: {
+                    Label("Discard", systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .tint(Theme.error)
+                .disabled(isUploading || recorder.isStarting || recorder.isRecording)
+                .accessibilityIdentifier("recording.discard.\(recording.id.uuidString)")
+            }
+        }
+        .cardStyle()
+    }
+
+    private func uploadRecording(
+        url: URL,
+        contentType: String,
+        localRecording: LocalRecording?
+    ) async {
         isUploading = true
-        defer { isUploading = false }
+        uploadingRecordingID = localRecording?.id
+        defer {
+            isUploading = false
+            uploadingRecordingID = nil
+        }
         error = nil
 
         do {
@@ -409,14 +511,17 @@ struct RecordView: View {
             )
             withAnimation(Theme.springSnappy) {
                 uploadResult = result
-                if recorder.recordingURL == url {
-                    recorder.discard()
+                if let localRecording {
+                    recorder.markUploaded(localRecording)
                 }
             }
             Haptics.light()
             startPolling(id: result.id)
         } catch {
             self.error = error.localizedDescription
+            if let localRecording {
+                recorder.markUploadFailed(localRecording, message: error.localizedDescription)
+            }
             Haptics.error()
         }
     }
@@ -497,143 +602,5 @@ struct RecordView: View {
         let mins = Int(seconds) / 60
         let secs = Int(seconds) % 60
         return "\(mins):\(String(format: "%02d", secs))"
-    }
-}
-
-// MARK: - Audio Recorder
-
-@MainActor
-@Observable
-final class AudioRecorderService {
-    var isRecording = false
-    var isStarting = false
-    var recordingURL: URL?
-    var duration: TimeInterval = 0
-    var audioLevel: CGFloat = 0
-    var errorMessage: String?
-    var permissionDenied = false
-
-    private var audioRecorder: AVAudioRecorder?
-    private var timer: Timer?
-
-    var formattedDuration: String {
-        let mins = Int(duration) / 60
-        let secs = Int(duration) % 60
-        return String(format: "%02d:%02d", mins, secs)
-    }
-
-    func start() {
-        guard !isRecording, !isStarting else { return }
-        isStarting = true
-        errorMessage = nil
-        permissionDenied = false
-        let session = AVAudioSession.sharedInstance()
-
-        AVAudioApplication.requestRecordPermission { granted in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                guard granted else {
-                    self.isStarting = false
-                    self.permissionDenied = true
-                    self.errorMessage =
-                        "Microphone access is required to record. You can enable it in Settings."
-                    return
-                }
-                self.startRecording(session: session)
-            }
-        }
-    }
-
-    private func startRecording(session: AVAudioSession) {
-        defer { isStarting = false }
-        let previousRecordingURL = recordingURL
-        do {
-            let bluetoothInput: AVAudioSession.CategoryOptions
-            #if compiler(>=6.2)
-            bluetoothInput = .allowBluetoothHFP
-            #else
-            // Xcode 16.4's iOS 18 SDK uses the pre-rename spelling.
-            bluetoothInput = .allowBluetooth
-            #endif
-            try session.setCategory(
-                .playAndRecord, mode: .default, options: [.defaultToSpeaker, bluetoothInput])
-            try session.setActive(true)
-        } catch {
-            errorMessage = "Could not start the audio session: \(error.localizedDescription)"
-            return
-        }
-
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension("m4a")
-
-        let settings: [String: Any] = [
-            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: 44100.0,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-        ]
-
-        do {
-            let replacementRecorder = try AVAudioRecorder(url: url, settings: settings)
-            replacementRecorder.isMeteringEnabled = true
-            guard replacementRecorder.record() else {
-                throw APIError.invalidFile(message: "The recorder could not start.")
-            }
-
-            // Keep the previous take recoverable until the replacement has
-            // actually started. A permission, session, or recorder failure must
-            // never destroy audio that was already ready to upload.
-            if let previousRecordingURL, previousRecordingURL != url {
-                try? FileManager.default.removeItem(at: previousRecordingURL)
-            }
-            audioRecorder = replacementRecorder
-            recordingURL = url
-            isRecording = true
-            duration = 0
-            audioLevel = 0
-
-            timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.updateMeters()
-                }
-            }
-        } catch {
-            audioRecorder = nil
-            try? FileManager.default.removeItem(at: url)
-            errorMessage = "Recording failed: \(error.localizedDescription)"
-            try? session.setActive(false, options: .notifyOthersOnDeactivation)
-        }
-    }
-
-    private func updateMeters() {
-        guard let audioRecorder else { return }
-        audioRecorder.updateMeters()
-        duration = audioRecorder.currentTime
-        let power = max(-60, min(0, audioRecorder.averagePower(forChannel: 0)))
-        audioLevel = CGFloat(pow(10, power / 20))
-    }
-
-    func stop() {
-        if let audioRecorder {
-            duration = audioRecorder.currentTime
-        }
-        audioRecorder?.stop()
-        audioRecorder = nil
-        timer?.invalidate()
-        timer = nil
-        isRecording = false
-        audioLevel = 0
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-    }
-
-    func discard() {
-        if isRecording { stop() }
-        if let url = recordingURL {
-            try? FileManager.default.removeItem(at: url)
-        }
-        recordingURL = nil
-        duration = 0
-        audioLevel = 0
     }
 }

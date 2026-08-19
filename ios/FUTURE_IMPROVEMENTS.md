@@ -185,6 +185,7 @@
 - [ ] Wire and validate the prepared Home Screen widget target (small + medium)
 - [x] Spotlight search indexing
 - [x] Local notifications on completion
+- [x] Durable app-level recording, background audio, interruption handling, and local recovery queue
 - [ ] Connect and validate the prepared background upload service in the active upload flow
 - [x] Onboarding walkthrough
 - [x] Audio playback with speed control
@@ -199,15 +200,14 @@
 
 ## Priority Order (Leon's Input)
 
-1. **Apple Watch companion** ← Leon wants this next
-2. Siri Shortcuts
-3. Live Activity
-4. Offline queue
+1. **Quick Capture controls** — App Shortcut, Action Button/Back Tap mapping, Lock Screen widget
+2. Live Activity and system recording controls
+3. Background upload and offline retry queue
+4. **Apple Watch companion**
 5. Image OCR
 6. iPad layout
 7. Everything else by impact/effort
 
 ---
 
-*Last updated: 2026-02-19*
-*Total iOS codebase: 4,335 lines across 31 Swift files*
+*Last updated: 2026-08-19*

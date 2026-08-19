@@ -27,6 +27,14 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
 
+    <!-- Keep an explicitly initiated recording alive when the screen locks or
+         the user moves to another app. The audio session is deactivated as
+         soon as capture stops, so this mode is used only for its stated role. -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>audio</string>
+    </array>
+
     <!-- Microphone access for audio recording -->
     <key>NSMicrophoneUsageDescription</key>
     <string>Media Tools needs microphone access to record audio for transcription.</string>

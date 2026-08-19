@@ -37,6 +37,87 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion"))
     }
 
+    func testHostApplicationDeclaresBackgroundAudioForUserInitiatedRecording() throws {
+        let modes = try XCTUnwrap(
+            Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String]
+        )
+        XCTAssertEqual(modes, ["audio"])
+    }
+
+    @MainActor
+    func testRecordingCoordinatorRecoversAndPreservesInterruptedCapture() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        var recording = store.makeRecording(
+            contentType: "meeting",
+            now: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        recording.duration = 37
+        try Data([0x00, 0x01, 0x02]).write(to: store.fileURL(for: recording))
+        try store.saveRecordings([recording])
+
+        let coordinator = RecordingCoordinator(store: store)
+        let recovered = try XCTUnwrap(coordinator.pendingRecordings.first)
+
+        XCTAssertEqual(recovered.id, recording.id)
+        XCTAssertEqual(recovered.contentType, "meeting")
+        XCTAssertEqual(recovered.duration, 37)
+        XCTAssertEqual(recovered.state, .interrupted)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.fileURL(for: recording).path))
+
+        let reloaded = try XCTUnwrap(store.loadRecordings().first)
+        XCTAssertEqual(reloaded.state, .interrupted)
+    }
+
+    @MainActor
+    func testDiscardingLocalRecordingDeletesAudioAndManifestEntry() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        var recording = store.makeRecording(contentType: "voice_memo")
+        recording.state = .ready
+        let audioURL = store.fileURL(for: recording)
+        try Data([0xAA, 0xBB]).write(to: audioURL)
+        try store.saveRecordings([recording])
+
+        let coordinator = RecordingCoordinator(store: store)
+        coordinator.discard(recording)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: audioURL.path))
+        XCTAssertTrue(coordinator.pendingRecordings.isEmpty)
+        XCTAssertTrue(try store.loadRecordings().isEmpty)
+    }
+
+    @MainActor
+    func testSimulatedCaptureExercisesDurableStartAndStopState() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        let coordinator = RecordingCoordinator(store: store, simulatesCapture: true)
+
+        coordinator.start(contentType: "conversation")
+        XCTAssertTrue(coordinator.isRecording)
+        XCTAssertTrue(coordinator.availableRecordings.isEmpty)
+
+        coordinator.stop()
+        let saved = try XCTUnwrap(coordinator.availableRecordings.first)
+        XCTAssertEqual(saved.contentType, "conversation")
+        XCTAssertEqual(saved.state, .ready)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.fileURL(for: saved).path))
+        let reloaded = try XCTUnwrap(store.loadRecordings().first)
+        XCTAssertEqual(reloaded.id, saved.id)
+        XCTAssertEqual(reloaded.contentType, saved.contentType)
+        XCTAssertEqual(reloaded.state, saved.state)
+        XCTAssertEqual(reloaded.duration, saved.duration)
+    }
+
     func testAudioProcessingStateDecodesIntoUsefulProgressCopy() throws {
         let data = Data(
             #"{"id":"audio-1","status":"processing","processing_stage":"splitting","processing_progress":35}"#

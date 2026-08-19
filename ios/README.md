@@ -69,7 +69,8 @@ MediaTools/
 ├── Info.plist                       # Permissions (mic), ATS config
 │
 ├── Models/
-│   └── Models.swift                 # Codable API models (Transcript, Audio, PDF, etc.)
+│   ├── Models.swift                 # Codable API models (Transcript, Audio, PDF, etc.)
+│   └── LocalRecording.swift         # Durable device-local capture metadata
 │
 ├── Services/
 │   ├── APIClient.swift              # HTTP client with Clerk JWT auth + multipart
@@ -78,6 +79,8 @@ MediaTools/
 │   ├── TokenSyncService.swift       # Syncs Clerk token to keychain every 50s
 │   ├── NotificationService.swift    # Local notifications on completion
 │   ├── BackgroundUploadService.swift # Background URLSession for large files
+│   ├── RecordingCoordinator.swift   # App-level capture + interruption handling
+│   ├── RecordingStore.swift         # Protected audio files + atomic queue manifest
 │   ├── WidgetService.swift          # Updates widget via shared UserDefaults
 │   └── SpotlightService.swift       # CoreSpotlight indexing for system search
 │
@@ -90,7 +93,7 @@ MediaTools/
 │   │   ├── TranscribeView.swift     # URL capture and visible status updates
 │   │   └── PDFUploadView.swift      # File picker with security-scoped access
 │   ├── Audio/
-│   │   └── RecordView.swift         # AVAudioRecorder + content type picker
+│   │   └── RecordView.swift         # Capture controls + recoverable local queue
 │   ├── Chat/
 │   │   └── ChatView.swift           # Reusable AI chat (all item types)
 │   ├── Collections/
@@ -124,8 +127,10 @@ MediaTools/
 - **Library** — Server-side search, pagination, filters, sorting, selection, and
   typed actions across videos, recordings, and PDFs
 - **Transcribe** — Paste a supported video URL and follow its processing state
-- **Record** — Record or import audio/video with semantic presets, durable
-  object-storage upload when configured, retry, and processing progress
+- **Record** — Record or import audio/video with semantic presets, continue a
+  user-initiated recording through screen lock/backgrounding, recover local
+  captures after relaunch or interruption, and retain audio until the API has
+  accepted its transcription job
 - **Collections** — Group items together, chat with AI about entire collections
 - **AI Chat** — Ask questions about any transcript, get summaries and key points
 - **PDF Upload** — Import PDFs from Files app for text extraction
@@ -136,6 +141,9 @@ MediaTools/
 - **Spotlight Search** — Find completed videos, recordings, and PDFs; deletion
   removes the corresponding typed search entry
 - **Local Notifications** — Get notified when transcriptions complete
+- **Background recording** — User-initiated microphone capture is owned at the
+  app level, supports Bluetooth input, and survives tab changes and ordinary
+  backgrounding; the audio session ends immediately when capture stops
 - **Background upload service source** — Present but not wired to the active
   flow; current recording uploads must be treated as foreground app work
 - **Haptic Feedback** — Tactile responses on key actions

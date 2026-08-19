@@ -4,6 +4,7 @@ import ClerkKit
 @main
 struct MediaToolsApp: App {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @State private var recordingCoordinator = RecordingCoordinator.shared
 
     init() {
         Clerk.configure(publishableKey: Configuration.clerkPublishableKey)
@@ -13,6 +14,7 @@ struct MediaToolsApp: App {
     var body: some Scene {
         WindowGroup {
             rootView
+                .environment(recordingCoordinator)
         }
     }
 

@@ -3,7 +3,7 @@ import XCTest
 final class MediaToolsUITests: XCTestCase {
     func testMainWorkspaceConnectsCaptureAndOrganizationDestinations() {
         let app = XCUIApplication()
-        app.launchArguments = ["-ui-test-main"]
+        app.launchArguments = ["-ui-test-main", "-ui-test-reset-recordings"]
         app.launch()
 
         XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 10))
@@ -20,14 +20,15 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["Settings"].exists)
         XCTAssertFalse(app.tabBars.buttons["Transcribe"].exists)
 
+        app.buttons["workspace.record"].tap()
+        XCTAssertTrue(app.buttons["Start recording"].waitForExistence(timeout: 5))
+
+        app.tabBars.buttons["Home"].tap()
+        XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 5))
         app.buttons["workspace.video"].tap()
         XCTAssertTrue(app.navigationBars["Transcribe"].waitForExistence(timeout: 5))
         app.navigationBars["Transcribe"].buttons.firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 5))
-
-        app.buttons["workspace.record"].tap()
-        XCTAssertTrue(app.navigationBars["Record"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Start recording"].exists)
 
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
@@ -42,7 +43,7 @@ final class MediaToolsUITests: XCTestCase {
 
     func testRecordScreenExposesAccessiblePrimaryActions() {
         let app = XCUIApplication()
-        app.launchArguments = ["-ui-test-record"]
+        app.launchArguments = ["-ui-test-record", "-ui-test-reset-recordings"]
         app.launch()
 
         XCTAssertTrue(app.buttons["Start recording"].waitForExistence(timeout: 10))
@@ -54,6 +55,63 @@ final class MediaToolsUITests: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(upload.isHittable)
+    }
+
+    func testRecordingCanStartStopAndRemainAvailableAfterRelaunch() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-test-record",
+            "-ui-test-simulated-recording",
+            "-ui-test-reset-recordings",
+        ]
+        app.launch()
+
+        let start = app.buttons["Start recording"]
+        XCTAssertTrue(start.waitForExistence(timeout: 10))
+        start.tap()
+
+        let stop = app.buttons["Stop recording"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Recording securely on this iPhone"].exists)
+        stop.tap()
+
+        XCTAssertTrue(app.staticTexts["Saved on this iPhone"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch.exists)
+
+        app.terminate()
+        app.launchArguments = ["-ui-test-record", "-ui-test-simulated-recording"]
+        app.launch()
+
+        let savedQueueLabel = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS[c] 'saved on this iPhone'")
+        ).firstMatch
+        XCTAssertTrue(savedQueueLabel.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch.exists)
+    }
+
+    func testActiveRecordingSurvivesTabChanges() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-test-main",
+            "-ui-test-simulated-recording",
+            "-ui-test-reset-recordings",
+        ]
+        app.launch()
+
+        app.tabBars.buttons["Record"].tap()
+        let start = app.buttons["Start recording"]
+        XCTAssertTrue(start.waitForExistence(timeout: 10))
+        start.tap()
+        XCTAssertTrue(app.buttons["Stop recording"].waitForExistence(timeout: 5))
+
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+
+        app.tabBars.buttons["Record"].tap()
+        let stop = app.buttons["Stop recording"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        stop.tap()
+        XCTAssertTrue(app.staticTexts["Saved on this iPhone"].waitForExistence(timeout: 5))
     }
 
     func testLibrarySupportsTypedSelectionAndResponsiveActions() {
