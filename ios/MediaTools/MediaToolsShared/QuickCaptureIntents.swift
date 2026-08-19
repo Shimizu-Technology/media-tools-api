@@ -26,7 +26,7 @@ struct QuickRecordIntent: AudioRecordingIntent, LiveActivityIntent {
 /// Used by the Live Activity's explicit Stop button. Keeping this separate from
 /// the toggle prevents a delayed double tap from accidentally starting another
 /// recording after the first one has stopped.
-struct StopRecordingIntent: AudioRecordingIntent, LiveActivityIntent {
+struct StopRecordingIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Stop Recording"
     static let description = IntentDescription("Stop and safely save the active Media Tools recording.")
 
