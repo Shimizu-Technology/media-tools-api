@@ -5,6 +5,7 @@ struct OnboardingView: View {
     @Binding var isComplete: Bool
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var currentPage = 0
     @State private var microphoneState: MicrophonePermissionState = .notRequested
@@ -157,6 +158,10 @@ struct OnboardingView: View {
         }
         .preferredColorScheme(.dark)
         .task { await refreshPermissionStates() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await refreshPermissionStates() }
+        }
         .onAppear {
             if reduceMotion {
                 appeared = true
