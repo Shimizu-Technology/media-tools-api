@@ -4,7 +4,6 @@ struct TranscriptionWatch: Identifiable, Codable, Equatable, Sendable {
     let id: String
     let title: String
     let createdAt: Date
-    var authenticationFailureCount: Int? = nil
 }
 
 /// Keeps the tiny amount of metadata required to deliver a completion

@@ -51,6 +51,30 @@ final class ModelDecodingTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testAuthenticationPauseUsesAgeRatherThanViewActivationCount() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let recent = TranscriptionWatch(
+            id: "recent",
+            title: "Recent recording",
+            createdAt: now.addingTimeInterval(-60)
+        )
+        let expired = TranscriptionWatch(
+            id: "expired",
+            title: "Old recording",
+            createdAt: now.addingTimeInterval(
+                -RecordingUploadCoordinator.maximumAuthenticationPauseAge
+            )
+        )
+
+        XCTAssertFalse(
+            RecordingUploadCoordinator.authenticationPauseHasExpired(recent, now: now)
+        )
+        XCTAssertTrue(
+            RecordingUploadCoordinator.authenticationPauseHasExpired(expired, now: now)
+        )
+    }
+
     private struct DatedPayload: Decodable {
         let createdAt: Date
     }
@@ -297,8 +321,7 @@ final class ModelDecodingTests: XCTestCase {
         let watch = TranscriptionWatch(
             id: "audio-1",
             title: "Team sync",
-            createdAt: Date(),
-            authenticationFailureCount: 2
+            createdAt: Date()
         )
 
         try store.save([watch])
@@ -306,7 +329,6 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(restored.id, watch.id)
         XCTAssertEqual(restored.title, watch.title)
         XCTAssertEqual(restored.createdAt.timeIntervalSince(watch.createdAt), 0, accuracy: 1)
-        XCTAssertEqual(restored.authenticationFailureCount, 2)
         try store.save([])
         XCTAssertTrue(try store.load().isEmpty)
     }

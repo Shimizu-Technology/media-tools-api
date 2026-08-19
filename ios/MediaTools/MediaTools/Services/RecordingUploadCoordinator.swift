@@ -17,7 +17,7 @@ enum TranscriptionWatchFailureDisposition: Equatable {
 @Observable
 final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     static let shared = RecordingUploadCoordinator()
-    static let maximumAuthenticationFailures = 3
+    static let maximumAuthenticationPauseAge: TimeInterval = 30 * 24 * 60 * 60
 
     private(set) var latestItem: AudioTranscription?
     private(set) var statusMessage: String?
@@ -283,7 +283,6 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 do {
                     let item = try await self.service.getAudioItem(watch.id)
                     failures = 0
-                    self.resetAuthenticationFailures(for: watch.id)
                     self.latestItem = item
                     if item.status == "completed" {
                         self.removeWatch(id: watch.id)
@@ -315,20 +314,19 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                         // disable it until the next scene activation.
                         try? await Task.sleep(for: Self.watchRetryDelay(after: failures))
                     case .pauseForAuthentication:
-                        let authenticationFailures = self.recordAuthenticationFailure(
-                            for: watch.id
-                        )
-                        if authenticationFailures >= Self.maximumAuthenticationFailures {
+                        if Self.authenticationPauseHasExpired(watch) {
                             self.stopWatching(
                                 watch,
-                                message: "Authentication could not be restored. Check Library for status."
+                                message:
+                                    "Sign-in recovery expired. Check Library for transcription status."
                             )
                         } else {
                             self.latestItem = nil
                             self.statusMessage =
                                 "Sign in to continue checking transcription status."
-                            // Keep the persisted watch for a bounded number of
-                            // recoveries. A successful poll resets the counter.
+                            // View appearances are not evidence of revocation.
+                            // Preserve the watch throughout a bounded recovery
+                            // window; a later signed-in poll still runs first.
                         }
                         return
                     case .stop:
@@ -346,24 +344,6 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
 
     private func removeWatch(id: String) {
         watches.removeAll { $0.id == id }
-        persistWatches()
-    }
-
-    private func recordAuthenticationFailure(for id: String) -> Int {
-        guard let index = watches.firstIndex(where: { $0.id == id }) else {
-            return Self.maximumAuthenticationFailures
-        }
-        let count = (watches[index].authenticationFailureCount ?? 0) + 1
-        watches[index].authenticationFailureCount = count
-        persistWatches()
-        return count
-    }
-
-    private func resetAuthenticationFailures(for id: String) {
-        guard let index = watches.firstIndex(where: { $0.id == id }),
-              watches[index].authenticationFailureCount != nil
-        else { return }
-        watches[index].authenticationFailureCount = nil
         persistWatches()
     }
 
@@ -445,6 +425,13 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             return apiError.isRetryable ? .retry : .stop
         }
         return error is URLError ? .retry : .stop
+    }
+
+    static func authenticationPauseHasExpired(
+        _ watch: TranscriptionWatch,
+        now: Date = Date()
+    ) -> Bool {
+        now.timeIntervalSince(watch.createdAt) >= maximumAuthenticationPauseAge
     }
 
     private static func mimeType(for url: URL) -> String {
