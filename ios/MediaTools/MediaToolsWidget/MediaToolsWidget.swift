@@ -1,208 +1,195 @@
-import WidgetKit
+import AppIntents
 import SwiftUI
-
-// MARK: - Timeline Provider
-
-struct RecentItemsProvider: TimelineProvider {
-    func placeholder(in context: Context) -> RecentItemsEntry {
-        RecentItemsEntry(date: Date(), items: [
-            .init(title: "TED Talk: How to stay calm", type: "video", status: "completed"),
-            .init(title: "Team Meeting Notes", type: "audio", status: "completed"),
-            .init(title: "Project Spec v2.pdf", type: "pdf", status: "completed"),
-        ])
-    }
-
-    func getSnapshot(in context: Context, completion: @escaping (RecentItemsEntry) -> Void) {
-        completion(placeholder(in: context))
-    }
-
-    func getTimeline(in context: Context, completion: @escaping (Timeline<RecentItemsEntry>) -> Void) {
-        // Read from shared UserDefaults (app group)
-        let items = loadRecentItems()
-        let entry = RecentItemsEntry(date: Date(), items: items)
-        let nextUpdate = Calendar.current.date(byAdding: .minute, value: 15, to: Date())!
-        let timeline = Timeline(entries: [entry], policy: .after(nextUpdate))
-        completion(timeline)
-    }
-
-    private func loadRecentItems() -> [WidgetItem] {
-        guard let defaults = UserDefaults(suiteName: "group.com.shimizu-technology.media-tools"),
-              let data = defaults.data(forKey: "recent_items"),
-              let items = try? JSONDecoder().decode([WidgetItem].self, from: data) else {
-            return []
-        }
-        return Array(items.prefix(5))
-    }
-}
-
-// MARK: - Entry
-
-struct RecentItemsEntry: TimelineEntry {
-    let date: Date
-    let items: [WidgetItem]
-}
-
-struct WidgetItem: Codable, Identifiable {
-    var id: String { title + type }
-    let title: String
-    let type: String // video, audio, pdf
-    let status: String
-
-    var icon: String {
-        switch type {
-        case "video": "play.rectangle.fill"
-        case "audio": "mic.fill"
-        case "pdf": "doc.fill"
-        default: "doc"
-        }
-    }
-
-    var iconColor: Color {
-        switch type {
-        case "video": Color(red: 47/255, green: 158/255, blue: 143/255)
-        case "audio": .orange
-        case "pdf": .red
-        default: .gray
-        }
-    }
-}
-
-// MARK: - Widget Views
-
-struct MediaToolsWidgetEntryView: View {
-    var entry: RecentItemsProvider.Entry
-    @Environment(\.widgetFamily) var family
-
-    var body: some View {
-        switch family {
-        case .systemSmall:
-            smallWidget
-        case .systemMedium:
-            mediumWidget
-        default:
-            mediumWidget
-        }
-    }
-
-    private var smallWidget: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "waveform.circle.fill")
-                    .foregroundStyle(Color(red: 47/255, green: 158/255, blue: 143/255))
-                Text("Media Tools")
-                    .font(.caption.weight(.semibold))
-            }
-
-            if entry.items.isEmpty {
-                Text("No recent items")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(entry.items.prefix(3)) { item in
-                    HStack(spacing: 6) {
-                        Image(systemName: item.icon)
-                            .font(.caption2)
-                            .foregroundStyle(item.iconColor)
-                        Text(item.title)
-                            .font(.caption2)
-                            .lineLimit(1)
-                    }
-                }
-            }
-
-            Spacer()
-        }
-        .padding(12)
-    }
-
-    private var mediumWidget: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Image(systemName: "waveform.circle.fill")
-                    .foregroundStyle(Color(red: 47/255, green: 158/255, blue: 143/255))
-                Text("Recent Items")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-            }
-
-            if entry.items.isEmpty {
-                Text("No recent transcriptions")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 4)
-            } else {
-                ForEach(entry.items.prefix(4)) { item in
-                    HStack(spacing: 8) {
-                        Image(systemName: item.icon)
-                            .font(.caption)
-                            .foregroundStyle(item.iconColor)
-                            .frame(width: 16)
-
-                        Text(item.title)
-                            .font(.caption)
-                            .lineLimit(1)
-
-                        Spacer()
-
-                        if item.status == "processing" || item.status == "pending" {
-                            Image(systemName: "clock")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                }
-            }
-
-            Spacer()
-        }
-        .padding(12)
-    }
-}
-
-// MARK: - Widget Declaration
-
-struct MediaToolsWidget: Widget {
-    let kind: String = "MediaToolsWidget"
-
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: RecentItemsProvider()) { entry in
-            MediaToolsWidgetEntryView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
-        }
-        .configurationDisplayName("Media Tools")
-        .description("See your recent transcriptions at a glance.")
-        .supportedFamilies([.systemSmall, .systemMedium])
-    }
-}
-
-// MARK: - Widget Bundle
+import WidgetKit
 
 @main
 struct MediaToolsWidgetBundle: WidgetBundle {
     var body: some Widget {
-        MediaToolsWidget
+        QuickRecordWidget()
+        QuickRecordControl()
+        RecordingLiveActivity()
     }
 }
 
-// MARK: - Previews
+// MARK: - Home and Lock Screen widget
 
-#Preview(as: .systemSmall) {
-    MediaToolsWidget()
-} timeline: {
-    RecentItemsEntry(date: .now, items: [
-        .init(title: "TED Talk: How to stay calm", type: "video", status: "completed"),
-        .init(title: "Team standup 2/19", type: "audio", status: "completed"),
-        .init(title: "Contract_v3.pdf", type: "pdf", status: "processing"),
-    ])
+private struct QuickRecordEntry: TimelineEntry {
+    let date: Date
 }
 
-#Preview(as: .systemMedium) {
-    MediaToolsWidget()
-} timeline: {
-    RecentItemsEntry(date: .now, items: [
-        .init(title: "TED Talk: How to stay calm when you know you'll be stressed", type: "video", status: "completed"),
-        .init(title: "Team standup 2/19", type: "audio", status: "completed"),
-        .init(title: "Contract_v3.pdf", type: "pdf", status: "processing"),
-        .init(title: "Rick Astley - Never Gonna Give You Up", type: "video", status: "completed"),
-    ])
+private struct QuickRecordProvider: TimelineProvider {
+    func placeholder(in context: Context) -> QuickRecordEntry {
+        QuickRecordEntry(date: .now)
+    }
+
+    func getSnapshot(in context: Context, completion: @escaping (QuickRecordEntry) -> Void) {
+        completion(QuickRecordEntry(date: .now))
+    }
+
+    func getTimeline(in context: Context, completion: @escaping (Timeline<QuickRecordEntry>) -> Void) {
+        completion(Timeline(entries: [QuickRecordEntry(date: .now)], policy: .never))
+    }
+}
+
+private struct QuickRecordWidget: Widget {
+    let kind = "com.shimizutechnology.mediatools.quick-record-widget"
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: kind, provider: QuickRecordProvider()) { _ in
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: "waveform.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.teal)
+                    Spacer()
+                    Text("MEDIA TOOLS")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                Button(intent: QuickRecordIntent()) {
+                    Label("Quick Record", systemImage: "mic.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                Text("Tap again or use the Live Activity to stop.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .containerBackground(.fill.tertiary, for: .widget)
+        }
+        .configurationDisplayName("Quick Record")
+        .description("Start or stop a Media Tools recording without opening the app.")
+        .supportedFamilies([.systemSmall])
+    }
+}
+
+// MARK: - Control Center, Lock Screen, and Action Button control
+
+private struct QuickRecordControl: ControlWidget {
+    static let kind = "com.shimizutechnology.mediatools.quick-record-control"
+
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: Self.kind) {
+            ControlWidgetButton(action: QuickRecordIntent()) {
+                Label("Quick Record", systemImage: "mic.fill")
+            }
+        }
+        .displayName("Quick Record")
+        .description("Start or stop a private Media Tools recording.")
+    }
+}
+
+// MARK: - Lock Screen and Dynamic Island
+
+private struct RecordingLiveActivity: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: RecordingActivityAttributes.self) { context in
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(Color.red.opacity(0.18))
+                    Image(systemName: context.state.isInterrupted ? "pause.fill" : "waveform")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.red)
+                }
+                .frame(width: 44, height: 44)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(context.state.isInterrupted ? "Recording paused" : "Recording")
+                        .font(.headline)
+                    Text(context.attributes.contentTypeLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    RecordingTimer(state: context.state)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button(intent: StopRecordingIntent()) {
+                    Image(systemName: "stop.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(.red, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Stop and save recording")
+            }
+            .padding(16)
+            .activityBackgroundTint(Color.black.opacity(0.92))
+            .activitySystemActionForegroundColor(.white)
+            .widgetURL(URL(string: "mediatools://record"))
+        } dynamicIsland: { context in
+            DynamicIsland {
+                DynamicIslandExpandedRegion(.leading) {
+                    Label("Recording", systemImage: "waveform")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.red)
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    RecordingTimer(state: context.state)
+                        .font(.caption.monospacedDigit())
+                }
+                DynamicIslandExpandedRegion(.bottom) {
+                    HStack {
+                        Text(context.attributes.contentTypeLabel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button(intent: StopRecordingIntent()) {
+                            Label("Stop & Save", systemImage: "stop.fill")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                    }
+                }
+            } compactLeading: {
+                Image(systemName: context.state.isInterrupted ? "pause.fill" : "waveform")
+                    .foregroundStyle(.red)
+            } compactTrailing: {
+                RecordingTimer(state: context.state)
+                    .font(.caption2.monospacedDigit())
+                    .frame(maxWidth: 46)
+            } minimal: {
+                Image(systemName: "mic.fill")
+                    .foregroundStyle(.red)
+            }
+            .widgetURL(URL(string: "mediatools://record"))
+            .keylineTint(.red)
+        }
+    }
+}
+
+private struct RecordingTimer: View {
+    let state: RecordingActivityAttributes.ContentState
+
+    var body: some View {
+        if let resumedAt = state.resumedAt {
+            Text(
+                timerInterval: resumedAt.addingTimeInterval(-state.elapsedDuration)...Date.distantFuture,
+                countsDown: false
+            )
+        } else {
+            Text(Self.format(state.elapsedDuration))
+        }
+    }
+
+    private static func format(_ duration: TimeInterval) -> String {
+        let seconds = max(0, Int(duration.rounded(.down)))
+        let hours = seconds / 3_600
+        let minutes = (seconds % 3_600) / 60
+        let remainingSeconds = seconds % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, remainingSeconds)
+        }
+        return String(format: "%02d:%02d", minutes, remainingSeconds)
+    }
 }

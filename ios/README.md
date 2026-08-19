@@ -20,17 +20,17 @@ The checked-in project already includes `ClerkKit` and `ClerkKitUI` as Swift
 Package Manager dependencies. Xcode resolves them automatically; do not add a
 second package reference.
 
-### 2. Understand the Extension Prototypes
+### 2. Understand the Extension Targets
 
-The Share Extension and Widget source files are included in this repository,
-but they are not yet wired into the checked-in Xcode project. Do not treat
-either extension as shipping until these targets, capabilities, signing, and
-on-device behavior have been verified.
+The checked-in `MediaToolsWidget` target ships the Quick Record Home/Lock
+Screen widget, Control Center control, and recording Live Activity. It shares
+only App Intent and ActivityKit value types with the host app; the recording
+coordinator and protected audio store remain owned by the app process.
 
-Do not add capabilities solely because source files exist. Shipping either
-extension requires dedicated targets, bundle IDs, entitlements, signing,
-App-Group/Keychain groups, install testing, and review of shared-session
-behavior. That work remains explicitly out of the current app target.
+The Share Extension source remains a prototype and is not wired into the
+checked-in project. Do not treat it as shipping until its target, bundle ID,
+entitlements, signing, App Group/Keychain groups, and on-device behavior have
+been verified.
 
 ### 3. Configure Clerk
 
@@ -80,8 +80,8 @@ MediaTools/
 │   ├── NotificationService.swift    # Local notifications on completion
 │   ├── BackgroundUploadService.swift # Background URLSession for large files
 │   ├── RecordingCoordinator.swift   # App-level capture + interruption handling
+│   ├── RecordingActivityManager.swift # Recording Live Activity lifecycle
 │   ├── RecordingStore.swift         # Protected audio files + atomic queue manifest
-│   ├── WidgetService.swift          # Updates widget via shared UserDefaults
 │   └── SpotlightService.swift       # CoreSpotlight indexing for system search
 │
 ├── Views/
@@ -117,8 +117,13 @@ MediaTools/
 │   ├── ShareViewController.swift    # Handles URLs + audio + PDF files
 │   └── Info.plist                   # Activation rules
 │
-└── MediaToolsWidget/                # Home Screen Widget
-    └── MediaToolsWidget.swift       # Small + Medium sizes, recent items
+├── MediaToolsShared/                # Types compiled into app + widget extension
+│   ├── QuickCaptureIntents.swift    # Action Button/Siri/Shortcuts recording actions
+│   └── RecordingActivityAttributes.swift
+│
+└── MediaToolsWidget/                # Shipping WidgetKit extension
+    ├── MediaToolsWidget.swift       # Widget, system control, Live Activity
+    └── Info.plist
 ```
 
 ## Features
@@ -137,7 +142,10 @@ MediaTools/
 
 ### iOS Integration
 - **Share Sheet source** — Prepared for a future Share Extension target; not currently shipped
-- **Home Screen Widget source** — Prepared for a future Widget target; not currently shipped
+- **Quick Capture** — Start/stop recording from Shortcuts, Siri, the Action
+  Button, Back Tap, Control Center, or the Quick Record widget
+- **Live Activity** — Persistent recording state, timer, and Stop & Save action
+  on the Lock Screen and Dynamic Island
 - **Spotlight Search** — Find completed videos, recordings, and PDFs; deletion
   removes the corresponding typed search entry
 - **Local Notifications** — Get notified when transcriptions complete
@@ -148,6 +156,21 @@ MediaTools/
   flow; current recording uploads must be treated as foreground app work
 - **Haptic Feedback** — Tactile responses on key actions
 - **Swipe Actions** — Swipe to delete or add to collection
+
+## Configure Quick Record on an iPhone
+
+1. Open Media Tools once and allow microphone access.
+2. Open **Shortcuts** and confirm **Media Tools → Quick Record** is available.
+3. For an iPhone Action Button, open **Settings → Action Button**, choose
+   **Shortcut**, then select **Quick Record**.
+4. Press once to start. Press again, say “Stop recording with Media Tools,” or
+   use **Stop & Save** on the Live Activity to finish.
+
+The same Quick Record action can be assigned in **Settings → Accessibility →
+Touch → Back Tap** or added as a Control Center control. A system-triggered
+recording requires both microphone permission and Live Activities; Media Tools
+shows a clear setup message if either is disabled. An ordinary recording
+started inside the visible app can continue without Live Activities.
 
 ### Auth
 - **Clerk iOS SDK v1** — Native sign-in/sign-up with prebuilt `AuthView`

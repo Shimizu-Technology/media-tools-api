@@ -20,6 +20,7 @@ struct SettingsView: View {
             VStack(spacing: 24) {
                 accountSection
                 preferencesSection
+                quickCaptureSection
                 helpSection
                 advancedSection
                 signOutSection
@@ -34,6 +35,60 @@ struct SettingsView: View {
             guard phase == .active else { return }
             Task { await refreshNotificationState() }
         }
+    }
+
+    private var quickCaptureSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionHeader(text: "Quick Capture", icon: "button.programmable")
+
+            VStack(alignment: .leading, spacing: 14) {
+                Label {
+                    Text("Record from the Action Button, Back Tap, Control Center, or a widget without keeping Media Tools open.")
+                        .font(Theme.body(14))
+                        .foregroundStyle(Theme.textPrimary)
+                } icon: {
+                    Image(systemName: "mic.badge.plus")
+                        .foregroundStyle(Theme.brand400)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    setupStep(number: 1, text: "Open Shortcuts and find Media Tools → Quick Record.")
+                    setupStep(number: 2, text: "In Settings → Action Button, choose Shortcut and select Quick Record.")
+                    setupStep(number: 3, text: "Press once to start; press again or use the Live Activity to stop.")
+                }
+
+                Button {
+                    guard let shortcutsURL = URL(string: "shortcuts://") else { return }
+                    openURL(shortcutsURL)
+                } label: {
+                    Label("Open Shortcuts", systemImage: "arrow.up.forward.app")
+                        .font(Theme.body(14, weight: .semibold))
+                        .foregroundStyle(Theme.brand400)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Theme.brand50)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                }
+                .accessibilityHint("Opens the Shortcuts app to configure Quick Record")
+            }
+            .cardStyle(padding: 14)
+        }
+    }
+
+    private func setupStep(number: Int, text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text("\(number)")
+                .font(Theme.caption(11, weight: .bold))
+                .foregroundStyle(Theme.surface)
+                .frame(width: 22, height: 22)
+                .background(Theme.brand400, in: Circle())
+                .accessibilityHidden(true)
+
+            Text(text)
+                .font(Theme.caption(13))
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder

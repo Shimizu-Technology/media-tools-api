@@ -5,8 +5,8 @@ import SwiftUI
 
 /// Owns microphone capture for the whole app rather than for one SwiftUI view.
 /// This is what allows an active recording to survive tab changes, screen lock,
-/// and ordinary backgrounding. System controls and App Intents will call this
-/// same coordinator in the next phase.
+/// and ordinary backgrounding. System controls and App Intents call this same
+/// coordinator so every entry point shares one recording lifecycle.
 @MainActor
 @Observable
 final class RecordingCoordinator {
@@ -29,14 +29,20 @@ final class RecordingCoordinator {
     private let notificationObservers = NotificationObserverBag()
     private let store: RecordingStore?
     private let simulatesCapture: Bool
+    private let activityManager: RecordingActivityManaging
 
-    init(store: RecordingStore? = nil, simulatesCapture: Bool? = nil) {
+    init(
+        store: RecordingStore? = nil,
+        simulatesCapture: Bool? = nil,
+        activityManager: RecordingActivityManaging? = nil
+    ) {
         #if DEBUG
         self.simulatesCapture = simulatesCapture
             ?? ProcessInfo.processInfo.arguments.contains("-ui-test-simulated-recording")
         #else
         self.simulatesCapture = false
         #endif
+        self.activityManager = activityManager ?? RecordingActivityManager.shared
 
         if let store {
             self.store = store
@@ -78,42 +84,189 @@ final class RecordingCoordinator {
         store?.fileURL(for: recording)
     }
 
+    /// Starts capture from the visible app. This path may present the system's
+    /// microphone permission prompt and continues recording even if the person
+    /// has chosen not to show Live Activities.
     func start(contentType: String) {
-        guard !isRecording, !isStarting else { return }
+        guard prepareToStart() else { return }
+        if simulatesCapture {
+            // Preserve deterministic synchronous state transitions for unit and
+            // UI tests; ActivityKit setup can still complete independently.
+            startSimulatedRecording(contentType: contentType)
+            Task {
+                _ = await startActivityAfterCapture(requiresLiveActivity: false)
+            }
+            return
+        }
+        Task {
+            _ = await completeStart(
+                contentType: contentType,
+                requiresLiveActivity: false,
+                mayRequestPermission: true
+            )
+        }
+    }
+
+    /// The Action Button, Shortcuts, widget, and Control Center all call this
+    /// toggle. AudioRecordingIntent requires an accompanying Live Activity, so
+    /// this path refuses to start invisibly when Live Activities are disabled.
+    func toggleFromSystem(contentType: String = "voice_memo") async -> SystemCaptureOutcome {
+        if isRecording || activeRecordingID != nil {
+            return await stopFromSystem()
+        }
+        guard prepareToStart() else {
+            return .failed(errorMessage ?? "A recording is already being prepared.")
+        }
+        return await completeStart(
+            contentType: contentType,
+            requiresLiveActivity: true,
+            mayRequestPermission: false
+        )
+    }
+
+    func stopFromSystem() async -> SystemCaptureOutcome {
+        guard isRecording || activeRecordingID != nil else { return .alreadyStopped }
+        let recordingID = activeRecordingID
+        let finalDuration = finalizeRecording(
+            state: .ready,
+            message: "Saved on this iPhone",
+            endActivityAutomatically: false
+        )
+        await activityManager.end(recordingID: recordingID, finalDuration: finalDuration)
+        return .stopped
+    }
+
+    private func prepareToStart() -> Bool {
+        guard !isRecording, !isStarting else { return false }
         guard store != nil else {
             errorMessage = "Secure recording storage is unavailable. Restart Media Tools and try again."
-            return
+            return false
         }
 
         isStarting = true
         errorMessage = nil
         statusMessage = nil
         permissionDenied = false
+        return true
+    }
+
+    private func completeStart(
+        contentType: String,
+        requiresLiveActivity: Bool,
+        mayRequestPermission: Bool
+    ) async -> SystemCaptureOutcome {
+        if requiresLiveActivity, !activityManager.areActivitiesEnabled {
+            isStarting = false
+            errorMessage = "Live Activities must be enabled for Quick Record."
+            return .liveActivitiesDisabled
+        }
 
         if simulatesCapture {
             startSimulatedRecording(contentType: contentType)
-            return
+            return await startActivityAfterCapture(requiresLiveActivity: requiresLiveActivity)
         }
 
-        let session = AVAudioSession.sharedInstance()
+        let permission = AVAudioApplication.shared.recordPermission
+        if !mayRequestPermission, permission != .granted {
+            isStarting = false
+            permissionDenied = true
+            errorMessage = "Open Media Tools once and allow microphone access before using Quick Record."
+            return .microphonePermissionRequired
+        }
 
-        AVAudioApplication.requestRecordPermission { granted in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                guard granted else {
-                    self.isStarting = false
-                    self.permissionDenied = true
-                    self.errorMessage =
-                        "Microphone access is required to record. You can enable it in Settings."
-                    return
+        let granted: Bool
+        switch permission {
+        case .granted:
+            granted = true
+        case .denied:
+            granted = false
+        case .undetermined:
+            granted = await withCheckedContinuation { continuation in
+                AVAudioApplication.requestRecordPermission { permissionGranted in
+                    continuation.resume(returning: permissionGranted)
                 }
-                self.startRecording(session: session, contentType: contentType)
             }
+        @unknown default:
+            granted = false
+        }
+
+        guard granted else {
+            isStarting = false
+            permissionDenied = true
+            errorMessage = "Microphone access is required to record. You can enable it in Settings."
+            return .microphonePermissionRequired
+        }
+
+        startRecording(session: AVAudioSession.sharedInstance(), contentType: contentType)
+        return await startActivityAfterCapture(requiresLiveActivity: requiresLiveActivity)
+    }
+
+    private func startActivityAfterCapture(requiresLiveActivity: Bool) async -> SystemCaptureOutcome {
+        guard isRecording,
+              let activeRecordingID,
+              let recording = pendingRecordings.first(where: { $0.id == activeRecordingID })
+        else {
+            return .failed(errorMessage ?? "The audio session did not begin.")
+        }
+
+        guard activityManager.areActivitiesEnabled else {
+            // A visible in-app recording remains valid without a Live Activity.
+            guard requiresLiveActivity else { return .started }
+            let finalDuration = finalizeRecording(
+                state: .ready,
+                message: "Saved after Live Activities became unavailable",
+                endActivityAutomatically: false
+            )
+            await activityManager.end(
+                recordingID: recording.id,
+                finalDuration: finalDuration
+            )
+            return .liveActivitiesDisabled
+        }
+
+        do {
+            try await activityManager.start(for: recording)
+            guard isRecording, activeRecordingID == recording.id else {
+                // Activity.request can suspend. A stop may complete while it is
+                // in flight, so immediately clean up only that stale activity.
+                let finalDuration = pendingRecordings.first { $0.id == recording.id }?.duration ?? 0
+                await activityManager.end(
+                    recordingID: recording.id,
+                    finalDuration: finalDuration
+                )
+                return .stopped
+            }
+            return .started
+        } catch {
+            let message = "The recording indicator could not start: \(error.localizedDescription)"
+            guard isRecording, activeRecordingID == recording.id else {
+                let finalDuration = pendingRecordings.first { $0.id == recording.id }?.duration ?? 0
+                await activityManager.end(
+                    recordingID: recording.id,
+                    finalDuration: finalDuration
+                )
+                return .stopped
+            }
+            if requiresLiveActivity {
+                let finalDuration = finalizeRecording(
+                    state: .ready,
+                    message: "Saved after Quick Record could not start",
+                    endActivityAutomatically: false
+                )
+                await activityManager.end(
+                    recordingID: recording.id,
+                    finalDuration: finalDuration
+                )
+                errorMessage = message
+                return .failed(message)
+            }
+            statusMessage = "Recording securely on this iPhone"
+            return .started
         }
     }
 
     func stop() {
-        finalizeRecording(state: .ready, message: "Saved on this iPhone")
+        _ = finalizeRecording(state: .ready, message: "Saved on this iPhone")
     }
 
     func discard(_ recording: LocalRecording) {
@@ -283,8 +436,14 @@ final class RecordingCoordinator {
         try? persistPendingRecordings()
     }
 
-    private func finalizeRecording(state: LocalRecordingState, message: String) {
-        guard isRecording || activeRecordingID != nil else { return }
+    @discardableResult
+    private func finalizeRecording(
+        state: LocalRecordingState,
+        message: String,
+        endActivityAutomatically: Bool = true
+    ) -> TimeInterval {
+        guard isRecording || activeRecordingID != nil else { return duration }
+        let recordingIDToEnd = activeRecordingID
         if let audioRecorder {
             duration = max(duration, audioRecorder.currentTime)
             audioRecorder.stop()
@@ -310,6 +469,16 @@ final class RecordingCoordinator {
         self.activeRecordingID = nil
         statusMessage = message
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        let finalDuration = duration
+        if endActivityAutomatically {
+            Task { [activityManager] in
+                await activityManager.end(
+                    recordingID: recordingIDToEnd,
+                    finalDuration: finalDuration
+                )
+            }
+        }
+        return finalDuration
     }
 
     private func restorePendingRecordings() {
@@ -325,6 +494,9 @@ final class RecordingCoordinator {
             if recoveredAny {
                 try persistPendingRecordings()
                 statusMessage = "Recovered an interrupted recording"
+                Task { [activityManager] in
+                    await activityManager.end(recordingID: nil, finalDuration: 0)
+                }
             }
         } catch {
             errorMessage = "Saved recordings could not be restored: \(error.localizedDescription)"
@@ -392,6 +564,15 @@ final class RecordingCoordinator {
             isInterrupted = true
             audioLevel = 0
             statusMessage = "Recording paused by another audio source"
+            let interruptedDuration = duration
+            guard let activeRecordingID else { return }
+            Task { [activityManager] in
+                await activityManager.update(
+                    recordingID: activeRecordingID,
+                    isInterrupted: true,
+                    duration: interruptedDuration
+                )
+            }
         case .ended:
             let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
@@ -408,6 +589,15 @@ final class RecordingCoordinator {
                 isInterrupted = false
                 statusMessage = "Recording resumed"
                 startMeterTimer()
+                let resumedDuration = duration
+                guard let activeRecordingID else { return }
+                Task { [activityManager] in
+                    await activityManager.update(
+                        recordingID: activeRecordingID,
+                        isInterrupted: false,
+                        duration: resumedDuration
+                    )
+                }
             } catch {
                 finalizeRecording(
                     state: .interrupted,

@@ -412,11 +412,5 @@ final class MediaToolsService {
         SpotlightService.indexTranscripts(transcripts)
         SpotlightService.indexAudioItems(audioItems)
 
-        // Update home screen widget
-        WidgetService.updateRecentItems(
-            transcripts: transcripts,
-            audioItems: audioItems,
-            pdfItems: pdfItems
-        )
     }
 }
