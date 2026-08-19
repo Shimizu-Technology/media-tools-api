@@ -84,6 +84,10 @@ final class RecordingCoordinator {
         store?.fileURL(for: recording)
     }
 
+    func recording(withID id: UUID) -> LocalRecording? {
+        pendingRecordings.first { $0.id == id }
+    }
+
     /// Starts capture from the visible app. This path may present the system's
     /// microphone permission prompt and continues recording even if the person
     /// has chosen not to show Live Activities.
@@ -270,7 +274,9 @@ final class RecordingCoordinator {
     }
 
     func discard(_ recording: LocalRecording) {
-        guard recording.id != activeRecordingID, let store else { return }
+        guard recording.id != activeRecordingID,
+              !recording.isUploadInProgress,
+              let store else { return }
         do {
             try store.deleteFile(for: recording)
             pendingRecordings.removeAll { $0.id == recording.id }
@@ -283,7 +289,15 @@ final class RecordingCoordinator {
     /// Remove the device copy only after the server has accepted the recording
     /// and created its durable transcription job.
     func markUploaded(_ recording: LocalRecording) {
-        discard(recording)
+        guard let current = self.recording(withID: recording.id), let store else { return }
+        do {
+            try store.deleteFile(for: current)
+            pendingRecordings.removeAll { $0.id == current.id }
+            try persistPendingRecordings()
+            statusMessage = "Uploaded safely; transcription is processing"
+        } catch {
+            errorMessage = "The upload is safe, but its device copy could not be removed."
+        }
     }
 
     func markUploadFailed(_ recording: LocalRecording, message: String) {
@@ -294,6 +308,89 @@ final class RecordingCoordinator {
             try persistPendingRecordings()
         } catch {
             errorMessage = "The upload failed and its recovery state could not be saved."
+        }
+    }
+
+    func importRecording(from sourceURL: URL, contentType: String) throws -> LocalRecording {
+        guard let store else {
+            throw RecordingCoordinatorError.storageUnavailable
+        }
+        let recording = try store.importRecording(from: sourceURL, contentType: contentType)
+        pendingRecordings.insert(recording, at: 0)
+        do {
+            try persistPendingRecordings()
+            return recording
+        } catch {
+            try? store.deleteFile(for: recording)
+            pendingRecordings.removeAll { $0.id == recording.id }
+            throw error
+        }
+    }
+
+    func markWaitingForUpload(_ recordingID: UUID, message: String? = nil) {
+        updateRecording(recordingID) { recording in
+            recording.state = .waitingForUpload
+            recording.lastError = message
+            recording.uploadProgress = nil
+            recording.uploadTaskIdentifier = nil
+        }
+    }
+
+    func markUploadStarted(
+        _ recordingID: UUID,
+        objectKey: String,
+        sizeBytes: Int64,
+        mimeType: String,
+        taskIdentifier: Int
+    ) {
+        updateRecording(recordingID) { recording in
+            recording.state = .uploading
+            recording.lastError = nil
+            recording.uploadProgress = 0
+            recording.uploadObjectKey = objectKey
+            recording.uploadSizeBytes = sizeBytes
+            recording.uploadMimeType = mimeType
+            recording.uploadTaskIdentifier = taskIdentifier
+        }
+    }
+
+    func updateUploadProgress(_ recordingID: UUID, progress: Double) {
+        guard let index = pendingRecordings.firstIndex(where: { $0.id == recordingID }) else { return }
+        let normalized = min(max(progress, 0), 1)
+        let previousBucket = Int(((pendingRecordings[index].uploadProgress ?? 0) * 20).rounded(.down))
+        let nextBucket = Int((normalized * 20).rounded(.down))
+        pendingRecordings[index].uploadProgress = normalized
+        guard previousBucket != nextBucket || normalized == 1 else { return }
+        try? persistPendingRecordings()
+    }
+
+    func markUploadFinalizing(_ recordingID: UUID) {
+        updateRecording(recordingID) { recording in
+            recording.state = .finalizingUpload
+            recording.lastError = nil
+            recording.uploadProgress = 1
+            recording.uploadTaskIdentifier = nil
+        }
+    }
+
+    func markUploadFailed(_ recordingID: UUID, message: String) {
+        updateRecording(recordingID) { recording in
+            recording.state = .uploadFailed
+            recording.lastError = message
+            recording.uploadTaskIdentifier = nil
+        }
+    }
+
+    private func updateRecording(
+        _ recordingID: UUID,
+        mutation: (inout LocalRecording) -> Void
+    ) {
+        guard let index = pendingRecordings.firstIndex(where: { $0.id == recordingID }) else { return }
+        mutation(&pendingRecordings[index])
+        do {
+            try persistPendingRecordings()
+        } catch {
+            errorMessage = "The recording is safe, but its upload status could not be saved."
         }
     }
 
@@ -630,6 +727,7 @@ final class RecordingCoordinator {
 private enum RecordingCoordinatorError: LocalizedError {
     case couldNotStart
     case couldNotResume
+    case storageUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -637,6 +735,8 @@ private enum RecordingCoordinatorError: LocalizedError {
             return "The recorder could not start."
         case .couldNotResume:
             return "The recorder could not resume."
+        case .storageUnavailable:
+            return "Secure recording storage is unavailable."
         }
     }
 }

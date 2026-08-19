@@ -132,6 +132,130 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(reloaded.duration, saved.duration)
     }
 
+    func testRecordingManifestMigratesEntriesWithoutUploadMetadata() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let id = UUID()
+        let filename = "\(id.uuidString.lowercased()).m4a"
+        try Data([0x01]).write(to: directory.appendingPathComponent(filename))
+        let manifest = """
+            {
+              "version": 1,
+              "recordings": [{
+                "id": "\(id.uuidString)",
+                "filename": "\(filename)",
+                "createdAt": "2026-08-19T00:00:00Z",
+                "duration": 12,
+                "contentType": "voice_memo",
+                "state": "ready"
+              }]
+            }
+            """
+        try Data(manifest.utf8).write(to: directory.appendingPathComponent("recordings.json"))
+
+        let restored = try XCTUnwrap(
+            RecordingStore(rootDirectory: directory).loadRecordings().first
+        )
+        XCTAssertEqual(restored.id, id)
+        XCTAssertEqual(restored.state, .ready)
+        XCTAssertNil(restored.uploadObjectKey)
+        XCTAssertNil(restored.uploadProgress)
+    }
+
+    @MainActor
+    func testUploadTransitionsPersistProgressAndFinalizationMetadata() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        var recording = store.makeRecording(contentType: "meeting")
+        recording.state = .ready
+        try Data([0x01, 0x02]).write(to: store.fileURL(for: recording))
+        try store.saveRecordings([recording])
+        let coordinator = RecordingCoordinator(store: store)
+
+        coordinator.markWaitingForUpload(recording.id)
+        coordinator.markUploadStarted(
+            recording.id,
+            objectKey: "audio/example.m4a",
+            sizeBytes: 2,
+            mimeType: "audio/mp4",
+            taskIdentifier: 17
+        )
+        coordinator.updateUploadProgress(recording.id, progress: 0.55)
+        coordinator.markUploadFinalizing(recording.id)
+
+        let persisted = try XCTUnwrap(store.loadRecordings().first)
+        XCTAssertEqual(persisted.state, .finalizingUpload)
+        XCTAssertEqual(persisted.uploadObjectKey, "audio/example.m4a")
+        XCTAssertEqual(persisted.uploadSizeBytes, 2)
+        XCTAssertEqual(persisted.uploadMimeType, "audio/mp4")
+        XCTAssertEqual(persisted.uploadProgress, 1)
+        XCTAssertNil(persisted.uploadTaskIdentifier)
+    }
+
+    func testImportedRecordingIsCopiedIntoDurableStorage() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let sourceDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: sourceDirectory)
+        }
+        let source = sourceDirectory.appendingPathComponent("meeting.mp4")
+        let bytes = Data([0x10, 0x20, 0x30])
+        try bytes.write(to: source)
+
+        let store = try RecordingStore(rootDirectory: root)
+        let imported = try store.importRecording(from: source, contentType: "meeting")
+
+        XCTAssertEqual(imported.state, .ready)
+        XCTAssertEqual(imported.contentType, "meeting")
+        XCTAssertEqual(imported.originalFilename, "meeting.mp4")
+        XCTAssertEqual(imported.displayTitle, "meeting")
+        XCTAssertEqual(imported.uploadFilename, "meeting.mp4")
+        XCTAssertEqual(imported.filename.split(separator: ".").last, "mp4")
+        XCTAssertEqual(try Data(contentsOf: store.fileURL(for: imported)), bytes)
+    }
+
+    func testBackgroundUploadMetadataSurvivesTaskDescriptionRoundTrip() throws {
+        let metadata = BackgroundUploadMetadata(
+            recordingID: UUID(),
+            filename: "memo.m4a",
+            objectKey: "audio/random.m4a",
+            sizeBytes: 42,
+            mimeType: "audio/mp4",
+            contentType: "voice_memo"
+        )
+        let restored = try JSONDecoder().decode(
+            BackgroundUploadMetadata.self,
+            from: JSONEncoder().encode(metadata)
+        )
+        XCTAssertEqual(restored, metadata)
+    }
+
+    func testTranscriptionWatchStorePersistsAndRemovesCompletedItems() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try TranscriptionWatchStore(rootDirectory: directory)
+        let watch = TranscriptionWatch(id: "audio-1", title: "Team sync", createdAt: Date())
+
+        try store.save([watch])
+        let restored = try XCTUnwrap(store.load().first)
+        XCTAssertEqual(restored.id, watch.id)
+        XCTAssertEqual(restored.title, watch.title)
+        XCTAssertEqual(restored.createdAt.timeIntervalSince(watch.createdAt), 0, accuracy: 1)
+        try store.save([])
+        XCTAssertTrue(try store.load().isEmpty)
+    }
+
     @MainActor
     func testSystemQuickCaptureRequiresAndManagesLiveActivity() async throws {
         let directory = FileManager.default.temporaryDirectory

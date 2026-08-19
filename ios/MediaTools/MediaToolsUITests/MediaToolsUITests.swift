@@ -91,6 +91,37 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch.exists)
     }
 
+    func testSavedRecordingUploadsInBackgroundAndDeliversCompletion() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-test-record",
+            "-ui-test-simulated-recording",
+            "-ui-test-simulated-upload",
+            "-ui-test-reset-recordings",
+        ]
+        app.launch()
+
+        let start = app.buttons["Start recording"]
+        XCTAssertTrue(start.waitForExistence(timeout: 10))
+        start.tap()
+        let stop = app.buttons["Stop recording"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        stop.tap()
+
+        let transcribe = app.buttons.matching(
+            NSPredicate(format: "label == 'Transcribe'")
+        ).firstMatch
+        XCTAssertTrue(transcribe.waitForExistence(timeout: 5))
+        transcribe.tap()
+
+        XCTAssertTrue(app.buttons["Uploading"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Transcription complete!"].waitForExistence(timeout: 10))
+        XCTAssertFalse(
+            app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch.exists
+        )
+        XCTAssertTrue(app.buttons["View Details"].isHittable)
+    }
+
     func testActiveRecordingSurvivesTabChanges() {
         let app = XCUIApplication()
         app.launchArguments = [

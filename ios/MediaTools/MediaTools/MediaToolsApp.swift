@@ -3,8 +3,11 @@ import ClerkKit
 
 @main
 struct MediaToolsApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var recordingCoordinator = RecordingCoordinator.shared
+    @State private var uploadCoordinator = RecordingUploadCoordinator.shared
 
     init() {
         Clerk.configure(publishableKey: Configuration.clerkPublishableKey)
@@ -16,6 +19,11 @@ struct MediaToolsApp: App {
         WindowGroup {
             rootView
                 .environment(recordingCoordinator)
+                .environment(uploadCoordinator)
+                .onChange(of: scenePhase) { _, phase in
+                    guard phase == .active else { return }
+                    uploadCoordinator.resumePendingWork()
+                }
         }
     }
 

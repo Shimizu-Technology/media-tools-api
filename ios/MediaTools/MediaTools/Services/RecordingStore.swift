@@ -69,12 +69,48 @@ struct RecordingStore {
         let recording = LocalRecording(
             id: id,
             filename: "\(id.uuidString.lowercased()).m4a",
+            originalFilename: nil,
             createdAt: now,
             duration: 0,
             contentType: contentType,
             state: .recording,
-            lastError: nil
+            lastError: nil,
+            uploadProgress: nil,
+            uploadObjectKey: nil,
+            uploadSizeBytes: nil,
+            uploadMimeType: nil,
+            uploadTaskIdentifier: nil
         )
+        return recording
+    }
+
+    func importRecording(
+        from sourceURL: URL,
+        contentType: String,
+        now: Date = Date()
+    ) throws -> LocalRecording {
+        let id = UUID()
+        let sourceExtension = sourceURL.pathExtension.lowercased()
+        let filename = sourceExtension.isEmpty
+            ? "\(id.uuidString.lowercased()).audio"
+            : "\(id.uuidString.lowercased()).\(sourceExtension)"
+        let recording = LocalRecording(
+            id: id,
+            filename: filename,
+            originalFilename: sourceURL.lastPathComponent,
+            createdAt: now,
+            duration: 0,
+            contentType: contentType,
+            state: .ready,
+            lastError: nil,
+            uploadProgress: nil,
+            uploadObjectKey: nil,
+            uploadSizeBytes: nil,
+            uploadMimeType: nil,
+            uploadTaskIdentifier: nil
+        )
+        try fileManager.copyItem(at: sourceURL, to: fileURL(for: recording))
+        try protectRecordingFile(recording)
         return recording
     }
 
