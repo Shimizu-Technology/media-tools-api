@@ -102,13 +102,13 @@ final class ModelDecodingTests: XCTestCase {
         let store = try RecordingStore(rootDirectory: directory)
         let coordinator = RecordingCoordinator(store: store, simulatesCapture: true)
 
-        coordinator.start(contentType: "conversation")
+        coordinator.start(contentType: "phone_call")
         XCTAssertTrue(coordinator.isRecording)
         XCTAssertTrue(coordinator.availableRecordings.isEmpty)
 
         coordinator.stop()
         let saved = try XCTUnwrap(coordinator.availableRecordings.first)
-        XCTAssertEqual(saved.contentType, "conversation")
+        XCTAssertEqual(saved.contentType, "phone_call")
         XCTAssertEqual(saved.state, .ready)
         XCTAssertTrue(FileManager.default.fileExists(atPath: store.fileURL(for: saved).path))
         let reloaded = try XCTUnwrap(store.loadRecordings().first)

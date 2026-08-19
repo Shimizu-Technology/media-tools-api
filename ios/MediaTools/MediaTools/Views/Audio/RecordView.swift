@@ -17,7 +17,7 @@ struct RecordView: View {
 
     private let contentTypes = [
         ("general", "General", "waveform"),
-        ("conversation", "Conversation", "person.2.wave.2"),
+        ("phone_call", "Conversation", "person.2.wave.2"),
         ("meeting", "Meeting", "person.3"),
         ("voice_memo", "Voice Memo", "bubble.left"),
         ("interview", "Interview", "doc.text"),
