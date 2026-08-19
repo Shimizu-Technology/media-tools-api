@@ -1,6 +1,57 @@
 import XCTest
 
 final class MediaToolsUITests: XCTestCase {
+    func testOnboardingExplainsPermissionsBackgroundCaptureAndQuickRecord() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-test-onboarding"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Capture a thought anywhere"].waitForExistence(timeout: 10))
+        let progress = app.otherElements["Setup progress"]
+        XCTAssertTrue(progress.exists)
+        XCTAssertEqual(progress.value as? String, "Step 1 of 4")
+        XCTAssertTrue(app.buttons["Skip setup"].isHittable)
+
+        let continueButton = app.buttons["Continue"]
+        continueButton.tap()
+        XCTAssertTrue(app.staticTexts["Prepare your microphone"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Allow microphone"].exists || app.buttons["Open device Settings"].exists || app.buttons["Microphone ready"].exists)
+
+        continueButton.tap()
+        XCTAssertTrue(app.staticTexts["Know when it’s ready"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Enable completion alerts"].exists || app.buttons["Open device Settings"].exists || app.buttons["Completion alerts ready"].exists)
+
+        continueButton.tap()
+        XCTAssertTrue(app.staticTexts["Private, durable, and ready"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Open Shortcuts"].exists)
+        XCTAssertTrue(app.buttons["Continue to sign in"].isHittable)
+        XCTAssertEqual(progress.value as? String, "Step 4 of 4")
+    }
+
+    func testOnboardingNavigationSupportsLandscapeAndAccessibilityText() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-test-onboarding",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
+        ]
+        app.launch()
+        defer { XCUIDevice.shared.orientation = .portrait }
+
+        let continueButton = app.buttons["Continue"]
+        XCTAssertTrue(continueButton.waitForExistence(timeout: 10))
+        XCTAssertTrue(continueButton.isHittable)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(continueButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(continueButton.isHittable)
+        XCTAssertTrue(app.buttons["Skip setup"].isHittable)
+
+        continueButton.tap()
+        XCTAssertTrue(app.staticTexts["Prepare your microphone"].waitForExistence(timeout: 5))
+        XCTAssertTrue(continueButton.isHittable)
+    }
+
     func testMainWorkspaceConnectsCaptureAndOrganizationDestinations() {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-test-main", "-ui-test-reset-recordings"]
@@ -33,8 +84,12 @@ final class MediaToolsUITests: XCTestCase {
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Notification settings"].exists)
-        XCTAssertTrue(app.staticTexts["Quick Capture"].exists)
-        XCTAssertTrue(app.buttons["Open Shortcuts"].exists)
+        let openShortcuts = app.buttons["Open Shortcuts"]
+        for _ in 0..<3 where !openShortcuts.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(openShortcuts.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Review setup"].exists)
     }
 
     func testAppLaunches() {

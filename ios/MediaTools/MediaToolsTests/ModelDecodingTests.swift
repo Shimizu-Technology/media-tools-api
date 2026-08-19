@@ -120,6 +120,11 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundlePackageType") as? String, "APPL")
         XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "CFBundleExecutable"))
         XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion"))
+        XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "UILaunchScreen"))
+        XCTAssertTrue(
+            (Bundle.main.object(forInfoDictionaryKey: "UISupportedInterfaceOrientations") as? [String])?
+                .contains("UIInterfaceOrientationPortrait") == true
+        )
     }
 
     func testHostApplicationDeclaresBackgroundAudioForUserInitiatedRecording() throws {
@@ -141,6 +146,38 @@ final class ModelDecodingTests: XCTestCase {
         )
         let schemes = urlTypes.flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
         XCTAssertTrue(schemes.contains("mediatools"))
+    }
+
+    func testHostApplicationDeclaresPrivacyAndExportComplianceMetadata() throws {
+        XCTAssertEqual(
+            Bundle.main.object(forInfoDictionaryKey: "ITSAppUsesNonExemptEncryption") as? Bool,
+            false
+        )
+        let microphonePurpose = try XCTUnwrap(
+            Bundle.main.object(forInfoDictionaryKey: "NSMicrophoneUsageDescription") as? String
+        )
+        XCTAssertTrue(microphonePurpose.contains("only after you start a recording"))
+
+        let manifestURL = try XCTUnwrap(
+            Bundle.main.url(forResource: "PrivacyInfo", withExtension: "xcprivacy")
+        )
+        let data = try Data(contentsOf: manifestURL)
+        let manifest = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+        XCTAssertEqual(manifest["NSPrivacyTracking"] as? Bool, false)
+
+        let accessed = try XCTUnwrap(manifest["NSPrivacyAccessedAPITypes"] as? [[String: Any]])
+        var reasons: [String: [String]] = [:]
+        for entry in accessed {
+            guard let category = entry["NSPrivacyAccessedAPIType"] as? String,
+                  let values = entry["NSPrivacyAccessedAPITypeReasons"] as? [String]
+            else { continue }
+            reasons[category] = values
+        }
+        XCTAssertEqual(reasons["NSPrivacyAccessedAPICategoryUserDefaults"], ["CA92.1"])
+        XCTAssertEqual(reasons["NSPrivacyAccessedAPICategoryDiskSpace"], ["E174.1"])
+        XCTAssertEqual(reasons["NSPrivacyAccessedAPICategoryFileTimestamp"], ["C617.1"])
     }
 
     @MainActor
@@ -215,6 +252,58 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(reloaded.contentType, saved.contentType)
         XCTAssertEqual(reloaded.state, saved.state)
         XCTAssertEqual(reloaded.duration, saved.duration)
+    }
+
+    @MainActor
+    func testRecordingDoesNotStartWhenStorageIsAlreadyLow() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let coordinator = RecordingCoordinator(
+            store: try RecordingStore(rootDirectory: directory),
+            simulatesCapture: true,
+            availableCapacity: { _ in RecordingCoordinator.minimumStartCapacityBytes - 1 }
+        )
+
+        coordinator.start(contentType: "meeting")
+
+        XCTAssertFalse(coordinator.isRecording)
+        XCTAssertTrue(coordinator.pendingRecordings.isEmpty)
+        XCTAssertTrue(coordinator.storageIsLow)
+        XCTAssertEqual(
+            coordinator.errorMessage,
+            "Free at least 100 MB of storage before starting a recording."
+        )
+    }
+
+    @MainActor
+    func testLongRecordingStopsSafelyBeforeStorageIsExhausted() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var bytesAvailable = RecordingCoordinator.minimumStartCapacityBytes
+        let store = try RecordingStore(rootDirectory: directory)
+        let coordinator = RecordingCoordinator(
+            store: store,
+            simulatesCapture: true,
+            availableCapacity: { _ in bytesAvailable }
+        )
+
+        coordinator.start(contentType: "lecture")
+        XCTAssertTrue(coordinator.isRecording)
+        bytesAvailable = RecordingCoordinator.criticalRecordingCapacityBytes - 1
+        coordinator.enforceStorageSafetyIfNeeded(force: true)
+
+        XCTAssertFalse(coordinator.isRecording)
+        XCTAssertTrue(coordinator.storageIsLow)
+        let saved = try XCTUnwrap(coordinator.availableRecordings.first)
+        XCTAssertEqual(saved.state, .ready)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.fileURL(for: saved).path))
+        XCTAssertEqual(
+            coordinator.statusMessage,
+            "Recording stopped and saved because this iPhone is low on storage."
+        )
     }
 
     func testRecordingManifestMigratesEntriesWithoutUploadMetadata() throws {

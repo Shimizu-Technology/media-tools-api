@@ -19,6 +19,7 @@ final class RecordingCoordinator {
     private(set) var duration: TimeInterval = 0
     private(set) var audioLevel: CGFloat = 0
     private(set) var statusMessage: String?
+    private(set) var storageIsLow = false
     var errorMessage: String?
     var permissionDenied = false
 
@@ -26,15 +27,21 @@ final class RecordingCoordinator {
     private var activeRecordingID: UUID?
     private var timer: Timer?
     private var lastCheckpointedDuration: TimeInterval = 0
+    private var lastStorageCheckDuration: TimeInterval = 0
     private let notificationObservers = NotificationObserverBag()
     private let store: RecordingStore?
     private let simulatesCapture: Bool
     private let activityManager: RecordingActivityManaging
+    private let availableCapacity: (URL) -> Int64?
+
+    static let minimumStartCapacityBytes: Int64 = 100 * 1_024 * 1_024
+    static let criticalRecordingCapacityBytes: Int64 = 50 * 1_024 * 1_024
 
     init(
         store: RecordingStore? = nil,
         simulatesCapture: Bool? = nil,
-        activityManager: RecordingActivityManaging? = nil
+        activityManager: RecordingActivityManaging? = nil,
+        availableCapacity: @escaping (URL) -> Int64? = RecordingStorageCapacity.available
     ) {
         #if DEBUG
         self.simulatesCapture = simulatesCapture
@@ -43,6 +50,7 @@ final class RecordingCoordinator {
         self.simulatesCapture = false
         #endif
         self.activityManager = activityManager ?? RecordingActivityManager.shared
+        self.availableCapacity = availableCapacity
 
         if let store {
             self.store = store
@@ -146,10 +154,18 @@ final class RecordingCoordinator {
             errorMessage = "Secure recording storage is unavailable. Restart Media Tools and try again."
             return false
         }
+        if let directoryURL = store?.directoryURL,
+           let bytesAvailable = availableCapacity(directoryURL),
+           bytesAvailable < Self.minimumStartCapacityBytes {
+            storageIsLow = true
+            errorMessage = "Free at least 100 MB of storage before starting a recording."
+            return false
+        }
 
         isStarting = true
         errorMessage = nil
         statusMessage = nil
+        storageIsLow = false
         permissionDenied = false
         return true
     }
@@ -444,6 +460,7 @@ final class RecordingCoordinator {
             isInterrupted = false
             duration = 0
             lastCheckpointedDuration = 0
+            lastStorageCheckDuration = 0
             audioLevel = 0
             statusMessage = "Recording securely on this iPhone"
             startMeterTimer()
@@ -483,6 +500,7 @@ final class RecordingCoordinator {
             isInterrupted = false
             duration = 0
             lastCheckpointedDuration = 0
+            lastStorageCheckDuration = 0
             audioLevel = 0.35
             statusMessage = "Recording securely on this iPhone"
             startMeterTimer()
@@ -510,6 +528,7 @@ final class RecordingCoordinator {
             duration += 0.1
             audioLevel = 0.2 + (0.25 * CGFloat((sin(duration * 4) + 1) / 2))
             checkpointActiveRecordingIfNeeded()
+            enforceStorageSafetyIfNeeded()
             return
         }
         guard let audioRecorder else { return }
@@ -518,6 +537,28 @@ final class RecordingCoordinator {
         let power = max(-60, min(0, audioRecorder.averagePower(forChannel: 0)))
         audioLevel = CGFloat(pow(10, power / 20))
         checkpointActiveRecordingIfNeeded()
+        enforceStorageSafetyIfNeeded()
+    }
+
+    /// Long recordings should fail safe while there is still room to finalize
+    /// their audio container and manifest. Capacity is checked infrequently so
+    /// metering remains lightweight, and the saved recording stays uploadable.
+    func enforceStorageSafetyIfNeeded(force: Bool = false) {
+        guard isRecording,
+              force || duration - lastStorageCheckDuration >= 10,
+              let directoryURL = store?.directoryURL
+        else { return }
+
+        lastStorageCheckDuration = duration
+        guard let bytesAvailable = availableCapacity(directoryURL),
+              bytesAvailable < Self.criticalRecordingCapacityBytes
+        else { return }
+
+        storageIsLow = true
+        _ = finalizeRecording(
+            state: .ready,
+            message: "Recording stopped and saved because this iPhone is low on storage."
+        )
     }
 
     /// A small manifest checkpoint makes the elapsed time useful after an

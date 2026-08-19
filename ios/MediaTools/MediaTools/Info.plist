@@ -26,6 +26,8 @@
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
 
     <!-- Keep an explicitly initiated recording alive when the screen locks or
          the user moves to another app. The audio session is deactivated as
@@ -37,12 +39,31 @@
 
     <!-- Microphone access for audio recording -->
     <key>NSMicrophoneUsageDescription</key>
-    <string>Media Tools needs microphone access to record audio for transcription.</string>
+    <string>Media Tools uses the microphone only after you start a recording, so it can save the audio on this iPhone and transcribe it in your private workspace.</string>
 
     <!-- Required for the visible recording status and controls that accompany
          an AudioRecordingIntent started from the Action Button or Shortcuts. -->
     <key>NSSupportsLiveActivities</key>
     <true/>
+
+    <!-- Declaring a modern launch screen prevents compatibility-mode
+         letterboxing on current iPhone and iPad displays. -->
+    <key>UILaunchScreen</key>
+    <dict/>
+
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
 
     <!-- Tapping the Live Activity returns directly to the Record tab. -->
     <key>CFBundleURLTypes</key>
