@@ -100,4 +100,20 @@ enum NotificationService {
             )
         )
     }
+
+    static func notifyAudioStatusUnavailable(title: String, itemId: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Check Transcription Status"
+        content.body = "Media Tools could not refresh \(title). Open the Library for details."
+        content.sound = .default
+        content.userInfo = ["item_id": itemId, "type": "audio"]
+
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(
+                identifier: "audio-status-\(itemId)",
+                content: content,
+                trigger: nil
+            )
+        )
+    }
 }

@@ -2,6 +2,12 @@ import Foundation
 import Observation
 import UniformTypeIdentifiers
 
+enum TranscriptionWatchFailureDisposition: Equatable {
+    case retry
+    case pauseForAuthentication
+    case stop
+}
+
 /// Durable orchestration for recordings after capture finishes.
 ///
 /// The recording manifest is the source of truth until the API creates its
@@ -299,11 +305,31 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 } catch is CancellationError {
                     return
                 } catch {
-                    failures = min(failures + 1, 12)
-                    // The persisted watch must remain live while the app does.
-                    // A short outage should delay status delivery, not silently
-                    // disable it until the next scene activation.
-                    try? await Task.sleep(for: Self.watchRetryDelay(after: failures))
+                    switch Self.watchFailureDisposition(for: error) {
+                    case .retry:
+                        failures = min(failures + 1, 12)
+                        // The persisted watch must remain live while the app does.
+                        // A short outage should delay status delivery, not silently
+                        // disable it until the next scene activation.
+                        try? await Task.sleep(for: Self.watchRetryDelay(after: failures))
+                    case .pauseForAuthentication:
+                        self.latestItem = nil
+                        self.statusMessage =
+                            "Sign in to continue checking transcription status."
+                        // Keep the persisted watch. RecordView and the app scene
+                        // both resume pending work after authentication returns.
+                        return
+                    case .stop:
+                        self.latestItem = nil
+                        self.removeWatch(id: watch.id)
+                        self.statusMessage =
+                            "Transcription status could not be refreshed. Check Library for details."
+                        NotificationService.notifyAudioStatusUnavailable(
+                            title: watch.title,
+                            itemId: watch.id
+                        )
+                        return
+                    }
                 }
             }
         }
@@ -372,6 +398,17 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
 
     static func watchRetryDelay(after failureCount: Int) -> Duration {
         .seconds(min(max(failureCount, 1) * 5, 60))
+    }
+
+    static func watchFailureDisposition(for error: Error) -> TranscriptionWatchFailureDisposition {
+        if let apiError = error as? APIError {
+            if case .httpError(let statusCode, _, _) = apiError,
+               statusCode == 401 || statusCode == 403 {
+                return .pauseForAuthentication
+            }
+            return apiError.isRetryable ? .retry : .stop
+        }
+        return error is URLError ? .retry : .stop
     }
 
     private static func mimeType(for url: URL) -> String {

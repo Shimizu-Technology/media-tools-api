@@ -9,6 +9,42 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(RecordingUploadCoordinator.watchRetryDelay(after: 100), .seconds(60))
     }
 
+    @MainActor
+    func testTranscriptionWatchClassifiesTransientAuthenticationAndPermanentFailures() {
+        XCTAssertEqual(
+            RecordingUploadCoordinator.watchFailureDisposition(
+                for: URLError(.notConnectedToInternet)
+            ),
+            .retry
+        )
+        XCTAssertEqual(
+            RecordingUploadCoordinator.watchFailureDisposition(
+                for: APIError.httpError(statusCode: 503, message: "Unavailable")
+            ),
+            .retry
+        )
+        XCTAssertEqual(
+            RecordingUploadCoordinator.watchFailureDisposition(
+                for: APIError.httpError(statusCode: 401, message: "Sign in")
+            ),
+            .pauseForAuthentication
+        )
+        XCTAssertEqual(
+            RecordingUploadCoordinator.watchFailureDisposition(
+                for: APIError.httpError(statusCode: 404, message: "Missing")
+            ),
+            .stop
+        )
+        XCTAssertEqual(
+            RecordingUploadCoordinator.watchFailureDisposition(
+                for: DecodingError.dataCorrupted(
+                    .init(codingPath: [], debugDescription: "Malformed response")
+                )
+            ),
+            .stop
+        )
+    }
+
     private struct DatedPayload: Decodable {
         let createdAt: Date
     }
