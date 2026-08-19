@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		030BB98C2F47C7F600F89CFB /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 030BB98B2F47C7F600F89CFB /* ClerkKit */; };
 		030BB98E2F47C7FB00F89CFB /* ClerkKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = 030BB98D2F47C7FB00F89CFB /* ClerkKitUI */; };
+		A1000000000000000000000D /* MediaToolsWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* MediaToolsWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -26,12 +27,34 @@
 			remoteGlobalIDString = 030BB9142F4752E300F89CFB;
 			remoteInfo = MediaTools;
 		};
+		A1000000000000000000000F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 030BB90D2F4752E300F89CFB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000001;
+			remoteInfo = MediaToolsWidget;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A1000000000000000000000C /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A1000000000000000000000D /* MediaToolsWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		030BB9152F4752E300F89CFB /* MediaTools.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MediaTools.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		030BB9222F4752E500F89CFB /* MediaToolsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MediaToolsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		030BB92C2F4752E500F89CFB /* MediaToolsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MediaToolsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000002 /* MediaToolsWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MediaToolsWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -41,6 +64,13 @@
 				Info.plist,
 			);
 			target = 030BB9142F4752E300F89CFB /* MediaTools */;
+		};
+		A10000000000000000000005 /* Exceptions for "MediaToolsWidget" folder in "MediaToolsWidget" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A10000000000000000000001 /* MediaToolsWidget */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -61,6 +91,19 @@
 		030BB92F2F4752E500F89CFB /* MediaToolsUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = MediaToolsUITests;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000003 /* MediaToolsWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A10000000000000000000005 /* Exceptions for "MediaToolsWidget" folder in "MediaToolsWidget" target */,
+			);
+			path = MediaToolsWidget;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000004 /* MediaToolsShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MediaToolsShared;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -89,6 +132,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -96,6 +146,8 @@
 			isa = PBXGroup;
 			children = (
 				030BB9172F4752E300F89CFB /* MediaTools */,
+				A10000000000000000000003 /* MediaToolsWidget */,
+				A10000000000000000000004 /* MediaToolsShared */,
 				030BB9252F4752E500F89CFB /* MediaToolsTests */,
 				030BB92F2F4752E500F89CFB /* MediaToolsUITests */,
 				030BB98A2F47C7F600F89CFB /* Frameworks */,
@@ -109,6 +161,7 @@
 				030BB9152F4752E300F89CFB /* MediaTools.app */,
 				030BB9222F4752E500F89CFB /* MediaToolsTests.xctest */,
 				030BB92C2F4752E500F89CFB /* MediaToolsUITests.xctest */,
+				A10000000000000000000002 /* MediaToolsWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -130,13 +183,16 @@
 				030BB9122F4752E300F89CFB /* Frameworks */,
 				030BB9112F4752E300F89CFB /* Sources */,
 				030BB9132F4752E300F89CFB /* Resources */,
+				A1000000000000000000000C /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A1000000000000000000000E /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				030BB9172F4752E300F89CFB /* MediaTools */,
+				A10000000000000000000004 /* MediaToolsShared */,
 			);
 			name = MediaTools;
 			packageProductDependencies = (
@@ -193,6 +249,29 @@
 			productReference = 030BB92C2F4752E500F89CFB /* MediaToolsUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		A10000000000000000000001 /* MediaToolsWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000009 /* Build configuration list for PBXNativeTarget "MediaToolsWidget" */;
+			buildPhases = (
+				A10000000000000000000007 /* Sources */,
+				A10000000000000000000006 /* Frameworks */,
+				A10000000000000000000008 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000003 /* MediaToolsWidget */,
+				A10000000000000000000004 /* MediaToolsShared */,
+			);
+			name = MediaToolsWidget;
+			packageProductDependencies = (
+			);
+			productName = MediaToolsWidget;
+			productReference = A10000000000000000000002 /* MediaToolsWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -213,6 +292,9 @@
 					030BB92B2F4752E500F89CFB = {
 						CreatedOnToolsVersion = 16.4;
 						TestTargetID = 030BB9142F4752E300F89CFB;
+					};
+					A10000000000000000000001 = {
+						CreatedOnToolsVersion = 26.0;
 					};
 				};
 			};
@@ -236,6 +318,7 @@
 				030BB9142F4752E300F89CFB /* MediaTools */,
 				030BB9212F4752E500F89CFB /* MediaToolsTests */,
 				030BB92B2F4752E500F89CFB /* MediaToolsUITests */,
+				A10000000000000000000001 /* MediaToolsWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -256,6 +339,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		030BB92A2F4752E500F89CFB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000008 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -286,6 +376,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -298,6 +395,11 @@
 			isa = PBXTargetDependency;
 			target = 030BB9142F4752E300F89CFB /* MediaTools */;
 			targetProxy = 030BB92D2F4752E500F89CFB /* PBXContainerItemProxy */;
+		};
+		A1000000000000000000000E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000001 /* MediaToolsWidget */;
+			targetProxy = A1000000000000000000000F /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -553,6 +655,60 @@
 			};
 			name = Release;
 		};
+		A1000000000000000000000A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4T358A5S74;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MediaToolsWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ShimizuTechnology.MediaTools.Widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG WIDGET_EXTENSION $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A1000000000000000000000B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4T358A5S74;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MediaToolsWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ShimizuTechnology.MediaTools.Widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "WIDGET_EXTENSION $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -588,6 +744,15 @@
 			buildConfigurations = (
 				030BB93D2F4752E500F89CFB /* Debug */,
 				030BB93E2F4752E500F89CFB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000000000000000000009 /* Build configuration list for PBXNativeTarget "MediaToolsWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000000A /* Debug */,
+				A1000000000000000000000B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

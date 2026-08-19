@@ -8,6 +8,7 @@ struct MediaToolsApp: App {
 
     init() {
         Clerk.configure(publishableKey: Configuration.clerkPublishableKey)
+        MediaToolsAppShortcuts.updateAppShortcutParameters()
         configureAppearance()
     }
 
@@ -38,6 +39,14 @@ struct MediaToolsApp: App {
                 RecordView()
             }
             .preferredColorScheme(.dark)
+        } else if ProcessInfo.processInfo.arguments.contains("-ui-test-quick-capture") {
+            NavigationStack {
+                RecordView()
+            }
+            .preferredColorScheme(.dark)
+            .task {
+                _ = await recordingCoordinator.toggleFromSystem()
+            }
         } else {
             standardRoot
         }

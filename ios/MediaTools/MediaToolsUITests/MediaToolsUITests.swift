@@ -33,6 +33,8 @@ final class MediaToolsUITests: XCTestCase {
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Notification settings"].exists)
+        XCTAssertTrue(app.staticTexts["Quick Capture"].exists)
+        XCTAssertTrue(app.buttons["Open Shortcuts"].exists)
     }
 
     func testAppLaunches() {
@@ -112,6 +114,57 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(stop.waitForExistence(timeout: 5))
         stop.tap()
         XCTAssertTrue(app.staticTexts["Saved on this iPhone"].waitForExistence(timeout: 5))
+    }
+
+    func testSystemQuickCaptureStartsAndCanBeStoppedInTheApp() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-test-quick-capture",
+            "-ui-test-simulated-recording",
+            "-ui-test-reset-recordings",
+        ]
+        app.launch()
+
+        let stop = app.buttons["Stop recording"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Recording securely on this iPhone"].exists)
+        stop.tap()
+
+        XCTAssertTrue(app.staticTexts["Saved on this iPhone"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch.exists)
+    }
+
+    func testQuickCaptureLiveActivityCanStopFromTheDynamicIsland() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-test-quick-capture",
+            "-ui-test-simulated-recording",
+            "-ui-test-reset-recordings",
+        ]
+        app.launch()
+        XCTAssertTrue(app.buttons["Stop recording"].waitForExistence(timeout: 10))
+
+        XCUIDevice.shared.press(.home)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allowLiveActivities = springboard.buttons["Allow"]
+        if allowLiveActivities.waitForExistence(timeout: 3) {
+            allowLiveActivities.tap()
+        }
+
+        // Expand the compact Dynamic Island presentation to expose its label
+        // and explicit Stop action while Media Tools remains in the background.
+        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035))
+            .press(forDuration: 1)
+
+        XCTAssertTrue(springboard.staticTexts["Recording"].waitForExistence(timeout: 10))
+        XCTAssertTrue(springboard.staticTexts["Voice Memo"].exists)
+
+        let stopAndSave = springboard.buttons["Stop & Save"]
+        XCTAssertTrue(stopAndSave.waitForExistence(timeout: 5))
+        stopAndSave.tap()
+
+        app.activate()
+        XCTAssertTrue(app.staticTexts["Saved on this iPhone"].waitForExistence(timeout: 10))
     }
 
     func testLibrarySupportsTypedSelectionAndResponsiveActions() {

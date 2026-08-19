@@ -48,5 +48,9 @@ struct MainTabView: View {
         }
         .tint(Theme.brand500)
         .preferredColorScheme(.dark)
+        .onOpenURL { url in
+            guard url.scheme == "mediatools", url.host == "record" else { return }
+            selectedTab = .record
+        }
     }
 }

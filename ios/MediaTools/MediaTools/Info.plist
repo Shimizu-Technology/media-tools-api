@@ -39,6 +39,24 @@
     <key>NSMicrophoneUsageDescription</key>
     <string>Media Tools needs microphone access to record audio for transcription.</string>
 
+    <!-- Required for the visible recording status and controls that accompany
+         an AudioRecordingIntent started from the Action Button or Shortcuts. -->
+    <key>NSSupportsLiveActivities</key>
+    <true/>
+
+    <!-- Tapping the Live Activity returns directly to the Record tab. -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.ShimizuTechnology.MediaTools</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>mediatools</string>
+            </array>
+        </dict>
+    </array>
+
     <!-- Configuration values (can be overridden via xcconfig) -->
     <key>CLERK_PUBLISHABLE_KEY</key>
     <string>$(CLERK_PUBLISHABLE_KEY)</string>

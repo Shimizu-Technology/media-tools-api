@@ -44,6 +44,20 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(modes, ["audio"])
     }
 
+    func testHostApplicationDeclaresLiveActivitiesAndRecordingDeepLink() throws {
+        XCTAssertEqual(
+            Bundle.main.object(forInfoDictionaryKey: "NSSupportsLiveActivities") as? Bool,
+            true
+        )
+
+        let urlTypes = try XCTUnwrap(
+            Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes")
+                as? [[String: Any]]
+        )
+        let schemes = urlTypes.flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
+        XCTAssertTrue(schemes.contains("mediatools"))
+    }
+
     @MainActor
     func testRecordingCoordinatorRecoversAndPreservesInterruptedCapture() throws {
         let directory = FileManager.default.temporaryDirectory
@@ -116,6 +130,51 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(reloaded.contentType, saved.contentType)
         XCTAssertEqual(reloaded.state, saved.state)
         XCTAssertEqual(reloaded.duration, saved.duration)
+    }
+
+    @MainActor
+    func testSystemQuickCaptureRequiresAndManagesLiveActivity() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let activityManager = TestRecordingActivityManager()
+        let coordinator = RecordingCoordinator(
+            store: try RecordingStore(rootDirectory: directory),
+            simulatesCapture: true,
+            activityManager: activityManager
+        )
+
+        let startOutcome = await coordinator.toggleFromSystem()
+        XCTAssertEqual(startOutcome, .started)
+        XCTAssertTrue(coordinator.isRecording)
+        XCTAssertEqual(activityManager.startedRecording?.contentType, "voice_memo")
+
+        let stopOutcome = await coordinator.toggleFromSystem()
+        XCTAssertEqual(stopOutcome, .stopped)
+        XCTAssertFalse(coordinator.isRecording)
+        XCTAssertEqual(activityManager.endCount, 1)
+        XCTAssertEqual(coordinator.availableRecordings.first?.state, .ready)
+    }
+
+    @MainActor
+    func testSystemQuickCaptureDoesNotRecordWithoutLiveActivities() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let activityManager = TestRecordingActivityManager()
+        activityManager.areActivitiesEnabled = false
+        let coordinator = RecordingCoordinator(
+            store: try RecordingStore(rootDirectory: directory),
+            simulatesCapture: true,
+            activityManager: activityManager
+        )
+
+        let outcome = await coordinator.toggleFromSystem()
+        XCTAssertEqual(outcome, .liveActivitiesDisabled)
+        XCTAssertFalse(coordinator.isRecording)
+        XCTAssertTrue(coordinator.pendingRecordings.isEmpty)
     }
 
     func testAudioProcessingStateDecodesIntoUsefulProgressCopy() throws {
@@ -285,5 +344,25 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(query["status"], "active")
         XCTAssertEqual(query["search"], "payroll & tax")
         XCTAssertEqual(query["sort_dir"], "asc")
+    }
+}
+
+@MainActor
+private final class TestRecordingActivityManager: RecordingActivityManaging {
+    var areActivitiesEnabled = true
+    private(set) var startedRecording: LocalRecording?
+    private(set) var updates: [(isInterrupted: Bool, duration: TimeInterval)] = []
+    private(set) var endCount = 0
+
+    func start(for recording: LocalRecording) async throws {
+        startedRecording = recording
+    }
+
+    func update(isInterrupted: Bool, duration: TimeInterval) async {
+        updates.append((isInterrupted, duration))
+    }
+
+    func end(finalDuration: TimeInterval) async {
+        endCount += 1
     }
 }

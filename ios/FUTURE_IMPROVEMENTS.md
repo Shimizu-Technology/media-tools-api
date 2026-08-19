@@ -7,14 +7,18 @@
 
 ## 🔥 Tier 1: High Impact / Low Effort
 
-### 1. Siri Shortcuts & App Intents
+### 1. More Siri Shortcuts & App Intents
+- [x] “Quick Record” and “Stop Recording” actions for Siri, Shortcuts, the
+  Action Button, Back Tap, widgets, and system controls
 - "Hey Siri, transcribe this video" → opens app with URL paste
 - "Summarize my last recording" → returns AI summary via Siri
 - "What did I record today?" → lists today's transcriptions
 - Uses Apple's App Intents framework (SwiftUI native)
 - **Why:** Makes the app feel native, hands-free usage while driving/walking
 
-### 2. Live Activity & Dynamic Island
+### 2. More Live Activity & Dynamic Island States
+- [x] Show recording state, elapsed time, interruption state, and Stop & Save
+  on the Lock Screen and Dynamic Island
 - Show transcription/upload progress on Lock Screen and Dynamic Island
 - Real-time word count as transcription streams in
 - "Transcription complete" dismisses automatically
@@ -182,7 +186,8 @@
 
 - [x] Core iOS app (SwiftUI, 5 tabs, full feature parity with web)
 - [ ] Wire and validate the prepared Share Sheet extension target (URLs, audio, PDFs)
-- [ ] Wire and validate the prepared Home Screen widget target (small + medium)
+- [x] Ship and validate the Quick Record WidgetKit target, Control Center
+  control, App Shortcuts, and recording Live Activity
 - [x] Spotlight search indexing
 - [x] Local notifications on completion
 - [x] Durable app-level recording, background audio, interruption handling, and local recovery queue
@@ -200,9 +205,9 @@
 
 ## Priority Order (Leon's Input)
 
-1. **Quick Capture controls** — App Shortcut, Action Button/Back Tap mapping, Lock Screen widget
-2. Live Activity and system recording controls
-3. Background upload and offline retry queue
+1. [x] **Quick Capture controls** — App Shortcut, Action Button/Back Tap mapping, Lock Screen widget
+2. [x] Live Activity and system recording controls
+3. [ ] Background upload and offline retry queue
 4. **Apple Watch companion**
 5. Image OCR
 6. iPad layout
