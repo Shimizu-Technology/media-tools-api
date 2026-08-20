@@ -242,6 +242,11 @@ export interface AudioTranscription {
   duration: number;
   language: string;
   transcript_text: string;
+  formatted_transcript_text: string;
+  formatting_status: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
+  formatting_model?: string;
+  formatting_version?: string;
+  formatting_error_message?: string;
   word_count: number;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   error_message?: string;
@@ -751,6 +756,14 @@ export async function renameAudioTranscription(id: string, name: string): Promis
 
 export async function retryAudioTranscription(id: string): Promise<AudioTranscription> {
   const res = await fetchWithAuth(`${API_BASE}/audio/transcriptions/${id}/retry`, {
+    method: 'POST',
+    headers: await getHeaders(),
+  });
+  return handleActivityResponse<AudioTranscription>(res);
+}
+
+export async function formatAudioTranscript(id: string): Promise<AudioTranscription> {
+  const res = await fetchWithAuth(`${API_BASE}/audio/transcriptions/${id}/format`, {
     method: 'POST',
     headers: await getHeaders(),
   });

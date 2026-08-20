@@ -54,6 +54,7 @@ type Config struct {
 	OpenAITranscriptionModel    string
 	OpenAITranscriptionLanguage string
 	OpenAITranscriptionPrompt   string
+	OpenAITranscriptFormatModel string
 
 	// JWT Authentication (MTA-20)
 	JWTSecret string
@@ -139,6 +140,7 @@ func Load() (*Config, error) {
 		OpenAITranscriptionModel:    getEnv("OPENAI_TRANSCRIPTION_MODEL", "whisper-1"),
 		OpenAITranscriptionLanguage: getEnv("OPENAI_TRANSCRIPTION_LANGUAGE", "en"),
 		OpenAITranscriptionPrompt:   getEnv("OPENAI_TRANSCRIPTION_PROMPT", ""),
+		OpenAITranscriptFormatModel: getEnv("OPENAI_TRANSCRIPT_FORMAT_MODEL", "gpt-4.1-mini"),
 
 		// JWT Authentication
 		JWTSecret:         getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),

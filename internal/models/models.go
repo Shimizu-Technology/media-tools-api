@@ -250,6 +250,11 @@ type AudioTranscription struct {
 	Duration            float64          `json:"duration" db:"duration"`
 	Language            string           `json:"language" db:"language"`
 	TranscriptText      string           `json:"transcript_text" db:"transcript_text"`
+	FormattedTranscript string           `json:"formatted_transcript_text" db:"formatted_transcript_text"`
+	FormattingStatus    string           `json:"formatting_status" db:"formatting_status"`
+	FormattingModel     string           `json:"formatting_model,omitempty" db:"formatting_model"`
+	FormattingVersion   string           `json:"formatting_version,omitempty" db:"formatting_version"`
+	FormattingError     string           `json:"formatting_error_message,omitempty" db:"formatting_error_message"`
 	WordCount           int              `json:"word_count" db:"word_count"`
 	Status              string           `json:"status" db:"status"`
 	ErrorMessage        string           `json:"error_message,omitempty" db:"error_message"`

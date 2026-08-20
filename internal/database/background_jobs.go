@@ -17,6 +17,7 @@ const backgroundJobColumns = `
 `
 
 var ErrAudioSummaryNotQueueable = errors.New("audio summary is already active or audio is not completed")
+var ErrAudioFormattingNotQueueable = errors.New("transcript formatting is already active or audio is not completed")
 
 // EnqueueBackgroundJob persists work before waking an in-process worker.
 // An active partial unique index makes repeated recovery/submission idempotent.
@@ -29,7 +30,7 @@ func (db *DB) EnqueueBackgroundJob(ctx context.Context, jobType, resourceID stri
 	var id string
 	err := db.QueryRowContext(ctx, `
 		INSERT INTO background_jobs (job_type, resource_id, payload)
-		VALUES ($1, $2, $3)
+		VALUES ($1, $2, $3::jsonb)
 		ON CONFLICT (job_type, resource_id)
 			WHERE status IN ('queued', 'running')
 		DO UPDATE SET
@@ -37,7 +38,9 @@ func (db *DB) EnqueueBackgroundJob(ctx context.Context, jobType, resourceID stri
 			updated_at = NOW()
 		WHERE background_jobs.status = 'queued'
 		RETURNING id`,
-		jobType, resourceID, payload,
+		// JSON must cross database/sql as text. A []byte is encoded as bytea by
+		// pgx's simple protocol, and its hex representation is not valid JSON.
+		jobType, resourceID, string(payload),
 	).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -99,18 +102,129 @@ func (db *DB) QueueAudioSummary(
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO background_jobs (job_type, resource_id, payload)
-		VALUES ('audio_summary', $1, $2)
+		VALUES ('audio_summary', $1, $2::jsonb)
 		ON CONFLICT (job_type, resource_id)
 			WHERE status IN ('queued', 'running')
 		DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
 		WHERE background_jobs.status = 'queued'`,
-		audio.ID, payload,
+		audio.ID, string(payload),
 	)
 	if err != nil {
 		return fmt.Errorf("store audio summary job payload: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit audio summary queue transaction: %w", err)
+	}
+	return nil
+}
+
+// QueueAudioTranscriptFormatting atomically exposes the pending UI state and
+// persists its durable job. Completed formatting can be requested again after
+// a formatter upgrade; simultaneous requests remain idempotent.
+func (db *DB) QueueAudioTranscriptFormatting(ctx context.Context, audioID string) error {
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transcript formatting queue transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(ctx, `
+		UPDATE audio_transcriptions
+		SET formatting_status = 'pending',
+			formatted_transcript_text = '',
+			formatting_model = '',
+			formatting_version = '',
+			formatting_error_message = ''
+		WHERE id = $1
+		  AND status = 'completed'
+		  AND transcript_text <> ''
+		  AND formatting_status NOT IN ('pending', 'processing')`, audioID)
+	if err != nil {
+		return fmt.Errorf("mark transcript formatting pending: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect transcript formatting queue update: %w", err)
+	}
+	if rows == 0 {
+		return ErrAudioFormattingNotQueueable
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO background_jobs (job_type, resource_id, payload)
+		VALUES ('audio_transcript_formatting', $1, jsonb_build_object('audio_id', $1::text))
+		ON CONFLICT (job_type, resource_id)
+			WHERE status IN ('queued', 'running')
+		DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+		WHERE background_jobs.status = 'queued'`, audioID)
+	if err != nil {
+		return fmt.Errorf("store transcript formatting job: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transcript formatting queue transaction: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) StartAudioTranscriptFormatting(ctx context.Context, audioID string) (bool, error) {
+	result, err := db.ExecContext(ctx, `
+		UPDATE audio_transcriptions
+		SET formatting_status = 'processing', formatting_error_message = ''
+		WHERE id = $1 AND status = 'completed'
+		  AND formatting_status IN ('pending', 'processing')`, audioID)
+	if err != nil {
+		return false, fmt.Errorf("start transcript formatting: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("inspect transcript formatting start update: %w", err)
+	}
+	return rows > 0, nil
+}
+
+func (db *DB) CompleteAudioTranscriptFormatting(ctx context.Context, audioID, text, model, version string) error {
+	result, err := db.ExecContext(ctx, `
+		UPDATE audio_transcriptions
+		SET formatted_transcript_text = $2,
+			formatting_status = 'completed',
+			formatting_model = $3,
+			formatting_version = $4,
+			formatting_error_message = ''
+		WHERE id = $1 AND status = 'completed'
+		  AND formatting_status IN ('pending', 'processing')`,
+		audioID, text, model, version)
+	if err != nil {
+		return fmt.Errorf("complete transcript formatting: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect transcript formatting completion update: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("transcript formatting is no longer active")
+	}
+	return nil
+}
+
+func (db *DB) FailAudioTranscriptFormatting(ctx context.Context, audioID, message string) error {
+	result, err := db.ExecContext(ctx, `
+		UPDATE audio_transcriptions
+		SET formatted_transcript_text = '',
+			formatting_status = 'failed',
+			formatting_model = '',
+			formatting_version = '',
+			formatting_error_message = $2
+		WHERE id = $1 AND status = 'completed'
+		  AND formatting_status IN ('pending', 'processing')`, audioID, message)
+	if err != nil {
+		return fmt.Errorf("fail transcript formatting: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect transcript formatting failure update: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("transcript formatting is no longer active")
 	}
 	return nil
 }

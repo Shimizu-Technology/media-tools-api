@@ -95,7 +95,7 @@ struct RecordView: View {
                                         .foregroundStyle(Theme.textSecondary)
                                 }
 
-                                if let text = result.transcriptText, !text.isEmpty {
+                                if let text = result.readableTranscriptText, !text.isEmpty {
                                     Text(text)
                                         .font(Theme.body(14))
                                         .foregroundStyle(Theme.textSecondary)
@@ -635,8 +635,8 @@ struct RecordView: View {
             var consecutiveFailures = 0
 
             while !Task.isCancelled,
-                uploadResult?.status != "completed",
-                uploadResult?.status != "failed"
+                let current = uploadResult,
+                isResultProcessing(current)
             {
                 do {
                     try await Task.sleep(for: .seconds(3))
@@ -669,6 +669,11 @@ struct RecordView: View {
                 Haptics.error()
             }
         }
+    }
+
+    private func isResultProcessing(_ result: AudioTranscription) -> Bool {
+        ["pending", "processing"].contains(result.status)
+            || ["pending", "processing"].contains(result.formattingStatus ?? "none")
     }
 
     private func uploadButtonTitle(for recording: LocalRecording) -> String {

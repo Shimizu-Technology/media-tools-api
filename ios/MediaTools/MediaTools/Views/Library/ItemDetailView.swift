@@ -1,5 +1,13 @@
 import SwiftUI
 
+private enum TranscriptViewMode: String, CaseIterable, Identifiable {
+    case readable = "Readable"
+    case timestamps = "Timestamps"
+    case original = "Original"
+
+    var id: String { rawValue }
+}
+
 struct ItemDetailView: View {
     let item: LibraryItem
     @Environment(\.openURL) private var openURL
@@ -23,6 +31,8 @@ struct ItemDetailView: View {
     @State private var renameValue = ""
     @State private var isRenaming = false
     @State private var isRetrying = false
+    @State private var transcriptViewMode: TranscriptViewMode = .readable
+    @State private var isFormattingTranscript = false
     @State private var detailError: String?
     @State private var pollingWarning: String?
     @State private var detailPollingTask: Task<Void, Never>?
@@ -136,7 +146,7 @@ struct ItemDetailView: View {
                     } label: {
                         Label("Add to Collection", systemImage: "folder.badge.plus")
                     }
-                    if let text = contentText {
+                    if let text = visibleTranscriptText {
                         Button {
                             UIPasteboard.general.string = text
                             Haptics.success()
@@ -494,48 +504,144 @@ struct ItemDetailView: View {
     @ViewBuilder
     private var transcriptSection: some View {
         if let text = contentText, !text.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(text: "Transcript", icon: "doc.text")
 
-                if segments.isEmpty {
-                    Text(text)
+                if isAudioItem {
+                    Picker("Transcript view", selection: $transcriptViewMode) {
+                        ForEach(TranscriptViewMode.allCases.filter { $0 != .timestamps || !segments.isEmpty }) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text(transcriptViewDescription)
+                        .font(Theme.caption())
+                        .foregroundStyle(Theme.textMuted)
+
+                    if transcriptViewMode == .readable {
+                        transcriptFormattingState
+                    }
+                }
+
+                if isAudioItem && transcriptViewMode == .timestamps && !segments.isEmpty {
+                    timestampedTranscript
+                } else if !isAudioItem && !segments.isEmpty {
+                    timestampedTranscript
+                } else {
+                    Text(visibleTranscriptText ?? text)
                         .font(Theme.body())
                         .foregroundStyle(Theme.textSecondary)
                         .textSelection(.enabled)
-                } else {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(segments) { segment in
-                            Button {
-                                handleSegment(segment)
-                            } label: {
-                                HStack(alignment: .top, spacing: 10) {
-                                    Text(segment.locatorLabel)
-                                        .font(.caption.monospacedDigit().weight(.semibold))
-                                        .foregroundStyle(iconColor)
-                                        .frame(minWidth: 52, alignment: .leading)
-
-                                    Text(segment.text)
-                                        .font(Theme.body())
-                                        .foregroundStyle(Theme.textSecondary)
-                                        .multilineTextAlignment(.leading)
-
-                                    Spacer(minLength: 0)
-                                }
-                                .padding(.vertical, 10)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .id(segment.id)
-
-                            if segment.id != segments.last?.id {
-                                Divider()
-                                    .overlay(Theme.borderSubtle)
-                            }
-                        }
-                    }
                 }
             }
             .cardStyle()
+        }
+    }
+
+    private var timestampedTranscript: some View {
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(segments) { segment in
+                Button {
+                    handleSegment(segment)
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        Text(segment.locatorLabel)
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(iconColor)
+                            .frame(minWidth: 52, alignment: .leading)
+
+                        Text(segment.text)
+                            .font(Theme.body())
+                            .foregroundStyle(Theme.textSecondary)
+                            .multilineTextAlignment(.leading)
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .id(segment.id)
+
+                if segment.id != segments.last?.id {
+                    Divider()
+                        .overlay(Theme.borderSubtle)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var transcriptFormattingState: some View {
+        if let audio {
+            switch audio.formattingStatus ?? "none" {
+            case "pending", "processing":
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .tint(Theme.brand500)
+                    Text("Formatting for readability… The original is available now.")
+                        .font(Theme.caption())
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            case "failed":
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(audio.formattingErrorMessage ?? "Readable formatting could not finish. The original transcript is shown.")
+                        .font(Theme.caption())
+                        .foregroundStyle(Theme.textSecondary)
+                    Button {
+                        Task { await formatTranscriptForReadability() }
+                    } label: {
+                        if isFormattingTranscript {
+                            ProgressView().frame(maxWidth: .infinity)
+                        } else {
+                            Label("Try Again", systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Theme.brand500)
+                    .disabled(isFormattingTranscript)
+                }
+                .padding(12)
+                .background(Theme.warning.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            case "none":
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("This recording predates readable formatting.")
+                        .font(Theme.caption())
+                        .foregroundStyle(Theme.textSecondary)
+                    Button {
+                        Task { await formatTranscriptForReadability() }
+                    } label: {
+                        if isFormattingTranscript {
+                            ProgressView().frame(maxWidth: .infinity)
+                        } else {
+                            Label("Improve Readability", systemImage: "sparkles")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.brand500)
+                    .disabled(isFormattingTranscript)
+                }
+                .padding(12)
+                .background(Theme.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            default:
+                EmptyView()
+            }
+        }
+    }
+
+    private var transcriptViewDescription: String {
+        switch transcriptViewMode {
+        case .readable:
+            "Comfortable paragraphs with every spoken word preserved."
+        case .timestamps:
+            "Tap a timestamp to play that moment."
+        case .original:
+            "Untouched speech-to-text from the transcription service."
         }
     }
 
@@ -612,7 +718,23 @@ struct ItemDetailView: View {
     }
 
     private var contentText: String? {
-        transcript?.transcriptText ?? audio?.transcriptText ?? pdf?.textContent ?? nil
+        transcript?.transcriptText ?? audio?.readableTranscriptText ?? pdf?.textContent ?? nil
+    }
+
+    private var visibleTranscriptText: String? {
+        guard let audio else { return contentText }
+        switch transcriptViewMode {
+        case .readable:
+            return audio.readableTranscriptText
+        case .original:
+            return audio.transcriptText
+        case .timestamps:
+            let timestamped = segments.compactMap { segment -> String? in
+                guard segment.startMs != nil else { return nil }
+                return "[\(segment.locatorLabel)] \(segment.text)"
+            }.joined(separator: "\n")
+            return timestamped.isEmpty ? audio.transcriptText : timestamped
+        }
     }
 
     private func formatDuration(_ seconds: Double) -> String {
@@ -643,7 +765,9 @@ struct ItemDetailView: View {
                         evidence: audio.summaryEvidence
                     )
                 }
-                if let audio, ["pending", "processing"].contains(audio.status) {
+                if let audio,
+                   ["pending", "processing"].contains(audio.status)
+                    || ["pending", "processing"].contains(audio.formattingStatus ?? "none") {
                     startDetailPolling()
                 }
             case .pdf(let p):
@@ -824,13 +948,30 @@ struct ItemDetailView: View {
         }
     }
 
+    private func formatTranscriptForReadability() async {
+        guard isAudioItem, !isFormattingTranscript else { return }
+        isFormattingTranscript = true
+        detailError = nil
+        defer { isFormattingTranscript = false }
+        do {
+            audio = try await service.formatAudioTranscript(itemId)
+            transcriptViewMode = .readable
+            Haptics.light()
+            startDetailPolling()
+        } catch {
+            detailError = error.localizedDescription
+            Haptics.error()
+        }
+    }
+
     private func startDetailPolling() {
         detailPollingTask?.cancel()
         pollingWarning = nil
         detailPollingTask = Task {
             while !Task.isCancelled,
                   let current = audio,
-                  ["pending", "processing"].contains(current.status) {
+                  ["pending", "processing"].contains(current.status)
+                    || ["pending", "processing"].contains(current.formattingStatus ?? "none") {
                 do {
                     try await Task.sleep(for: .seconds(3))
                     audio = try await service.getAudioItem(itemId)
