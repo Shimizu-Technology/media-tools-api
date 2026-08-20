@@ -52,7 +52,15 @@ struct MainTabView: View {
             guard url.scheme == "mediatools", url.host == "record" else { return }
             selectedTab = .record
         }
+        .onAppear {
+            if QuickCaptureNavigation.consumeRecordTabRequest() {
+                selectedTab = .record
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .mediaToolsQuickCapture)) { _ in
+            // Consume the persisted fallback as well so a later onAppear does
+            // not replay a warm-launch navigation request.
+            _ = QuickCaptureNavigation.consumeRecordTabRequest()
             selectedTab = .record
         }
     }

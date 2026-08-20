@@ -805,17 +805,21 @@ struct ItemDetailView: View {
     private func startDetailPolling() {
         detailPollingTask?.cancel()
         detailPollingTask = Task {
+            let pollingWarning = "The recording is safe, but its latest status could not be loaded. Retrying…"
             while !Task.isCancelled,
                   let current = audio,
                   ["pending", "processing"].contains(current.status) {
                 do {
                     try await Task.sleep(for: .seconds(3))
                     audio = try await service.getAudioItem(itemId)
+                    if detailError == pollingWarning { detailError = nil }
                 } catch is CancellationError {
                     return
                 } catch {
-                    detailError = "The recording is safe, but its latest status could not be loaded."
-                    return
+                    // Keep the last known item visible and try again after the
+                    // normal polling delay. A brief connection loss should not
+                    // strand the screen in a stale processing state.
+                    detailError = pollingWarning
                 }
             }
             if audio?.status == "completed" { Haptics.success() }

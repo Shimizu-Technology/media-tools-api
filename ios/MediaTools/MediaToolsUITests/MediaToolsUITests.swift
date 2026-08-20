@@ -231,6 +231,19 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch.exists)
     }
 
+    func testColdQuickCaptureRoutesToRecordAfterMainTabsMount() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-test-main",
+            "-ui-test-cold-quick-capture",
+            "-ui-test-reset-recordings",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.buttons["Start recording"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.tabBars.buttons["Record"].isSelected)
+    }
+
     func testQuickCaptureLiveActivityCanStopFromTheDynamicIsland() {
         let app = XCUIApplication()
         app.launchArguments = [

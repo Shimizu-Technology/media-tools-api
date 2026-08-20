@@ -3,6 +3,17 @@ import XCTest
 
 final class ModelDecodingTests: XCTestCase {
     @MainActor
+    func testQuickCaptureNavigationSurvivesUntilMainTabsConsumeIt() {
+        // Clear any state left by a previous interrupted test run.
+        _ = QuickCaptureNavigation.consumeRecordTabRequest()
+
+        QuickCaptureNavigation.requestRecordTab()
+
+        XCTAssertTrue(QuickCaptureNavigation.consumeRecordTabRequest())
+        XCTAssertFalse(QuickCaptureNavigation.consumeRecordTabRequest())
+    }
+
+    @MainActor
     func testTranscriptionWatchRetryDelayIsPositiveAndCapped() {
         XCTAssertEqual(RecordingUploadCoordinator.watchRetryDelay(after: 0), .seconds(5))
         XCTAssertEqual(RecordingUploadCoordinator.watchRetryDelay(after: 3), .seconds(15))

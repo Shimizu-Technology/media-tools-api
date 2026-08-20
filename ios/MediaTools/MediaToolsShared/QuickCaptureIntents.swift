@@ -1,4 +1,5 @@
 import AppIntents
+import Foundation
 
 /// The single action Leon can map to the iPhone Action Button or Back Tap.
 /// A second invocation stops the current recording, matching a physical toggle.
@@ -33,7 +34,7 @@ struct QuickRecordIntent: AudioRecordingIntent, LiveActivityIntent {
         return .result()
         #else
         _ = await RecordingCoordinator.shared.toggleFromSystem()
-        NotificationCenter.default.post(name: .mediaToolsQuickCapture, object: nil)
+        QuickCaptureNavigation.requestRecordTab()
         return .result()
         #endif
     }
@@ -59,6 +60,25 @@ struct StopRecordingIntent: LiveActivityIntent {
 
 extension Notification.Name {
     static let mediaToolsQuickCapture = Notification.Name("MediaToolsQuickCapture")
+}
+
+/// The notification handles warm launches. The persisted one-shot flag covers
+/// cold launches where the intent can finish before MainTabView subscribes.
+enum QuickCaptureNavigation {
+    private static let recordTabRequestKey = "MediaToolsQuickCaptureRequestedRecordTab"
+
+    @MainActor
+    static func requestRecordTab() {
+        UserDefaults.standard.set(true, forKey: recordTabRequestKey)
+        NotificationCenter.default.post(name: .mediaToolsQuickCapture, object: nil)
+    }
+
+    @MainActor
+    static func consumeRecordTabRequest() -> Bool {
+        guard UserDefaults.standard.bool(forKey: recordTabRequestKey) else { return false }
+        UserDefaults.standard.removeObject(forKey: recordTabRequestKey)
+        return true
+    }
 }
 
 struct MediaToolsAppShortcuts: AppShortcutsProvider {
