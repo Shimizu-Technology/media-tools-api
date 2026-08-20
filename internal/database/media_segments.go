@@ -191,7 +191,10 @@ func (db *DB) CompleteAudioTranscriptionWithSegments(ctx context.Context, audio 
 		SET duration = $2, language = $3, transcript_text = $4, word_count = $5,
 			status = $6, error_message = $7,
 			processing_stage = $8, processing_progress = $9, retry_count = $10,
-			quality_warning = $11, omitted_ranges = $12
+			quality_warning = $11, omitted_ranges = $12,
+			formatted_transcript_text = $13, formatting_status = $14,
+			formatting_model = $15, formatting_version = $16,
+			formatting_error_message = $17
 		WHERE id = $1 AND status IN ('pending', 'processing')`,
 		audio.ID,
 		audio.Duration,
@@ -205,6 +208,11 @@ func (db *DB) CompleteAudioTranscriptionWithSegments(ctx context.Context, audio 
 		audio.RetryCount,
 		audio.QualityWarning,
 		audio.OmittedRanges,
+		audio.FormattedTranscript,
+		audio.FormattingStatus,
+		audio.FormattingModel,
+		audio.FormattingVersion,
+		audio.FormattingError,
 	)
 	if err != nil {
 		return false, fmt.Errorf("complete audio transcription: %w", err)
@@ -215,6 +223,18 @@ func (db *DB) CompleteAudioTranscriptionWithSegments(ctx context.Context, audio 
 	}
 	if err := replaceMediaSegmentsTx(ctx, tx, "audio", audio.ID, segments); err != nil {
 		return false, err
+	}
+	if audio.FormattingStatus == "pending" {
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO background_jobs (job_type, resource_id, payload)
+			VALUES ('audio_transcript_formatting', $1, jsonb_build_object('audio_id', $1::text))
+			ON CONFLICT (job_type, resource_id)
+				WHERE status IN ('queued', 'running')
+			DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+			WHERE background_jobs.status = 'queued'`, audio.ID)
+		if err != nil {
+			return false, fmt.Errorf("queue transcript formatting: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("commit audio completion: %w", err)

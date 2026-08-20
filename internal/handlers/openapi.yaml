@@ -1025,6 +1025,16 @@ paths:
       summary: Retry an audio transcription
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
       responses: {"202": {description: Transcription queued}}
+  /audio/transcriptions/{id}/format:
+    post:
+      tags: [Audio]
+      summary: Format a completed transcript for readability
+      description: Queues a durable, word-preserving capitalization, punctuation, and paragraph pass while retaining the original transcript.
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        "202": {description: Readability formatting queued}
+        "404": {description: Audio transcription not found}
+        "409": {description: Transcript is not ready or formatting is already active}
   /audio/transcriptions/{id}/audio:
     get:
       tags: [Audio]
@@ -1035,7 +1045,9 @@ paths:
     get:
       tags: [Audio]
       summary: Export an audio transcription
-      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: source, in: query, required: false, schema: {type: string, enum: [readable, original], default: readable}}
       responses: {"200": {description: Export file}}
   /audio/transcriptions/{id}/summarize:
     post:

@@ -622,6 +622,24 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(item.processingDescription, "Splitting long recording")
     }
 
+    func testAudioReadableTranscriptUsesFormattedTextOnlyAfterCompletion() throws {
+        let completed = try APIClient.makeDecoder().decode(
+            AudioTranscription.self,
+            from: Data(
+                #"{"id":"audio-1","status":"completed","transcript_text":"testing this","formatted_transcript_text":"Testing this.","formatting_status":"completed"}"#.utf8
+            )
+        )
+        XCTAssertEqual(completed.readableTranscriptText, "Testing this.")
+
+        let pending = try APIClient.makeDecoder().decode(
+            AudioTranscription.self,
+            from: Data(
+                #"{"id":"audio-2","status":"completed","transcript_text":"testing this","formatted_transcript_text":"","formatting_status":"pending"}"#.utf8
+            )
+        )
+        XCTAssertEqual(pending.readableTranscriptText, "testing this")
+    }
+
     func testAudioUploadCompletionEncodesSemanticContentType() throws {
         let request = AudioUploadCompleteRequest(
             objectKey: "audio/user/upload.m4a",

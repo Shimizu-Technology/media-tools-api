@@ -149,6 +149,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		protected.PATCH("/audio/transcriptions/:id", h.RenameAudioTranscription)
 		protected.POST("/audio/transcriptions/:id/cancel", h.CancelAudioTranscription)
 		protected.POST("/audio/transcriptions/:id/retry", h.RetryAudioTranscription)
+		protected.POST("/audio/transcriptions/:id/format", h.FormatAudioTranscript)
 		protected.GET("/audio/transcriptions/:id/audio", h.GetAudioPlaybackURL)
 		protected.DELETE("/audio/transcriptions/:id", h.DeleteAudioTranscription)
 		protected.GET("/audio/transcriptions/:id/export", h.ExportAudioTranscription) // MTA-26

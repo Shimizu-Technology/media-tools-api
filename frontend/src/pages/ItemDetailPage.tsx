@@ -8,6 +8,7 @@ import { CitationRow } from '../components/CitationChip';
 import {
   downloadAudioExport,
   downloadExport,
+  formatAudioTranscript,
   getAudioPlaybackUrl,
   getAudioTranscription,
   getErrorMessage,
@@ -77,10 +78,12 @@ export function ItemDetailPage() {
 
   const status = item?.status || '';
   const audioSummaryStatus = type === 'audio' ? (item as AudioTranscription | null)?.summary_status : 'none';
+  const formattingStatus = type === 'audio' ? (item as AudioTranscription | null)?.formatting_status : 'none';
   useEffect(() => {
     const mediaActive = status === 'pending' || status === 'processing';
     const summaryActive = audioSummaryStatus === 'pending' || audioSummaryStatus === 'processing';
-    if (!mediaActive && !summaryActive) return;
+    const formattingActive = formattingStatus === 'pending' || formattingStatus === 'processing';
+    if (!mediaActive && !summaryActive && !formattingActive) return;
     const refresh = () => {
       if (document.visibilityState === 'visible') void loadItem(true);
     };
@@ -90,7 +93,7 @@ export function ItemDetailPage() {
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [audioSummaryStatus, loadItem, status]);
+  }, [audioSummaryStatus, formattingStatus, loadItem, status]);
 
   useEffect(() => {
     if (!itemId || !validType || status !== 'completed') {
@@ -112,12 +115,6 @@ export function ItemDetailPage() {
   }, [item, itemId, type]);
 
   const view = useMemo(() => normalizeItem(type, item), [item, type]);
-  const matchCount = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
-    if (!needle || !view.text) return 0;
-    return view.text.toLocaleLowerCase().split(needle).length - 1;
-  }, [query, view.text]);
-
   const handleCopy = async () => {
     if (!view.text) return;
     try {
@@ -165,6 +162,19 @@ export function ItemDetailPage() {
     setError('');
     try {
       setItem(await summarizeAudio(itemId, { content_type: (item as AudioTranscription).content_type || 'general', length: 'medium' }));
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setIsActing(false);
+    }
+  };
+
+  const handleTranscriptFormatting = async () => {
+    if (type !== 'audio' || !itemId) return;
+    setIsActing(true);
+    setError('');
+    try {
+      setItem(await formatAudioTranscript(itemId));
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -337,7 +347,7 @@ export function ItemDetailPage() {
 
       {complete && <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
         <div className="min-w-0 space-y-6">
-          {type === 'transcript' ? <SummaryPanel transcriptId={item.id} transcriptText={view.text} segments={segments} onCitationClick={openCitation} onSummaryReady={markVideoSummaryReady} /> : <TextViewer title={type === 'pdf' ? 'Document text' : 'Transcript'} text={view.text} segments={segments} query={query} setQuery={setQuery} matches={matchCount} onCitationClick={openCitation} transcriptModes={type === 'audio'} />}
+          {type === 'transcript' ? <SummaryPanel transcriptId={item.id} transcriptText={view.text} segments={segments} onCitationClick={openCitation} onSummaryReady={markVideoSummaryReady} /> : <TextViewer title={type === 'pdf' ? 'Document text' : 'Transcript'} text={view.text} originalText={type === 'audio' ? (item as AudioTranscription).transcript_text : undefined} formattingStatus={type === 'audio' ? (item as AudioTranscription).formatting_status : undefined} formattingError={type === 'audio' ? (item as AudioTranscription).formatting_error_message : undefined} onFormat={type === 'audio' ? handleTranscriptFormatting : undefined} isFormattingAction={isActing} segments={segments} query={query} setQuery={setQuery} onCitationClick={openCitation} transcriptModes={type === 'audio'} />}
           {type === 'audio' && <AudioSummary item={item as AudioTranscription} onGenerate={handleAudioSummary} isActing={isActing} onCitationClick={openCitation} />}
         </div>
         <aside className="min-w-0 xl:sticky xl:top-24 xl:self-start"><TranscriptChatPanel itemId={item.id} itemType={type} onCitationClick={openCitation} /></aside>
@@ -348,28 +358,40 @@ export function ItemDetailPage() {
   );
 }
 
-function TextViewer({ title, text, segments, query, setQuery, matches, onCitationClick, transcriptModes = false }: {
+function TextViewer({ title, text, originalText, formattingStatus, formattingError, onFormat, isFormattingAction = false, segments, query, setQuery, onCitationClick, transcriptModes = false }: {
   title: string;
   text: string;
+  originalText?: string;
+  formattingStatus?: AudioTranscription['formatting_status'];
+  formattingError?: string;
+  onFormat?: () => void;
+  isFormattingAction?: boolean;
   segments: MediaSegment[];
   query: string;
   setQuery: (value: string) => void;
-  matches: number;
   onCitationClick: (citation: Citation) => void;
   transcriptModes?: boolean;
 }) {
-  const [mode, setMode] = useState<'full' | 'timestamped'>('full');
+  const [mode, setMode] = useState<'readable' | 'timestamped' | 'original'>('readable');
   const [viewerCopied, setViewerCopied] = useState(false);
   const [viewerCopyError, setViewerCopyError] = useState('');
   const timedSegments = useMemo(() => segments.filter((segment) => typeof segment.start_ms === 'number'), [segments]);
   const hasTimestampedView = transcriptModes && timedSegments.length > 0;
   const showSegments = transcriptModes ? mode === 'timestamped' && hasTimestampedView : segments.length > 0;
   const visibleSegments = transcriptModes ? timedSegments : segments;
-  const plainText = text.trim() || segments.map((segment) => segment.text.trim()).filter(Boolean).join('\n\n');
+  const readableText = text.trim() || segments.map((segment) => segment.text.trim()).filter(Boolean).join('\n\n');
+  const sourceText = originalText?.trim() || readableText;
+  const plainText = transcriptModes && mode === 'original' ? sourceText : readableText;
   const copyText = showSegments && transcriptModes
     ? timedSegments.map((segment) => `[${formatTimestamp(segment.start_ms || 0)}] ${segment.text.trim()}`).join('\n')
     : plainText;
-  const copyLabel = showSegments && transcriptModes ? 'Copy timestamped' : transcriptModes ? 'Copy full transcript' : 'Copy text';
+  const copyLabel = showSegments && transcriptModes ? 'Copy timestamps' : transcriptModes && mode === 'original' ? 'Copy original' : transcriptModes ? 'Copy readable' : 'Copy text';
+  const matches = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    if (!needle || !copyText) return 0;
+    return copyText.toLocaleLowerCase().split(needle).length - 1;
+  }, [copyText, query]);
+  const formattingActive = formattingStatus === 'pending' || formattingStatus === 'processing';
 
   const copyVisibleTranscript = async () => {
     if (!copyText) return;
@@ -392,15 +414,16 @@ function TextViewer({ title, text, segments, query, setQuery, matches, onCitatio
           </div>
           <div className="min-w-0">
             <h2 className="font-semibold">{title}</h2>
-            {hasTimestampedView && <p className="mt-0.5 text-xs leading-5" style={{ color: 'var(--color-text-muted)' }}>{mode === 'full' ? 'Clean text for reading and copying' : 'Select a timestamp to play that moment'}</p>}
+            {transcriptModes && <p className="mt-0.5 text-xs leading-5" style={{ color: 'var(--color-text-muted)' }}>{mode === 'readable' ? 'Comfortable paragraphs with every spoken word preserved' : mode === 'timestamped' ? 'Select a timestamp to play that moment' : 'Untouched speech-to-text from the transcription service'}</p>}
           </div>
         </div>
 
-        <div className="mt-4 grid min-w-0 gap-2 sm:grid-cols-2 2xl:grid-cols-[auto_auto_minmax(12rem,1fr)]">
-          {hasTimestampedView && (
-            <div className="grid min-w-0 grid-cols-2 rounded-xl border p-1" role="group" aria-label="Transcript view" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}>
-              <button type="button" aria-pressed={mode === 'full'} onClick={() => setMode('full')} className="min-h-11 min-w-0 rounded-lg px-3 text-sm font-semibold transition" style={{ backgroundColor: mode === 'full' ? 'var(--color-surface-elevated)' : undefined, color: mode === 'full' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: mode === 'full' ? 'var(--shadow-tab-active)' : undefined }}>Full</button>
-              <button type="button" aria-pressed={mode === 'timestamped'} onClick={() => setMode('timestamped')} className="min-h-11 min-w-0 rounded-lg px-3 text-sm font-semibold transition" style={{ backgroundColor: mode === 'timestamped' ? 'var(--color-surface-elevated)' : undefined, color: mode === 'timestamped' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: mode === 'timestamped' ? 'var(--shadow-tab-active)' : undefined }}>Timestamped</button>
+        <div className="mt-4 grid min-w-0 gap-2 sm:grid-cols-2 2xl:grid-cols-[minmax(20rem,auto)_auto_minmax(12rem,1fr)]">
+          {transcriptModes && (
+            <div className="grid min-w-0 grid-cols-3 rounded-xl border p-1" role="group" aria-label="Transcript view" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}>
+              <button type="button" aria-pressed={mode === 'readable'} onClick={() => setMode('readable')} className="min-h-11 min-w-0 rounded-lg px-2 text-sm font-semibold transition" style={{ backgroundColor: mode === 'readable' ? 'var(--color-surface-elevated)' : undefined, color: mode === 'readable' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: mode === 'readable' ? 'var(--shadow-tab-active)' : undefined }}>Readable</button>
+              <button type="button" aria-pressed={mode === 'timestamped'} disabled={!hasTimestampedView} onClick={() => setMode('timestamped')} className="min-h-11 min-w-0 rounded-lg px-2 text-sm font-semibold transition disabled:opacity-40" style={{ backgroundColor: mode === 'timestamped' ? 'var(--color-surface-elevated)' : undefined, color: mode === 'timestamped' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: mode === 'timestamped' ? 'var(--shadow-tab-active)' : undefined }}>Timestamps</button>
+              <button type="button" aria-pressed={mode === 'original'} onClick={() => setMode('original')} className="min-h-11 min-w-0 rounded-lg px-2 text-sm font-semibold transition" style={{ backgroundColor: mode === 'original' ? 'var(--color-surface-elevated)' : undefined, color: mode === 'original' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: mode === 'original' ? 'var(--shadow-tab-active)' : undefined }}>Original</button>
             </div>
           )}
           <button type="button" onClick={() => void copyVisibleTranscript()} disabled={!copyText} className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)] disabled:opacity-40" style={{ borderColor: 'var(--color-border)' }}>
@@ -414,6 +437,9 @@ function TextViewer({ title, text, segments, query, setQuery, matches, onCitatio
           </div>
         </div>
         {viewerCopyError && <p role="status" className="mt-3 text-sm" style={{ color: 'var(--color-danger)' }}>{viewerCopyError}</p>}
+        {transcriptModes && mode === 'readable' && formattingActive && <div className="mt-3 flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}><Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-brand-500)' }} />Formatting for readability… The original transcript is available now.</div>}
+        {transcriptModes && mode === 'readable' && formattingStatus === 'none' && <div className="mt-3 flex flex-col items-start justify-between gap-3 rounded-xl border p-3 sm:flex-row sm:items-center" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}><p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>This recording predates readable formatting.</p><button type="button" onClick={onFormat} disabled={isFormattingAction} className="inline-flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-white disabled:opacity-50" style={{ backgroundColor: 'var(--color-brand-500)' }}>{isFormattingAction ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Improve readability</button></div>}
+        {transcriptModes && mode === 'readable' && formattingStatus === 'failed' && <div className="mt-3 flex flex-col items-start justify-between gap-3 rounded-xl border p-3 sm:flex-row sm:items-center" style={{ borderColor: 'rgba(245, 158, 11, 0.35)', backgroundColor: 'rgba(245, 158, 11, 0.08)' }}><p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{formattingError || 'Readable formatting could not finish. The original transcript is shown.'}</p><button type="button" onClick={onFormat} disabled={isFormattingAction} className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-3 text-sm font-semibold disabled:opacity-50" style={{ borderColor: 'var(--color-border)' }}>{isFormattingAction ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}Try again</button></div>}
       </div>
 
       <div className="max-h-[62vh] overflow-y-auto overscroll-contain p-3 text-sm leading-7 sm:max-h-[70vh] sm:p-5" style={{ color: 'var(--color-text-secondary)' }}>
@@ -488,7 +514,7 @@ function CenteredState({ icon, title, body }: { icon: ReactNode; title: string; 
 function normalizeItem(type: ItemDetailType, item: DetailItem | null) {
   if (!item) return { title: '', subtitle: '', text: '', wordCount: 0, duration: 0, pageCount: 0, language: '', createdAt: '', sourceURL: '', errorMessage: '', summaryReady: false, progress: 0, progressLabel: '' };
   if (type === 'transcript') { const value = item as Transcript; return { title: value.title || 'Untitled video', subtitle: value.channel_name || 'Video transcript', text: value.transcript_text || '', wordCount: value.word_count, duration: value.duration, pageCount: 0, language: value.language, createdAt: value.created_at, sourceURL: value.youtube_url, errorMessage: value.error_message || '', summaryReady: false, progress: value.status === 'completed' ? 100 : 0, progressLabel: value.status === 'pending' ? 'Waiting to process video…' : 'Extracting transcript…' }; }
-  if (type === 'audio') { const value = item as AudioTranscription; return { title: value.original_name || 'Untitled recording', subtitle: value.content_type?.replaceAll('_', ' ') || 'Audio transcription', text: value.transcript_text || '', wordCount: value.word_count, duration: value.duration, pageCount: 0, language: value.language, createdAt: value.created_at, sourceURL: '', errorMessage: value.error_message || '', summaryReady: value.summary_status === 'completed', progress: value.processing_progress || 0, progressLabel: audioProgressLabel(value.processing_stage) }; }
+  if (type === 'audio') { const value = item as AudioTranscription; const readable = value.formatting_status === 'completed' && value.formatted_transcript_text?.trim() ? value.formatted_transcript_text : value.transcript_text; return { title: value.original_name || 'Untitled recording', subtitle: value.content_type?.replaceAll('_', ' ') || 'Audio transcription', text: readable || '', wordCount: value.word_count, duration: value.duration, pageCount: 0, language: value.language, createdAt: value.created_at, sourceURL: '', errorMessage: value.error_message || '', summaryReady: value.summary_status === 'completed', progress: value.processing_progress || 0, progressLabel: audioProgressLabel(value.processing_stage) }; }
   const value = item as PDFExtraction; return { title: value.original_name || 'Untitled PDF', subtitle: `${value.page_count} ${value.page_count === 1 ? 'page' : 'pages'}`, text: value.text_content || '', wordCount: value.word_count, duration: 0, pageCount: value.page_count, language: '', createdAt: value.created_at, sourceURL: '', errorMessage: value.error_message || '', summaryReady: false, progress: value.status === 'completed' ? 100 : 0, progressLabel: 'Extracting document text…' };
 }
 

@@ -158,6 +158,15 @@ final class MediaToolsService {
         return item
     }
 
+    func formatAudioTranscript(_ id: String) async throws -> AudioTranscription {
+        let item: AudioTranscription = try await api.post(
+            "/audio/transcriptions/\(id)/format",
+            body: EmptyResponse()
+        )
+        upsertAudioItem(item)
+        return item
+    }
+
     func renameAudioItem(_ id: String, name: String) async throws -> AudioTranscription {
         let item: AudioTranscription = try await api.patch(
             "/audio/transcriptions/\(id)",

@@ -606,6 +606,11 @@ const audioTranscriptionSelectColumns = `
 	duration,
 	language,
 	transcript_text,
+	COALESCE(formatted_transcript_text, '') AS formatted_transcript_text,
+	COALESCE(formatting_status, 'none') AS formatting_status,
+	COALESCE(formatting_model, '') AS formatting_model,
+	COALESCE(formatting_version, '') AS formatting_version,
+	COALESCE(formatting_error_message, '') AS formatting_error_message,
 	word_count,
 	status,
 	error_message,
@@ -752,17 +757,21 @@ func (db *DB) UpdateAudioTranscriptionWithSummary(ctx context.Context, at *model
 	}
 	query := `
 		UPDATE audio_transcriptions
-		SET duration = $2, language = $3, transcript_text = $4, word_count = $5,
-			status = $6, error_message = $7,
-			processing_stage = $8, processing_progress = $9, retry_count = $10,
-			content_type = $11, summary_text = $12, key_points = $13,
-			action_items = $14, decisions = $15, summary_model = $16,
-			summary_length = $17, summary_status = $18, summary_evidence = $19,
-			summary_error_message = $20, quality_warning = $21, omitted_ranges = $22
+		SET duration = $2, language = $3, transcript_text = $4,
+			formatted_transcript_text = $5, formatting_status = $6,
+			formatting_model = $7, formatting_version = $8,
+			formatting_error_message = $9, word_count = $10,
+			status = $11, error_message = $12,
+			processing_stage = $13, processing_progress = $14, retry_count = $15,
+			content_type = $16, summary_text = $17, key_points = $18,
+			action_items = $19, decisions = $20, summary_model = $21,
+			summary_length = $22, summary_status = $23, summary_evidence = $24,
+			summary_error_message = $25, quality_warning = $26, omitted_ranges = $27
 		WHERE id = $1`
 
 	result, err := db.ExecContext(ctx, query,
 		at.ID, at.Duration, at.Language, at.TranscriptText,
+		at.FormattedTranscript, at.FormattingStatus, at.FormattingModel, at.FormattingVersion, at.FormattingError,
 		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
 		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryLength,
 		at.SummaryStatus, at.SummaryEvidence, at.SummaryErrorMessage, at.QualityWarning, at.OmittedRanges,
@@ -792,13 +801,16 @@ func (db *DB) PrepareAudioRetranscriptionForActor(ctx context.Context, at *model
 	const updateSQL = `
 		updated AS (
 			UPDATE audio_transcriptions AS a
-			SET duration = $3, language = $4, transcript_text = $5, word_count = $6,
-				status = $7, error_message = $8,
-				processing_stage = $9, processing_progress = $10, retry_count = $11,
-				content_type = $12, summary_text = $13, key_points = $14,
-				action_items = $15, decisions = $16, summary_model = $17,
-				summary_length = $18, summary_status = $19, summary_evidence = $20,
-				summary_error_message = $21, quality_warning = $22, omitted_ranges = $23
+			SET duration = $3, language = $4, transcript_text = $5,
+				formatted_transcript_text = $6, formatting_status = $7,
+				formatting_model = $8, formatting_version = $9,
+				formatting_error_message = $10, word_count = $11,
+				status = $12, error_message = $13,
+				processing_stage = $14, processing_progress = $15, retry_count = $16,
+				content_type = $17, summary_text = $18, key_points = $19,
+				action_items = $20, decisions = $21, summary_model = $22,
+				summary_length = $23, summary_status = $24, summary_evidence = $25,
+				summary_error_message = $26, quality_warning = $27, omitted_ranges = $28
 			FROM previous AS p
 			WHERE a.id = p.id
 			RETURNING a.id
@@ -837,6 +849,7 @@ func (db *DB) PrepareAudioRetranscriptionForActor(ctx context.Context, at *model
 	var previous models.AudioTranscription
 	err := db.GetContext(ctx, &previous, query,
 		at.ID, ownerArg, at.Duration, at.Language, at.TranscriptText,
+		at.FormattedTranscript, at.FormattingStatus, at.FormattingModel, at.FormattingVersion, at.FormattingError,
 		at.WordCount, at.Status, at.ErrorMessage, at.ProcessingStage, at.ProcessingProgress, at.RetryCount,
 		at.ContentType, at.SummaryText, at.KeyPoints, at.ActionItems, at.Decisions, at.SummaryModel, at.SummaryLength,
 		at.SummaryStatus, at.SummaryEvidence, at.SummaryErrorMessage, at.QualityWarning, at.OmittedRanges,
@@ -956,6 +969,27 @@ func (db *DB) ListRecoverableAudioSummaries(ctx context.Context, limit int) ([]m
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list recoverable audio summaries: %w", err)
+	}
+	return rows, nil
+}
+
+// ListRecoverableAudioTranscriptFormatting returns readability jobs interrupted
+// by a restart. The source transcript lives on the row, so no payload is needed.
+func (db *DB) ListRecoverableAudioTranscriptFormatting(ctx context.Context, limit int) ([]models.AudioTranscription, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	var rows []models.AudioTranscription
+	err := db.SelectContext(ctx, &rows, `
+		SELECT `+audioTranscriptionSelectColumns+`
+		FROM audio_transcriptions
+		WHERE formatting_status IN ('pending', 'processing')
+		  AND status = 'completed'
+		  AND transcript_text <> ''
+		ORDER BY created_at ASC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recoverable transcript formatting: %w", err)
 	}
 	return rows, nil
 }

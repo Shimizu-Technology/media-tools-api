@@ -39,6 +39,11 @@ struct AudioTranscription: Identifiable, Codable {
     let title: String?
     let status: String
     let transcriptText: String?
+    let formattedTranscriptText: String?
+    let formattingStatus: String?
+    let formattingModel: String?
+    let formattingVersion: String?
+    let formattingErrorMessage: String?
     let contentType: String?
     let duration: Double?
     let wordCount: Int?
@@ -64,6 +69,14 @@ struct AudioTranscription: Identifiable, Codable {
 
     var isComplete: Bool {
         status == "completed"
+    }
+
+    var readableTranscriptText: String? {
+        guard formattingStatus == "completed",
+              let formattedTranscriptText,
+              !formattedTranscriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return transcriptText }
+        return formattedTranscriptText
     }
 
     var processingDescription: String {

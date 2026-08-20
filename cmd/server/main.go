@@ -19,6 +19,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcriptformat"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/webhook"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
@@ -119,6 +120,12 @@ func main() {
 	} else {
 		log.Println("⚠️  Audio transcription disabled (set OPENAI_API_KEY to enable)")
 	}
+	transcriptFormatter := transcriptformat.New(cfg.OpenAIAPIKey, cfg.OpenAITranscriptFormatModel)
+	if transcriptFormatter.IsConfigured() {
+		log.Printf("✅ Transcript readability formatting enabled (model=%s)", cfg.OpenAITranscriptFormatModel)
+	} else {
+		log.Println("⚠️  Transcript readability formatting disabled (set OPENAI_API_KEY to enable)")
+	}
 
 	// Webhook notification service (MTA-18)
 	webhookService := webhook.New(db)
@@ -144,6 +151,7 @@ func main() {
 	wp := worker.NewPool(cfg.WorkerCount, cfg.JobQueueSize, db, extractor, summarizer)
 	wp.SetWebhookService(webhookService)     // MTA-18: wire webhooks into worker for job notifications
 	wp.SetAudioTranscriber(audioTranscriber) // Wire audio transcriber for async Whisper jobs
+	wp.SetTranscriptFormatter(transcriptFormatter)
 	wp.SetAudioStorage(audioStorage)
 	wp.SetTranscriptionConcurrency(cfg.WhisperChunkConcurrency, cfg.WhisperGlobalConcurrency)
 	wp.Start()
@@ -190,6 +198,15 @@ func main() {
 			}
 		} else if recoveredAudioSummaries > 0 {
 			log.Printf("♻️  Requeued %d recoverable audio summary job(s) on startup", recoveredAudioSummaries)
+		}
+
+		recoveredFormatting, recoveryErr := wp.RecoverAudioTranscriptFormattingJobs(recoveryCtx, 200)
+		if recoveryErr != nil {
+			if recoveryCtx.Err() == nil {
+				log.Printf("⚠️  Transcript formatting job recovery failed: %v", recoveryErr)
+			}
+		} else if recoveredFormatting > 0 {
+			log.Printf("♻️  Requeued %d recoverable transcript formatting job(s) on startup", recoveredFormatting)
 		}
 	}()
 

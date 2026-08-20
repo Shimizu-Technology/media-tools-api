@@ -42,6 +42,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcriptformat"
 	webhookservice "github.com/Shimizu-Technology/media-tools-api/internal/services/webhook"
 )
 
@@ -49,10 +50,11 @@ import (
 type JobType string
 
 const (
-	JobTranscriptExtraction JobType = "transcript_extraction"
-	JobSummaryGeneration    JobType = "summary_generation"
-	JobAudioTranscription   JobType = "audio_transcription"
-	JobAudioSummary         JobType = "audio_summary"
+	JobTranscriptExtraction  JobType = "transcript_extraction"
+	JobSummaryGeneration     JobType = "summary_generation"
+	JobAudioTranscription    JobType = "audio_transcription"
+	JobAudioSummary          JobType = "audio_summary"
+	JobAudioTranscriptFormat JobType = "audio_transcript_formatting"
 )
 
 const whisperTargetBytes = 24 << 20 // Keep below 25MB hard limit to account for multipart overhead
@@ -155,6 +157,7 @@ type Pool struct {
 	extractor              transcript.Extractor
 	summarizer             *summary.Service
 	audioTranscriber       *audio.Transcriber // Audio transcription via Whisper
+	transcriptFormatter    *transcriptformat.Formatter
 	audioStorage           *storage.S3
 	chunkConcurrency       int
 	transcriptionSem       chan struct{}
@@ -179,6 +182,11 @@ func (p *Pool) SetWebhookService(ws *webhookservice.Service) {
 // SetAudioTranscriber sets the audio transcriber for Whisper jobs.
 func (p *Pool) SetAudioTranscriber(at *audio.Transcriber) {
 	p.audioTranscriber = at
+}
+
+// SetTranscriptFormatter enables the optional, word-preserving readability pass.
+func (p *Pool) SetTranscriptFormatter(formatter *transcriptformat.Formatter) {
+	p.transcriptFormatter = formatter
 }
 
 func (p *Pool) SetAudioStorage(as *storage.S3) {
@@ -533,6 +541,30 @@ func (p *Pool) RecoverAudioSummaryJobs(ctx context.Context, limit int) (int, err
 	return requeued, nil
 }
 
+// RecoverAudioTranscriptFormattingJobs restores readability jobs whose source
+// transcript already completed before a process restart.
+func (p *Pool) RecoverAudioTranscriptFormattingJobs(ctx context.Context, limit int) (int, error) {
+	rows, err := p.db.ListRecoverableAudioTranscriptFormatting(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+	requeued := 0
+	var recoveryErrs []string
+	for _, at := range rows {
+		if err := p.SubmitBlocking(ctx, Job{
+			ID: at.ID, Type: JobAudioTranscriptFormat, CreatedAt: time.Now(),
+		}); err != nil {
+			recoveryErrs = append(recoveryErrs, fmt.Sprintf("requeue %s: %v", at.ID, err))
+			continue
+		}
+		requeued++
+	}
+	if len(recoveryErrs) > 0 {
+		return requeued, fmt.Errorf("transcript formatting recovery completed with %d issue(s): %s", len(recoveryErrs), strings.Join(recoveryErrs, "; "))
+	}
+	return requeued, nil
+}
+
 func audioSummaryRecoveryPayload(at models.AudioTranscription) AudioSummaryPayload {
 	length := at.SummaryLength
 	if length == "" {
@@ -841,6 +873,8 @@ func (p *Pool) dispatchJob(job Job) (err error) {
 		return p.processAudioTranscription(job)
 	case JobAudioSummary:
 		return p.processAudioSummary(job)
+	case JobAudioTranscriptFormat:
+		return p.processAudioTranscriptFormatting(job)
 	default:
 		return fmt.Errorf("unknown job type: %s", job.Type)
 	}
@@ -1423,6 +1457,15 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	at.Status = "completed"
 	at.ProcessingStage = "completed"
 	at.ProcessingProgress = 100
+	at.FormattedTranscript = ""
+	at.FormattingModel = ""
+	at.FormattingVersion = ""
+	at.FormattingError = ""
+	if p.transcriptFormatter != nil && p.transcriptFormatter.IsConfigured() {
+		at.FormattingStatus = "pending"
+	} else {
+		at.FormattingStatus = "none"
+	}
 
 	segments := make([]models.MediaSegment, 0, len(transcriptionSegments))
 	for _, segment := range transcriptionSegments {
@@ -1446,11 +1489,64 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	if !updated {
 		return fmt.Errorf("audio transcription stopped before completion")
 	}
+	if at.FormattingStatus == "pending" {
+		// Completion persisted the formatting job in the same transaction. Submit
+		// refreshes that idempotent row and, most importantly, wakes a worker.
+		if err := p.Submit(Job{ID: at.ID, Type: JobAudioTranscriptFormat, CreatedAt: time.Now()}); err != nil {
+			log.Printf("⚠️  Transcript formatting for %s is queued durably; wake refresh failed: %v", at.ID, err)
+		}
+	}
 
 	p.NotifyWebhook("audio.completed", at.UserID, at.APIKeyID, at)
 	log.Printf("✅ Audio transcription completed: %s (%s, %.0fs, %d words)",
 		payload.OriginalName, language, duration, at.WordCount)
 
+	return nil
+}
+
+func (p *Pool) processAudioTranscriptFormatting(job Job) error {
+	ctx := p.ctx
+	at, err := p.db.GetAudioTranscription(ctx, job.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get audio for transcript formatting: %w", err)
+	}
+	if at.FormattingStatus == "completed" && strings.TrimSpace(at.FormattedTranscript) != "" {
+		return nil
+	}
+	if at.Status != "completed" || strings.TrimSpace(at.TranscriptText) == "" {
+		return nil
+	}
+
+	started, err := p.db.StartAudioTranscriptFormatting(ctx, at.ID)
+	if err != nil {
+		return err
+	}
+	if !started {
+		return nil
+	}
+	if p.transcriptFormatter == nil || !p.transcriptFormatter.IsConfigured() {
+		message := "Readable formatting is not configured. The original transcript is still available."
+		if err := p.db.FailAudioTranscriptFormatting(ctx, at.ID, message); err != nil {
+			return err
+		}
+		return transcriptformat.ErrNotConfigured
+	}
+
+	result, err := p.transcriptFormatter.Format(ctx, at.TranscriptText)
+	if err != nil {
+		message := "Readable formatting is temporarily unavailable. The original transcript is still available."
+		if errors.Is(err, transcriptformat.ErrUnsafeRewrite) {
+			message = "Readable formatting was skipped because the result did not exactly preserve the original words."
+		}
+		if saveErr := p.db.FailAudioTranscriptFormatting(ctx, at.ID, message); saveErr != nil {
+			return fmt.Errorf("format transcript: %v; save failure: %w", err, saveErr)
+		}
+		return fmt.Errorf("format transcript: %w", err)
+	}
+	if err := p.db.CompleteAudioTranscriptFormatting(ctx, at.ID, result.Text, result.Model, result.Version); err != nil {
+		return err
+	}
+	log.Printf("✨ Transcript readability formatting completed: %s (model=%s, version=%s)", at.ID, result.Model, result.Version)
 	return nil
 }
 

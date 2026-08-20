@@ -702,6 +702,11 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 	at.Duration = 0
 	at.Language = ""
 	at.TranscriptText = ""
+	at.FormattedTranscript = ""
+	at.FormattingStatus = "none"
+	at.FormattingModel = ""
+	at.FormattingVersion = ""
+	at.FormattingError = ""
 	at.WordCount = 0
 	at.Status = "pending"
 	at.ErrorMessage = ""
@@ -750,6 +755,51 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 
 	clearStaleChat()
 	c.JSON(http.StatusAccepted, at)
+}
+
+// FormatAudioTranscript queues a word-preserving readability pass. It also
+// supports existing recordings and explicit retries after a provider failure.
+// POST /api/v1/audio/transcriptions/:id/format
+func (h *Handler) FormatAudioTranscript(c *gin.Context) {
+	id := c.Param("id")
+	actor := getActorOwnership(c)
+	at, err := h.DB.GetAudioTranscriptionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error: "not_found", Message: "Audio transcription not found", Code: http.StatusNotFound,
+		})
+		return
+	}
+	if at.Status != "completed" || strings.TrimSpace(at.TranscriptText) == "" {
+		c.JSON(http.StatusConflict, models.ErrorResponse{
+			Error: "not_ready", Message: "The original transcript must finish before readability formatting can start.", Code: http.StatusConflict,
+		})
+		return
+	}
+
+	if err := h.DB.QueueAudioTranscriptFormatting(c.Request.Context(), at.ID); err != nil {
+		if errors.Is(err, database.ErrAudioFormattingNotQueueable) {
+			c.JSON(http.StatusConflict, models.ErrorResponse{
+				Error: "already_processing", Message: "Readable formatting is already in progress.", Code: http.StatusConflict,
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "database_error", Message: "Readable formatting could not be queued.", Code: http.StatusInternalServerError,
+		})
+		return
+	}
+	if err := h.Worker.Submit(worker.Job{ID: at.ID, Type: worker.JobAudioTranscriptFormat, CreatedAt: time.Now()}); err != nil {
+		// The job is already durable. A worker will recover it even if this
+		// best-effort wake refresh loses its database connection.
+		log.Printf("Transcript formatting %s queued durably; wake refresh failed: %v", at.ID, err)
+	}
+	updated, err := h.DB.GetAudioTranscriptionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
+	if err != nil {
+		c.JSON(http.StatusAccepted, gin.H{"id": id, "formatting_status": "pending"})
+		return
+	}
+	c.JSON(http.StatusAccepted, updated)
 }
 
 // CancelAudioTranscription stops the UI from polling a pending/processing job.
@@ -1049,6 +1099,13 @@ func (h *Handler) SearchAudioTranscriptions(c *gin.Context) {
 func (h *Handler) ExportAudioTranscription(c *gin.Context) {
 	id := c.Param("id")
 	format := c.DefaultQuery("format", "txt")
+	source := strings.ToLower(strings.TrimSpace(c.DefaultQuery("source", "readable")))
+	if source != "readable" && source != "original" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: "invalid_source", Message: "Supported transcript sources: readable, original", Code: http.StatusBadRequest,
+		})
+		return
+	}
 
 	actor := getActorOwnership(c)
 	at, err := h.DB.GetAudioTranscriptionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
@@ -1069,10 +1126,10 @@ func (h *Handler) ExportAudioTranscription(c *gin.Context) {
 	switch format {
 	case "txt":
 		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s_transcript.txt"`, baseName))
-		c.Data(http.StatusOK, "text/plain", []byte(at.TranscriptText))
+		c.Data(http.StatusOK, "text/plain", []byte(audioTranscriptText(at, source)))
 
 	case "md":
-		md := buildMarkdownExport(at)
+		md := buildMarkdownExportWithSource(at, source)
 		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s_summary.md"`, baseName))
 		c.Data(http.StatusOK, "text/markdown", []byte(md))
 
@@ -1091,6 +1148,10 @@ func (h *Handler) ExportAudioTranscription(c *gin.Context) {
 
 // buildMarkdownExport creates a formatted markdown document from an audio transcription (MTA-26).
 func buildMarkdownExport(at *models.AudioTranscription) string {
+	return buildMarkdownExportWithSource(at, "readable")
+}
+
+func buildMarkdownExportWithSource(at *models.AudioTranscription, source string) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("# %s\n\n", at.OriginalName))
@@ -1136,10 +1197,17 @@ func buildMarkdownExport(at *models.AudioTranscription) string {
 	}
 
 	sb.WriteString("## Full Transcript\n\n")
-	sb.WriteString(at.TranscriptText)
+	sb.WriteString(audioTranscriptText(at, source))
 	sb.WriteString("\n")
 
 	return sb.String()
+}
+
+func audioTranscriptText(at *models.AudioTranscription, source string) string {
+	if source != "original" && at.FormattingStatus == "completed" && strings.TrimSpace(at.FormattedTranscript) != "" {
+		return at.FormattedTranscript
+	}
+	return at.TranscriptText
 }
 
 // GetAudioOpsHealth returns operational metrics for audio processing.

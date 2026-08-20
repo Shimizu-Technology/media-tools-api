@@ -610,7 +610,9 @@ export function AudioPage() {
     result?.status === 'pending' ||
     result?.status === 'processing' ||
     result?.summary_status === 'pending' ||
-    result?.summary_status === 'processing';
+    result?.summary_status === 'processing' ||
+    result?.formatting_status === 'pending' ||
+    result?.formatting_status === 'processing';
 
   usePolling(
     useCallback(async () => {
@@ -642,7 +644,8 @@ export function AudioPage() {
       shouldStop: (data: AudioTranscription) => {
         const mediaDone = data.status === 'completed' || data.status === 'failed';
         const summaryDone = data.summary_status !== 'pending' && data.summary_status !== 'processing';
-        return mediaDone && summaryDone;
+        const formattingDone = data.formatting_status !== 'pending' && data.formatting_status !== 'processing';
+        return mediaDone && summaryDone && formattingDone;
       },
     }
   );
@@ -1697,7 +1700,7 @@ export function AudioPage() {
                     Full Transcript
                   </h3>
                   <button
-                    onClick={() => handleCopy(result.transcript_text, 'transcript')}
+                    onClick={() => handleCopy(result.formatting_status === 'completed' && result.formatted_transcript_text ? result.formatted_transcript_text : result.transcript_text, 'transcript')}
                     className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors"
                     style={{
                       backgroundColor: copied === 'transcript' ? 'var(--color-success)' : 'var(--color-surface-overlay)',
@@ -1711,8 +1714,10 @@ export function AudioPage() {
                 </div>
                 <div className="text-sm leading-relaxed whitespace-pre-wrap max-h-96 overflow-y-auto"
                   style={{ color: 'var(--color-text-secondary)' }}>
-                  {result.transcript_text}
+                  {result.formatting_status === 'completed' && result.formatted_transcript_text ? result.formatted_transcript_text : result.transcript_text}
                 </div>
+                {(result.formatting_status === 'pending' || result.formatting_status === 'processing') && <p className="mt-3 flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-muted)' }}><Loader2 className="h-3.5 w-3.5 animate-spin" />Formatting for readability… The original transcript is available now.</p>}
+                {result.formatting_status === 'failed' && <p className="mt-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>Readable formatting could not finish, so the original transcript is shown. You can retry from the recording details.</p>}
               </div>
 
               {/* AI Chat */}
