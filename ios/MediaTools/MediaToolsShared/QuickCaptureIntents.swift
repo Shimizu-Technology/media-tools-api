@@ -17,8 +17,13 @@ struct QuickRecordIntent: AudioRecordingIntent, LiveActivityIntent {
     // switches apps.
     static let openAppWhenRun = true
 
+    // IntentModes was introduced with the iOS 26 SDK. Keep Xcode 16 / iOS 18
+    // builders on openAppWhenRun while newer SDKs express the same foreground
+    // requirement through the replacement API.
+    #if compiler(>=6.2)
     @available(iOS 26.0, *)
     static var supportedModes: IntentModes { [.foreground(.immediate)] }
+    #endif
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
