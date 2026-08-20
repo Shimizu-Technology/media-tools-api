@@ -886,6 +886,66 @@ func (db *DB) UpdateAudioTranscriptionIfActive(ctx context.Context, at *models.A
 	return rows > 0, nil
 }
 
+// FailAudioTranscriptionAfterProcessingError gives clients a terminal,
+// retriable state when the worker cannot persist its final result. The durable
+// job and audio row transition together: either this worker still owns the job
+// and fails both, or a replacement has claimed it and this worker changes
+// neither. The source recording remains in durable storage for a safe retry.
+func (db *DB) FailAudioTranscriptionAfterProcessingError(
+	ctx context.Context,
+	id, backgroundJobID, workerID, message string,
+) (bool, error) {
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin audio transcription persistence failure: %w", err)
+	}
+	defer tx.Rollback()
+
+	jobResult, err := tx.ExecContext(ctx, `
+		UPDATE background_jobs
+		SET status = 'failed',
+			completed_at = NOW(),
+			locked_by = NULL,
+			locked_at = NULL,
+			lease_expires_at = NULL,
+			last_error = $4
+		WHERE id = $2
+		  AND resource_id = $1
+		  AND status = 'running'
+		  AND locked_by = $3`, id, backgroundJobID, workerID, message)
+	if err != nil {
+		return false, fmt.Errorf("fail audio transcription background job: %w", err)
+	}
+	jobRows, err := jobResult.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("inspect audio transcription background job failure: %w", err)
+	}
+	if jobRows == 0 {
+		return false, nil
+	}
+
+	audioResult, err := tx.ExecContext(ctx, `
+		UPDATE audio_transcriptions AS audio
+		SET status = 'failed', error_message = $2,
+			processing_stage = 'failed', processing_progress = 100
+		WHERE audio.id = $1
+		  AND audio.status IN ('pending', 'processing')`, id, message)
+	if err != nil {
+		return false, fmt.Errorf("mark audio transcription persistence failure: %w", err)
+	}
+	audioRows, err := audioResult.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("inspect audio transcription persistence failure: %w", err)
+	}
+	if audioRows == 0 {
+		return false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit audio transcription persistence failure: %w", err)
+	}
+	return true, nil
+}
+
 // UpdateAudioProcessing updates processing stage/progress without changing transcript payload.
 func (db *DB) UpdateAudioProcessing(ctx context.Context, id, stage string, progress int) error {
 	if progress < 0 {

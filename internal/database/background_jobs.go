@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -18,6 +19,22 @@ const backgroundJobColumns = `
 
 var ErrAudioSummaryNotQueueable = errors.New("audio summary is already active or audio is not completed")
 var ErrAudioFormattingNotQueueable = errors.New("transcript formatting is already active or audio is not completed")
+
+type audioTranscriptFormattingPayload struct {
+	AudioID string `json:"audio_id"`
+}
+
+// marshalAudioTranscriptFormattingPayload builds the durable job payload in Go
+// instead of asking PostgreSQL to reinterpret the resource UUID as text. Keeping
+// the UUID and JSON parameters separate avoids ambiguous parameter inference in
+// both PostgreSQL's simple and extended query protocols.
+func marshalAudioTranscriptFormattingPayload(audioID string) (string, error) {
+	payload, err := json.Marshal(audioTranscriptFormattingPayload{AudioID: audioID})
+	if err != nil {
+		return "", fmt.Errorf("marshal transcript formatting payload: %w", err)
+	}
+	return string(payload), nil
+}
 
 // EnqueueBackgroundJob persists work before waking an in-process worker.
 // An active partial unique index makes repeated recovery/submission idempotent.
@@ -122,6 +139,11 @@ func (db *DB) QueueAudioSummary(
 // persists its durable job. Completed formatting can be requested again after
 // a formatter upgrade; simultaneous requests remain idempotent.
 func (db *DB) QueueAudioTranscriptFormatting(ctx context.Context, audioID string) error {
+	payload, err := marshalAudioTranscriptFormattingPayload(audioID)
+	if err != nil {
+		return err
+	}
+
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transcript formatting queue transaction: %w", err)
@@ -152,11 +174,11 @@ func (db *DB) QueueAudioTranscriptFormatting(ctx context.Context, audioID string
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO background_jobs (job_type, resource_id, payload)
-		VALUES ('audio_transcript_formatting', $1, jsonb_build_object('audio_id', $1::text))
+		VALUES ('audio_transcript_formatting', $1, $2::jsonb)
 		ON CONFLICT (job_type, resource_id)
 			WHERE status IN ('queued', 'running')
 		DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
-		WHERE background_jobs.status = 'queued'`, audioID)
+		WHERE background_jobs.status = 'queued'`, audioID, payload)
 	if err != nil {
 		return fmt.Errorf("store transcript formatting job: %w", err)
 	}
@@ -391,6 +413,13 @@ func (db *DB) FailBackgroundJob(ctx context.Context, jobID, workerID, message st
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
+		// A specialized worker path may already have atomically failed its
+		// resource and durable job. Treat that terminal acknowledgement as
+		// idempotent while still reporting a lease actually owned elsewhere.
+		var status string
+		if err := db.GetContext(ctx, &status, `SELECT status FROM background_jobs WHERE id = $1`, jobID); err == nil && status == "failed" {
+			return nil
+		}
 		return fmt.Errorf("background job failure lost its lease")
 	}
 	return nil

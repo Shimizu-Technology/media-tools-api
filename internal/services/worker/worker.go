@@ -1484,6 +1484,19 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	updated, err := p.db.CompleteAudioTranscriptionWithSegments(ctx, at, segments)
 	if err != nil {
 		log.Printf("⚠️  Failed to save audio transcription result and evidence: %v", err)
+		message := "Transcription finished, but Media Tools could not save the result. The original recording is safe. Please retry transcription."
+		failed, failErr := p.db.FailAudioTranscriptionAfterProcessingError(
+			ctx, at.ID, job.QueueID, p.instanceID, message,
+		)
+		if failErr != nil {
+			log.Printf("⚠️  Failed to expose terminal status for audio transcription %s: %v", at.ID, failErr)
+		} else if failed {
+			at.Status = "failed"
+			at.ErrorMessage = message
+			at.ProcessingStage = "failed"
+			at.ProcessingProgress = 100
+			p.NotifyWebhook("audio.failed", at.UserID, at.APIKeyID, at)
+		}
 		return fmt.Errorf("failed to save transcription and evidence: %w", err)
 	}
 	if !updated {
