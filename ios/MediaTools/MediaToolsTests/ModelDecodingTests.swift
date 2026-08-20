@@ -74,6 +74,11 @@ final class ModelDecodingTests: XCTestCase {
                 APIError.httpError(statusCode: 503, message: "Unavailable")
             )
         )
+        XCTAssertFalse(
+            RecordingUploadCoordinator.isAuthenticationFailure(
+                APIError.authenticationTemporarilyUnavailable(message: "Clerk unavailable")
+            )
+        )
     }
 
     @MainActor
@@ -632,6 +637,9 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertTrue(APIError.invalidResponse.isRetryable)
         XCTAssertTrue(APIError.httpError(statusCode: 429, message: "Busy").isRetryable)
         XCTAssertTrue(APIError.httpError(statusCode: 503, message: "Unavailable").isRetryable)
+        XCTAssertTrue(
+            APIError.authenticationTemporarilyUnavailable(message: "Clerk unavailable").isRetryable
+        )
         XCTAssertFalse(APIError.authenticationRequired(message: "Restoring sign-in").isRetryable)
         XCTAssertFalse(APIError.httpError(statusCode: 400, message: "Invalid").isRetryable)
         XCTAssertFalse(APIError.invalidFile(message: "Empty").isRetryable)

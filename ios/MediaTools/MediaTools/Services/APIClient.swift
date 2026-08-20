@@ -62,8 +62,15 @@ actor APIClient {
         do {
             token = try await session.getToken(options)
         } catch {
-            throw APIError.authenticationRequired(
-                message: "Your sign-in session could not be refreshed. Sign out and sign in again."
+            // Clerk can fail token refresh because its API or the network is
+            // temporarily unavailable. Only pause for sign-in if Clerk has
+            // actually removed the session; otherwise preserve automatic
+            // upload backoff for the transient service failure.
+            if await Clerk.shared.session == nil {
+                throw APIError.authenticationRequired(message: "Sign in to continue.")
+            }
+            throw APIError.authenticationTemporarilyUnavailable(
+                message: "The sign-in service is temporarily unavailable. Media Tools will retry."
             )
         }
         guard let token, !token.isEmpty else {
@@ -315,6 +322,7 @@ enum APIError: LocalizedError {
     case invalidResponse
     case invalidFile(message: String)
     case authenticationRequired(message: String)
+    case authenticationTemporarilyUnavailable(message: String)
     case httpError(statusCode: Int, code: String? = nil, message: String)
 
     var errorDescription: String? {
@@ -324,6 +332,8 @@ enum APIError: LocalizedError {
         case .invalidFile(let message):
             return message
         case .authenticationRequired(let message):
+            return message
+        case .authenticationTemporarilyUnavailable(let message):
             return message
         case .httpError(let statusCode, _, let message):
             return "HTTP \(statusCode): \(message)"
@@ -340,6 +350,8 @@ enum APIError: LocalizedError {
             // Authentication is recoverable through sign-in, not a transient
             // connection failure. Upload orchestration pauses it explicitly.
             return false
+        case .authenticationTemporarilyUnavailable:
+            return true
         case .httpError(let statusCode, _, _):
             return statusCode == 408 || statusCode == 429 || statusCode >= 500
         }
