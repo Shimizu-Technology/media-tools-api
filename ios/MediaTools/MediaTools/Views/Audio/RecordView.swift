@@ -26,10 +26,9 @@ struct RecordView: View {
     ]
 
     var body: some View {
-        GeometryReader { geometry in
-            ScrollViewReader { scrollProxy in
-                ScrollView {
-                    VStack(spacing: 24) {
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                LazyVStack(spacing: 20) {
                     // Content type selector
                     VStack(alignment: .leading, spacing: 8) {
                         SectionHeader(text: "Content Type", icon: "tag")
@@ -58,144 +57,8 @@ struct RecordView: View {
                         }
                     }
 
-                    Spacer()
-
-                    // Recording UI
-                    VStack(spacing: 20) {
-                        // Timer
-                        Text(recorder.formattedDuration)
-                            .font(.system(size: 48, weight: .light, design: .monospaced))
-                            .foregroundStyle(recorder.isRecording ? Theme.brand400 : Theme.textMuted)
-
-                        // Waveform
-                        if recorder.isRecording && !recorder.isInterrupted {
-                            HStack(spacing: 3) {
-                                ForEach(0..<20, id: \.self) { i in
-                                    RoundedRectangle(cornerRadius: 2)
-                                        .fill(
-                                            LinearGradient(
-                                                colors: [Theme.brand400, Theme.brand500],
-                                                startPoint: .top,
-                                                endPoint: .bottom
-                                            )
-                                        )
-                                        .frame(
-                                            width: 4,
-                                            height: 8 + (36 * recorder.audioLevel * waveformScale(for: i))
-                                        )
-                                }
-                            }
-                            .frame(height: 44)
-                            .animation(
-                                reduceMotion ? nil : .linear(duration: 0.1),
-                                value: recorder.audioLevel
-                            )
-                            .transition(.opacity)
-                            .accessibilityHidden(true)
-                        }
-
-                        // Record button with pulsing ring
-                        Button {
-                            if recorder.isRecording {
-                                recorder.stop()
-                                pulseRing = false
-                                Haptics.medium()
-                            } else {
-                                error = nil
-                                recorder.start(contentType: contentType)
-                                Haptics.medium()
-                            }
-                        } label: {
-                            ZStack {
-                                // Pulsing outer ring
-                                if recorder.isRecording && !reduceMotion {
-                                    Circle()
-                                        .stroke(Color.red.opacity(0.3), lineWidth: 3)
-                                        .frame(width: 96, height: 96)
-                                        .scaleEffect(pulseRing ? 1.2 : 1.0)
-                                        .opacity(pulseRing ? 0.0 : 0.6)
-                                        .animation(
-                                            .easeInOut(duration: 1).repeatForever(autoreverses: false),
-                                            value: pulseRing
-                                        )
-
-                                    Circle()
-                                        .stroke(Color.red.opacity(0.15), lineWidth: 2)
-                                        .frame(width: 96, height: 96)
-                                        .scaleEffect(pulseRing ? 1.4 : 1.0)
-                                        .opacity(pulseRing ? 0.0 : 0.4)
-                                        .animation(
-                                            .easeInOut(duration: 1.3).repeatForever(autoreverses: false),
-                                            value: pulseRing
-                                        )
-                                }
-
-                                Circle()
-                                    .fill(recorder.isRecording ? .red : Theme.brand500)
-                                    .frame(width: 72, height: 72)
-
-                                if recorder.isStarting {
-                                    ProgressView()
-                                        .tint(.white)
-                                } else if recorder.isInterrupted {
-                                    Image(systemName: "pause.fill")
-                                        .font(.title2.weight(.bold))
-                                        .foregroundStyle(.white)
-                                } else if recorder.isRecording {
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(.white)
-                                        .frame(width: 24, height: 24)
-                                } else {
-                                    Circle()
-                                        .fill(.white)
-                                        .frame(width: 28, height: 28)
-                                }
-                            }
-                            .animation(Theme.springSnappy, value: recorder.isRecording)
-                        }
-                        .shadow(
-                            color: (recorder.isRecording ? Color.red : Theme.brand500).opacity(0.3), radius: 12
-                        )
-                        .disabled(isUploading || recorder.isStarting)
-                        .accessibilityLabel(
-                            recorder.isStarting
-                                ? "Preparing microphone"
-                                : (recorder.isRecording ? "Stop recording" : "Start recording")
-                        )
-                        .accessibilityHint(
-                            recorder.isRecording
-                                ? "Stops and saves this recording" : "Begins recording from the microphone"
-                        )
-                        .accessibilityValue(recorder.isRecording ? recorder.formattedDuration : "Not recording")
-
-                        Text(
-                            recorder.isStarting
-                                ? "Preparing microphone..."
-                                : recorder.isInterrupted
-                                    ? "Paused by another audio source — tap to save"
-                                    : (recorder.isRecording ? "Tap to stop" : "Tap to record")
-                        )
-                            .font(Theme.caption())
-                            .foregroundStyle(Theme.textSecondary)
-
-                        if let statusMessage = visibleStatusMessage {
-                            Label(
-                                statusMessage,
-                                systemImage: recorder.isInterrupted || recorder.storageIsLow
-                                    ? "exclamationmark.circle"
-                                    : (uploader.statusMessage == nil ? "lock.shield" : "icloud")
-                            )
-                            .font(Theme.caption(12))
-                            .foregroundStyle(
-                                recorder.isInterrupted || recorder.storageIsLow
-                                    ? Theme.warning : Theme.textMuted
-                            )
-                            .multilineTextAlignment(.center)
-                            .transition(.opacity)
-                        }
-                    }
-
-                    Spacer()
+                    captureConsole
+                        .padding(.horizontal)
 
                     // Device-local recovery queue. These files remain available
                     // across relaunches until the server has accepted them.
@@ -373,10 +236,9 @@ struct RecordView: View {
                             self.error = error.localizedDescription
                         }
                     }
-                    }
-                    .frame(minHeight: geometry.size.height)
-                    .padding(.top, 12)
                 }
+                .padding(.top, 12)
+            }
                 .scrollBounceBehavior(.basedOnSize)
                 .onChange(of: uploader.latestItemSignature) { _, _ in
                     withAnimation(Theme.springSnappy) {
@@ -394,7 +256,6 @@ struct RecordView: View {
                         }
                     }
                 }
-            }
         }
         .background(Theme.surface)
         .navigationTitle("Record")
@@ -440,6 +301,209 @@ struct RecordView: View {
         } message: { _ in
             Text("This removes the audio from this iPhone and cannot be undone.")
         }
+    }
+
+    // MARK: - Capture console
+
+    private var captureConsole: some View {
+        VStack(spacing: 20) {
+            HStack {
+                Label(captureEyebrow, systemImage: captureIcon)
+                    .font(Theme.caption(11, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(captureAccent)
+                Spacer()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(captureAccent)
+                        .frame(width: 7, height: 7)
+                    Text(recorder.isRecording ? "ON DEVICE" : "READY")
+                        .font(Theme.caption(10, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundStyle(Theme.textMuted)
+                }
+            }
+
+            VStack(spacing: 10) {
+                Text(recorder.formattedDuration)
+                    .font(.system(size: 54, weight: .light, design: .monospaced))
+                    .foregroundStyle(recorder.isRecording ? Theme.textPrimary : Theme.textSecondary)
+                    .contentTransition(.numericText())
+                    .accessibilityIdentifier("recording.timer")
+
+                signalMeter
+            }
+
+            captureActionButton
+
+            VStack(spacing: 5) {
+                Text(captureTitle)
+                    .font(Theme.heading(17, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .multilineTextAlignment(.center)
+                Text(captureDetail)
+                    .font(Theme.caption(12))
+                    .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if recorder.isRecording {
+                Label("Keeps recording when you lock your phone or switch apps", systemImage: "lock.shield")
+                    .font(Theme.caption(11))
+                    .foregroundStyle(Theme.textMuted)
+                    .multilineTextAlignment(.center)
+                    .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 22)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.radiusXL)
+                .fill(
+                    LinearGradient(
+                        colors: [captureAccent.opacity(0.11), Theme.surfaceCard, Theme.surfaceElevated],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radiusXL)
+                .stroke(captureAccent.opacity(recorder.isRecording ? 0.42 : 0.2), lineWidth: 1)
+        )
+        .animation(reduceMotion ? nil : Theme.springGentle, value: recorder.isRecording)
+        .animation(reduceMotion ? nil : Theme.springGentle, value: recorder.isStarting)
+    }
+
+    private var signalMeter: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<24, id: \.self) { index in
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(
+                        recorder.isRecording && !recorder.isInterrupted
+                            ? captureAccent
+                            : Theme.border
+                    )
+                    .frame(
+                        width: 4,
+                        height: recorder.isRecording && !recorder.isInterrupted
+                            ? 7 + (27 * recorder.audioLevel * waveformScale(for: index))
+                            : 4
+                    )
+            }
+        }
+        .frame(height: 34)
+        .animation(reduceMotion ? nil : .linear(duration: 0.1), value: recorder.audioLevel)
+        .accessibilityHidden(true)
+    }
+
+    private var captureActionButton: some View {
+        Button {
+            if recorder.isRecording {
+                recorder.stop()
+                pulseRing = false
+                Haptics.medium()
+            } else {
+                error = nil
+                recorder.start(contentType: contentType)
+                Haptics.medium()
+            }
+        } label: {
+            ZStack {
+                if recorder.isRecording && !reduceMotion {
+                    Circle()
+                        .stroke(Theme.error.opacity(0.26), lineWidth: 2)
+                        .frame(width: 94, height: 94)
+                        .scaleEffect(pulseRing ? 1.2 : 1)
+                        .opacity(pulseRing ? 0 : 0.7)
+                        .animation(
+                            .easeOut(duration: 1.15).repeatForever(autoreverses: false),
+                            value: pulseRing
+                        )
+                }
+
+                Circle()
+                    .fill(Theme.brandGradient)
+                    .frame(width: 82, height: 82)
+                    .shadow(color: captureAccent.opacity(0.28), radius: 18, y: 7)
+
+                if recorder.isRecording {
+                    Circle()
+                        .fill(Theme.error)
+                        .frame(width: 82, height: 82)
+                }
+
+                if recorder.isStarting {
+                    ProgressView().tint(.white)
+                } else if recorder.isInterrupted {
+                    Image(systemName: "stop.fill")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(.white)
+                } else if recorder.isRecording {
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(.white)
+                        .frame(width: 25, height: 25)
+                } else {
+                    Image(systemName: "mic.fill")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .frame(width: 108, height: 108)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isUploading || recorder.isStarting)
+        .accessibilityLabel(
+            recorder.isStarting
+                ? "Preparing microphone"
+                : (recorder.isRecording ? "Stop recording" : "Start recording")
+        )
+        .accessibilityHint(
+            recorder.isRecording
+                ? "Stops and saves this recording" : "Begins recording from the microphone"
+        )
+        .accessibilityValue(recorder.isRecording ? recorder.formattedDuration : "Not recording")
+    }
+
+    private var captureAccent: Color {
+        if recorder.storageIsLow || recorder.isInterrupted { return Theme.warning }
+        if recorder.isRecording { return Theme.error }
+        return Theme.brand400
+    }
+
+    private var captureEyebrow: String {
+        if recorder.isStarting { return "PREPARING" }
+        if recorder.isInterrupted { return "INTERRUPTED" }
+        if recorder.isRecording { return "LIVE CAPTURE" }
+        return "QUICK CAPTURE"
+    }
+
+    private var captureIcon: String {
+        if recorder.isStarting { return "waveform.badge.magnifyingglass" }
+        if recorder.isInterrupted { return "pause.circle.fill" }
+        if recorder.isRecording { return "record.circle.fill" }
+        return "waveform"
+    }
+
+    private var captureTitle: String {
+        if recorder.isStarting { return "Preparing microphone" }
+        if recorder.isInterrupted { return "Recording interrupted" }
+        if recorder.isRecording { return "Recording now" }
+        if recorder.statusMessage != nil { return "Ready for another recording" }
+        return "Ready to record"
+    }
+
+    private var captureDetail: String {
+        if recorder.isStarting { return "Setting up a secure on-device audio session." }
+        if recorder.isInterrupted { return "Another audio source paused capture. Tap stop to save what was recorded." }
+        if recorder.isRecording { return "Tap once to stop and save. Upload begins only when you choose Transcribe." }
+        if recorder.storageIsLow { return "Free at least 100 MB before starting a new recording." }
+        if recorder.statusMessage != nil {
+            return "The previous recording is saved. The clock is reset and ready when you are."
+        }
+        return "Choose a content type, then tap the microphone. Your audio is saved on this iPhone first."
     }
 
     @ViewBuilder
@@ -618,13 +682,6 @@ struct RecordView: View {
         default:
             return "Transcribe"
         }
-    }
-
-    private var visibleStatusMessage: String? {
-        if recorder.isRecording || recorder.isStarting || recorder.isInterrupted {
-            return recorder.statusMessage
-        }
-        return uploader.statusMessage ?? recorder.statusMessage
     }
 
     private func waveformScale(for index: Int) -> CGFloat {

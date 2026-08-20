@@ -29,13 +29,20 @@ echo "Running frontend checks"
 
 if [[ "$(uname -s)" == "Darwin" ]] && command -v xcodebuild >/dev/null 2>&1; then
   echo "Running iOS build and tests"
-  simulator_id="$(xcrun simctl list devices available -j | ruby -rjson -e '
+  simulator_id="${IOS_SIMULATOR_ID:-$(xcrun simctl list devices available -j | ruby -rjson -e '
     devices = JSON.parse(STDIN.read).fetch("devices").values.flatten
-    preferred = devices.find { |device| device["name"] == "iPhone 16 Pro" }
+    # Reuse a booted simulator when possible. Starting a second CoreSimulator
+    # runtime while another is active can leave Xcode waiting indefinitely for
+    # a test runner to materialize. CI can still pin a device explicitly with
+    # IOS_SIMULATOR_ID.
+    preferred = devices.find do |device|
+      device["state"] == "Booted" && device["name"].to_s.start_with?("iPhone")
+    end
+    preferred ||= devices.find { |device| device["name"] == "iPhone 16 Pro" }
     selected = preferred || devices.find { |device| device["name"].to_s.start_with?("iPhone") }
     abort "No available iPhone simulator found" unless selected
     puts selected.fetch("udid")
-  ')"
+  ')}"
 
   derived_data="${TMPDIR:-/tmp}/media-tools-gate-derived-data"
   result_bundle="${TMPDIR:-/tmp}/media-tools-gate.xcresult"

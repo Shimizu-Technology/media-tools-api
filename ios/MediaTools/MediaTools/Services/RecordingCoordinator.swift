@@ -608,6 +608,10 @@ final class RecordingCoordinator {
         statusMessage = message
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         let finalDuration = duration
+        // The saved LocalRecording retains the completed duration. `duration`
+        // is the live capture clock, so carrying it into the ready state makes
+        // the next recording look as though it has already been running.
+        duration = 0
         if endActivityAutomatically {
             Task { [activityManager] in
                 await activityManager.end(

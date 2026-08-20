@@ -52,5 +52,8 @@ struct MainTabView: View {
             guard url.scheme == "mediatools", url.host == "record" else { return }
             selectedTab = .record
         }
+        .onReceive(NotificationCenter.default.publisher(for: .mediaToolsQuickCapture)) { _ in
+            selectedTab = .record
+        }
     }
 }

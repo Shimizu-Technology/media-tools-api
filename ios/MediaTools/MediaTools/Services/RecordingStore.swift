@@ -79,7 +79,10 @@ struct RecordingStore {
         let recording = LocalRecording(
             id: id,
             filename: "\(id.uuidString.lowercased()).m4a",
-            originalFilename: nil,
+            // Keep the UUID for collision-proof device storage, but send a
+            // human-readable source name to the API. The old implementation
+            // exposed the private storage UUID as the recording title.
+            originalFilename: "Recording — \(Self.recordingNameFormatter.string(from: now)).m4a",
             createdAt: now,
             duration: 0,
             contentType: contentType,
@@ -93,6 +96,13 @@ struct RecordingStore {
         )
         return recording
     }
+
+    private static let recordingNameFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
 
     func importRecording(
         from sourceURL: URL,

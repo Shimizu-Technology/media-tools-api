@@ -158,6 +158,15 @@ final class MediaToolsService {
         return item
     }
 
+    func renameAudioItem(_ id: String, name: String) async throws -> AudioTranscription {
+        let item: AudioTranscription = try await api.patch(
+            "/audio/transcriptions/\(id)",
+            body: RenameAudioRequest(name: name)
+        )
+        upsertAudioItem(item)
+        return item
+    }
+
     func deleteAudioItem(_ id: String) async throws {
         try await api.delete("/audio/transcriptions/\(id)")
     }
@@ -278,6 +287,22 @@ final class MediaToolsService {
         default:
             throw APIError.httpError(statusCode: 400, message: "Unknown library item type")
         }
+    }
+
+    func getLibraryPreferences(_ reference: LibraryReference) async throws -> LibraryPreferences {
+        try await api.get(
+            "/library/items/\(reference.collectionItemType)/\(reference.itemId)/preferences"
+        )
+    }
+
+    func updateLibraryPreferences(
+        _ reference: LibraryReference,
+        updates: UpdateLibraryPreferencesRequest
+    ) async throws -> LibraryPreferences {
+        try await api.patch(
+            "/library/items/\(reference.collectionItemType)/\(reference.itemId)/preferences",
+            body: updates
+        )
     }
 
     // MARK: - Collections

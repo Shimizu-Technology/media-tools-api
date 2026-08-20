@@ -63,7 +63,7 @@ private struct QuickRecordWidget: Widget {
             .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("Quick Record")
-        .description("Start or stop a Media Tools recording without opening the app.")
+        .description("Open Media Tools to start recording, then stop from the Live Activity.")
         .supportedFamilies([.systemSmall])
     }
 }

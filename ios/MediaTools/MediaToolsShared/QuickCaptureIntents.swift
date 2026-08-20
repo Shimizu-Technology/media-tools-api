@@ -26,14 +26,15 @@ struct QuickRecordIntent: AudioRecordingIntent, LiveActivityIntent {
     #endif
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult {
         #if WIDGET_EXTENSION
         // The system executes LiveActivityIntent in the app process. This body
         // only lets the widget extension compile and expose intent metadata.
-        return .result(dialog: "Opening Media Tools recording controls.")
+        return .result()
         #else
-        let outcome = await RecordingCoordinator.shared.toggleFromSystem()
-        return .result(dialog: IntentDialog(stringLiteral: outcome.dialog))
+        _ = await RecordingCoordinator.shared.toggleFromSystem()
+        NotificationCenter.default.post(name: .mediaToolsQuickCapture, object: nil)
+        return .result()
         #endif
     }
 }
@@ -46,14 +47,18 @@ struct StopRecordingIntent: LiveActivityIntent {
     static let description = IntentDescription("Stop and safely save the active Media Tools recording.")
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult {
         #if WIDGET_EXTENSION
-        return .result(dialog: "Stopping the Media Tools recording.")
+        return .result()
         #else
-        let outcome = await RecordingCoordinator.shared.stopFromSystem()
-        return .result(dialog: IntentDialog(stringLiteral: outcome.dialog))
+        _ = await RecordingCoordinator.shared.stopFromSystem()
+        return .result()
         #endif
     }
+}
+
+extension Notification.Name {
+    static let mediaToolsQuickCapture = Notification.Name("MediaToolsQuickCapture")
 }
 
 struct MediaToolsAppShortcuts: AppShortcutsProvider {

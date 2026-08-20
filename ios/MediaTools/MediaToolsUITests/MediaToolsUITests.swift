@@ -129,10 +129,15 @@ final class MediaToolsUITests: XCTestCase {
 
         let stop = app.buttons["Stop recording"]
         XCTAssertTrue(stop.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Recording securely on this iPhone"].exists)
+        XCTAssertTrue(app.staticTexts["Recording now"].exists)
         stop.tap()
 
-        XCTAssertTrue(app.staticTexts["Saved on this iPhone"].waitForExistence(timeout: 5))
+        let savedRecordingTitle = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH 'Recording — '")
+        ).firstMatch
+        XCTAssertTrue(savedRecordingTitle.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["00:00"].exists)
+        XCTAssertTrue(app.staticTexts["Ready for another recording"].exists)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch.exists)
 
         app.terminate()
@@ -218,10 +223,11 @@ final class MediaToolsUITests: XCTestCase {
 
         let stop = app.buttons["Stop recording"]
         XCTAssertTrue(stop.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Recording securely on this iPhone"].exists)
+        XCTAssertTrue(app.staticTexts["Recording now"].exists)
         stop.tap()
 
         XCTAssertTrue(app.staticTexts["Saved on this iPhone"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["00:00"].exists)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch.exists)
     }
 

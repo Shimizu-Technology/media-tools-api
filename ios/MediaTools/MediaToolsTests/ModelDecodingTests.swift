@@ -273,6 +273,8 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertTrue(coordinator.availableRecordings.isEmpty)
 
         coordinator.stop()
+        XCTAssertEqual(coordinator.duration, 0)
+        XCTAssertEqual(coordinator.formattedDuration, "00:00")
         let saved = try XCTUnwrap(coordinator.availableRecordings.first)
         XCTAssertEqual(saved.contentType, "phone_call")
         XCTAssertEqual(saved.state, .ready)
@@ -282,6 +284,29 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(reloaded.contentType, saved.contentType)
         XCTAssertEqual(reloaded.state, saved.state)
         XCTAssertEqual(reloaded.duration, saved.duration)
+        XCTAssertTrue(saved.displayTitle.hasPrefix("Recording — "))
+        XCTAssertFalse(saved.uploadFilename.contains(saved.id.uuidString.lowercased()))
+    }
+
+    func testLibraryPreferencePatchOmitsUnchangedFields() throws {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let data = try encoder.encode(UpdateLibraryPreferencesRequest(favorite: true))
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+
+        XCTAssertEqual(payload["favorite"] as? Bool, true)
+        XCTAssertNil(payload["archived"])
+        XCTAssertNil(payload["tags"])
+    }
+
+    func testRenameAudioRequestUsesBackendContract() throws {
+        let data = try JSONEncoder().encode(RenameAudioRequest(name: "Client discovery"))
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: String]
+        )
+        XCTAssertEqual(payload, ["name": "Client discovery"])
     }
 
     @MainActor
