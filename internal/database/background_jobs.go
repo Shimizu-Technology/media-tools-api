@@ -142,7 +142,10 @@ func (db *DB) QueueAudioTranscriptFormatting(ctx context.Context, audioID string
 	if err != nil {
 		return fmt.Errorf("mark transcript formatting pending: %w", err)
 	}
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect transcript formatting queue update: %w", err)
+	}
 	if rows == 0 {
 		return ErrAudioFormattingNotQueueable
 	}
@@ -172,7 +175,10 @@ func (db *DB) StartAudioTranscriptFormatting(ctx context.Context, audioID string
 	if err != nil {
 		return false, fmt.Errorf("start transcript formatting: %w", err)
 	}
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("inspect transcript formatting start update: %w", err)
+	}
 	return rows > 0, nil
 }
 
@@ -190,7 +196,10 @@ func (db *DB) CompleteAudioTranscriptFormatting(ctx context.Context, audioID, te
 	if err != nil {
 		return fmt.Errorf("complete transcript formatting: %w", err)
 	}
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect transcript formatting completion update: %w", err)
+	}
 	if rows == 0 {
 		return fmt.Errorf("transcript formatting is no longer active")
 	}
@@ -198,7 +207,7 @@ func (db *DB) CompleteAudioTranscriptFormatting(ctx context.Context, audioID, te
 }
 
 func (db *DB) FailAudioTranscriptFormatting(ctx context.Context, audioID, message string) error {
-	_, err := db.ExecContext(ctx, `
+	result, err := db.ExecContext(ctx, `
 		UPDATE audio_transcriptions
 		SET formatted_transcript_text = '',
 			formatting_status = 'failed',
@@ -209,6 +218,13 @@ func (db *DB) FailAudioTranscriptFormatting(ctx context.Context, audioID, messag
 		  AND formatting_status IN ('pending', 'processing')`, audioID, message)
 	if err != nil {
 		return fmt.Errorf("fail transcript formatting: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect transcript formatting failure update: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("transcript formatting is no longer active")
 	}
 	return nil
 }
