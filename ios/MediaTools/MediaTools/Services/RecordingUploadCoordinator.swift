@@ -224,7 +224,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 )
                 self.accept(item: item, recordingID: recordingID)
             } catch {
-                if Self.isRetryableFinalization(error) {
+                if Self.isAuthenticationFailure(error) {
+                    self.pauseForAuthentication(recordingID: recordingID, finalizing: true)
+                } else if Self.isRetryable(error) {
                     self.statusMessage = "Upload is safe. Finishing will retry automatically."
                     self.scheduleRetry(recordingID: recordingID, finalizing: true)
                 } else {
@@ -388,7 +390,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     }
 
     private func handlePreparationFailure(_ error: Error, recordingID: UUID) {
-        if Self.isRetryable(error) {
+        if Self.isAuthenticationFailure(error) {
+            pauseForAuthentication(recordingID: recordingID, finalizing: false)
+        } else if Self.isRetryable(error) {
             recorder.markWaitingForUpload(
                 recordingID,
                 message: "Waiting for a connection. Media Tools will retry automatically."
@@ -398,6 +402,22 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             recorder.markUploadFailed(recordingID, message: error.localizedDescription)
             statusMessage = error.localizedDescription
         }
+    }
+
+    private func pauseForAuthentication(recordingID: UUID, finalizing: Bool) {
+        retryTasks[recordingID]?.cancel()
+        retryTasks[recordingID] = nil
+        retryAttempts[recordingID] = nil
+
+        let message: String
+        if finalizing {
+            message = "Upload is safe. Sign in to finish creating the transcription."
+            recorder.markUploadFinalizing(recordingID, message: message)
+        } else {
+            message = "Recording is safe on this iPhone. Sign in to upload it."
+            recorder.markWaitingForUpload(recordingID, message: message)
+        }
+        statusMessage = message
     }
 
     private func scheduleRetry(recordingID: UUID, finalizing: Bool = false) {
@@ -423,16 +443,16 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         return false
     }
 
-    private static func isRetryableFinalization(_ error: Error) -> Bool {
+    static func isAuthenticationFailure(_ error: Error) -> Bool {
         if let apiError = error as? APIError {
+            if case .authenticationRequired = apiError {
+                return true
+            }
             if case .httpError(let statusCode, _, _) = apiError, statusCode == 401 {
-                // A background URLSession wake-up can arrive before Clerk finishes
-                // restoring its session. The object is already safe, so preserve
-                // finalization and try again when authentication is available.
                 return true
             }
         }
-        return isRetryable(error)
+        return false
     }
 
     static func watchRetryDelay(after failureCount: Int) -> Duration {

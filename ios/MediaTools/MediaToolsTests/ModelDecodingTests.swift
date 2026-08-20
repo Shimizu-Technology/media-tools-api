@@ -58,6 +58,25 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     @MainActor
+    func testRecordingUploadsPauseInsteadOfRetryingAuthenticationFailures() {
+        XCTAssertTrue(
+            RecordingUploadCoordinator.isAuthenticationFailure(
+                APIError.authenticationRequired(message: "Sign in")
+            )
+        )
+        XCTAssertTrue(
+            RecordingUploadCoordinator.isAuthenticationFailure(
+                APIError.httpError(statusCode: 401, message: "Expired")
+            )
+        )
+        XCTAssertFalse(
+            RecordingUploadCoordinator.isAuthenticationFailure(
+                APIError.httpError(statusCode: 503, message: "Unavailable")
+            )
+        )
+    }
+
+    @MainActor
     func testAuthenticationPauseStartsAtFirstFailureAndSurvivesViewActivations() {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
         let oldWatch = TranscriptionWatch(
@@ -613,7 +632,7 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertTrue(APIError.invalidResponse.isRetryable)
         XCTAssertTrue(APIError.httpError(statusCode: 429, message: "Busy").isRetryable)
         XCTAssertTrue(APIError.httpError(statusCode: 503, message: "Unavailable").isRetryable)
-        XCTAssertTrue(APIError.authenticationRequired(message: "Restoring sign-in").isRetryable)
+        XCTAssertFalse(APIError.authenticationRequired(message: "Restoring sign-in").isRetryable)
         XCTAssertFalse(APIError.httpError(statusCode: 400, message: "Invalid").isRetryable)
         XCTAssertFalse(APIError.invalidFile(message: "Empty").isRetryable)
     }

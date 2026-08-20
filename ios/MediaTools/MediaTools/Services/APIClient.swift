@@ -337,10 +337,9 @@ enum APIError: LocalizedError {
         case .invalidFile:
             return false
         case .authenticationRequired:
-            // Clerk may still be restoring a persisted session during a
-            // background wake-up. Durable uploads should wait and retry rather
-            // than turning a safe local recording into a terminal failure.
-            return true
+            // Authentication is recoverable through sign-in, not a transient
+            // connection failure. Upload orchestration pauses it explicitly.
+            return false
         case .httpError(let statusCode, _, _):
             return statusCode == 408 || statusCode == 429 || statusCode >= 500
         }

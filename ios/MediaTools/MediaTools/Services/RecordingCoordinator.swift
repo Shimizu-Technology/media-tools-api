@@ -380,10 +380,10 @@ final class RecordingCoordinator {
         try? persistPendingRecordings()
     }
 
-    func markUploadFinalizing(_ recordingID: UUID) {
+    func markUploadFinalizing(_ recordingID: UUID, message: String? = nil) {
         updateRecording(recordingID) { recording in
             recording.state = .finalizingUpload
-            recording.lastError = nil
+            recording.lastError = message
             recording.uploadProgress = 1
             recording.uploadTaskIdentifier = nil
         }

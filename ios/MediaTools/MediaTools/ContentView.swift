@@ -4,6 +4,7 @@ import ClerkKitUI
 
 struct ContentView: View {
     @Environment(Clerk.self) private var clerk
+    @Environment(RecordingUploadCoordinator.self) private var uploadCoordinator
     @State private var showAuth = false
     private let tokenSync = TokenSyncService.shared
 
@@ -13,6 +14,10 @@ struct ContentView: View {
                 MainTabView()
                     .onAppear {
                         tokenSync.startSyncing()
+                        // A saved recording may be paused while Clerk has no
+                        // session. Entering the signed-in workspace is the
+                        // deterministic signal to resume that durable work.
+                        uploadCoordinator.resumePendingWork()
                     }
                     .onDisappear {
                         tokenSync.stopSyncing()
@@ -158,5 +163,6 @@ struct FeatureRow: View {
 #Preview {
     ContentView()
         .environment(Clerk.shared)
+        .environment(RecordingUploadCoordinator.shared)
         .preferredColorScheme(.dark)
 }
