@@ -31,6 +31,12 @@ final class ModelDecodingTests: XCTestCase {
         )
         XCTAssertEqual(
             RecordingUploadCoordinator.watchFailureDisposition(
+                for: APIError.authenticationRequired(message: "Restoring sign-in")
+            ),
+            .pauseForAuthentication
+        )
+        XCTAssertEqual(
+            RecordingUploadCoordinator.watchFailureDisposition(
                 for: APIError.httpError(statusCode: 404, message: "Missing")
             ),
             .stop
@@ -48,6 +54,30 @@ final class ModelDecodingTests: XCTestCase {
                 )
             ),
             .stop
+        )
+    }
+
+    @MainActor
+    func testRecordingUploadsPauseInsteadOfRetryingAuthenticationFailures() {
+        XCTAssertTrue(
+            RecordingUploadCoordinator.isAuthenticationFailure(
+                APIError.authenticationRequired(message: "Sign in")
+            )
+        )
+        XCTAssertTrue(
+            RecordingUploadCoordinator.isAuthenticationFailure(
+                APIError.httpError(statusCode: 401, message: "Expired")
+            )
+        )
+        XCTAssertFalse(
+            RecordingUploadCoordinator.isAuthenticationFailure(
+                APIError.httpError(statusCode: 503, message: "Unavailable")
+            )
+        )
+        XCTAssertFalse(
+            RecordingUploadCoordinator.isAuthenticationFailure(
+                APIError.authenticationTemporarilyUnavailable(message: "Clerk unavailable")
+            )
         )
     }
 
@@ -461,6 +491,15 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(coordinator.availableRecordings.first?.state, .ready)
     }
 
+    func testQuickRecordForegroundsBeforeStartingMicrophoneCapture() {
+        XCTAssertTrue(QuickRecordIntent.openAppWhenRun)
+    }
+
+    func testShippingClientConfigurationIncludesClerk() {
+        XCTAssertTrue(Configuration.clerkPublishableKey.hasPrefix("pk_"))
+        XCTAssertFalse(Configuration.clerkPublishableKey.isEmpty)
+    }
+
     @MainActor
     func testSystemQuickCaptureDoesNotRecordWithoutLiveActivities() async throws {
         let directory = FileManager.default.temporaryDirectory
@@ -598,6 +637,10 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertTrue(APIError.invalidResponse.isRetryable)
         XCTAssertTrue(APIError.httpError(statusCode: 429, message: "Busy").isRetryable)
         XCTAssertTrue(APIError.httpError(statusCode: 503, message: "Unavailable").isRetryable)
+        XCTAssertTrue(
+            APIError.authenticationTemporarilyUnavailable(message: "Clerk unavailable").isRetryable
+        )
+        XCTAssertFalse(APIError.authenticationRequired(message: "Restoring sign-in").isRetryable)
         XCTAssertFalse(APIError.httpError(statusCode: 400, message: "Invalid").isRetryable)
         XCTAssertFalse(APIError.invalidFile(message: "Empty").isRetryable)
     }

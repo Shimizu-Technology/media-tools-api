@@ -38,11 +38,13 @@ been verified.
 2. Enable **Native API**
 3. Add bundle ID `com.ShimizuTechnology.MediaTools`
 
-Debug builds include the public Clerk publishable key as a development
-fallback. Release builds must supply `CLERK_PUBLISHABLE_KEY` through an Xcode
-build setting or generated Info.plist value. A Clerk publishable key is client
+The checked-in Xcode build setting supplies the public Clerk publishable key to
+both Debug and Release archives, and `Configuration.swift` keeps the same public
+client value as a defensive runtime fallback. A Clerk publishable key is client
 configuration; never place `CLERK_SECRET_KEY`, AI keys, database credentials,
-or the Media Tools admin key in the iOS target.
+or the Media Tools admin key in the iOS target. Before uploading a release,
+inspect the archived app's `Info.plist` and confirm `CLERK_PUBLISHABLE_KEY` is
+non-empty.
 
 `API_BASE_URL` can also be supplied as a build setting. It otherwise defaults
 to the production Render API. Use a local HTTP URL only for simulator
@@ -171,6 +173,12 @@ Touch → Back Tap** or added as a Control Center control. A system-triggered
 recording requires both microphone permission and Live Activities; Media Tools
 shows a clear setup message if either is disabled. An ordinary recording
 started inside the visible app can continue without Live Activities.
+
+iOS does not allow a general-purpose app to activate the microphone from a
+completely cold background process. Quick Record therefore brings Media Tools
+to the foreground and starts capture automatically in one press. Once capture
+has started, it continues through screen lock and normal app switching, and the
+Live Activity provides a visible Stop action.
 
 ### Auth
 - **Clerk iOS SDK v1** — Native sign-in/sign-up with prebuilt `AuthView`

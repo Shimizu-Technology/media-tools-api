@@ -44,7 +44,7 @@ struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 Label {
-                    Text("Record from the Action Button, Back Tap, Control Center, or a widget without keeping Media Tools open.")
+                    Text("One press opens Media Tools and begins recording. After capture starts, you can lock your phone or use another app.")
                         .font(Theme.body(14))
                         .foregroundStyle(Theme.textPrimary)
                 } icon: {

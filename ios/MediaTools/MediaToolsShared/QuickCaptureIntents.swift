@@ -7,8 +7,23 @@ import AppIntents
 struct QuickRecordIntent: AudioRecordingIntent, LiveActivityIntent {
     static let title: LocalizedStringResource = "Quick Record"
     static let description = IntentDescription(
-        "Start a private voice recording, or stop and save the recording already in progress."
+        "Open Media Tools and start a private voice recording, or stop and save the recording already in progress."
     )
+
+    // iOS deliberately blocks a general-purpose microphone session from being
+    // activated by a cold, background-only process. Foregrounding first keeps
+    // the Action Button a one-press workflow while satisfying that privacy
+    // boundary; capture continues normally after the phone locks or the person
+    // switches apps.
+    static let openAppWhenRun = true
+
+    // IntentModes was introduced with the iOS 26 SDK. Keep Xcode 16 / iOS 18
+    // builders on openAppWhenRun while newer SDKs express the same foreground
+    // requirement through the replacement API.
+    #if compiler(>=6.2)
+    @available(iOS 26.0, *)
+    static var supportedModes: IntentModes { [.foreground(.immediate)] }
+    #endif
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {

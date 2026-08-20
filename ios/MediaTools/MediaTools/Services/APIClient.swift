@@ -43,18 +43,89 @@ actor APIClient {
 
     // MARK: - Auth
 
-    private func authHeaders() async -> [String: String] {
+    private func authHeaders(forceRefresh: Bool = false) async throws -> [String: String] {
         var headers: [String: String] = [
             "Content-Type": "application/json",
             "Accept": "application/json"
         ]
 
-        // Get Clerk session token
-        if let token = try? await Clerk.shared.session?.getToken() {
-            headers["Authorization"] = "Bearer \(token)"
+        guard !Configuration.clerkPublishableKey.isEmpty else {
+            throw APIError.authenticationRequired(
+                message: "Media Tools authentication is not configured in this build."
+            )
         }
+        guard let session = await Clerk.shared.session else {
+            throw APIError.authenticationRequired(message: "Sign in to continue.")
+        }
+        let options = Session.GetTokenOptions(skipCache: forceRefresh)
+        let token: String?
+        do {
+            token = try await session.getToken(options)
+        } catch {
+            // Clerk can fail token refresh because its API or the network is
+            // temporarily unavailable. Only pause for sign-in if Clerk has
+            // actually removed the session; otherwise preserve automatic
+            // upload backoff for the transient service failure.
+            if await Clerk.shared.session == nil {
+                throw APIError.authenticationRequired(message: "Sign in to continue.")
+            }
+            throw APIError.authenticationTemporarilyUnavailable(
+                message: "The sign-in service is temporarily unavailable. Media Tools will retry."
+            )
+        }
+        guard let token, !token.isEmpty else {
+            throw APIError.authenticationRequired(
+                message: "Your sign-in session could not be refreshed. Sign out and sign in again."
+            )
+        }
+        headers["Authorization"] = "Bearer \(token)"
 
         return headers
+    }
+
+    private func authenticatedRequest(
+        from originalRequest: URLRequest,
+        forceRefresh: Bool = false
+    ) async throws -> URLRequest {
+        var request = originalRequest
+        for (key, value) in try await authHeaders(forceRefresh: forceRefresh) {
+            // Multipart requests carry their boundary in Content-Type; never
+            // replace it with the JSON default while applying auth headers.
+            if key.caseInsensitiveCompare("Content-Type") == .orderedSame,
+               request.value(forHTTPHeaderField: key) != nil {
+                continue
+            }
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        return request
+    }
+
+    /// Send an authenticated API request and recover once from a rejected
+    /// cached Clerk token. The retry is deliberately limited to one attempt so
+    /// a revoked session never creates a request loop.
+    private func data(for originalRequest: URLRequest) async throws -> (Data, URLResponse) {
+        let request = try await authenticatedRequest(from: originalRequest)
+        let firstResponse = try await session.data(for: request)
+        guard (firstResponse.1 as? HTTPURLResponse)?.statusCode == 401 else {
+            return firstResponse
+        }
+
+        let retryRequest = try await authenticatedRequest(from: originalRequest, forceRefresh: true)
+        return try await session.data(for: retryRequest)
+    }
+
+    private func upload(
+        for originalRequest: URLRequest,
+        fromFile fileURL: URL
+    ) async throws -> (Data, URLResponse) {
+        let request = try await authenticatedRequest(from: originalRequest)
+        let firstResponse = try await session.upload(for: request, fromFile: fileURL)
+        guard (firstResponse.1 as? HTTPURLResponse)?.statusCode == 401 else {
+            return firstResponse
+        }
+
+        let retryRequest = try await authenticatedRequest(from: originalRequest, forceRefresh: true)
+        return try await session.upload(for: retryRequest, fromFile: fileURL)
     }
 
     // MARK: - HTTP Methods
@@ -63,11 +134,7 @@ actor APIClient {
         let url = URL(string: baseURL + path)!
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        for (key, value) in await authHeaders() {
-            request.setValue(value, forHTTPHeaderField: key)
-        }
-
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await data(for: request)
         try validateResponse(response, data: data)
         return try decoder.decode(T.self, from: data)
     }
@@ -77,11 +144,7 @@ actor APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = try encoder.encode(body)
-        for (key, value) in await authHeaders() {
-            request.setValue(value, forHTTPHeaderField: key)
-        }
-
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await data(for: request)
         try validateResponse(response, data: data)
         return try decoder.decode(T.self, from: data)
     }
@@ -91,11 +154,7 @@ actor APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = try encoder.encode(body)
-        for (key, value) in await authHeaders() {
-            request.setValue(value, forHTTPHeaderField: key)
-        }
-
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await data(for: request)
         try validateResponse(response, data: data)
     }
 
@@ -103,11 +162,7 @@ actor APIClient {
         let url = URL(string: baseURL + path)!
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
-        for (key, value) in await authHeaders() {
-            request.setValue(value, forHTTPHeaderField: key)
-        }
-
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await data(for: request)
         try validateResponse(response, data: data)
     }
 
@@ -124,11 +179,7 @@ actor APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
 
-        var headers = await authHeaders()
-        headers["Content-Type"] = "multipart/form-data; boundary=\(boundary)"
-        for (key, value) in headers {
-            request.setValue(value, forHTTPHeaderField: key)
-        }
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         var body = Data()
         // Text fields
@@ -146,7 +197,7 @@ actor APIClient {
 
         request.httpBody = body
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await data(for: request)
         try validateResponse(response, data: data)
         if let raw = String(data: data, encoding: .utf8) {
             print("📦 Upload response: \(raw.prefix(500))")
@@ -187,13 +238,9 @@ actor APIClient {
         let url = URL(string: baseURL + path)!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        var headers = await authHeaders()
-        headers["Content-Type"] = "multipart/form-data; boundary=\(boundary)"
-        for (key, value) in headers {
-            request.setValue(value, forHTTPHeaderField: key)
-        }
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
-        let (data, response) = try await session.upload(for: request, fromFile: bodyURL)
+        let (data, response) = try await upload(for: request, fromFile: bodyURL)
         try validateResponse(response, data: data)
         return try decoder.decode(T.self, from: data)
     }
@@ -274,6 +321,8 @@ actor APIClient {
 enum APIError: LocalizedError {
     case invalidResponse
     case invalidFile(message: String)
+    case authenticationRequired(message: String)
+    case authenticationTemporarilyUnavailable(message: String)
     case httpError(statusCode: Int, code: String? = nil, message: String)
 
     var errorDescription: String? {
@@ -281,6 +330,10 @@ enum APIError: LocalizedError {
         case .invalidResponse:
             return "Invalid server response"
         case .invalidFile(let message):
+            return message
+        case .authenticationRequired(let message):
+            return message
+        case .authenticationTemporarilyUnavailable(let message):
             return message
         case .httpError(let statusCode, _, let message):
             return "HTTP \(statusCode): \(message)"
@@ -293,6 +346,12 @@ enum APIError: LocalizedError {
             return true
         case .invalidFile:
             return false
+        case .authenticationRequired:
+            // Authentication is recoverable through sign-in, not a transient
+            // connection failure. Upload orchestration pauses it explicitly.
+            return false
+        case .authenticationTemporarilyUnavailable:
+            return true
         case .httpError(let statusCode, _, _):
             return statusCode == 408 || statusCode == 429 || statusCode >= 500
         }

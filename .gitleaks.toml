@@ -24,3 +24,13 @@ regexes = [
   '''raw_key["']?\s*:\s*["']?mta_abc123\.\.\.xyz''',
   '''raw_key["']?\s*:\s*["']?mta_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4''',
 ]
+
+# Clerk publishable keys identify the public Clerk Frontend API instance and
+# must be embedded in browser and native clients. Secret keys use the distinct
+# `sk_` prefix and remain covered by the default Gitleaks rules.
+[[allowlists]]
+description = "Public Clerk client configuration"
+regexTarget = "line"
+regexes = [
+  '''\bpk_(?:test|live)_[A-Za-z0-9_$-]+''',
+]
