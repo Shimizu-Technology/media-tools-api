@@ -22,7 +22,11 @@ func openPostgresIntegrationDB(t *testing.T) *DB {
 	if err != nil {
 		t.Fatalf("connect to PostgreSQL: %v", err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close PostgreSQL connection: %v", err)
+		}
+	})
 	if err := db.RunMigrations(filepath.Join("..", "..", "migrations")); err != nil {
 		t.Fatalf("run migrations: %v", err)
 	}
@@ -40,9 +44,16 @@ func insertTestAudio(t *testing.T, db *DB, status string) string {
 		t.Fatalf("insert audio transcription: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.ExecContext(context.Background(), `DELETE FROM background_jobs WHERE resource_id = $1`, id)
-		_, _ = db.ExecContext(context.Background(), `DELETE FROM media_segments WHERE item_type = 'audio' AND item_id = $1`, id)
-		_, _ = db.ExecContext(context.Background(), `DELETE FROM audio_transcriptions WHERE id = $1`, id)
+		cleanupQueries := []string{
+			`DELETE FROM background_jobs WHERE resource_id = $1`,
+			`DELETE FROM media_segments WHERE item_type = 'audio' AND item_id = $1`,
+			`DELETE FROM audio_transcriptions WHERE id = $1`,
+		}
+		for _, query := range cleanupQueries {
+			if _, err := db.ExecContext(context.Background(), query, id); err != nil {
+				t.Errorf("clean up audio integration fixture: %v", err)
+			}
+		}
 	})
 	return id
 }
@@ -134,8 +145,34 @@ func TestFailAudioTranscriptionAfterProcessingErrorInPostgres(t *testing.T) {
 	ctx := context.Background()
 	id := insertTestAudio(t, db, "processing")
 	const message = "The original recording is safe. Please retry transcription."
+	const workerID = "integration-worker"
+	var backgroundJobID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO background_jobs (
+			job_type, resource_id, payload, status, locked_by,
+			locked_at, lease_expires_at
+		)
+		VALUES (
+			'audio_transcription', $1, '{}'::jsonb, 'running', $2,
+			NOW(), NOW() + INTERVAL '5 minutes'
+		)
+		RETURNING id`, id, workerID).Scan(&backgroundJobID); err != nil {
+		t.Fatalf("insert running background job: %v", err)
+	}
 
-	updated, err := db.FailAudioTranscriptionAfterProcessingError(ctx, id, message)
+	updated, err := db.FailAudioTranscriptionAfterProcessingError(
+		ctx, id, backgroundJobID, "stale-worker", message,
+	)
+	if err != nil {
+		t.Fatalf("reject stale worker failure update: %v", err)
+	}
+	if updated {
+		t.Fatal("stale worker should not mark the audio transcription failed")
+	}
+
+	updated, err = db.FailAudioTranscriptionAfterProcessingError(
+		ctx, id, backgroundJobID, workerID, message,
+	)
 	if err != nil {
 		t.Fatalf("mark terminal failure: %v", err)
 	}
@@ -155,7 +192,9 @@ func TestFailAudioTranscriptionAfterProcessingErrorInPostgres(t *testing.T) {
 		t.Fatalf("unexpected failure state: status=%q stage=%q progress=%d message=%q", status, stage, progress, errorMessage)
 	}
 
-	updated, err = db.FailAudioTranscriptionAfterProcessingError(ctx, id, message)
+	updated, err = db.FailAudioTranscriptionAfterProcessingError(
+		ctx, id, backgroundJobID, workerID, message,
+	)
 	if err != nil {
 		t.Fatalf("repeat terminal failure update: %v", err)
 	}

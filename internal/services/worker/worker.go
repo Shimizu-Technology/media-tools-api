@@ -1485,7 +1485,9 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	if err != nil {
 		log.Printf("⚠️  Failed to save audio transcription result and evidence: %v", err)
 		message := "Transcription finished, but Media Tools could not save the result. The original recording is safe. Please retry transcription."
-		failed, failErr := p.db.FailAudioTranscriptionAfterProcessingError(ctx, at.ID, message)
+		failed, failErr := p.db.FailAudioTranscriptionAfterProcessingError(
+			ctx, at.ID, job.QueueID, p.instanceID, message,
+		)
 		if failErr != nil {
 			log.Printf("⚠️  Failed to expose terminal status for audio transcription %s: %v", at.ID, failErr)
 		} else if failed {
