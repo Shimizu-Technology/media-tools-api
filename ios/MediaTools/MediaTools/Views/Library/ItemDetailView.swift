@@ -24,6 +24,7 @@ struct ItemDetailView: View {
     @State private var isRenaming = false
     @State private var isRetrying = false
     @State private var detailError: String?
+    @State private var pollingWarning: String?
     @State private var detailPollingTask: Task<Void, Never>?
 
     private let service = MediaToolsService.shared
@@ -45,6 +46,9 @@ struct ItemDetailView: View {
                     headerSection
                     if let detailError {
                         detailErrorBanner(detailError)
+                    }
+                    if let pollingWarning {
+                        pollingWarningBanner(pollingWarning)
                     }
                     processingSection
                     actionButtons
@@ -688,6 +692,24 @@ struct ItemDetailView: View {
     }
 
     @ViewBuilder
+    private func pollingWarningBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "wifi.exclamationmark")
+                .foregroundStyle(Theme.warning)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Connection interrupted")
+                    .font(Theme.body(14, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(message)
+                    .font(Theme.caption())
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .cardStyle(padding: 12)
+    }
+
+    @ViewBuilder
     private var renameSheet: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
@@ -804,24 +826,25 @@ struct ItemDetailView: View {
 
     private func startDetailPolling() {
         detailPollingTask?.cancel()
+        pollingWarning = nil
         detailPollingTask = Task {
-            let pollingWarning = "The recording is safe, but its latest status could not be loaded. Retrying…"
             while !Task.isCancelled,
                   let current = audio,
                   ["pending", "processing"].contains(current.status) {
                 do {
                     try await Task.sleep(for: .seconds(3))
                     audio = try await service.getAudioItem(itemId)
-                    if detailError == pollingWarning { detailError = nil }
+                    pollingWarning = nil
                 } catch is CancellationError {
                     return
                 } catch {
                     // Keep the last known item visible and try again after the
                     // normal polling delay. A brief connection loss should not
                     // strand the screen in a stale processing state.
-                    detailError = pollingWarning
+                    pollingWarning = "The recording is safe. Retrying the latest status automatically…"
                 }
             }
+            pollingWarning = nil
             if audio?.status == "completed" { Haptics.success() }
         }
     }
