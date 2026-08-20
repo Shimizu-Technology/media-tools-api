@@ -111,10 +111,22 @@ func (c *JWKSCache) ParseToken(tokenString string) (*ClerkClaims, error) {
 	if !ok {
 		return nil, fmt.Errorf("failed to parse Clerk claims")
 	}
-	if c.authorizedParty != "" && claims.AuthorizedParty != c.authorizedParty {
-		return nil, fmt.Errorf("unexpected authorized party")
+	if err := validateAuthorizedParty(c.authorizedParty, claims.AuthorizedParty); err != nil {
+		return nil, err
 	}
 	return claims, nil
+}
+
+// Native Clerk clients do not send a browser Origin while minting a session
+// token, so their signed tokens can legitimately omit azp. Keep rejecting a
+// conflicting browser azp while allowing an absent native claim; signature,
+// expiry, and issuer validation still bind every accepted token to this Clerk
+// instance.
+func validateAuthorizedParty(expected, actual string) error {
+	if expected != "" && actual != "" && actual != expected {
+		return fmt.Errorf("unexpected authorized party")
+	}
+	return nil
 }
 
 // GetKey returns the RSA public key for the given key ID, fetching from JWKS if needed.

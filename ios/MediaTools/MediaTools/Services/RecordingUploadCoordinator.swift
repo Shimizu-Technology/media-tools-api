@@ -441,6 +441,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
 
     static func watchFailureDisposition(for error: Error) -> TranscriptionWatchFailureDisposition {
         if let apiError = error as? APIError {
+            if case .authenticationRequired = apiError {
+                return .pauseForAuthentication
+            }
             if case .httpError(let statusCode, _, _) = apiError, statusCode == 401 {
                 return .pauseForAuthentication
             }

@@ -151,9 +151,9 @@ function ClerkAppContent() {
   const [isUserLoading, setIsUserLoading] = useState(false)
 
   useEffect(() => {
-    setAuthTokenGetter(async () => {
+    setAuthTokenGetter(async (forceRefresh) => {
       try {
-        return await getToken()
+        return await getToken(forceRefresh ? { skipCache: true } : undefined)
       } catch {
         return null
       }

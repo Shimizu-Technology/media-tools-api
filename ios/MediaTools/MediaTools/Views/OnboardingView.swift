@@ -53,7 +53,7 @@ struct OnboardingView: View {
                             color: Theme.brand400,
                             title: "Capture a thought anywhere",
                             subtitle:
-                                "Start a recording in Media Tools, from the Action Button, a widget, Control Center, or Back Tap. It keeps recording when the screen locks or you use another app.",
+                                "Press the Action Button, a widget, Control Center, or Back Tap to open Media Tools and begin recording automatically. Once capture starts, it keeps recording when the screen locks or you use another app.",
                             note: "You always get a visible recording indicator and one-tap stop control."
                         )
                         .tag(0)

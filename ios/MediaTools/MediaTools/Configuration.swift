@@ -8,13 +8,10 @@ enum Configuration {
         if let key = configuredValue("CLERK_PUBLISHABLE_KEY") {
             return key
         }
-        #if DEBUG
-        // Development fallback — media-tools-api Clerk instance. Release builds
-        // should inject this through xcconfig/Info.plist instead of source.
+        // Clerk publishable keys are public client configuration, not secrets.
+        // Keep a runtime fallback so an archive cannot silently ship unable to
+        // refresh authentication if an external build setting is omitted.
         return "pk_test_d2VsY29tZWQtZWFyd2lnLTg2LmNsZXJrLmFjY291bnRzLmRldiQ"
-        #else
-        return ""
-        #endif
     }()
 
     /// Media Tools API base URL.
