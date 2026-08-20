@@ -886,6 +886,27 @@ func (db *DB) UpdateAudioTranscriptionIfActive(ctx context.Context, at *models.A
 	return rows > 0, nil
 }
 
+// FailAudioTranscriptionAfterProcessingError gives clients a terminal,
+// retriable state when the worker cannot persist its final result. The source
+// recording remains in durable storage, so a retry can safely transcribe it
+// again instead of leaving the UI polling an unreachable progress value.
+func (db *DB) FailAudioTranscriptionAfterProcessingError(ctx context.Context, id, message string) (bool, error) {
+	result, err := db.ExecContext(ctx, `
+		UPDATE audio_transcriptions
+		SET status = 'failed', error_message = $2,
+			processing_stage = 'failed', processing_progress = 100
+		WHERE id = $1
+		  AND status IN ('pending', 'processing')`, id, message)
+	if err != nil {
+		return false, fmt.Errorf("mark audio transcription persistence failure: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("inspect audio transcription persistence failure: %w", err)
+	}
+	return rows > 0, nil
+}
+
 // UpdateAudioProcessing updates processing stage/progress without changing transcript payload.
 func (db *DB) UpdateAudioProcessing(ctx context.Context, id, stage string, progress int) error {
 	if progress < 0 {

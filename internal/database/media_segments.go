@@ -225,13 +225,17 @@ func (db *DB) CompleteAudioTranscriptionWithSegments(ctx context.Context, audio 
 		return false, err
 	}
 	if audio.FormattingStatus == "pending" {
+		payload, err := marshalAudioTranscriptFormattingPayload(audio.ID)
+		if err != nil {
+			return false, err
+		}
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO background_jobs (job_type, resource_id, payload)
-			VALUES ('audio_transcript_formatting', $1, jsonb_build_object('audio_id', $1::text))
+			VALUES ('audio_transcript_formatting', $1, $2::jsonb)
 			ON CONFLICT (job_type, resource_id)
 				WHERE status IN ('queued', 'running')
 			DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
-			WHERE background_jobs.status = 'queued'`, audio.ID)
+			WHERE background_jobs.status = 'queued'`, audio.ID, payload)
 		if err != nil {
 			return false, fmt.Errorf("queue transcript formatting: %w", err)
 		}
