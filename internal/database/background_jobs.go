@@ -413,6 +413,13 @@ func (db *DB) FailBackgroundJob(ctx context.Context, jobID, workerID, message st
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
+		// A specialized worker path may already have atomically failed its
+		// resource and durable job. Treat that terminal acknowledgement as
+		// idempotent while still reporting a lease actually owned elsewhere.
+		var status string
+		if err := db.GetContext(ctx, &status, `SELECT status FROM background_jobs WHERE id = $1`, jobID); err == nil && status == "failed" {
+			return nil
+		}
 		return fmt.Errorf("background job failure lost its lease")
 	}
 	return nil

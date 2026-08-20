@@ -154,7 +154,7 @@ func TestFailAudioTranscriptionAfterProcessingErrorInPostgres(t *testing.T) {
 		)
 		VALUES (
 			'audio_transcription', $1, '{}'::jsonb, 'running', $2,
-			NOW(), NOW() + INTERVAL '5 minutes'
+			NOW() - INTERVAL '6 minutes', NOW() - INTERVAL '1 minute'
 		)
 		RETURNING id`, id, workerID).Scan(&backgroundJobID); err != nil {
 		t.Fatalf("insert running background job: %v", err)
@@ -190,6 +190,18 @@ func TestFailAudioTranscriptionAfterProcessingErrorInPostgres(t *testing.T) {
 	}
 	if status != "failed" || stage != "failed" || progress != 100 || errorMessage != message {
 		t.Fatalf("unexpected failure state: status=%q stage=%q progress=%d message=%q", status, stage, progress, errorMessage)
+	}
+	var jobStatus, jobError string
+	if err := db.QueryRowContext(ctx, `
+		SELECT status, last_error FROM background_jobs WHERE id = $1`, backgroundJobID).
+		Scan(&jobStatus, &jobError); err != nil {
+		t.Fatalf("read failed background job: %v", err)
+	}
+	if jobStatus != "failed" || jobError != message {
+		t.Fatalf("unexpected background job failure: status=%q message=%q", jobStatus, jobError)
+	}
+	if err := db.FailBackgroundJob(ctx, backgroundJobID, workerID, message); err != nil {
+		t.Fatalf("repeat durable failure acknowledgement: %v", err)
 	}
 
 	updated, err = db.FailAudioTranscriptionAfterProcessingError(
