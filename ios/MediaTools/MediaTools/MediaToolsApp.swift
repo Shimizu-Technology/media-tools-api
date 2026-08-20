@@ -12,6 +12,13 @@ struct MediaToolsApp: App {
     init() {
         Clerk.configure(publishableKey: Configuration.clerkPublishableKey)
         MediaToolsAppShortcuts.updateAppShortcutParameters()
+        #if DEBUG
+        // Exercise the real cold-launch handoff in UI tests: publish the route
+        // before MainTabView exists, just as an Action Button intent can.
+        if ProcessInfo.processInfo.arguments.contains("-ui-test-cold-quick-capture") {
+            QuickCaptureNavigation.requestRecordTab()
+        }
+        #endif
         configureAppearance()
     }
 

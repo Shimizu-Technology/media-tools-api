@@ -158,6 +158,16 @@ actor APIClient {
         try validateResponse(response, data: data)
     }
 
+    func patch<T: Decodable, B: Encodable>(_ path: String, body: B) async throws -> T {
+        let url = URL(string: baseURL + path)!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.httpBody = try encoder.encode(body)
+        let (data, response) = try await data(for: request)
+        try validateResponse(response, data: data)
+        return try decoder.decode(T.self, from: data)
+    }
+
     func delete(_ path: String) async throws {
         let url = URL(string: baseURL + path)!
         var request = URLRequest(url: url)

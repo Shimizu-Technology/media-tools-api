@@ -1,4 +1,5 @@
 import AppIntents
+import Foundation
 
 /// The single action Leon can map to the iPhone Action Button or Back Tap.
 /// A second invocation stops the current recording, matching a physical toggle.
@@ -26,14 +27,15 @@ struct QuickRecordIntent: AudioRecordingIntent, LiveActivityIntent {
     #endif
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult {
         #if WIDGET_EXTENSION
         // The system executes LiveActivityIntent in the app process. This body
         // only lets the widget extension compile and expose intent metadata.
-        return .result(dialog: "Opening Media Tools recording controls.")
+        return .result()
         #else
-        let outcome = await RecordingCoordinator.shared.toggleFromSystem()
-        return .result(dialog: IntentDialog(stringLiteral: outcome.dialog))
+        _ = await RecordingCoordinator.shared.toggleFromSystem()
+        QuickCaptureNavigation.requestRecordTab()
+        return .result()
         #endif
     }
 }
@@ -46,13 +48,36 @@ struct StopRecordingIntent: LiveActivityIntent {
     static let description = IntentDescription("Stop and safely save the active Media Tools recording.")
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult {
         #if WIDGET_EXTENSION
-        return .result(dialog: "Stopping the Media Tools recording.")
+        return .result()
         #else
-        let outcome = await RecordingCoordinator.shared.stopFromSystem()
-        return .result(dialog: IntentDialog(stringLiteral: outcome.dialog))
+        _ = await RecordingCoordinator.shared.stopFromSystem()
+        return .result()
         #endif
+    }
+}
+
+extension Notification.Name {
+    static let mediaToolsQuickCapture = Notification.Name("MediaToolsQuickCapture")
+}
+
+/// The notification handles warm launches. The persisted one-shot flag covers
+/// cold launches where the intent can finish before MainTabView subscribes.
+enum QuickCaptureNavigation {
+    private static let recordTabRequestKey = "MediaToolsQuickCaptureRequestedRecordTab"
+
+    @MainActor
+    static func requestRecordTab() {
+        UserDefaults.standard.set(true, forKey: recordTabRequestKey)
+        NotificationCenter.default.post(name: .mediaToolsQuickCapture, object: nil)
+    }
+
+    @MainActor
+    static func consumeRecordTabRequest() -> Bool {
+        guard UserDefaults.standard.bool(forKey: recordTabRequestKey) else { return false }
+        UserDefaults.standard.removeObject(forKey: recordTabRequestKey)
+        return true
     }
 }
 

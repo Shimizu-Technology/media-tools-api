@@ -16,6 +16,16 @@ struct ItemDetailView: View {
     @State private var summaryContentType = "general"
     @State private var showExportSheet = false
     @State private var exportText = ""
+    @State private var preferences = LibraryPreferences(favorite: false, archived: false, tags: [])
+    @State private var tagInput = ""
+    @State private var isSavingPreferences = false
+    @State private var showRenameSheet = false
+    @State private var renameValue = ""
+    @State private var isRenaming = false
+    @State private var isRetrying = false
+    @State private var detailError: String?
+    @State private var pollingWarning: String?
+    @State private var detailPollingTask: Task<Void, Never>?
 
     private let service = MediaToolsService.shared
 
@@ -34,7 +44,15 @@ struct ItemDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     headerSection
+                    if let detailError {
+                        detailErrorBanner(detailError)
+                    }
+                    if let pollingWarning {
+                        pollingWarningBanner(pollingWarning)
+                    }
+                    processingSection
                     actionButtons
+                    preferencesSection
                     summaryTypeSection
                     audioPlayerSection
                     summarySection
@@ -76,9 +94,43 @@ struct ItemDetailView: View {
         .sheet(isPresented: $showExportSheet) {
             ExportSheet(text: exportText, title: title)
         }
+        .sheet(isPresented: $showRenameSheet) {
+            renameSheet
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
+                    if isAudioItem {
+                        Button {
+                            beginRename()
+                        } label: {
+                            Label("Rename Recording", systemImage: "pencil")
+                        }
+                    }
+                    Button {
+                        Task {
+                            await savePreferences(
+                                UpdateLibraryPreferencesRequest(favorite: !preferences.favorite)
+                            )
+                        }
+                    } label: {
+                        Label(
+                            preferences.favorite ? "Remove Star" : "Star",
+                            systemImage: preferences.favorite ? "star.slash" : "star"
+                        )
+                    }
+                    Button {
+                        Task {
+                            await savePreferences(
+                                UpdateLibraryPreferencesRequest(archived: !preferences.archived)
+                            )
+                        }
+                    } label: {
+                        Label(
+                            preferences.archived ? "Unarchive" : "Archive",
+                            systemImage: preferences.archived ? "tray.and.arrow.up" : "archivebox"
+                        )
+                    }
                     Button {
                         showAddToCollection = true
                     } label: {
@@ -104,21 +156,36 @@ struct ItemDetailView: View {
             }
         }
         .task { await loadDetail() }
+        .onDisappear { detailPollingTask?.cancel() }
     }
 
     // MARK: - Header
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(alignment: .top) {
                 Image(systemName: iconName)
                     .font(.title)
                     .foregroundStyle(iconColor)
 
                 VStack(alignment: .leading) {
-                    Text(title)
-                        .font(Theme.heading(18))
-                        .foregroundStyle(Theme.textPrimary)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(title)
+                            .font(Theme.heading(18))
+                            .foregroundStyle(Theme.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if isAudioItem {
+                            Button(action: beginRename) {
+                                Image(systemName: "pencil")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(Theme.brand400)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Rename recording")
+                        }
+                    }
                     HStack(spacing: 8) {
                         StatusBadge(status: statusText)
                         if let wc = wordCount, wc > 0 {
@@ -130,6 +197,12 @@ struct ItemDetailView: View {
                             Text(formatDuration(dur))
                                 .font(Theme.caption())
                                 .foregroundStyle(Theme.textSecondary)
+                        }
+                        if preferences.favorite {
+                            Image(systemName: "star.fill")
+                                .font(.caption)
+                                .foregroundStyle(Theme.warning)
+                                .accessibilityLabel("Starred")
                         }
                     }
                 }
@@ -149,6 +222,7 @@ struct ItemDetailView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(Theme.brand500)
+            .disabled(!canUseContentActions)
 
             Button {
                 Task { await generateSummary() }
@@ -169,7 +243,118 @@ struct ItemDetailView: View {
 
     private var canSummarize: Bool {
         if case .pdf = item { return false }
-        return true
+        return canUseContentActions
+    }
+
+    private var canUseContentActions: Bool {
+        !["pending", "processing", "failed"].contains(statusText)
+    }
+
+    // MARK: - Processing state
+
+    @ViewBuilder
+    private var processingSection: some View {
+        if let audio, ["pending", "processing"].contains(audio.status) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    ProgressView()
+                        .tint(Theme.brand400)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(audio.processingDescription)
+                            .font(Theme.body(15, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("You can leave this screen. Media Tools will keep working in the background.")
+                            .font(Theme.caption())
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                if let progress = audio.processingProgress, progress > 0 {
+                    ProgressView(value: Double(progress), total: 100)
+                        .tint(Theme.brand400)
+                        .accessibilityLabel("Transcription progress")
+                        .accessibilityValue("\(progress) percent")
+                }
+            }
+            .accentCardStyle()
+        } else if let audio, audio.status == "failed" {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Transcription needs attention", systemImage: "exclamationmark.triangle.fill")
+                    .font(Theme.body(15, weight: .semibold))
+                    .foregroundStyle(Theme.error)
+                Text(audio.errorMessage ?? "The recording could not be transcribed.")
+                    .font(Theme.caption())
+                    .foregroundStyle(Theme.textSecondary)
+                Button {
+                    Task { await retryAudioTranscription() }
+                } label: {
+                    if isRetrying {
+                        ProgressView().frame(maxWidth: .infinity)
+                    } else {
+                        Label("Retry Transcription", systemImage: "arrow.clockwise")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.brand500)
+                .disabled(isRetrying)
+            }
+            .cardStyle()
+        }
+    }
+
+    // MARK: - Library preferences
+
+    private var preferencesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                SectionHeader(text: "Organize", icon: "tag")
+                Spacer()
+                if isSavingPreferences {
+                    ProgressView().tint(Theme.brand400)
+                }
+            }
+
+            if !preferences.tags.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(preferences.tags, id: \.self) { tag in
+                        Button {
+                            Task { await removeTag(tag) }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text(tag)
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .font(Theme.caption(12, weight: .semibold))
+                            .foregroundStyle(Theme.brand400)
+                            .padding(.leading, 11)
+                            .padding(.trailing, 9)
+                            .frame(minHeight: 44)
+                            .background(Theme.brand500.opacity(0.12), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isSavingPreferences)
+                        .accessibilityLabel("Remove \(tag) tag")
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                TextField("Add a tag", text: $tagInput)
+                    .textFieldStyle(.themed)
+                    .submitLabel(.done)
+                    .onSubmit { Task { await addTag() } }
+                    .onChange(of: tagInput) { _, value in
+                        if value.count > 40 { tagInput = String(value.prefix(40)) }
+                    }
+                Button("Add") { Task { await addTag() } }
+                    .font(Theme.body(14, weight: .semibold))
+                    .frame(minWidth: 56, minHeight: 44)
+                    .foregroundStyle(Theme.brand400)
+                    .disabled(tagInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSavingPreferences)
+            }
+        }
+        .cardStyle()
     }
 
     // MARK: - Summary Content Type
@@ -359,7 +544,7 @@ struct ItemDetailView: View {
     private var title: String {
         switch item {
         case .transcript(let t): t.displayTitle
-        case .audio(let a): a.displayTitle
+        case .audio(let a): (audio ?? a).displayTitle
         case .pdf(let p): p.displayTitle
         }
     }
@@ -399,7 +584,7 @@ struct ItemDetailView: View {
     private var statusText: String {
         switch item {
         case .transcript(let t): t.status
-        case .audio(let a): a.status
+        case .audio(let a): (audio ?? a).status
         case .pdf(let p): p.status
         }
     }
@@ -407,14 +592,23 @@ struct ItemDetailView: View {
     private var wordCount: Int? {
         switch item {
         case .transcript(let t): t.wordCount
-        case .audio(let a): a.wordCount
+        case .audio(let a): (audio ?? a).wordCount
         case .pdf(let p): p.wordCount
         }
     }
 
     private var audioDuration: Double? {
-        if case .audio(let a) = item { return a.duration }
+        if case .audio(let a) = item { return (audio ?? a).duration }
         return nil
+    }
+
+    private var isAudioItem: Bool {
+        if case .audio = item { return true }
+        return false
+    }
+
+    private var itemReference: LibraryReference {
+        LibraryReference(itemType: chatItemType, itemId: itemId)
     }
 
     private var contentText: String? {
@@ -428,6 +622,7 @@ struct ItemDetailView: View {
     }
 
     private func loadDetail() async {
+        detailError = nil
         do {
             switch item {
             case .transcript(let t):
@@ -448,11 +643,22 @@ struct ItemDetailView: View {
                         evidence: audio.summaryEvidence
                     )
                 }
+                if let audio, ["pending", "processing"].contains(audio.status) {
+                    startDetailPolling()
+                }
             case .pdf(let p):
                 pdf = try await service.getPDF(p.id)
             }
         } catch {
-            print("Failed to load detail: \(error)")
+            detailError = error.localizedDescription
+        }
+
+        do {
+            preferences = try await service.getLibraryPreferences(itemReference)
+        } catch {
+            // Content remains fully usable if preference metadata is briefly
+            // unavailable; expose the error without replacing the detail.
+            detailError = error.localizedDescription
         }
 
         do {
@@ -460,6 +666,186 @@ struct ItemDetailView: View {
         } catch {
             // Legacy items may predate source segments; plain text remains usable.
             print("Failed to load source segments: \(error)")
+        }
+    }
+
+    @ViewBuilder
+    private func detailErrorBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(Theme.error)
+            Text(message)
+                .font(Theme.caption())
+                .foregroundStyle(Theme.textSecondary)
+            Spacer(minLength: 0)
+            Button {
+                detailError = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.textMuted)
+            .accessibilityLabel("Dismiss error")
+        }
+        .cardStyle(padding: 12)
+    }
+
+    @ViewBuilder
+    private func pollingWarningBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "wifi.exclamationmark")
+                .foregroundStyle(Theme.warning)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Connection interrupted")
+                    .font(Theme.body(14, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(message)
+                    .font(Theme.caption())
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .cardStyle(padding: 12)
+    }
+
+    @ViewBuilder
+    private var renameSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Use a name you will recognize in search, exports, and collections.")
+                    .font(Theme.body(14))
+                    .foregroundStyle(Theme.textSecondary)
+
+                TextField("Recording title", text: $renameValue)
+                    .textFieldStyle(.themed)
+                    .textInputAutocapitalization(.sentences)
+                    .submitLabel(.done)
+                    .onSubmit { Task { await renameAudio() } }
+                    .accessibilityIdentifier("recording.rename.field")
+
+                if let detailError {
+                    Text(detailError)
+                        .font(Theme.caption())
+                        .foregroundStyle(Theme.error)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding()
+            .background(Theme.surface)
+            .navigationTitle("Rename Recording")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showRenameSheet = false }
+                        .disabled(isRenaming)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task { await renameAudio() }
+                    } label: {
+                        if isRenaming { ProgressView() } else { Text("Save") }
+                    }
+                    .disabled(renameValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isRenaming)
+                    .accessibilityIdentifier("recording.rename.save")
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .presentationDetents([.height(250)])
+    }
+
+    private func beginRename() {
+        renameValue = title
+        detailError = nil
+        showRenameSheet = true
+    }
+
+    private func renameAudio() async {
+        guard isAudioItem else { return }
+        let nextName = renameValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !nextName.isEmpty else { return }
+        isRenaming = true
+        detailError = nil
+        defer { isRenaming = false }
+        do {
+            audio = try await service.renameAudioItem(itemId, name: nextName)
+            showRenameSheet = false
+            Haptics.success()
+        } catch {
+            detailError = error.localizedDescription
+            Haptics.error()
+        }
+    }
+
+    private func savePreferences(_ updates: UpdateLibraryPreferencesRequest) async {
+        guard !isSavingPreferences else { return }
+        isSavingPreferences = true
+        detailError = nil
+        defer { isSavingPreferences = false }
+        do {
+            preferences = try await service.updateLibraryPreferences(itemReference, updates: updates)
+            Haptics.light()
+        } catch {
+            detailError = error.localizedDescription
+            Haptics.error()
+        }
+    }
+
+    private func addTag() async {
+        let nextTag = tagInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !nextTag.isEmpty,
+              !preferences.tags.contains(where: { $0.caseInsensitiveCompare(nextTag) == .orderedSame })
+        else { return }
+        await savePreferences(
+            UpdateLibraryPreferencesRequest(tags: preferences.tags + [nextTag])
+        )
+        if detailError == nil { tagInput = "" }
+    }
+
+    private func removeTag(_ tag: String) async {
+        await savePreferences(
+            UpdateLibraryPreferencesRequest(tags: preferences.tags.filter { $0 != tag })
+        )
+    }
+
+    private func retryAudioTranscription() async {
+        guard isAudioItem else { return }
+        isRetrying = true
+        detailError = nil
+        defer { isRetrying = false }
+        do {
+            audio = try await service.retryAudioItem(itemId)
+            Haptics.light()
+            startDetailPolling()
+        } catch {
+            detailError = error.localizedDescription
+            Haptics.error()
+        }
+    }
+
+    private func startDetailPolling() {
+        detailPollingTask?.cancel()
+        pollingWarning = nil
+        detailPollingTask = Task {
+            while !Task.isCancelled,
+                  let current = audio,
+                  ["pending", "processing"].contains(current.status) {
+                do {
+                    try await Task.sleep(for: .seconds(3))
+                    audio = try await service.getAudioItem(itemId)
+                    pollingWarning = nil
+                } catch is CancellationError {
+                    return
+                } catch {
+                    // Keep the last known item visible and try again after the
+                    // normal polling delay. A brief connection loss should not
+                    // strand the screen in a stale processing state.
+                    pollingWarning = "The recording is safe. Retrying the latest status automatically…"
+                }
+            }
+            pollingWarning = nil
+            if audio?.status == "completed" { Haptics.success() }
         }
     }
 

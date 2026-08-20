@@ -99,6 +99,10 @@ struct AudioUploadCompleteRequest: Codable {
     let contentType: String
 }
 
+struct RenameAudioRequest: Codable {
+    let name: String
+}
+
 // MARK: - PDFs
 
 struct PDFExtraction: Identifiable, Codable {
@@ -160,6 +164,26 @@ struct LibraryReference: Identifiable, Codable, Hashable {
 
     var collectionItemType: String {
         itemType == "youtube" ? "transcript" : itemType
+    }
+}
+
+struct LibraryPreferences: Codable, Equatable {
+    let favorite: Bool
+    let archived: Bool
+    let tags: [String]
+}
+
+/// Optional fields preserve PATCH semantics: omitted values stay unchanged on
+/// the server while an explicitly supplied empty tags array clears all tags.
+struct UpdateLibraryPreferencesRequest: Encodable {
+    let favorite: Bool?
+    let archived: Bool?
+    let tags: [String]?
+
+    init(favorite: Bool? = nil, archived: Bool? = nil, tags: [String]? = nil) {
+        self.favorite = favorite
+        self.archived = archived
+        self.tags = tags
     }
 }
 
