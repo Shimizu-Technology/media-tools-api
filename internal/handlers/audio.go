@@ -651,7 +651,13 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 			at.ProcessingProgress = 100
 			at.ErrorMessage = worker.InvalidAudioSourceMessage()
 			if err := h.DB.UpdateAudioTranscription(c.Request.Context(), at); err != nil {
-				log.Printf("Warning: failed to normalize invalid audio source %s: %v", at.ID, err)
+				log.Printf("Failed to normalize invalid audio source %s: %v", at.ID, err)
+				c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+					Error:   "database_error",
+					Message: "Media Tools recognized the invalid recording but could not save its status. Please try again.",
+					Code:    http.StatusInternalServerError,
+				})
+				return
 			}
 		}
 		c.JSON(http.StatusUnprocessableEntity, models.ErrorResponse{
