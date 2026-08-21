@@ -642,6 +642,32 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 		return
 	}
 
+	if audioSourceRetryBlocked(at) {
+		if at.ProcessingStage != "invalid_source" {
+			// Older workers stored raw ffmpeg diagnostics under the generic
+			// `failed` stage. Normalize those records when they next reach the
+			// retry boundary so clients stop offering a futile action.
+			at.ProcessingStage = "invalid_source"
+			at.ProcessingProgress = 100
+			at.ErrorMessage = worker.InvalidAudioSourceMessage()
+			if err := h.DB.UpdateAudioTranscription(c.Request.Context(), at); err != nil {
+				log.Printf("Failed to normalize invalid audio source %s: %v", at.ID, err)
+				c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+					Error:   "database_error",
+					Message: "Media Tools recognized the invalid recording but could not save its status. Please try again.",
+					Code:    http.StatusInternalServerError,
+				})
+				return
+			}
+		}
+		c.JSON(http.StatusUnprocessableEntity, models.ErrorResponse{
+			Error:   "invalid_audio_source",
+			Message: "This recording file is invalid and cannot be repaired by retrying. Replace it with the original recording if available.",
+			Code:    http.StatusUnprocessableEntity,
+		})
+		return
+	}
+
 	if h.AudioStorage == nil || !h.AudioStorage.IsConfigured() || at.AudioS3Key == "" {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "storage_unavailable",
@@ -755,6 +781,11 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 
 	clearStaleChat()
 	c.JSON(http.StatusAccepted, at)
+}
+
+func audioSourceRetryBlocked(at *models.AudioTranscription) bool {
+	return at != nil && (at.ProcessingStage == "invalid_source" ||
+		worker.IsInvalidAudioSourceError(errors.New(at.ErrorMessage)))
 }
 
 // FormatAudioTranscript queues a word-preserving readability pass. It also

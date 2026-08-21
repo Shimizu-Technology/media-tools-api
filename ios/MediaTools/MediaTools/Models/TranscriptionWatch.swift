@@ -4,11 +4,26 @@ struct TranscriptionWatch: Identifiable, Codable, Equatable, Sendable {
     let id: String
     let title: String
     let createdAt: Date
-    var authenticationPausedAt: Date? = nil
+    let recordingID: UUID?
+    var authenticationPausedAt: Date?
+
+    init(
+        id: String,
+        title: String,
+        createdAt: Date,
+        recordingID: UUID? = nil,
+        authenticationPausedAt: Date? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.createdAt = createdAt
+        self.recordingID = recordingID
+        self.authenticationPausedAt = authenticationPausedAt
+    }
 }
 
 /// Keeps the tiny amount of metadata required to deliver a completion
-/// notification after the source recording has safely left the device.
+/// notification and retain the device copy until server processing succeeds.
 struct TranscriptionWatchStore {
     private struct Manifest: Codable {
         let version: Int

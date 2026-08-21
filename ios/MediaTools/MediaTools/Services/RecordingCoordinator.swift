@@ -302,17 +302,38 @@ final class RecordingCoordinator {
         }
     }
 
-    /// Remove the device copy only after the server has accepted the recording
-    /// and created its durable transcription job.
-    func markUploaded(_ recording: LocalRecording) {
-        guard let current = self.recording(withID: recording.id), let store else { return }
+    /// A 202 response proves that the server created a job, not that the audio
+    /// can be decoded. Keep the only known-good local source until that job
+    /// reaches a successful terminal state.
+    func markServerAccepted(_ recordingID: UUID, transcriptionID: String) {
+        updateRecording(recordingID) { recording in
+            recording.state = .serverProcessing
+            recording.remoteTranscriptionID = transcriptionID
+            recording.lastError = nil
+            recording.uploadProgress = 1
+            recording.uploadTaskIdentifier = nil
+        }
+        statusMessage = "Upload complete. Device copy retained while transcription runs."
+    }
+
+    func markServerCompleted(_ recordingID: UUID) {
+        guard let current = recording(withID: recordingID), let store else { return }
         do {
             try store.deleteFile(for: current)
             pendingRecordings.removeAll { $0.id == current.id }
             try persistPendingRecordings()
-            statusMessage = "Uploaded safely; transcription is processing"
+            statusMessage = "Transcription complete; device copy removed"
         } catch {
-            errorMessage = "The upload is safe, but its device copy could not be removed."
+            errorMessage = "Transcription completed, but its device copy could not be removed."
+        }
+    }
+
+    func markServerFailed(_ recordingID: UUID, message: String, invalidSource: Bool) {
+        updateRecording(recordingID) { recording in
+            recording.state = invalidSource ? .invalid : .uploadFailed
+            recording.lastError = message
+            recording.uploadProgress = nil
+            recording.uploadTaskIdentifier = nil
         }
     }
 
@@ -332,6 +353,14 @@ final class RecordingCoordinator {
             throw RecordingCoordinatorError.storageUnavailable
         }
         let recording = try store.importRecording(from: sourceURL, contentType: contentType)
+        if case .failure(let validationError) = RecordingIntegrityValidator.validate(
+            url: store.fileURL(for: recording)
+        ) {
+            try? store.deleteFile(for: recording)
+            throw RecordingCoordinatorError.invalidRecording(
+                validationError.errorDescription ?? "The selected audio file is invalid."
+            )
+        }
         pendingRecordings.insert(recording, at: 0)
         do {
             try persistPendingRecordings()
@@ -359,6 +388,9 @@ final class RecordingCoordinator {
         mimeType: String,
         taskIdentifier: Int
     ) {
+        guard recording(withID: recordingID)?.canUpload == true
+                || recording(withID: recordingID)?.state == .waitingForUpload
+        else { return }
         updateRecording(recordingID) { recording in
             recording.state = .uploading
             recording.lastError = nil
@@ -381,6 +413,9 @@ final class RecordingCoordinator {
     }
 
     func markUploadFinalizing(_ recordingID: UUID, message: String? = nil) {
+        guard let state = recording(withID: recordingID)?.state,
+              state == .uploading || state == .finalizingUpload
+        else { return }
         updateRecording(recordingID) { recording in
             recording.state = .finalizingUpload
             recording.lastError = message
@@ -487,7 +522,10 @@ final class RecordingCoordinator {
         do {
             let newRecording = store.makeRecording(contentType: contentType)
             recording = newRecording
-            try Data("Media Tools simulator capture".utf8).write(
+            // A tiny structurally complete ISO media fixture exercises the
+            // same container-integrity checks as a real M4A without requiring
+            // Simulator microphone hardware.
+            try Self.simulatedM4AData.write(
                 to: store.fileURL(for: newRecording),
                 options: .atomic
             )
@@ -592,12 +630,24 @@ final class RecordingCoordinator {
         isRecording = false
         isInterrupted = false
         audioLevel = 0
+        var finalStatusMessage = message
 
         if let activeRecordingID,
-           let index = pendingRecordings.firstIndex(where: { $0.id == activeRecordingID }) {
+           let index = pendingRecordings.firstIndex(where: { $0.id == activeRecordingID }),
+           let store {
             pendingRecordings[index].duration = duration
-            pendingRecordings[index].state = state
-            pendingRecordings[index].lastError = state == .interrupted ? message : nil
+            let validation = RecordingIntegrityValidator.validate(
+                url: store.fileURL(for: pendingRecordings[index])
+            )
+            switch validation {
+            case .success:
+                pendingRecordings[index].state = state
+                pendingRecordings[index].lastError = state == .interrupted ? message : nil
+            case .failure:
+                pendingRecordings[index].state = .invalid
+                pendingRecordings[index].lastError = Self.invalidRecordingMessage
+                finalStatusMessage = Self.invalidRecordingMessage
+            }
             do {
                 try persistPendingRecordings()
             } catch {
@@ -605,7 +655,7 @@ final class RecordingCoordinator {
             }
         }
         self.activeRecordingID = nil
-        statusMessage = message
+        statusMessage = finalStatusMessage
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         let finalDuration = duration
         // The saved LocalRecording retains the completed duration. `duration`
@@ -628,14 +678,28 @@ final class RecordingCoordinator {
         do {
             pendingRecordings = try store.loadRecordings()
             var recoveredAny = false
-            for index in pendingRecordings.indices where pendingRecordings[index].state == .recording {
-                pendingRecordings[index].state = .interrupted
-                pendingRecordings[index].lastError = "Media Tools stopped before this recording was finalized."
-                recoveredAny = true
+            for index in pendingRecordings.indices {
+                let recording = pendingRecordings[index]
+                guard recording.state == .recording || recording.canUpload else { continue }
+                switch RecordingIntegrityValidator.validate(url: store.fileURL(for: recording)) {
+                case .success where recording.state == .recording:
+                    pendingRecordings[index].state = .interrupted
+                    pendingRecordings[index].lastError =
+                        "Recovered and verified after Media Tools stopped unexpectedly."
+                    recoveredAny = true
+                case .failure:
+                    pendingRecordings[index].state = .invalid
+                    pendingRecordings[index].lastError = Self.invalidRecordingMessage
+                    recoveredAny = true
+                default:
+                    break
+                }
             }
             if recoveredAny {
                 try persistPendingRecordings()
-                statusMessage = "Recovered an interrupted recording"
+                statusMessage = pendingRecordings.contains { $0.state == .invalid }
+                    ? "A recording needs recovery and was not uploaded"
+                    : "Recovered and verified an interrupted recording"
                 Task { [activityManager] in
                     await activityManager.end(recordingID: nil, finalDuration: 0)
                 }
@@ -644,6 +708,25 @@ final class RecordingCoordinator {
             errorMessage = "Saved recordings could not be restored: \(error.localizedDescription)"
         }
     }
+
+    private static let invalidRecordingMessage =
+        "This recording was not finalized correctly. It is still on this iPhone and will not be uploaded."
+
+    private static let simulatedM4AData: Data = {
+        func box(_ type: String, payload: Data) -> Data {
+            let size = UInt32(payload.count + 8)
+            var data = Data([
+                UInt8((size >> 24) & 0xff), UInt8((size >> 16) & 0xff),
+                UInt8((size >> 8) & 0xff), UInt8(size & 0xff),
+            ])
+            data.append(Data(type.utf8))
+            data.append(payload)
+            return data
+        }
+        return box("ftyp", payload: Data("M4A ".utf8))
+            + box("mdat", payload: Data([0x00]))
+            + box("moov", payload: Data([0x00]))
+    }()
 
     private func persistPendingRecordings() throws {
         try store?.saveRecordings(pendingRecordings)
@@ -773,6 +856,7 @@ private enum RecordingCoordinatorError: LocalizedError {
     case couldNotStart
     case couldNotResume
     case storageUnavailable
+    case invalidRecording(String)
 
     var errorDescription: String? {
         switch self {
@@ -782,6 +866,8 @@ private enum RecordingCoordinatorError: LocalizedError {
             return "The recorder could not resume."
         case .storageUnavailable:
             return "Secure recording storage is unavailable."
+        case .invalidRecording(let message):
+            return message
         }
     }
 }

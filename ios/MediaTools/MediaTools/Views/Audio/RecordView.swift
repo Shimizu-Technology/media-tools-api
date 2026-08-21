@@ -140,15 +140,17 @@ struct RecordView: View {
                                         .multilineTextAlignment(.center)
                                 }
                                 HStack(spacing: 16) {
-                                    Button {
-                                        Task { await retryTranscription(id: result.id) }
-                                    } label: {
-                                        Label("Retry", systemImage: "arrow.clockwise")
-                                            .font(Theme.body(14, weight: .medium))
-                                            .foregroundStyle(Theme.brand500)
+                                    if result.isRetryable {
+                                        Button {
+                                            Task { await retryTranscription(id: result.id) }
+                                        } label: {
+                                            Label("Retry", systemImage: "arrow.clockwise")
+                                                .font(Theme.body(14, weight: .medium))
+                                                .foregroundStyle(Theme.brand500)
+                                        }
+                                        .disabled(isUploading)
+                                        .frame(minHeight: 44)
                                     }
-                                    .disabled(isUploading)
-                                    .frame(minHeight: 44)
 
                                     Button {
                                         withAnimation(Theme.springSnappy) {
@@ -519,7 +521,8 @@ struct RecordView: View {
                 .foregroundStyle(
                     recording.state == .interrupted
                         ? Theme.warning
-                        : (recording.state == .uploadFailed ? Theme.error : Theme.brand400)
+                        : ([.invalid, .uploadFailed].contains(recording.state)
+                            ? Theme.error : Theme.brand400)
                 )
                 .frame(width: 36, height: 36)
                 .background(Theme.surfaceElevated)
@@ -532,7 +535,8 @@ struct RecordView: View {
                     Text("\(recording.formattedDuration)  ·  \(recording.recoveryDescription)")
                         .font(Theme.caption(12))
                         .foregroundStyle(
-                            recording.state == .uploadFailed ? Theme.error : Theme.textSecondary
+                            [.invalid, .uploadFailed].contains(recording.state)
+                                ? Theme.error : Theme.textSecondary
                         )
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -550,37 +554,47 @@ struct RecordView: View {
             }
 
             HStack(spacing: 12) {
-                Button {
-                    if !recording.isUploadInProgress {
-                        error = nil
-                        uploader.queue(recording)
-                        Haptics.light()
+                if recording.state == .invalid,
+                   let fileURL = recorder.fileURL(for: recording) {
+                    ShareLink(item: fileURL) {
+                        Label("Save Recording", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity)
                     }
-                } label: {
-                    if recording.isUploadInProgress {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .tint(.white)
-                            Text(uploadButtonTitle(for: recording))
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.brand500)
+                    .accessibilityIdentifier("recording.save.\(recording.id.uuidString)")
+                } else {
+                    Button {
+                        if !recording.isUploadInProgress {
+                            error = nil
+                            uploader.queue(recording)
+                            Haptics.light()
                         }
-                        .frame(maxWidth: .infinity)
-                    } else {
-                        Label(
-                            recording.state == .uploadFailed ? "Retry" : "Transcribe",
-                            systemImage: recording.state == .uploadFailed
-                                ? "arrow.clockwise" : "arrow.up.circle"
-                        )
-                        .frame(maxWidth: .infinity)
+                    } label: {
+                        if recording.isUploadInProgress {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .tint(.white)
+                                Text(uploadButtonTitle(for: recording))
+                            }
+                            .frame(maxWidth: .infinity)
+                        } else {
+                            Label(
+                                uploadActionTitle(for: recording),
+                                systemImage: uploadActionIcon(for: recording)
+                            )
+                                .frame(maxWidth: .infinity)
+                        }
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.brand500)
+                    .disabled(
+                        !recording.canUpload
+                            || recorder.isStarting
+                            || recorder.isRecording
+                    )
+                    .accessibilityIdentifier("recording.transcribe.\(recording.id.uuidString)")
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.brand500)
-                .disabled(
-                    recording.isUploadInProgress
-                        || recorder.isStarting
-                        || recorder.isRecording
-                )
-                .accessibilityIdentifier("recording.transcribe.\(recording.id.uuidString)")
 
                 Button {
                     recordingToDiscard = recording
@@ -684,8 +698,32 @@ struct RecordView: View {
             return "Uploading"
         case .finalizingUpload:
             return "Finishing"
+        case .serverProcessing:
+            return "Transcribing"
         default:
             return "Transcribe"
+        }
+    }
+
+    private func uploadActionTitle(for recording: LocalRecording) -> String {
+        switch recording.state {
+        case .invalid:
+            return "Needs Recovery"
+        case .uploadFailed:
+            return "Retry Upload"
+        default:
+            return "Transcribe"
+        }
+    }
+
+    private func uploadActionIcon(for recording: LocalRecording) -> String {
+        switch recording.state {
+        case .invalid:
+            return "exclamationmark.triangle"
+        case .uploadFailed:
+            return "arrow.clockwise"
+        default:
+            return "arrow.up.circle"
         }
     }
 

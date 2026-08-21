@@ -294,19 +294,21 @@ struct ItemDetailView: View {
                 Text(audio.errorMessage ?? "The recording could not be transcribed.")
                     .font(Theme.caption())
                     .foregroundStyle(Theme.textSecondary)
-                Button {
-                    Task { await retryAudioTranscription() }
-                } label: {
-                    if isRetrying {
-                        ProgressView().frame(maxWidth: .infinity)
-                    } else {
-                        Label("Retry Transcription", systemImage: "arrow.clockwise")
-                            .frame(maxWidth: .infinity)
+                if audio.isRetryable {
+                    Button {
+                        Task { await retryAudioTranscription() }
+                    } label: {
+                        if isRetrying {
+                            ProgressView().frame(maxWidth: .infinity)
+                        } else {
+                            Label("Retry Transcription", systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity)
+                        }
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.brand500)
+                    .disabled(isRetrying)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.brand500)
-                .disabled(isRetrying)
             }
             .cardStyle()
         }
