@@ -5,7 +5,12 @@ import Foundation
 protocol RecordingActivityManaging: AnyObject {
     var areActivitiesEnabled: Bool { get }
     func start(for recording: LocalRecording) async throws
-    func update(recordingID: UUID, isInterrupted: Bool, duration: TimeInterval) async
+    func update(
+        recordingID: UUID,
+        isPaused: Bool,
+        isInterrupted: Bool,
+        duration: TimeInterval
+    ) async
     func end(recordingID: UUID?, finalDuration: TimeInterval) async
 }
 
@@ -34,6 +39,7 @@ final class RecordingActivityManager: RecordingActivityManaging {
         let state = RecordingActivityAttributes.ContentState(
             elapsedDuration: 0,
             resumedAt: recording.createdAt,
+            isPaused: false,
             isInterrupted: false
         )
         _ = try Activity.request(
@@ -43,10 +49,16 @@ final class RecordingActivityManager: RecordingActivityManaging {
         )
     }
 
-    func update(recordingID: UUID, isInterrupted: Bool, duration: TimeInterval) async {
+    func update(
+        recordingID: UUID,
+        isPaused: Bool,
+        isInterrupted: Bool,
+        duration: TimeInterval
+    ) async {
         let state = RecordingActivityAttributes.ContentState(
             elapsedDuration: duration,
-            resumedAt: isInterrupted ? nil : Date(),
+            resumedAt: isPaused || isInterrupted ? nil : Date(),
+            isPaused: isPaused,
             isInterrupted: isInterrupted
         )
         let content = ActivityContent(state: state, staleDate: nil)
@@ -63,6 +75,7 @@ final class RecordingActivityManager: RecordingActivityManaging {
         let finalState = RecordingActivityAttributes.ContentState(
             elapsedDuration: finalDuration,
             resumedAt: nil,
+            isPaused: false,
             isInterrupted: false
         )
         let finalContent = ActivityContent(state: finalState, staleDate: nil)

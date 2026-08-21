@@ -3,6 +3,13 @@ import Foundation
 import Observation
 import SwiftUI
 
+enum RecordingCaptureState: Equatable {
+    case idle
+    case recording
+    case paused
+    case interrupted
+}
+
 /// Owns microphone capture for the whole app rather than for one SwiftUI view.
 /// This is what allows an active recording to survive tab changes, screen lock,
 /// and ordinary backgrounding. System controls and App Intents call this same
@@ -12,9 +19,8 @@ import SwiftUI
 final class RecordingCoordinator {
     static let shared = RecordingCoordinator()
 
-    private(set) var isRecording = false
+    private(set) var captureState: RecordingCaptureState = .idle
     private(set) var isStarting = false
-    private(set) var isInterrupted = false
     private(set) var pendingRecordings: [LocalRecording] = []
     private(set) var duration: TimeInterval = 0
     private(set) var audioLevel: CGFloat = 0
@@ -26,8 +32,10 @@ final class RecordingCoordinator {
     private var audioRecorder: AVAudioRecorder?
     private var activeRecordingID: UUID?
     private var timer: Timer?
+    private var activityUpdateTask: Task<Void, Never>?
     private var lastCheckpointedDuration: TimeInterval = 0
     private var lastStorageCheckDuration: TimeInterval = 0
+    private var stateBeforeInterruption: RecordingCaptureState?
     private let notificationObservers = NotificationObserverBag()
     private let store: RecordingStore?
     private let simulatesCapture: Bool
@@ -36,6 +44,13 @@ final class RecordingCoordinator {
 
     static let minimumStartCapacityBytes: Int64 = 100 * 1_024 * 1_024
     static let criticalRecordingCapacityBytes: Int64 = 50 * 1_024 * 1_024
+
+    /// `isRecording` means a recording session is still active, including a
+    /// deliberate pause or a temporary system interruption. This keeps stop,
+    /// recovery, and the Action Button safe in every non-idle state.
+    var isRecording: Bool { captureState != .idle }
+    var isPaused: Bool { captureState == .paused }
+    var isInterrupted: Bool { captureState == .interrupted }
 
     init(
         store: RecordingStore? = nil,
@@ -144,7 +159,7 @@ final class RecordingCoordinator {
             message: "Saved on this iPhone",
             endActivityAutomatically: false
         )
-        await activityManager.end(recordingID: recordingID, finalDuration: finalDuration)
+        await endLiveActivity(recordingID: recordingID, finalDuration: finalDuration)
         return .stopped
     }
 
@@ -256,6 +271,15 @@ final class RecordingCoordinator {
                 )
                 return .stopped
             }
+            // Activity.request can suspend long enough for the person to pause
+            // or for iOS to interrupt capture. Reconcile the newly created
+            // activity with the latest state instead of leaving it "running."
+            await activityManager.update(
+                recordingID: recording.id,
+                isPaused: isPaused,
+                isInterrupted: isInterrupted,
+                duration: duration
+            )
             return .started
         } catch {
             let message = "The recording indicator could not start: \(error.localizedDescription)"
@@ -287,6 +311,45 @@ final class RecordingCoordinator {
 
     func stop() {
         _ = finalizeRecording(state: .ready, message: "Saved on this iPhone")
+    }
+
+    @discardableResult
+    func pause() -> Bool {
+        guard captureState == .recording else { return false }
+        if let audioRecorder {
+            duration = max(duration, audioRecorder.currentTime)
+            audioRecorder.pause()
+        }
+        checkpointActiveRecordingIfNeeded(force: true)
+        timer?.invalidate()
+        timer = nil
+        captureState = .paused
+        audioLevel = 0
+        statusMessage = "Recording paused"
+        updateLiveActivity()
+        return true
+    }
+
+    @discardableResult
+    func resume() -> Bool {
+        guard captureState == .paused else { return false }
+
+        do {
+            if !simulatesCapture {
+                try AVAudioSession.sharedInstance().setActive(true)
+                guard let audioRecorder, audioRecorder.record() else {
+                    throw RecordingCoordinatorError.couldNotResume
+                }
+            }
+            captureState = .recording
+            statusMessage = "Recording resumed"
+            startMeterTimer()
+            updateLiveActivity()
+            return true
+        } catch {
+            errorMessage = "Recording is still paused and could not resume: \(error.localizedDescription)"
+            return false
+        }
     }
 
     func discard(_ recording: LocalRecording) {
@@ -476,11 +539,17 @@ final class RecordingCoordinator {
 
             let url = store.fileURL(for: newRecording)
             let settings: [String: Any] = [
-                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                AVSampleRateKey: 44_100.0,
+                // Linear PCM in CAF remains structurally recoverable if iOS
+                // terminates the app before AVAudioRecorder.stop() can run.
+                // 16 kHz mono is the speech model's target bandwidth and uses
+                // about 115 MB per hour before the server normalizes to MP3.
+                AVFormatIDKey: Int(kAudioFormatLinearPCM),
+                AVSampleRateKey: 16_000.0,
                 AVNumberOfChannelsKey: 1,
-                AVEncoderBitRateKey: 64_000,
-                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: false,
             ]
             let replacementRecorder = try AVAudioRecorder(url: url, settings: settings)
             replacementRecorder.isMeteringEnabled = true
@@ -491,8 +560,8 @@ final class RecordingCoordinator {
 
             audioRecorder = replacementRecorder
             activeRecordingID = newRecording.id
-            isRecording = true
-            isInterrupted = false
+            captureState = .recording
+            stateBeforeInterruption = nil
             duration = 0
             lastCheckpointedDuration = 0
             lastStorageCheckDuration = 0
@@ -522,10 +591,9 @@ final class RecordingCoordinator {
         do {
             let newRecording = store.makeRecording(contentType: contentType)
             recording = newRecording
-            // A tiny structurally complete ISO media fixture exercises the
-            // same container-integrity checks as a real M4A without requiring
-            // Simulator microphone hardware.
-            try Self.simulatedM4AData.write(
+            // A tiny CAF fixture exercises the crash-recovery validator without
+            // depending on Simulator microphone hardware.
+            try Self.simulatedCAFData.write(
                 to: store.fileURL(for: newRecording),
                 options: .atomic
             )
@@ -534,8 +602,8 @@ final class RecordingCoordinator {
             try persistPendingRecordings()
 
             activeRecordingID = newRecording.id
-            isRecording = true
-            isInterrupted = false
+            captureState = .recording
+            stateBeforeInterruption = nil
             duration = 0
             lastCheckpointedDuration = 0
             lastStorageCheckDuration = 0
@@ -562,6 +630,7 @@ final class RecordingCoordinator {
     }
 
     private func updateMeters() {
+        guard captureState == .recording else { return }
         if simulatesCapture {
             duration += 0.1
             audioLevel = 0.2 + (0.25 * CGFloat((sin(duration * 4) + 1) / 2))
@@ -582,7 +651,7 @@ final class RecordingCoordinator {
     /// their audio container and manifest. Capacity is checked infrequently so
     /// metering remains lightweight, and the saved recording stays uploadable.
     func enforceStorageSafetyIfNeeded(force: Bool = false) {
-        guard isRecording,
+        guard captureState == .recording,
               force || duration - lastStorageCheckDuration >= 10,
               let directoryURL = store?.directoryURL
         else { return }
@@ -627,8 +696,8 @@ final class RecordingCoordinator {
         audioRecorder = nil
         timer?.invalidate()
         timer = nil
-        isRecording = false
-        isInterrupted = false
+        captureState = .idle
+        stateBeforeInterruption = nil
         audioLevel = 0
         var finalStatusMessage = message
 
@@ -663,8 +732,8 @@ final class RecordingCoordinator {
         // the next recording look as though it has already been running.
         duration = 0
         if endActivityAutomatically {
-            Task { [activityManager] in
-                await activityManager.end(
+            Task {
+                await endLiveActivity(
                     recordingID: recordingIDToEnd,
                     finalDuration: finalDuration
                 )
@@ -710,22 +779,23 @@ final class RecordingCoordinator {
     }
 
     private static let invalidRecordingMessage =
-        "This recording was not finalized correctly. It is still on this iPhone and will not be uploaded."
+        "This older recording ended before its audio index was saved. You can export the remaining file, but it cannot be transcribed."
 
-    private static let simulatedM4AData: Data = {
-        func box(_ type: String, payload: Data) -> Data {
-            let size = UInt32(payload.count + 8)
-            var data = Data([
-                UInt8((size >> 24) & 0xff), UInt8((size >> 16) & 0xff),
-                UInt8((size >> 8) & 0xff), UInt8(size & 0xff),
-            ])
-            data.append(Data(type.utf8))
+    private static let simulatedCAFData: Data = {
+        func chunk(_ type: String, payload: Data) -> Data {
+            let size = UInt64(payload.count)
+            var data = Data(type.utf8)
+            data.append(contentsOf: (0..<8).reversed().map {
+                UInt8((size >> UInt64($0 * 8)) & 0xff)
+            })
             data.append(payload)
             return data
         }
-        return box("ftyp", payload: Data("M4A ".utf8))
-            + box("mdat", payload: Data([0x00]))
-            + box("moov", payload: Data([0x00]))
+        var description = Data(count: 32)
+        description.replaceSubrange(8..<12, with: Data("lpcm".utf8))
+        return Data("caff".utf8) + Data([0x00, 0x01, 0x00, 0x00])
+            + chunk("desc", payload: description)
+            + chunk("data", payload: Data([0, 0, 0, 0, 1, 0]))
     }()
 
     private func persistPendingRecordings() throws {
@@ -780,25 +850,27 @@ final class RecordingCoordinator {
 
         switch type {
         case .began:
+            guard captureState != .interrupted else { return }
+            stateBeforeInterruption = captureState
             if let audioRecorder {
                 duration = max(duration, audioRecorder.currentTime)
             }
             checkpointActiveRecordingIfNeeded(force: true)
             timer?.invalidate()
             timer = nil
-            isInterrupted = true
+            captureState = .interrupted
             audioLevel = 0
             statusMessage = "Recording paused by another audio source"
-            let interruptedDuration = duration
-            guard let activeRecordingID else { return }
-            Task { [activityManager] in
-                await activityManager.update(
-                    recordingID: activeRecordingID,
-                    isInterrupted: true,
-                    duration: interruptedDuration
-                )
-            }
+            updateLiveActivity()
         case .ended:
+            let previousState = stateBeforeInterruption
+            stateBeforeInterruption = nil
+            if previousState == .paused {
+                captureState = .paused
+                statusMessage = "Recording paused"
+                updateLiveActivity()
+                return
+            }
             let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
             guard options.contains(.shouldResume), let audioRecorder else {
@@ -811,18 +883,10 @@ final class RecordingCoordinator {
             do {
                 try AVAudioSession.sharedInstance().setActive(true)
                 guard audioRecorder.record() else { throw RecordingCoordinatorError.couldNotResume }
-                isInterrupted = false
+                captureState = .recording
                 statusMessage = "Recording resumed"
                 startMeterTimer()
-                let resumedDuration = duration
-                guard let activeRecordingID else { return }
-                Task { [activityManager] in
-                    await activityManager.update(
-                        recordingID: activeRecordingID,
-                        isInterrupted: false,
-                        duration: resumedDuration
-                    )
-                }
+                updateLiveActivity()
             } catch {
                 finalizeRecording(
                     state: .interrupted,
@@ -837,8 +901,32 @@ final class RecordingCoordinator {
         }
     }
 
+    private func updateLiveActivity() {
+        guard let activeRecordingID else { return }
+        let paused = isPaused
+        let interrupted = isInterrupted
+        let elapsedDuration = duration
+        let previousUpdate = activityUpdateTask
+        activityUpdateTask = Task { [activityManager] in
+            await previousUpdate?.value
+            await activityManager.update(
+                recordingID: activeRecordingID,
+                isPaused: paused,
+                isInterrupted: interrupted,
+                duration: elapsedDuration
+            )
+        }
+    }
+
+    private func endLiveActivity(recordingID: UUID?, finalDuration: TimeInterval) async {
+        let pendingUpdate = activityUpdateTask
+        activityUpdateTask = nil
+        await pendingUpdate?.value
+        await activityManager.end(recordingID: recordingID, finalDuration: finalDuration)
+    }
+
     private func handleRouteChange(_ notification: Notification) {
-        guard isRecording,
+        guard captureState == .recording,
               let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: rawReason) else { return }
         switch reason {

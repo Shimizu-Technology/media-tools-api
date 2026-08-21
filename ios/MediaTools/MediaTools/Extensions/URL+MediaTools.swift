@@ -14,7 +14,7 @@ extension URL {
 
     /// Check if this URL points to an audio file.
     var isAudioURL: Bool {
-        let audioExts = ["mp3", "m4a", "wav", "aac", "ogg", "flac", "wma"]
+        let audioExts = ["mp3", "m4a", "wav", "caf", "aac", "ogg", "flac", "wma"]
         return audioExts.contains(pathExtension.lowercased())
     }
 

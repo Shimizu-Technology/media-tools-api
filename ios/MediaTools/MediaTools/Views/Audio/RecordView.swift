@@ -12,7 +12,6 @@ struct RecordView: View {
     @State private var error: String?
     @State private var recordingToDiscard: LocalRecording?
     @State private var showFilePicker = false
-    @State private var pulseRing = false
 
     private let service = MediaToolsService.shared
 
@@ -271,17 +270,26 @@ struct RecordView: View {
         .onDisappear {
             pollingTask?.cancel()
         }
-        .onChange(of: recorder.isRecording) { wasRecording, isRecording in
-            pulseRing = isRecording && !recorder.isInterrupted
-            guard wasRecording != isRecording else { return }
+        .onChange(of: recorder.captureState) { previousState, captureState in
+            let announcement: String
+            switch (previousState, captureState) {
+            case (.idle, .recording):
+                announcement = "Recording started"
+            case (.recording, .paused):
+                announcement = "Recording paused"
+            case (.paused, .recording):
+                announcement = "Recording resumed"
+            case (_, .interrupted):
+                announcement = "Recording interrupted by another audio source"
+            case (_, .idle):
+                announcement = recorder.statusMessage ?? "Recording stopped"
+            default:
+                return
+            }
             UIAccessibility.post(
                 notification: .announcement,
-                argument: isRecording
-                    ? "Recording started" : recorder.statusMessage ?? "Recording stopped"
+                argument: announcement
             )
-        }
-        .onChange(of: recorder.isInterrupted) { _, isInterrupted in
-            pulseRing = recorder.isRecording && !isInterrupted
         }
         .alert(
             "Discard recording?",
@@ -319,7 +327,7 @@ struct RecordView: View {
                     Circle()
                         .fill(captureAccent)
                         .frame(width: 7, height: 7)
-                    Text(recorder.isRecording ? "ON DEVICE" : "READY")
+                    Text(captureStatus)
                         .font(Theme.caption(10, weight: .bold))
                         .tracking(0.8)
                         .foregroundStyle(Theme.textMuted)
@@ -336,7 +344,7 @@ struct RecordView: View {
                 signalMeter
             }
 
-            captureActionButton
+            captureControls
 
             VStack(spacing: 5) {
                 Text(captureTitle)
@@ -351,7 +359,7 @@ struct RecordView: View {
             }
 
             if recorder.isRecording {
-                Label("Keeps recording when you lock your phone or switch apps", systemImage: "lock.shield")
+                Label(captureFootnote, systemImage: captureFootnoteIcon)
                     .font(Theme.caption(11))
                     .foregroundStyle(Theme.textMuted)
                     .multilineTextAlignment(.center)
@@ -376,6 +384,7 @@ struct RecordView: View {
         )
         .animation(reduceMotion ? nil : Theme.springGentle, value: recorder.isRecording)
         .animation(reduceMotion ? nil : Theme.springGentle, value: recorder.isStarting)
+        .animation(reduceMotion ? nil : Theme.springGentle, value: recorder.captureState)
     }
 
     private var signalMeter: some View {
@@ -383,13 +392,13 @@ struct RecordView: View {
             ForEach(0..<24, id: \.self) { index in
                 RoundedRectangle(cornerRadius: 2)
                     .fill(
-                        recorder.isRecording && !recorder.isInterrupted
+                        recorder.captureState == .recording
                             ? captureAccent
                             : Theme.border
                     )
                     .frame(
                         width: 4,
-                        height: recorder.isRecording && !recorder.isInterrupted
+                        height: recorder.captureState == .recording
                             ? 7 + (27 * recorder.audioLevel * waveformScale(for: index))
                             : 4
                     )
@@ -400,52 +409,93 @@ struct RecordView: View {
         .accessibilityHidden(true)
     }
 
-    private var captureActionButton: some View {
-        Button {
-            if recorder.isRecording {
-                recorder.stop()
-                pulseRing = false
-                Haptics.medium()
-            } else {
-                error = nil
-                recorder.start(contentType: contentType)
-                Haptics.medium()
-            }
-        } label: {
-            ZStack {
-                if recorder.isRecording && !reduceMotion {
-                    Circle()
-                        .stroke(Theme.error.opacity(0.26), lineWidth: 2)
-                        .frame(width: 94, height: 94)
-                        .scaleEffect(pulseRing ? 1.2 : 1)
-                        .opacity(pulseRing ? 0 : 0.7)
-                        .animation(
-                            .easeOut(duration: 1.15).repeatForever(autoreverses: false),
-                            value: pulseRing
+    @ViewBuilder
+    private var captureControls: some View {
+        if recorder.isRecording {
+            HStack(spacing: 28) {
+                if !recorder.isInterrupted {
+                    Button {
+                        if recorder.isPaused {
+                            if recorder.resume() { Haptics.medium() } else { Haptics.error() }
+                        } else {
+                            recorder.pause()
+                            Haptics.medium()
+                        }
+                    } label: {
+                        captureControlLabel(
+                            title: recorder.isPaused ? "Resume" : "Pause",
+                            systemImage: recorder.isPaused ? "play.fill" : "pause.fill",
+                            color: Theme.brand500
                         )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(recorder.isPaused ? "Resume recording" : "Pause recording")
+                    .accessibilityHint(
+                        recorder.isPaused
+                            ? "Continues adding audio to this recording"
+                            : "Temporarily stops adding audio without saving yet"
+                    )
                 }
 
+                Button {
+                    recorder.stop()
+                    Haptics.medium()
+                } label: {
+                    captureControlLabel(
+                        title: "Stop & Save",
+                        systemImage: "stop.fill",
+                        color: Theme.error
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Stop and save recording")
+                .accessibilityHint("Ends capture and saves the recording on this iPhone")
+            }
+            .transition(.opacity.combined(with: .scale(scale: 0.94)))
+        } else {
+            captureActionButton
+        }
+    }
+
+    private func captureControlLabel(
+        title: String,
+        systemImage: String,
+        color: Color
+    ) -> some View {
+        VStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.16))
+                    .frame(width: 68, height: 68)
+                Circle()
+                    .stroke(color.opacity(0.42), lineWidth: 1)
+                    .frame(width: 68, height: 68)
+                Image(systemName: systemImage)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(color)
+            }
+            Text(title)
+                .font(Theme.caption(12, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+        }
+        .frame(minWidth: 88, minHeight: 92)
+        .contentShape(Rectangle())
+    }
+
+    private var captureActionButton: some View {
+        Button {
+            error = nil
+            recorder.start(contentType: contentType)
+            Haptics.medium()
+        } label: {
+            ZStack {
                 Circle()
                     .fill(Theme.brandGradient)
                     .frame(width: 82, height: 82)
                     .shadow(color: captureAccent.opacity(0.28), radius: 18, y: 7)
 
-                if recorder.isRecording {
-                    Circle()
-                        .fill(Theme.error)
-                        .frame(width: 82, height: 82)
-                }
-
                 if recorder.isStarting {
                     ProgressView().tint(.white)
-                } else if recorder.isInterrupted {
-                    Image(systemName: "stop.fill")
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(.white)
-                } else if recorder.isRecording {
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(.white)
-                        .frame(width: 25, height: 25)
                 } else {
                     Image(systemName: "mic.fill")
                         .font(.title2.weight(.semibold))
@@ -460,31 +510,37 @@ struct RecordView: View {
         .accessibilityLabel(
             recorder.isStarting
                 ? "Preparing microphone"
-                : (recorder.isRecording ? "Stop recording" : "Start recording")
+                : "Start recording"
         )
-        .accessibilityHint(
-            recorder.isRecording
-                ? "Stops and saves this recording" : "Begins recording from the microphone"
-        )
-        .accessibilityValue(recorder.isRecording ? recorder.formattedDuration : "Not recording")
+        .accessibilityHint("Begins recording from the microphone")
+        .accessibilityValue("Not recording")
     }
 
     private var captureAccent: Color {
-        if recorder.storageIsLow || recorder.isInterrupted { return Theme.warning }
+        if recorder.storageIsLow || recorder.isPaused || recorder.isInterrupted { return Theme.warning }
         if recorder.isRecording { return Theme.error }
         return Theme.brand400
+    }
+
+    private var captureStatus: String {
+        if recorder.isInterrupted { return "INTERRUPTED" }
+        if recorder.isPaused { return "PAUSED" }
+        if recorder.isRecording { return "ON DEVICE" }
+        return "READY"
     }
 
     private var captureEyebrow: String {
         if recorder.isStarting { return "PREPARING" }
         if recorder.isInterrupted { return "INTERRUPTED" }
+        if recorder.isPaused { return "PAUSED" }
         if recorder.isRecording { return "LIVE CAPTURE" }
         return "QUICK CAPTURE"
     }
 
     private var captureIcon: String {
         if recorder.isStarting { return "waveform.badge.magnifyingglass" }
-        if recorder.isInterrupted { return "pause.circle.fill" }
+        if recorder.isInterrupted { return "exclamationmark.waveform" }
+        if recorder.isPaused { return "pause.circle.fill" }
         if recorder.isRecording { return "record.circle.fill" }
         return "waveform"
     }
@@ -492,6 +548,7 @@ struct RecordView: View {
     private var captureTitle: String {
         if recorder.isStarting { return "Preparing microphone" }
         if recorder.isInterrupted { return "Recording interrupted" }
+        if recorder.isPaused { return "Recording paused" }
         if recorder.isRecording { return "Recording now" }
         if recorder.statusMessage != nil { return "Ready for another recording" }
         return "Ready to record"
@@ -499,13 +556,26 @@ struct RecordView: View {
 
     private var captureDetail: String {
         if recorder.isStarting { return "Setting up a secure on-device audio session." }
-        if recorder.isInterrupted { return "Another audio source paused capture. Tap stop to save what was recorded." }
-        if recorder.isRecording { return "Tap once to stop and save. Upload begins only when you choose Transcribe." }
+        if recorder.isInterrupted {
+            return "Another audio source paused capture. It will resume when iOS allows, or you can stop and save now."
+        }
+        if recorder.isPaused { return "No audio is being added. Resume when you're ready, or stop and save." }
+        if recorder.isRecording { return "Pause for a break, or stop when you're ready to save." }
         if recorder.storageIsLow { return "Free at least 100 MB before starting a new recording." }
         if recorder.statusMessage != nil {
             return "The previous recording is saved. The clock is reset and ready when you are."
         }
         return "Choose a content type, then tap the microphone. Your audio is saved on this iPhone first."
+    }
+
+    private var captureFootnote: String {
+        if recorder.isInterrupted { return "Waiting for the other audio source to finish" }
+        if recorder.isPaused { return "Resume or stop and save before closing Media Tools" }
+        return "Keeps recording when you lock your phone or switch apps"
+    }
+
+    private var captureFootnoteIcon: String {
+        recorder.captureState == .recording ? "lock.shield" : "pause.circle"
     }
 
     @ViewBuilder
@@ -557,7 +627,7 @@ struct RecordView: View {
                 if recording.state == .invalid,
                    let fileURL = recorder.fileURL(for: recording) {
                     ShareLink(item: fileURL) {
-                        Label("Save Recording", systemImage: "square.and.arrow.up")
+                        Label("Export File", systemImage: "square.and.arrow.up")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)

@@ -83,7 +83,7 @@ func requiresWhisperTranscode(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
 	// We accept these uploads at the API boundary, but normalize them before
 	// transcription so the worker feeds Whisper a predictable audio format.
-	case ".mp4", ".m4a", ".webm", ".flac", ".ogg":
+	case ".mp4", ".m4a", ".caf", ".webm", ".flac", ".ogg":
 		return true
 	default:
 		return false

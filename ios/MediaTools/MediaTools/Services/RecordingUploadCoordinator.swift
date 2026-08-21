@@ -521,8 +521,13 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         return updated
     }
 
-    private static func mimeType(for url: URL) -> String {
-        UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
+    static func mimeType(for url: URL) -> String {
+        if url.pathExtension.caseInsensitiveCompare("caf") == .orderedSame {
+            // UniformTypeIdentifiers does not consistently publish a CAF MIME
+            // mapping across supported iOS/macOS SDKs.
+            return "audio/x-caf"
+        }
+        return UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
             ?? "application/octet-stream"
     }
 
