@@ -358,6 +358,29 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Weekly product review"].exists)
     }
 
+    func testLibraryPrefetchesAndRestoresPositionAfterOpeningDetail() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-test-library-pagination"]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
+        let target = app.buttons["library-row-audio:audio-25"]
+        for _ in 0..<12 where !target.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(target.waitForExistence(timeout: 5))
+        XCTAssertTrue(target.isHittable)
+
+        target.tap()
+        XCTAssertTrue(app.navigationBars["Recording 25"].waitForExistence(timeout: 5))
+        app.navigationBars["Recording 25"].buttons.element(boundBy: 0).tap()
+
+        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 5))
+        XCTAssertTrue(target.waitForExistence(timeout: 5))
+        XCTAssertTrue(target.isHittable)
+        XCTAssertFalse(app.buttons["library-row-audio:audio-1"].isHittable)
+    }
+
     private func assertSavedRecordingQueueIsVisible(
         in app: XCUIApplication,
         file: StaticString = #filePath,

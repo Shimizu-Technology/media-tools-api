@@ -779,7 +779,7 @@ final class RecordingCoordinator {
     }
 
     private static let invalidRecordingMessage =
-        "This older recording ended before its audio index was saved. You can export the remaining file, but it cannot be transcribed."
+        "This older recording ended before its audio index was saved. Export and keep the original file for a best-effort recovery attempt on a computer."
 
     private static let simulatedCAFData: Data = {
         func chunk(_ type: String, payload: Data) -> Data {

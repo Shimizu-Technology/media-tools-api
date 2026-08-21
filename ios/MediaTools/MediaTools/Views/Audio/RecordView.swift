@@ -623,11 +623,19 @@ struct RecordView: View {
                     )
             }
 
+            if recording.state == .invalid {
+                Text("Uploading this file unchanged will still fail. Keep the exported original for a recovery attempt.")
+                    .font(Theme.caption(11))
+                    .foregroundStyle(Theme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("recording.recovery-guidance")
+            }
+
             HStack(spacing: 12) {
                 if recording.state == .invalid,
                    let fileURL = recorder.fileURL(for: recording) {
                     ShareLink(item: fileURL) {
-                        Label("Export File", systemImage: "square.and.arrow.up")
+                        Label("Export for Recovery", systemImage: "square.and.arrow.up")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)

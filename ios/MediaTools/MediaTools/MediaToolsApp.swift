@@ -52,6 +52,11 @@ struct MediaToolsApp: App {
                 LibraryView(previewItems: LibraryListItem.uiTestSamples)
             }
             .preferredColorScheme(.dark)
+        } else if ProcessInfo.processInfo.arguments.contains("-ui-test-library-pagination") {
+            NavigationStack {
+                LibraryView(previewItems: LibraryListItem.uiTestPaginationSamples)
+            }
+            .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-record") {
             NavigationStack {
                 RecordView()

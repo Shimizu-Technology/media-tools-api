@@ -299,7 +299,7 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(recovered.contentType, "meeting")
         XCTAssertEqual(recovered.duration, 37)
         XCTAssertEqual(recovered.state, .invalid)
-        XCTAssertTrue(recovered.lastError?.contains("cannot be transcribed") == true)
+        XCTAssertTrue(recovered.lastError?.contains("best-effort recovery") == true)
         XCTAssertTrue(FileManager.default.fileExists(atPath: store.fileURL(for: recording).path))
 
         let reloaded = try XCTUnwrap(store.loadRecordings().first)
@@ -959,6 +959,96 @@ final class ModelDecodingTests: XCTestCase {
             )
         )
         XCTAssertEqual(pending.readableTranscriptText, "testing this")
+    }
+
+    func testAudioReadableTranscriptOnlyOffersOriginalWhenDisplayTextDiffers() throws {
+        let unchanged = try APIClient.makeDecoder().decode(
+            AudioTranscription.self,
+            from: Data(
+                #"{"id":"audio-1","status":"completed","transcript_text":"Testing this.","formatted_transcript_text":"Testing this.","formatting_status":"completed"}"#.utf8
+            )
+        )
+        XCTAssertFalse(unchanged.hasDistinctReadableTranscript)
+
+        let paragraphFormatting = try APIClient.makeDecoder().decode(
+            AudioTranscription.self,
+            from: Data(
+                #"{"id":"audio-2","status":"completed","transcript_text":"Testing this. Testing that.","formatted_transcript_text":"Testing this.\n\nTesting that.","formatting_status":"completed"}"#.utf8
+            )
+        )
+        XCTAssertTrue(paragraphFormatting.hasDistinctReadableTranscript)
+
+        let pending = try APIClient.makeDecoder().decode(
+            AudioTranscription.self,
+            from: Data(
+                #"{"id":"audio-3","status":"completed","transcript_text":"testing this","formatted_transcript_text":"Testing this.","formatting_status":"pending"}"#.utf8
+            )
+        )
+        XCTAssertFalse(pending.hasDistinctReadableTranscript)
+    }
+
+    @MainActor
+    func testLibrarySnapshotSurvivesReentryAndPrefetchesBeforeTheLastRow() async {
+        let previewItems = (1...45).map { index in
+            LibraryListItem(
+                id: "audio-\(index)", itemType: "audio", title: "Recording \(index).m4a",
+                subtitle: "EN", status: "completed", wordCount: index,
+                duration: Double(index), pageCount: 0, summaryStatus: "", favorite: false,
+                archived: false, tags: [], createdAt: Date().addingTimeInterval(Double(-index))
+            )
+        }
+        let model = LibraryViewModel(previewItems: previewItems)
+
+        await model.loadIfNeeded(for: model.query)
+        XCTAssertEqual(model.items.count, 20)
+        XCTAssertFalse(
+            LibraryViewModel.shouldPrefetch(itemIndex: 14, itemCount: model.items.count)
+        )
+        XCTAssertTrue(
+            LibraryViewModel.shouldPrefetch(itemIndex: 15, itemCount: model.items.count)
+        )
+
+        let anchor = model.items[10].reference
+        model.visibleReference = anchor
+        await model.prefetchIfNeeded(after: model.items[15].reference)
+        XCTAssertEqual(model.items.count, 40)
+
+        await model.loadIfNeeded(for: model.query)
+        XCTAssertEqual(model.items.count, 40)
+        XCTAssertEqual(model.visibleReference, anchor)
+    }
+
+    func testLibraryRowsUseHumanReadableTitlesAndMetadata() {
+        let item = LibraryListItem(
+            id: "audio-1", itemType: "audio", title: "Team planning.m4a", subtitle: "EN",
+            status: "completed", wordCount: 100, duration: 72, pageCount: 0,
+            summaryStatus: "", favorite: false, archived: false, tags: [],
+            createdAt: Date(timeIntervalSince1970: 2_000_000_000)
+        )
+
+        XCTAssertEqual(item.displayTitle, "Team planning")
+        XCTAssertNil(item.displaySubtitle)
+        XCTAssertNotNil(item.createdDateText)
+
+        let meaningfulSubtitle = LibraryListItem(
+            id: "audio-2", itemType: "audio", title: "Song.m4a", subtitle: "Music",
+            status: "completed", wordCount: 100, duration: 72, pageCount: 0,
+            summaryStatus: "", favorite: false, archived: false, tags: [], createdAt: nil
+        )
+        XCTAssertEqual(meaningfulSubtitle.displaySubtitle, "Music")
+    }
+
+    @MainActor
+    func testAudioPlayerUsesKnownDurationBeforeRemoteMetadataLoads() {
+        let player = AudioPlayerService()
+        player.load(
+            url: URL(fileURLWithPath: "/tmp/media-tools-missing-audio.m4a"),
+            knownDuration: 72
+        )
+
+        XCTAssertEqual(player.duration, 72)
+        XCTAssertEqual(player.formattedDuration, "1:12")
+        player.stop()
     }
 
     func testAudioUploadCompletionEncodesSemanticContentType() throws {

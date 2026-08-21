@@ -83,6 +83,20 @@ struct AudioTranscription: Identifiable, Codable {
         return formattedTranscriptText
     }
 
+    /// The original view is useful only when readability formatting produced a
+    /// visibly different result. Both values remain stored for exports and
+    /// provenance even when the UI collapses the duplicate choice.
+    var hasDistinctReadableTranscript: Bool {
+        guard formattingStatus == "completed",
+              let transcriptText,
+              let formattedTranscriptText
+        else { return false }
+
+        let original = Self.normalizedTranscriptForDisplayComparison(transcriptText)
+        let readable = Self.normalizedTranscriptForDisplayComparison(formattedTranscriptText)
+        return !original.isEmpty && !readable.isEmpty && original != readable
+    }
+
     var processingDescription: String {
         switch processingStage {
         case "queued": "Waiting to start"
@@ -93,6 +107,13 @@ struct AudioTranscription: Identifiable, Codable {
         case "invalid_source": "Recording file needs recovery"
         default: status == "pending" ? "Waiting to start" : "Processing transcription"
         }
+    }
+
+    private static func normalizedTranscriptForDisplayComparison(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -161,6 +182,50 @@ struct LibraryListItem: Identifiable, Codable, Hashable {
 
     var reference: LibraryReference {
         LibraryReference(itemType: itemType, itemId: id)
+    }
+
+    var displayTitle: String {
+        let supportedExtensions: Set<String>
+        switch itemType {
+        case "audio":
+            supportedExtensions = ["aac", "caf", "m4a", "mp3", "mp4", "mov", "wav"]
+        case "pdf":
+            supportedExtensions = ["pdf"]
+        default:
+            supportedExtensions = []
+        }
+
+        let pathExtension = (title as NSString).pathExtension.lowercased()
+        guard supportedExtensions.contains(pathExtension) else { return title }
+        let titleWithoutExtension = (title as NSString).deletingPathExtension
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return titleWithoutExtension.isEmpty ? title : titleWithoutExtension
+    }
+
+    var displaySubtitle: String? {
+        let value = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+
+        if itemType == "audio" {
+            let normalized = value.lowercased()
+            let languageCodes: Set<String> = [
+                "en", "en-us", "en-gb", "es", "fr", "de", "it", "ja", "ko", "pt", "zh",
+            ]
+            if normalized == "recording" || languageCodes.contains(normalized) {
+                return nil
+            }
+        }
+        return value
+    }
+
+    var createdDateText: String? {
+        createdAt?.formatted(
+            .dateTime
+                .month(.abbreviated)
+                .day()
+                .hour()
+                .minute()
+        )
     }
 }
 
