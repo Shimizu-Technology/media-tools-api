@@ -2,6 +2,28 @@ import XCTest
 @testable import MediaTools
 
 final class ModelDecodingTests: XCTestCase {
+    private func mediaBox(_ type: String, payload: Data) -> Data {
+        let size = UInt32(payload.count + 8)
+        var data = Data([
+            UInt8((size >> 24) & 0xff), UInt8((size >> 16) & 0xff),
+            UInt8((size >> 8) & 0xff), UInt8(size & 0xff),
+        ])
+        data.append(Data(type.utf8))
+        data.append(payload)
+        return data
+    }
+
+    private func finalizedM4AData() -> Data {
+        mediaBox("ftyp", payload: Data("M4A ".utf8))
+            + mediaBox("mdat", payload: Data([0x01, 0x02]))
+            + mediaBox("moov", payload: Data([0x03]))
+    }
+
+    private func unfinalizedM4AData() -> Data {
+        mediaBox("ftyp", payload: Data("M4A ".utf8))
+            + mediaBox("mdat", payload: Data([0x01, 0x02]))
+    }
+
     @MainActor
     func testQuickCaptureNavigationSurvivesUntilMainTabsConsumeIt() {
         // Clear any state left by a previous interrupted test run.
@@ -222,7 +244,7 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     @MainActor
-    func testRecordingCoordinatorRecoversAndPreservesInterruptedCapture() throws {
+    func testRecordingCoordinatorRejectsAndPreservesUnfinalizedInterruptedCapture() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -233,7 +255,7 @@ final class ModelDecodingTests: XCTestCase {
             now: Date(timeIntervalSince1970: 1_700_000_000)
         )
         recording.duration = 37
-        try Data([0x00, 0x01, 0x02]).write(to: store.fileURL(for: recording))
+        try unfinalizedM4AData().write(to: store.fileURL(for: recording))
         try store.saveRecordings([recording])
 
         let coordinator = RecordingCoordinator(store: store)
@@ -242,11 +264,62 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(recovered.id, recording.id)
         XCTAssertEqual(recovered.contentType, "meeting")
         XCTAssertEqual(recovered.duration, 37)
-        XCTAssertEqual(recovered.state, .interrupted)
+        XCTAssertEqual(recovered.state, .invalid)
+        XCTAssertTrue(recovered.lastError?.contains("not finalized correctly") == true)
         XCTAssertTrue(FileManager.default.fileExists(atPath: store.fileURL(for: recording).path))
 
         let reloaded = try XCTUnwrap(store.loadRecordings().first)
-        XCTAssertEqual(reloaded.state, .interrupted)
+        XCTAssertEqual(reloaded.state, .invalid)
+    }
+
+    @MainActor
+    func testRecordingCoordinatorRecoversOnlyVerifiedInterruptedCapture() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        var recording = store.makeRecording(contentType: "meeting")
+        recording.duration = 37
+        try finalizedM4AData().write(to: store.fileURL(for: recording))
+        try store.saveRecordings([recording])
+
+        let coordinator = RecordingCoordinator(store: store)
+        let recovered = try XCTUnwrap(coordinator.pendingRecordings.first)
+
+        XCTAssertEqual(recovered.state, .interrupted)
+        XCTAssertTrue(recovered.canUpload)
+        XCTAssertTrue(recovered.lastError?.contains("verified") == true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.fileURL(for: recording).path))
+    }
+
+    func testRecordingIntegrityValidatorRequiresMovieMetadata() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let validURL = directory.appendingPathComponent("valid.m4a")
+        let invalidURL = directory.appendingPathComponent("invalid.m4a")
+        try finalizedM4AData().write(to: validURL)
+        try unfinalizedM4AData().write(to: invalidURL)
+
+        XCTAssertNoThrow(try RecordingIntegrityValidator.validate(url: validURL).get())
+        XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: invalidURL).get()) { error in
+            XCTAssertEqual(error as? RecordingIntegrityError, .unfinalizedContainer)
+        }
+    }
+
+    func testLocalRecordingDecodesManifestWrittenBeforeServerRetentionFields() throws {
+        let data = Data(
+            #"{"id":"11111111-1111-1111-1111-111111111111","filename":"memo.m4a","createdAt":"2026-08-21T03:00:00Z","duration":12,"contentType":"voice_memo","state":"ready"}"#.utf8
+        )
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let recording = try decoder.decode(LocalRecording.self, from: data)
+
+        XCTAssertEqual(recording.state, .ready)
+        XCTAssertNil(recording.remoteTranscriptionID)
     }
 
     @MainActor
@@ -485,10 +558,12 @@ final class ModelDecodingTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = try TranscriptionWatchStore(rootDirectory: directory)
+        let recordingID = UUID()
         let watch = TranscriptionWatch(
             id: "audio-1",
             title: "Team sync",
             createdAt: Date(),
+            recordingID: recordingID,
             authenticationPausedAt: Date(timeIntervalSince1970: 1_800_000_000)
         )
 
@@ -497,9 +572,75 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(restored.id, watch.id)
         XCTAssertEqual(restored.title, watch.title)
         XCTAssertEqual(restored.createdAt.timeIntervalSince(watch.createdAt), 0, accuracy: 1)
+        XCTAssertEqual(restored.recordingID, recordingID)
         XCTAssertEqual(restored.authenticationPausedAt, watch.authenticationPausedAt)
         try store.save([])
         XCTAssertTrue(try store.load().isEmpty)
+    }
+
+    func testTranscriptionWatchDecodesManifestWrittenBeforeRecordingLink() throws {
+        let data = Data(
+            #"{"id":"audio-1","title":"Old watch","createdAt":"2026-08-21T03:00:00Z"}"#.utf8
+        )
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let watch = try decoder.decode(TranscriptionWatch.self, from: data)
+
+        XCTAssertNil(watch.recordingID)
+        XCTAssertNil(watch.authenticationPausedAt)
+    }
+
+    @MainActor
+    func testDeviceCopyIsRetainedUntilServerProcessingCompletes() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        var recording = store.makeRecording(contentType: "voice_memo")
+        recording.state = .ready
+        let audioURL = store.fileURL(for: recording)
+        try finalizedM4AData().write(to: audioURL)
+        try store.saveRecordings([recording])
+        let coordinator = RecordingCoordinator(store: store)
+
+        coordinator.markServerAccepted(recording.id, transcriptionID: "audio-1")
+
+        let processing = try XCTUnwrap(coordinator.recording(withID: recording.id))
+        XCTAssertEqual(processing.state, .serverProcessing)
+        XCTAssertEqual(processing.remoteTranscriptionID, "audio-1")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: audioURL.path))
+
+        coordinator.markServerCompleted(recording.id)
+
+        XCTAssertNil(coordinator.recording(withID: recording.id))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: audioURL.path))
+    }
+
+    @MainActor
+    func testPermanentServerSourceFailurePreservesDeviceCopyAsInvalid() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        var recording = store.makeRecording(contentType: "voice_memo")
+        recording.state = .ready
+        let audioURL = store.fileURL(for: recording)
+        try finalizedM4AData().write(to: audioURL)
+        try store.saveRecordings([recording])
+        let coordinator = RecordingCoordinator(store: store)
+
+        coordinator.markServerAccepted(recording.id, transcriptionID: "audio-1")
+        coordinator.markServerFailed(
+            recording.id,
+            message: "The source is invalid.",
+            invalidSource: true
+        )
+
+        XCTAssertEqual(coordinator.recording(withID: recording.id)?.state, .invalid)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: audioURL.path))
     }
 
     @MainActor

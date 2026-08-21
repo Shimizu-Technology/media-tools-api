@@ -71,6 +71,10 @@ struct AudioTranscription: Identifiable, Codable {
         status == "completed"
     }
 
+    var isRetryable: Bool {
+        processingStage != "invalid_source"
+    }
+
     var readableTranscriptText: String? {
         guard formattingStatus == "completed",
               let formattedTranscriptText,
@@ -86,6 +90,7 @@ struct AudioTranscription: Identifiable, Codable {
         case "splitting": "Splitting long recording"
         case "transcribing": "Transcribing audio"
         case "stitching", "finalizing": "Finalizing transcript"
+        case "invalid_source": "Recording file needs recovery"
         default: status == "pending" ? "Waiting to start" : "Processing transcription"
         }
     }

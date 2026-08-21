@@ -10,9 +10,11 @@ enum LocalRecordingState: String, Codable, Sendable {
     case recording
     case ready
     case interrupted
+    case invalid
     case waitingForUpload
     case uploading
     case finalizingUpload
+    case serverProcessing
     case uploadFailed
 }
 
@@ -30,6 +32,7 @@ struct LocalRecording: Identifiable, Codable, Equatable, Sendable {
     var uploadSizeBytes: Int64?
     var uploadMimeType: String?
     var uploadTaskIdentifier: Int?
+    var remoteTranscriptionID: String? = nil
 
     var displayTitle: String {
         if let originalFilename, !originalFilename.isEmpty {
@@ -61,6 +64,8 @@ struct LocalRecording: Identifiable, Codable, Equatable, Sendable {
             return "Saved on this iPhone"
         case .interrupted:
             return "Recovered after an interruption"
+        case .invalid:
+            return lastError ?? "Recording needs recovery"
         case .waitingForUpload:
             return "Waiting for a connection"
         case .uploading:
@@ -68,13 +73,22 @@ struct LocalRecording: Identifiable, Codable, Equatable, Sendable {
             return percent > 0 ? "Uploading \(percent)%" : "Starting upload"
         case .finalizingUpload:
             return "Finishing securely"
+        case .serverProcessing:
+            return "Transcribing; device copy retained"
         case .uploadFailed:
             return lastError ?? "Upload paused"
         }
     }
 
     var isUploadInProgress: Bool {
-        state == .waitingForUpload || state == .uploading || state == .finalizingUpload
+        state == .waitingForUpload
+            || state == .uploading
+            || state == .finalizingUpload
+            || state == .serverProcessing
+    }
+
+    var canUpload: Bool {
+        state == .ready || state == .interrupted || state == .uploadFailed
     }
 
     private static let titleFormatter: DateFormatter = {

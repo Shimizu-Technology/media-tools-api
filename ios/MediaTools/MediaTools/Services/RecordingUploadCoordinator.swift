@@ -10,9 +10,9 @@ enum TranscriptionWatchFailureDisposition: Equatable {
 
 /// Durable orchestration for recordings after capture finishes.
 ///
-/// The recording manifest is the source of truth until the API creates its
-/// transcription job. A separate watch manifest then follows server processing
-/// so completion can still be delivered after the local audio is removed.
+/// The recording manifest remains the source of truth until server processing
+/// succeeds. A separate watch manifest links the remote job to its device copy
+/// so a 202 response can never discard the only recoverable source recording.
 @MainActor
 @Observable
 final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
@@ -68,7 +68,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     }
 
     func queue(_ recording: LocalRecording) {
-        guard !recording.isUploadInProgress else { return }
+        guard recording.canUpload else { return }
         recorder.markWaitingForUpload(recording.id)
         retryAttempts[recording.id] = 0
         process(recordingID: recording.id)
@@ -76,6 +76,20 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
 
     func resumePendingWork() {
         transport.receiver = self
+        for recording in recorder.pendingRecordings
+        where recording.state == .serverProcessing {
+            guard let remoteID = recording.remoteTranscriptionID,
+                  !watches.contains(where: { $0.id == remoteID })
+            else { continue }
+            addWatch(
+                TranscriptionWatch(
+                    id: remoteID,
+                    title: recording.displayTitle,
+                    createdAt: recording.createdAt,
+                    recordingID: recording.id
+                )
+            )
+        }
         for watch in watches {
             startWatching(watch)
         }
@@ -238,8 +252,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     }
 
     private func accept(item: AudioTranscription, recordingID: UUID) {
-        guard let recording = recorder.recording(withID: recordingID) else { return }
-        recorder.markUploaded(recording)
+        guard recorder.recording(withID: recordingID) != nil else { return }
+        recorder.markServerAccepted(recordingID, transcriptionID: item.id)
         retryAttempts[recordingID] = nil
         retryTasks[recordingID]?.cancel()
         retryTasks[recordingID] = nil
@@ -248,7 +262,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         let watch = TranscriptionWatch(
             id: item.id,
             title: item.displayTitle,
-            createdAt: Date()
+            createdAt: Date(),
+            recordingID: recordingID
         )
         addWatch(watch)
         startWatching(watch)
@@ -276,6 +291,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                     progress: 100
                 ) else { return }
                 self.latestItem = item
+                if let recordingID = watch.recordingID {
+                    self.recorder.markServerCompleted(recordingID)
+                }
                 self.removeWatch(id: watch.id)
                 self.statusMessage = "Transcription complete"
                 return
@@ -288,6 +306,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                     self.clearAuthenticationPause(for: watch.id)
                     self.latestItem = item
                     if item.status == "completed" {
+                        if let recordingID = watch.recordingID {
+                            self.recorder.markServerCompleted(recordingID)
+                        }
                         self.removeWatch(id: watch.id)
                         self.statusMessage = "Transcription complete"
                         NotificationService.notifyAudioComplete(
@@ -297,6 +318,13 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                         return
                     }
                     if item.status == "failed" {
+                        if let recordingID = watch.recordingID {
+                            self.recorder.markServerFailed(
+                                recordingID,
+                                message: item.errorMessage ?? "Transcription failed. The recording is still on this iPhone.",
+                                invalidSource: !item.isRetryable
+                            )
+                        }
                         self.removeWatch(id: watch.id)
                         self.statusMessage = item.errorMessage ?? "Transcription failed"
                         NotificationService.notifyAudioFailed(
@@ -373,6 +401,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
 
     private func stopWatching(_ watch: TranscriptionWatch, message: String) {
         latestItem = nil
+        if let recordingID = watch.recordingID {
+            recorder.markServerFailed(recordingID, message: message, invalidSource: false)
+        }
         removeWatch(id: watch.id)
         statusMessage = message
         NotificationService.notifyAudioStatusUnavailable(

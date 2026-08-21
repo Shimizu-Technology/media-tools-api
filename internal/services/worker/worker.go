@@ -1230,6 +1230,16 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	log.Printf("📊 Audio job %s source ready: %s (%.1fMB)", at.ID, filepath.Ext(payload.TempFilePath), bytesToMB(fileInfo.Size()))
 	sourceDuration, probeErr := probeMediaDuration(ctx, payload.TempFilePath)
 	if probeErr != nil {
+		if IsInvalidAudioSourceError(probeErr) {
+			log.Printf("❌ Audio job %s source validation failed: %v", at.ID, probeErr)
+			at.Status = "failed"
+			at.ErrorMessage = InvalidAudioSourceMessage()
+			at.ProcessingStage = "invalid_source"
+			at.ProcessingProgress = 100
+			_ = p.db.UpdateAudioTranscription(ctx, at)
+			p.NotifyWebhook("audio.failed", at.UserID, at.APIKeyID, at)
+			return fmt.Errorf("invalid audio source: %w", probeErr)
+		}
 		log.Printf("⚠️  Audio job %s could not probe source duration; using safe chunked recovery: %v", at.ID, probeErr)
 	} else {
 		log.Printf("⏱️  Audio job %s source duration: %.1fs", at.ID, sourceDuration)
@@ -1255,8 +1265,16 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		}
 		if err := transcodeForWhisper(ctx, payload.TempFilePath, compressedPath, transcodeProgress); err != nil {
 			at.Status = "failed"
-			at.ErrorMessage = "Failed to compress audio for transcription: " + err.Error()
-			p.db.UpdateAudioTranscription(ctx, at)
+			at.ProcessingProgress = 100
+			if IsInvalidAudioSourceError(err) {
+				at.ErrorMessage = InvalidAudioSourceMessage()
+				at.ProcessingStage = "invalid_source"
+			} else {
+				at.ErrorMessage = "We couldn't prepare this recording for transcription. Please try again."
+				at.ProcessingStage = "failed"
+			}
+			_ = p.db.UpdateAudioTranscription(ctx, at)
+			p.NotifyWebhook("audio.failed", at.UserID, at.APIKeyID, at)
 			return fmt.Errorf("failed to transcode large audio: %w", err)
 		}
 		cleanupPaths = append(cleanupPaths, compressedPath)
@@ -2295,13 +2313,47 @@ func probeMediaDuration(ctx context.Context, inputPath string) (float64, error) 
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		inputPath,
 	)
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("ffprobe failed: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	duration, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
-	if err != nil || duration <= 0 {
-		return 0, err
+	if err != nil {
+		return 0, fmt.Errorf("ffprobe returned an invalid duration: %w", err)
+	}
+	if duration <= 0 {
+		return 0, fmt.Errorf("ffprobe returned a non-positive duration: %v", duration)
 	}
 	return duration, nil
+}
+
+const invalidAudioSourcePublicMessage = "This recording file was not finalized correctly and cannot be transcribed. Retry will not repair it; replace the file with the original recording if available."
+
+// InvalidAudioSourceMessage is safe for API clients. Detailed ffprobe and
+// ffmpeg diagnostics remain in server logs.
+func InvalidAudioSourceMessage() string {
+	return invalidAudioSourcePublicMessage
+}
+
+// IsInvalidAudioSourceError identifies permanent media-container failures.
+// It is exported so the retry handler can also recognize records written by
+// older workers that stored the raw ffmpeg message with a generic stage.
+func IsInvalidAudioSourceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"moov atom not found",
+		"invalid data found when processing input",
+		"could not find codec parameters",
+		"does not contain any stream",
+		"matches no streams",
+		"stream map '0:a:0' matches no streams",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
