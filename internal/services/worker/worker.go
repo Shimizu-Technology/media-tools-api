@@ -1232,12 +1232,11 @@ func (p *Pool) processAudioTranscription(job Job) error {
 	if probeErr != nil {
 		if IsInvalidAudioSourceError(probeErr) {
 			log.Printf("❌ Audio job %s source validation failed: %v", at.ID, probeErr)
-			at.Status = "failed"
-			at.ErrorMessage = InvalidAudioSourceMessage()
-			at.ProcessingStage = "invalid_source"
-			at.ProcessingProgress = 100
-			_ = p.db.UpdateAudioTranscription(ctx, at)
-			p.NotifyWebhook("audio.failed", at.UserID, at.APIKeyID, at)
+			if err := p.persistAudioFailure(
+				ctx, at, "invalid_source", InvalidAudioSourceMessage(),
+			); err != nil {
+				return fmt.Errorf("failed to persist invalid audio source status: %w", err)
+			}
 			return fmt.Errorf("invalid audio source: %w", probeErr)
 		}
 		log.Printf("⚠️  Audio job %s could not probe source duration; using safe chunked recovery: %v", at.ID, probeErr)
@@ -1264,17 +1263,15 @@ func (p *Pool) processAudioTranscription(job Job) error {
 			}
 		}
 		if err := transcodeForWhisper(ctx, payload.TempFilePath, compressedPath, transcodeProgress); err != nil {
-			at.Status = "failed"
-			at.ProcessingProgress = 100
+			stage := "failed"
+			message := "We couldn't prepare this recording for transcription. Please try again."
 			if IsInvalidAudioSourceError(err) {
-				at.ErrorMessage = InvalidAudioSourceMessage()
-				at.ProcessingStage = "invalid_source"
-			} else {
-				at.ErrorMessage = "We couldn't prepare this recording for transcription. Please try again."
-				at.ProcessingStage = "failed"
+				stage = "invalid_source"
+				message = InvalidAudioSourceMessage()
 			}
-			_ = p.db.UpdateAudioTranscription(ctx, at)
-			p.NotifyWebhook("audio.failed", at.UserID, at.APIKeyID, at)
+			if persistErr := p.persistAudioFailure(ctx, at, stage, message); persistErr != nil {
+				return fmt.Errorf("failed to persist audio preparation failure: %w", persistErr)
+			}
 			return fmt.Errorf("failed to transcode large audio: %w", err)
 		}
 		cleanupPaths = append(cleanupPaths, compressedPath)
@@ -2325,6 +2322,27 @@ func probeMediaDuration(ctx context.Context, inputPath string) (float64, error) 
 		return 0, fmt.Errorf("ffprobe returned a non-positive duration: %v", duration)
 	}
 	return duration, nil
+}
+
+func (p *Pool) persistAudioFailure(
+	ctx context.Context,
+	at *models.AudioTranscription,
+	stage string,
+	message string,
+) error {
+	at.Status = "failed"
+	at.ErrorMessage = message
+	at.ProcessingStage = stage
+	at.ProcessingProgress = 100
+	updated, err := p.db.UpdateAudioTranscriptionIfActive(ctx, at)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return fmt.Errorf("audio transcription stopped before failure could be saved")
+	}
+	p.NotifyWebhook("audio.failed", at.UserID, at.APIKeyID, at)
+	return nil
 }
 
 const invalidAudioSourcePublicMessage = "This recording file was not finalized correctly and cannot be transcribed. Retry will not repair it; replace the file with the original recording if available."
