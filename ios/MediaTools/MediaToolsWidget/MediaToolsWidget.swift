@@ -92,15 +92,15 @@ private struct RecordingLiveActivity: Widget {
             HStack(spacing: 14) {
                 ZStack {
                     Circle()
-                        .fill(Color.red.opacity(0.18))
-                    Image(systemName: context.state.isInterrupted ? "pause.fill" : "waveform")
+                        .fill(activityColor(for: context.state).opacity(0.18))
+                    Image(systemName: activityIcon(for: context.state))
                         .font(.headline.weight(.bold))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(activityColor(for: context.state))
                 }
                 .frame(width: 44, height: 44)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(context.state.isInterrupted ? "Recording paused" : "Recording")
+                    Text(activityTitle(for: context.state))
                         .font(.headline)
                     Text(context.attributes.contentTypeLabel)
                         .font(.caption)
@@ -112,15 +112,41 @@ private struct RecordingLiveActivity: Widget {
 
                 Spacer()
 
-                Button(intent: StopRecordingIntent()) {
-                    Image(systemName: "stop.fill")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(.red, in: Circle())
+                HStack(spacing: 8) {
+                    if !context.state.isInterrupted {
+                        if context.state.isPaused {
+                            Button(intent: ResumeRecordingIntent()) {
+                                Image(systemName: "play.fill")
+                                    .font(.headline)
+                                    .foregroundStyle(.white)
+                                    .frame(width: 44, height: 44)
+                                    .background(.teal, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Resume recording")
+                        } else {
+                            Button(intent: PauseRecordingIntent()) {
+                                Image(systemName: "pause.fill")
+                                    .font(.headline)
+                                    .foregroundStyle(.white)
+                                    .frame(width: 44, height: 44)
+                                    .background(.teal, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Pause recording")
+                        }
+                    }
+
+                    Button(intent: StopRecordingIntent()) {
+                        Image(systemName: "stop.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(.red, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Stop and save recording")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Stop and save recording")
             }
             .padding(16)
             .activityBackgroundTint(Color.black.opacity(0.92))
@@ -129,20 +155,37 @@ private struct RecordingLiveActivity: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label("Recording", systemImage: "waveform")
+                    Label(activityTitle(for: context.state), systemImage: activityIcon(for: context.state))
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(activityColor(for: context.state))
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     RecordingTimer(state: context.state)
                         .font(.caption.monospacedDigit())
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    HStack {
+                    HStack(spacing: 8) {
                         Text(context.attributes.contentTypeLabel)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
+                        if !context.state.isInterrupted {
+                            if context.state.isPaused {
+                                Button(intent: ResumeRecordingIntent()) {
+                                    Label("Resume", systemImage: "play.fill")
+                                        .font(.caption.weight(.semibold))
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.teal)
+                            } else {
+                                Button(intent: PauseRecordingIntent()) {
+                                    Label("Pause", systemImage: "pause.fill")
+                                        .font(.caption.weight(.semibold))
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.teal)
+                            }
+                        }
                         Button(intent: StopRecordingIntent()) {
                             Label("Stop & Save", systemImage: "stop.fill")
                                 .font(.caption.weight(.semibold))
@@ -152,8 +195,8 @@ private struct RecordingLiveActivity: Widget {
                     }
                 }
             } compactLeading: {
-                Image(systemName: context.state.isInterrupted ? "pause.fill" : "waveform")
-                    .foregroundStyle(.red)
+                Image(systemName: activityIcon(for: context.state))
+                    .foregroundStyle(activityColor(for: context.state))
             } compactTrailing: {
                 RecordingTimer(state: context.state)
                     .font(.caption2.monospacedDigit())
@@ -165,6 +208,22 @@ private struct RecordingLiveActivity: Widget {
             .widgetURL(URL(string: "mediatools://record"))
             .keylineTint(.red)
         }
+    }
+
+    private func activityTitle(for state: RecordingActivityAttributes.ContentState) -> String {
+        if state.isInterrupted { return "Recording interrupted" }
+        if state.isPaused { return "Recording paused" }
+        return "Recording"
+    }
+
+    private func activityIcon(for state: RecordingActivityAttributes.ContentState) -> String {
+        if state.isInterrupted { return "exclamationmark.waveform" }
+        if state.isPaused { return "pause.fill" }
+        return "waveform"
+    }
+
+    private func activityColor(for state: RecordingActivityAttributes.ContentState) -> Color {
+        state.isInterrupted || state.isPaused ? .orange : .red
     }
 }
 

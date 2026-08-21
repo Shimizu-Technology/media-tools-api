@@ -8,6 +8,7 @@ func TestRequiresWhisperTranscodeNormalizesBrowserContainers(t *testing.T) {
 		want bool
 	}{
 		{path: "/tmp/recording.m4a", want: true},
+		{path: "/tmp/recording.caf", want: true},
 		{path: "/tmp/recording.webm", want: true},
 		{path: "/tmp/zoom.mp4", want: true},
 		{path: "/tmp/audio.mp3", want: false},

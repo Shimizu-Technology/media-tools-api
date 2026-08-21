@@ -82,7 +82,7 @@ const PENDING_AUDIO_DB = 'media-tools-audio';
 const PENDING_AUDIO_STORE = 'pending-recordings';
 const PENDING_AUDIO_KEY = 'latest';
 const ACTIVE_AUDIO_TRANSCRIPTION_KEY = 'mta_active_audio_transcription_id';
-const ALLOWED_AUDIO_EXTENSIONS = ['.mp3', '.wav', '.m4a', '.mp4', '.ogg', '.flac', '.webm'];
+const ALLOWED_AUDIO_EXTENSIONS = ['.mp3', '.wav', '.caf', '.m4a', '.mp4', '.ogg', '.flac', '.webm'];
 const MAX_AUDIO_SIZE_MB = 2048;
 
 interface PendingRecording {

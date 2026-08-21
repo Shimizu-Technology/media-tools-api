@@ -27,7 +27,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
-const supportedTranscriptionUploadFormats = "mp3, wav, m4a, mp4, ogg, flac, webm"
+const supportedTranscriptionUploadFormats = "mp3, wav, caf, m4a, mp4, ogg, flac, webm"
 
 // supportedTranscriptionUploadTypes maps upload extensions accepted by the app.
 //
@@ -36,6 +36,7 @@ const supportedTranscriptionUploadFormats = "mp3, wav, m4a, mp4, ogg, flac, webm
 var supportedTranscriptionUploadTypes = map[string]bool{
 	".mp3":  true,
 	".wav":  true,
+	".caf":  true,
 	".m4a":  true,
 	".mp4":  true,
 	".ogg":  true,
@@ -91,7 +92,7 @@ type AudioUploadCompleteRequest struct {
 // POST /api/v1/audio/transcribe
 //
 // Accepts multipart file upload with field name "file".
-// Supported formats: mp3, wav, m4a, mp4, ogg, flac, webm
+// Supported formats: mp3, wav, caf, m4a, mp4, ogg, flac, webm
 //
 // Returns 202 Accepted immediately with the transcription record.
 // Frontend should poll GET /api/v1/audio/transcriptions/:id for completion.

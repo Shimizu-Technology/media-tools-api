@@ -58,6 +58,38 @@ struct StopRecordingIntent: LiveActivityIntent {
     }
 }
 
+struct PauseRecordingIntent: LiveActivityIntent {
+    static let title: LocalizedStringResource = "Pause Recording"
+    static let description = IntentDescription(
+        "Pause the active Media Tools recording without ending it."
+    )
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        #if WIDGET_EXTENSION
+        return .result()
+        #else
+        _ = RecordingCoordinator.shared.pause()
+        return .result()
+        #endif
+    }
+}
+
+struct ResumeRecordingIntent: LiveActivityIntent {
+    static let title: LocalizedStringResource = "Resume Recording"
+    static let description = IntentDescription("Resume the paused Media Tools recording.")
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        #if WIDGET_EXTENSION
+        return .result()
+        #else
+        _ = RecordingCoordinator.shared.resume()
+        return .result()
+        #endif
+    }
+}
+
 extension Notification.Name {
     static let mediaToolsQuickCapture = Notification.Name("MediaToolsQuickCapture")
 }
@@ -102,6 +134,24 @@ struct MediaToolsAppShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Stop Recording",
             systemImageName: "stop.circle.fill"
+        )
+
+        AppShortcut(
+            intent: PauseRecordingIntent(),
+            phrases: [
+                "Pause my \(.applicationName) recording",
+            ],
+            shortTitle: "Pause Recording",
+            systemImageName: "pause.circle.fill"
+        )
+
+        AppShortcut(
+            intent: ResumeRecordingIntent(),
+            phrases: [
+                "Resume my \(.applicationName) recording",
+            ],
+            shortTitle: "Resume Recording",
+            systemImageName: "play.circle.fill"
         )
     }
 }

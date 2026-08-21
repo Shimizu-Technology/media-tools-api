@@ -78,11 +78,15 @@ struct RecordingStore {
         let id = UUID()
         let recording = LocalRecording(
             id: id,
-            filename: "\(id.uuidString.lowercased()).m4a",
+            // Capture voice as linear PCM inside CAF. Unlike M4A, CAF permits
+            // its final audio-data size to remain unknown and treats EOF as the
+            // boundary. That makes samples written before an app termination
+            // recoverable instead of depending on a final `moov` atom.
+            filename: "\(id.uuidString.lowercased()).caf",
             // Keep the UUID for collision-proof device storage, but send a
             // human-readable source name to the API. The old implementation
             // exposed the private storage UUID as the recording title.
-            originalFilename: "Recording — \(Self.recordingNameFormatter.string(from: now)).m4a",
+            originalFilename: "Recording — \(Self.recordingNameFormatter.string(from: now)).caf",
             createdAt: now,
             duration: 0,
             contentType: contentType,

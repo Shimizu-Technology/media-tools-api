@@ -24,6 +24,28 @@ final class ModelDecodingTests: XCTestCase {
             + mediaBox("mdat", payload: Data([0x01, 0x02]))
     }
 
+    private func cafData(unknownDataLength: Bool) -> Data {
+        func chunk(_ type: String, payload: Data, unknownLength: Bool = false) -> Data {
+            let size = unknownLength ? UInt64.max : UInt64(payload.count)
+            var data = Data(type.utf8)
+            data.append(contentsOf: (0..<8).reversed().map {
+                UInt8((size >> UInt64($0 * 8)) & 0xff)
+            })
+            data.append(payload)
+            return data
+        }
+
+        var description = Data(count: 32)
+        description.replaceSubrange(8..<12, with: Data("lpcm".utf8))
+        return Data("caff".utf8) + Data([0x00, 0x01, 0x00, 0x00])
+            + chunk("desc", payload: description)
+            + chunk(
+                "data",
+                payload: Data([0, 0, 0, 0, 1, 0, 2, 0]),
+                unknownLength: unknownDataLength
+            )
+    }
+
     @MainActor
     func testQuickCaptureNavigationSurvivesUntilMainTabsConsumeIt() {
         // Clear any state left by a previous interrupted test run.
@@ -250,9 +272,21 @@ final class ModelDecodingTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let store = try RecordingStore(rootDirectory: directory)
-        var recording = store.makeRecording(
+        let id = UUID()
+        var recording = LocalRecording(
+            id: id,
+            filename: "\(id.uuidString.lowercased()).m4a",
+            originalFilename: "Legacy recording.m4a",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            duration: 0,
             contentType: "meeting",
-            now: Date(timeIntervalSince1970: 1_700_000_000)
+            state: .recording,
+            lastError: nil,
+            uploadProgress: nil,
+            uploadObjectKey: nil,
+            uploadSizeBytes: nil,
+            uploadMimeType: nil,
+            uploadTaskIdentifier: nil
         )
         recording.duration = 37
         try unfinalizedM4AData().write(to: store.fileURL(for: recording))
@@ -265,7 +299,7 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(recovered.contentType, "meeting")
         XCTAssertEqual(recovered.duration, 37)
         XCTAssertEqual(recovered.state, .invalid)
-        XCTAssertTrue(recovered.lastError?.contains("not finalized correctly") == true)
+        XCTAssertTrue(recovered.lastError?.contains("cannot be transcribed") == true)
         XCTAssertTrue(FileManager.default.fileExists(atPath: store.fileURL(for: recording).path))
 
         let reloaded = try XCTUnwrap(store.loadRecordings().first)
@@ -281,7 +315,7 @@ final class ModelDecodingTests: XCTestCase {
         let store = try RecordingStore(rootDirectory: directory)
         var recording = store.makeRecording(contentType: "meeting")
         recording.duration = 37
-        try finalizedM4AData().write(to: store.fileURL(for: recording))
+        try cafData(unknownDataLength: false).write(to: store.fileURL(for: recording))
         try store.saveRecordings([recording])
 
         let coordinator = RecordingCoordinator(store: store)
@@ -307,6 +341,57 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: invalidURL).get()) { error in
             XCTAssertEqual(error as? RecordingIntegrityError, .unfinalizedContainer)
         }
+    }
+
+    func testRecordingStoreCreatesCrashRecoverableCAF() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        let recording = store.makeRecording(contentType: "voice_memo")
+
+        XCTAssertEqual((recording.filename as NSString).pathExtension, "caf")
+        XCTAssertEqual(((recording.originalFilename ?? "") as NSString).pathExtension, "caf")
+    }
+
+    func testRecordingIntegrityValidatorAcceptsCAFWithUnknownDataLength() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let interruptedURL = directory.appendingPathComponent("interrupted.caf")
+        try cafData(unknownDataLength: true).write(to: interruptedURL)
+
+        XCTAssertNoThrow(try RecordingIntegrityValidator.validate(url: interruptedURL).get())
+    }
+
+    @MainActor
+    func testCAFUploadUsesExplicitAudioMIMEType() {
+        XCTAssertEqual(
+            RecordingUploadCoordinator.mimeType(for: URL(fileURLWithPath: "/tmp/recording.caf")),
+            "audio/x-caf"
+        )
+    }
+
+    @MainActor
+    func testRecordingCoordinatorRecoversInterruptedCAFForUpload() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        var recording = store.makeRecording(contentType: "meeting")
+        recording.duration = 28
+        try cafData(unknownDataLength: true).write(to: store.fileURL(for: recording))
+        try store.saveRecordings([recording])
+
+        let coordinator = RecordingCoordinator(store: store)
+        let recovered = try XCTUnwrap(coordinator.pendingRecordings.first)
+
+        XCTAssertEqual(recovered.state, .interrupted)
+        XCTAssertTrue(recovered.canUpload)
+        XCTAssertEqual((recovered.uploadFilename as NSString).pathExtension, "caf")
     }
 
     func testLocalRecordingDecodesManifestWrittenBeforeServerRetentionFields() throws {
@@ -370,6 +455,68 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(reloaded.duration, saved.duration)
         XCTAssertTrue(saved.displayTitle.hasPrefix("Recording — "))
         XCTAssertFalse(saved.uploadFilename.contains(saved.id.uuidString.lowercased()))
+    }
+
+    @MainActor
+    func testSimulatedCapturePausesResumesAndStopsFromPausedState() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let activityManager = TestRecordingActivityManager()
+        let store = try RecordingStore(rootDirectory: directory)
+        let coordinator = RecordingCoordinator(
+            store: store,
+            simulatesCapture: true,
+            activityManager: activityManager
+        )
+
+        coordinator.start(contentType: "meeting")
+        XCTAssertEqual(coordinator.captureState, .recording)
+        try await Task.sleep(for: .milliseconds(250))
+
+        XCTAssertTrue(coordinator.pause())
+        XCTAssertTrue(coordinator.isRecording)
+        XCTAssertTrue(coordinator.isPaused)
+        XCTAssertEqual(coordinator.statusMessage, "Recording paused")
+        let pausedDuration = coordinator.duration
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(coordinator.duration, pausedDuration, accuracy: 0.001)
+        await Task.yield()
+        XCTAssertEqual(activityManager.updates.last?.isPaused, true)
+        XCTAssertEqual(activityManager.updates.last?.isInterrupted, false)
+
+        XCTAssertTrue(coordinator.resume())
+        XCTAssertEqual(coordinator.captureState, .recording)
+        XCTAssertEqual(coordinator.statusMessage, "Recording resumed")
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertGreaterThan(coordinator.duration, pausedDuration)
+        await Task.yield()
+        XCTAssertEqual(activityManager.updates.last?.isPaused, false)
+        XCTAssertEqual(activityManager.updates.last?.isInterrupted, false)
+
+        XCTAssertTrue(coordinator.pause())
+        coordinator.stop()
+
+        XCTAssertEqual(coordinator.captureState, .idle)
+        let saved = try XCTUnwrap(coordinator.availableRecordings.first)
+        XCTAssertEqual(saved.state, .ready)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.fileURL(for: saved).path))
+    }
+
+    func testRecordingActivityStateDecodesBeforePauseSupport() throws {
+        let data = Data(
+            #"{"elapsedDuration":12,"resumedAt":null,"isInterrupted":true}"#.utf8
+        )
+
+        let state = try JSONDecoder().decode(
+            RecordingActivityAttributes.ContentState.self,
+            from: data
+        )
+
+        XCTAssertEqual(state.elapsedDuration, 12)
+        XCTAssertFalse(state.isPaused)
+        XCTAssertTrue(state.isInterrupted)
     }
 
     func testLibraryPreferencePatchOmitsUnchangedFields() throws {
@@ -661,6 +808,8 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertTrue(coordinator.isRecording)
         XCTAssertEqual(activityManager.startedRecording?.contentType, "voice_memo")
 
+        XCTAssertTrue(coordinator.pause())
+        XCTAssertTrue(coordinator.isPaused)
         let stopOutcome = await coordinator.toggleFromSystem()
         XCTAssertEqual(stopOutcome, .stopped)
         XCTAssertFalse(coordinator.isRecording)
@@ -750,6 +899,37 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertFalse(coordinator.isRecording)
         XCTAssertEqual(coordinator.availableRecordings.first?.state, .ready)
         XCTAssertEqual(activityManager.endedRecordingIDs, [recordingID, recordingID])
+    }
+
+    @MainActor
+    func testDelayedLiveActivityStartReconcilesAUserPause() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let activityManager = TestRecordingActivityManager()
+        activityManager.pausesStart = true
+        let coordinator = RecordingCoordinator(
+            store: try RecordingStore(rootDirectory: directory),
+            simulatesCapture: true,
+            activityManager: activityManager
+        )
+
+        let startTask = Task { await coordinator.toggleFromSystem() }
+        for _ in 0..<100 where !activityManager.isStartSuspended {
+            await Task.yield()
+        }
+        XCTAssertTrue(activityManager.isStartSuspended)
+
+        XCTAssertTrue(coordinator.pause())
+        activityManager.resumeStart()
+        let startOutcome = await startTask.value
+        XCTAssertEqual(startOutcome, .started)
+        XCTAssertTrue(coordinator.isPaused)
+        XCTAssertEqual(activityManager.updates.last?.isPaused, true)
+
+        let stopOutcome = await coordinator.stopFromSystem()
+        XCTAssertEqual(stopOutcome, .stopped)
     }
 
     func testAudioProcessingStateDecodesIntoUsefulProgressCopy() throws {
@@ -960,7 +1140,11 @@ private final class TestRecordingActivityManager: RecordingActivityManaging {
     }
     var pausesStart = false
     private(set) var startedRecording: LocalRecording?
-    private(set) var updates: [(isInterrupted: Bool, duration: TimeInterval)] = []
+    private(set) var updates: [(
+        isPaused: Bool,
+        isInterrupted: Bool,
+        duration: TimeInterval
+    )] = []
     private(set) var endCount = 0
     private(set) var endedRecordingIDs: [UUID?] = []
     private(set) var isStartSuspended = false
@@ -982,8 +1166,13 @@ private final class TestRecordingActivityManager: RecordingActivityManaging {
         startContinuation = nil
     }
 
-    func update(recordingID: UUID, isInterrupted: Bool, duration: TimeInterval) async {
-        updates.append((isInterrupted, duration))
+    func update(
+        recordingID: UUID,
+        isPaused: Bool,
+        isInterrupted: Bool,
+        duration: TimeInterval
+    ) async {
+        updates.append((isPaused, isInterrupted, duration))
     }
 
     func end(recordingID: UUID?, finalDuration: TimeInterval) async {

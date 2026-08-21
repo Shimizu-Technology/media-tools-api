@@ -32,7 +32,12 @@ enum RecordingIntegrityValidator {
             return .failure(.emptyFile)
         }
 
-        guard isoMediaExtensions.contains(url.pathExtension.lowercased()) else {
+        let pathExtension = url.pathExtension.lowercased()
+        if pathExtension == "caf" {
+            return validateCAF(url: url, fileSize: fileSize)
+        }
+
+        guard isoMediaExtensions.contains(pathExtension) else {
             return .success(())
         }
 
@@ -94,5 +99,77 @@ enum RecordingIntegrityValidator {
     private static func readBigEndianInteger<S: Sequence>(_ bytes: S) -> UInt64
     where S.Element == UInt8 {
         bytes.reduce(0) { ($0 << 8) | UInt64($1) }
+    }
+
+    /// Validates the subset of Core Audio Format needed for durable capture.
+    /// A CAF data chunk may legally use an all-ones size while recording; in
+    /// that case the data continues through EOF and remains decodable after an
+    /// unexpected process termination.
+    private static func validateCAF(
+        url: URL,
+        fileSize: Int
+    ) -> Result<Void, RecordingIntegrityError> {
+        do {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+
+            guard let header = try handle.read(upToCount: 8),
+                  header.count == 8,
+                  String(data: header.prefix(4), encoding: .ascii) == "caff",
+                  readBigEndianInteger(header[4..<6]) == 1
+            else {
+                return .failure(.malformedContainer)
+            }
+
+            let length = UInt64(fileSize)
+            var offset: UInt64 = 8
+            var foundAudioDescription = false
+            var foundAudioData = false
+
+            while offset < length {
+                guard length - offset >= 12 else {
+                    return .failure(.malformedContainer)
+                }
+                try handle.seek(toOffset: offset)
+                guard let chunkHeader = try handle.read(upToCount: 12),
+                      chunkHeader.count == 12
+                else {
+                    return .failure(.malformedContainer)
+                }
+
+                let chunkType = String(data: chunkHeader.prefix(4), encoding: .ascii) ?? ""
+                let chunkSize = readBigEndianInteger(chunkHeader.suffix(8))
+                let payloadOffset = offset + 12
+
+                if chunkSize == UInt64.max {
+                    // CAF only permits an unknown size for the final audio-data
+                    // chunk. Four bytes are the edit count; at least one audio
+                    // byte must follow it before the recording is uploadable.
+                    guard chunkType == "data", length > payloadOffset + 4 else {
+                        return .failure(.malformedContainer)
+                    }
+                    foundAudioData = true
+                    offset = length
+                    continue
+                }
+
+                guard chunkSize <= length - payloadOffset else {
+                    return .failure(.malformedContainer)
+                }
+                if chunkType == "desc", chunkSize >= 32 {
+                    foundAudioDescription = true
+                } else if chunkType == "data", chunkSize > 4 {
+                    foundAudioData = true
+                }
+                offset = payloadOffset + chunkSize
+            }
+
+            guard foundAudioDescription, foundAudioData else {
+                return .failure(.unfinalizedContainer)
+            }
+            return .success(())
+        } catch {
+            return .failure(.malformedContainer)
+        }
     }
 }

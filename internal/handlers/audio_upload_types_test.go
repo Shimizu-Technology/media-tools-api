@@ -32,6 +32,7 @@ func TestIsSupportedTranscriptionUploadExt(t *testing.T) {
 	}{
 		{ext: ".mp3", expected: true},
 		{ext: ".m4a", expected: true},
+		{ext: ".caf", expected: true},
 		{ext: ".mp4", expected: true},
 		{ext: ".webm", expected: true},
 		{ext: ".MP4", expected: true},
