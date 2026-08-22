@@ -6,6 +6,10 @@ private enum TranscriptViewMode: String, CaseIterable, Identifiable {
     case original = "Original"
 
     var id: String { rawValue }
+
+    var title: String {
+        self == .readable ? "Transcript" : rawValue
+    }
 }
 
 struct ItemDetailView: View {
@@ -166,6 +170,11 @@ struct ItemDetailView: View {
             }
         }
         .task { await loadDetail() }
+        .onChange(of: audio?.hasDistinctReadableTranscript) { _, hasDistinctOriginal in
+            if hasDistinctOriginal != true, transcriptViewMode == .original {
+                transcriptViewMode = .readable
+            }
+        }
         .onDisappear { detailPollingTask?.cancel() }
     }
 
@@ -398,7 +407,11 @@ struct ItemDetailView: View {
     @ViewBuilder
     private var audioPlayerSection: some View {
         if let audio, audio.isComplete {
-            AudioPlayerView(audioId: audio.id, seekTime: $audioSeekTime)
+            AudioPlayerView(
+                audioId: audio.id,
+                knownDuration: audio.duration,
+                seekTime: $audioSeekTime
+            )
                 .id("audio-player")
         }
     }
@@ -511,8 +524,8 @@ struct ItemDetailView: View {
 
                 if isAudioItem {
                     Picker("Transcript view", selection: $transcriptViewMode) {
-                        ForEach(TranscriptViewMode.allCases.filter { $0 != .timestamps || !segments.isEmpty }) { mode in
-                            Text(mode.rawValue).tag(mode)
+                        ForEach(availableTranscriptViewModes) { mode in
+                            Text(mode.title).tag(mode)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -582,13 +595,13 @@ struct ItemDetailView: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .tint(Theme.brand500)
-                    Text("Formatting for readability… The original is available now.")
+                    Text("Formatting for readability… Your transcript is available now.")
                         .font(Theme.caption())
                         .foregroundStyle(Theme.textSecondary)
                 }
             case "failed":
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(audio.formattingErrorMessage ?? "Readable formatting could not finish. The original transcript is shown.")
+                    Text(audio.formattingErrorMessage ?? "Readable formatting could not finish. Your transcript is shown unchanged.")
                         .font(Theme.caption())
                         .foregroundStyle(Theme.textSecondary)
                     Button {
@@ -639,12 +652,25 @@ struct ItemDetailView: View {
     private var transcriptViewDescription: String {
         switch transcriptViewMode {
         case .readable:
-            "Comfortable paragraphs with every spoken word preserved."
+            audio?.hasDistinctReadableTranscript == true
+                ? "Cleaned punctuation and paragraphs with every spoken word preserved."
+                : "Every spoken word from this recording."
         case .timestamps:
             "Tap a timestamp to play that moment."
         case .original:
             "Untouched speech-to-text from the transcription service."
         }
+    }
+
+    private var availableTranscriptViewModes: [TranscriptViewMode] {
+        var modes: [TranscriptViewMode] = [.readable]
+        if !segments.isEmpty {
+            modes.append(.timestamps)
+        }
+        if audio?.hasDistinctReadableTranscript == true {
+            modes.append(.original)
+        }
+        return modes
     }
 
     // MARK: - Helpers

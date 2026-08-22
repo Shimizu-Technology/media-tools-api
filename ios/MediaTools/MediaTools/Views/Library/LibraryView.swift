@@ -1,17 +1,7 @@
 import SwiftUI
 
 struct LibraryView: View {
-    @State private var items: [LibraryListItem] = []
-    @State private var selectedType: MediaFilter = .all
-    @State private var selectedStatus: StatusFilter = .all
-    @State private var sortOrder: SortOrder = .newest
-    @State private var searchText = ""
-    @State private var currentPage = 0
-    @State private var totalPages = 0
-    @State private var totalItems = 0
-    @State private var isLoading = false
-    @State private var isLoadingMore = false
-    @State private var loadError: String?
+    @State private var model: LibraryViewModel
     @State private var operationError: String?
     @State private var isSelecting = false
     @State private var selectedReferences: Set<LibraryReference> = []
@@ -19,76 +9,16 @@ struct LibraryView: View {
     @State private var showDeleteConfirmation = false
     @State private var isDeleting = false
     @State private var collectionTarget: LibraryReference?
+    @State private var presentedReference: LibraryReference?
 
     private let service = MediaToolsService.shared
     private let previewItems: [LibraryListItem]?
 
-    init(previewItems: [LibraryListItem]? = nil) {
+    init(model: LibraryViewModel? = nil, previewItems: [LibraryListItem]? = nil) {
         self.previewItems = previewItems
-    }
-
-    private enum MediaFilter: String, CaseIterable, Hashable {
-        case all
-        case youtube
-        case audio
-        case pdf
-
-        var title: String {
-            switch self {
-            case .all: "All"
-            case .youtube: "Videos"
-            case .audio: "Audio"
-            case .pdf: "PDFs"
-            }
-        }
-
-        var queryValue: String? { self == .all ? nil : rawValue }
-    }
-
-    private enum StatusFilter: String, CaseIterable, Hashable {
-        case all
-        case active
-        case completed
-        case failed
-
-        var title: String {
-            switch self {
-            case .all: "Any status"
-            case .active: "In progress"
-            case .completed: "Completed"
-            case .failed: "Needs attention"
-            }
-        }
-
-        var queryValue: String? { self == .all ? nil : rawValue }
-    }
-
-    private enum SortOrder: String, CaseIterable, Hashable {
-        case newest
-        case oldest
-
-        var title: String { self == .newest ? "Newest first" : "Oldest first" }
-        var direction: String { self == .newest ? "desc" : "asc" }
-    }
-
-    private struct Query: Hashable {
-        let type: MediaFilter
-        let status: StatusFilter
-        let sort: SortOrder
-        let search: String
-    }
-
-    private var query: Query {
-        Query(
-            type: selectedType,
-            status: selectedStatus,
-            sort: sortOrder,
-            search: searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        _model = State(
+            initialValue: model ?? LibraryViewModel(previewItems: previewItems)
         )
-    }
-
-    private var hasMore: Bool {
-        currentPage > 0 && currentPage < totalPages
     }
 
     var body: some View {
@@ -98,11 +28,14 @@ struct LibraryView: View {
         }
         .background(Theme.surface)
         .navigationTitle("Library")
-        .searchable(text: $searchText, prompt: "Search all media")
+        .searchable(text: $model.searchText, prompt: "Search all media")
         .toolbar { libraryToolbar }
         .safeAreaInset(edge: .bottom) { selectionBar }
-        .navigationDestination(for: LibraryReference.self) { reference in
-            LibraryDetailLoader(reference: reference)
+        .navigationDestination(item: $presentedReference) { reference in
+            LibraryDetailLoader(
+                reference: reference,
+                previewTitle: previewItems?.first { $0.reference == reference }?.displayTitle
+            )
         }
         .navigationDestination(for: String.self) { value in
             if value == "pdf-upload" {
@@ -130,8 +63,8 @@ struct LibraryView: View {
         } message: {
             Text("This permanently removes the selected content and cannot be undone.")
         }
-        .task(id: query) {
-            let requestedQuery = query
+        .task(id: model.query) {
+            let requestedQuery = model.query
             if !requestedQuery.search.isEmpty {
                 do {
                     try await Task.sleep(for: .milliseconds(300))
@@ -139,30 +72,30 @@ struct LibraryView: View {
                     return
                 }
             }
-            await reload(for: requestedQuery, clearExisting: true)
+            await model.loadIfNeeded(for: requestedQuery)
         }
     }
 
     private var mediaFilterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(MediaFilter.allCases, id: \.self) { filter in
+                ForEach(LibraryMediaFilter.allCases, id: \.self) { filter in
                     Button {
                         withAnimation(Theme.springSnappy) {
-                            selectedType = filter
+                            model.selectedType = filter
                             leaveSelectionMode()
                         }
                     } label: {
                         Text(filter.title)
                             .font(Theme.body(13, weight: .medium))
-                            .foregroundStyle(selectedType == filter ? Color.white : Theme.textSecondary)
+                            .foregroundStyle(model.selectedType == filter ? Color.white : Theme.textSecondary)
                             .padding(.horizontal, 14)
                             .frame(minHeight: 44)
-                            .background(selectedType == filter ? Theme.brand500 : Theme.surfaceElevated)
+                            .background(model.selectedType == filter ? Theme.brand500 : Theme.surfaceElevated)
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityAddTraits(selectedType == filter ? .isSelected : [])
+                    .accessibilityAddTraits(model.selectedType == filter ? .isSelected : [])
                 }
             }
             .padding(.horizontal)
@@ -177,31 +110,32 @@ struct LibraryView: View {
                 dismissibleErrorRow(operationError)
             }
 
-            if isLoading && items.isEmpty {
+            if model.isLoading && model.items.isEmpty {
                 loadingRow
-            } else if let loadError, items.isEmpty {
+            } else if let loadError = model.loadError, model.items.isEmpty {
                 errorRow(loadError)
-            } else if items.isEmpty {
+            } else if model.items.isEmpty {
                 emptyRow
             } else {
-                if selectedStatus != .all || sortOrder != .newest || !query.search.isEmpty {
+                if model.selectedStatus != .all || model.sortOrder != .newest || !model.query.search.isEmpty {
                     filterSummaryRow
                 }
 
-                ForEach(items) { item in
+                ForEach(model.items, id: \.reference) { item in
                     libraryRow(item)
+                        .id(item.reference)
+                        .task(id: item.reference) {
+                            await model.prefetchIfNeeded(after: item.reference)
+                        }
                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 }
 
-                if hasMore {
+                if model.hasMore && (model.isLoadingMore || model.loadError != nil) {
                     loadMoreRow
-                        .task {
-                            await loadNextPage(for: query)
-                        }
-                } else if totalItems > 0 {
-                    Text("\(totalItems) item\(totalItems == 1 ? "" : "s")")
+                } else if model.totalItems > 0 && !model.hasMore {
+                    Text("\(model.totalItems) item\(model.totalItems == 1 ? "" : "s")")
                         .font(Theme.caption())
                         .foregroundStyle(Theme.textMuted)
                         .frame(maxWidth: .infinity)
@@ -213,8 +147,9 @@ struct LibraryView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .scrollPosition(id: $model.visibleReference)
         .refreshable {
-            await reload(for: query, clearExisting: false)
+            await model.refresh()
         }
     }
 
@@ -229,12 +164,12 @@ struct LibraryView: View {
         ToolbarItem(placement: .primaryAction) {
             Menu {
                 Section("Status") {
-                    ForEach(StatusFilter.allCases, id: \.self) { filter in
+                    ForEach(LibraryStatusFilter.allCases, id: \.self) { filter in
                         Button {
-                            selectedStatus = filter
+                            model.selectedStatus = filter
                             leaveSelectionMode()
                         } label: {
-                            if selectedStatus == filter {
+                            if model.selectedStatus == filter {
                                 Label(filter.title, systemImage: "checkmark")
                             } else {
                                 Text(filter.title)
@@ -244,12 +179,12 @@ struct LibraryView: View {
                 }
 
                 Section("Sort") {
-                    ForEach(SortOrder.allCases, id: \.self) { order in
+                    ForEach(LibrarySortOrder.allCases, id: \.self) { order in
                         Button {
-                            sortOrder = order
+                            model.sortOrder = order
                             leaveSelectionMode()
                         } label: {
-                            if sortOrder == order {
+                            if model.sortOrder == order {
                                 Label(order.title, systemImage: "checkmark")
                             } else {
                                 Text(order.title)
@@ -266,7 +201,7 @@ struct LibraryView: View {
                     } label: {
                         Label("Select Items", systemImage: "checkmark.circle")
                     }
-                    .disabled(items.isEmpty || isSelecting)
+                    .disabled(model.items.isEmpty || isSelecting)
 
                     NavigationLink(value: "pdf-upload") {
                         Label("Upload PDF", systemImage: "doc.badge.plus")
@@ -293,13 +228,24 @@ struct LibraryView: View {
                 .cardStyle(padding: 12)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(selectedReferences.contains(item.reference) ? "Deselect" : "Select") \(item.title)")
+            .accessibilityLabel("\(selectedReferences.contains(item.reference) ? "Deselect" : "Select") \(item.displayTitle)")
         } else {
-            NavigationLink(value: item.reference) {
-                LibrarySummaryRow(item: item, selectionState: nil)
-                    .cardStyle(padding: 12)
+            Button {
+                model.visibleReference = item.reference
+                presentedReference = item.reference
+            } label: {
+                HStack(spacing: 10) {
+                    LibrarySummaryRow(item: item, selectionState: nil)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.textMuted)
+                        .accessibilityHidden(true)
+                }
+                .cardStyle(padding: 12)
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("library-row-\(item.reference.id)")
+            .accessibilityLabel("Open \(item.displayTitle)")
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button(role: .destructive) {
                     requestDeletion([item.reference])
@@ -339,7 +285,7 @@ struct LibraryView: View {
             Text(message)
         } actions: {
             Button("Try Again") {
-                Task { await reload(for: query, clearExisting: true) }
+                Task { await model.retryInitialLoad() }
             }
             .buttonStyle(.borderedProminent)
             .tint(Theme.brand500)
@@ -351,7 +297,7 @@ struct LibraryView: View {
 
     private var emptyRow: some View {
         ContentUnavailableView {
-            Label(emptyTitle, systemImage: query.search.isEmpty ? "tray" : "magnifyingglass")
+            Label(emptyTitle, systemImage: model.query.search.isEmpty ? "tray" : "magnifyingglass")
         } description: {
             Text(emptyDescription)
         }
@@ -361,16 +307,16 @@ struct LibraryView: View {
     }
 
     private var emptyTitle: String {
-        if !query.search.isEmpty { return "No Results" }
-        if selectedStatus != .all { return "No Matching Items" }
+        if !model.query.search.isEmpty { return "No Results" }
+        if model.selectedStatus != .all { return "No Matching Items" }
         return "Your Library Is Ready"
     }
 
     private var emptyDescription: String {
-        if !query.search.isEmpty {
+        if !model.query.search.isEmpty {
             return "Try a different title, transcript phrase, summary, or tag."
         }
-        if selectedStatus != .all {
+        if model.selectedStatus != .all {
             return "Change the status filter to see more of your library."
         }
         return "Transcribe a video, record audio, or upload a PDF to add your first item."
@@ -384,10 +330,10 @@ struct LibraryView: View {
                 .font(Theme.caption())
                 .foregroundStyle(Theme.textSecondary)
             Spacer()
-            if selectedStatus != .all || sortOrder != .newest {
+            if model.selectedStatus != .all || model.sortOrder != .newest {
                 Button("Reset") {
-                    selectedStatus = .all
-                    sortOrder = .newest
+                    model.selectedStatus = .all
+                    model.sortOrder = .newest
                 }
                 .font(Theme.caption())
                 .foregroundStyle(Theme.brand400)
@@ -401,9 +347,9 @@ struct LibraryView: View {
 
     private var filterSummary: String {
         var parts: [String] = []
-        if !query.search.isEmpty { parts.append("Results for “\(query.search)”") }
-        if selectedStatus != .all { parts.append(selectedStatus.title) }
-        if sortOrder != .newest { parts.append(sortOrder.title) }
+        if !model.query.search.isEmpty { parts.append("Results for “\(model.query.search)”") }
+        if model.selectedStatus != .all { parts.append(model.selectedStatus.title) }
+        if model.sortOrder != .newest { parts.append(model.sortOrder.title) }
         return parts.joined(separator: " · ")
     }
 
@@ -434,18 +380,19 @@ struct LibraryView: View {
     private var loadMoreRow: some View {
         HStack {
             Spacer()
-            if isLoadingMore {
+            if model.isLoadingMore {
                 ProgressView()
                     .tint(Theme.brand500)
-            } else if loadError != nil {
+                    .accessibilityLabel("Loading more library items")
+            } else if model.loadError != nil {
                 Button("Load More") {
-                    Task { await loadNextPage(for: query) }
+                    Task { await model.retryNextPage() }
                 }
                 .frame(minWidth: 120, minHeight: 44)
             }
             Spacer()
         }
-        .frame(minHeight: 52)
+        .frame(minHeight: 44)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
@@ -507,110 +454,6 @@ struct LibraryView: View {
         showDeleteConfirmation = true
     }
 
-    private func reload(for requestedQuery: Query, clearExisting: Bool) async {
-        if clearExisting {
-            items = []
-            currentPage = 0
-            totalPages = 0
-            totalItems = 0
-            isSelecting = false
-            selectedReferences.removeAll()
-        }
-        isLoading = true
-        loadError = nil
-        defer {
-            if requestedQuery == query {
-                isLoading = false
-            }
-        }
-
-        if let previewItems {
-            let filtered = filteredPreviewItems(previewItems, for: requestedQuery)
-            guard requestedQuery == query else { return }
-            items = filtered
-            currentPage = 1
-            totalPages = filtered.isEmpty ? 0 : 1
-            totalItems = filtered.count
-            return
-        }
-
-        do {
-            let response = try await service.listLibraryItems(
-                page: 1,
-                itemType: requestedQuery.type.queryValue,
-                status: requestedQuery.status.queryValue,
-                search: requestedQuery.search,
-                sortDirection: requestedQuery.sort.direction
-            )
-            guard !Task.isCancelled, requestedQuery == query else { return }
-            items = response.data
-            currentPage = response.page
-            totalPages = response.totalPages
-            totalItems = response.totalItems
-            updateSpotlightIndex(response.data, for: requestedQuery)
-        } catch {
-            guard !Task.isCancelled, requestedQuery == query else { return }
-            loadError = error.localizedDescription
-        }
-    }
-
-    private func loadNextPage(for requestedQuery: Query) async {
-        guard hasMore, !isLoadingMore, previewItems == nil else { return }
-        isLoadingMore = true
-        loadError = nil
-        defer { isLoadingMore = false }
-
-        do {
-            let response = try await service.listLibraryItems(
-                page: currentPage + 1,
-                itemType: requestedQuery.type.queryValue,
-                status: requestedQuery.status.queryValue,
-                search: requestedQuery.search,
-                sortDirection: requestedQuery.sort.direction
-            )
-            guard requestedQuery == query else { return }
-            let known = Set(items.map(\.reference))
-            items.append(contentsOf: response.data.filter { !known.contains($0.reference) })
-            currentPage = response.page
-            totalPages = response.totalPages
-            totalItems = response.totalItems
-        } catch {
-            guard requestedQuery == query else { return }
-            loadError = error.localizedDescription
-        }
-    }
-
-    private func filteredPreviewItems(_ source: [LibraryListItem], for requestedQuery: Query) -> [LibraryListItem] {
-        var result = source
-        if let type = requestedQuery.type.queryValue {
-            result = result.filter { $0.itemType == type }
-        }
-        if requestedQuery.status == .active {
-            result = result.filter { ["pending", "processing"].contains($0.status) }
-        } else if let status = requestedQuery.status.queryValue {
-            result = result.filter { $0.status == status }
-        }
-        if !requestedQuery.search.isEmpty {
-            result = result.filter {
-                $0.title.localizedCaseInsensitiveContains(requestedQuery.search)
-                    || $0.subtitle.localizedCaseInsensitiveContains(requestedQuery.search)
-                    || $0.tags.contains { tag in
-                        tag.localizedCaseInsensitiveContains(requestedQuery.search)
-                    }
-            }
-        }
-        return requestedQuery.sort == .newest ? result : Array(result.reversed())
-    }
-
-    private func updateSpotlightIndex(_ recentItems: [LibraryListItem], for requestedQuery: Query) {
-        guard requestedQuery.type == .all,
-              requestedQuery.status == .all,
-              requestedQuery.sort == .newest,
-              requestedQuery.search.isEmpty else { return }
-
-        SpotlightService.indexLibraryItems(recentItems)
-    }
-
     private func deletePendingItems() async {
         let references = pendingDeletion
         guard !references.isEmpty else { return }
@@ -624,8 +467,7 @@ struct LibraryView: View {
 
         if previewItems != nil {
             let deleted = Set(references)
-            items.removeAll { deleted.contains($0.reference) }
-            totalItems = items.count
+            model.remove(deleted)
             leaveSelectionMode()
             return
         }
@@ -641,15 +483,13 @@ struct LibraryView: View {
             }
         }
 
-        items.removeAll { deleted.contains($0.reference) }
-        totalItems = max(0, totalItems - deleted.count)
+        model.remove(deleted)
         SpotlightService.removeLibraryItems(Array(deleted))
-        updateSpotlightIndex(Array(items.prefix(20)), for: query)
         selectedReferences = Set(failed)
         if failed.isEmpty {
             leaveSelectionMode()
             Haptics.success()
-            await reload(for: query, clearExisting: false)
+            await model.refresh()
         } else {
             isSelecting = true
             operationError = "\(failed.count) item\(failed.count == 1 ? "" : "s") couldn’t be deleted. The failed selection was kept so you can try again."
@@ -674,13 +514,13 @@ struct LibrarySummaryRow: View {
             .frame(width: 44, height: 44)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(item.title)
+                Text(item.displayTitle)
                     .font(Theme.body(15, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
 
-                if !item.subtitle.isEmpty {
-                    Text(item.subtitle)
+                if let displaySubtitle = item.displaySubtitle {
+                    Text(displaySubtitle)
                         .font(Theme.caption())
                         .foregroundStyle(Theme.textMuted)
                         .lineLimit(1)
@@ -688,10 +528,11 @@ struct LibrarySummaryRow: View {
 
                 HStack(spacing: 8) {
                     StatusBadge(status: item.status)
-                    if let detail = detailText {
-                        Text(detail)
+                    if let metadataText {
+                        Text(metadataText)
                             .font(Theme.caption())
                             .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1)
                     }
                     if item.favorite {
                         Image(systemName: "star.fill")
@@ -708,10 +549,6 @@ struct LibrarySummaryRow: View {
                 Image(systemName: selectionState ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
                     .foregroundStyle(selectionState ? Theme.brand400 : Theme.textMuted)
-            } else if ["pending", "processing"].contains(item.status) {
-                ProgressView()
-                    .tint(Theme.brand400)
-                    .accessibilityLabel("Processing")
             }
         }
         .frame(minHeight: 58)
@@ -755,10 +592,22 @@ struct LibrarySummaryRow: View {
             return nil
         }
     }
+
+    private var metadataText: String? {
+        [detailText, item.createdDateText]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+            .nilIfEmpty
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
 struct LibraryDetailLoader: View {
     let reference: LibraryReference
+    var previewTitle: String? = nil
     @State private var item: LibraryItem?
     @State private var errorMessage: String?
     @State private var isLoading = false
@@ -767,7 +616,15 @@ struct LibraryDetailLoader: View {
 
     var body: some View {
         Group {
-            if let item {
+            if let previewTitle {
+                ContentUnavailableView {
+                    Label(previewTitle, systemImage: "doc.text.magnifyingglass")
+                } description: {
+                    Text("Library navigation preview")
+                }
+                .navigationTitle(previewTitle)
+                .navigationBarTitleDisplayMode(.inline)
+            } else if let item {
                 ItemDetailView(item: item)
             } else if let errorMessage {
                 ContentUnavailableView {
@@ -791,7 +648,10 @@ struct LibraryDetailLoader: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.surface)
-        .task(id: reference) { await load() }
+        .task(id: reference) {
+            guard previewTitle == nil else { return }
+            await load()
+        }
     }
 
     private func load() async {
@@ -874,6 +734,7 @@ struct StatusBadge: View {
     }
 }
 
+#if DEBUG
 extension LibraryListItem {
     static var uiTestSamples: [LibraryListItem] {
         [
@@ -903,4 +764,29 @@ extension LibraryListItem {
             ),
         ]
     }
+
+    static var uiTestPaginationSamples: [LibraryListItem] {
+        var samples: [LibraryListItem] = []
+        for index in 1...60 {
+            let createdAt = Date().addingTimeInterval(TimeInterval(-index * 60))
+            let item = LibraryListItem(
+                id: "audio-\(index)",
+                itemType: "audio",
+                title: String(format: "Recording %02d.m4a", index),
+                subtitle: "EN",
+                status: "completed",
+                wordCount: 120 + index,
+                duration: Double(30 + index),
+                pageCount: 0,
+                summaryStatus: "",
+                favorite: false,
+                archived: false,
+                tags: [],
+                createdAt: createdAt
+            )
+            samples.append(item)
+        }
+        return samples
+    }
 }
+#endif

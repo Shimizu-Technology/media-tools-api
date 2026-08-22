@@ -9,6 +9,7 @@ struct MainTabView: View {
     }
 
     @State private var selectedTab: TabSelection = .home
+    @State private var libraryModel = LibraryViewModel()
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -24,7 +25,7 @@ struct MainTabView: View {
 
             Tab("Library", systemImage: "books.vertical", value: .library) {
                 NavigationStack {
-                    LibraryView()
+                    LibraryView(model: libraryModel)
                 }
             }
 

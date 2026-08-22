@@ -4,13 +4,19 @@ import AVFoundation
 /// In-app audio playback for recorded/uploaded audio.
 struct AudioPlayerView: View {
     let audioId: String
+    let knownDuration: TimeInterval?
     @Binding private var seekTime: TimeInterval?
     @State private var player = AudioPlayerService()
     @State private var isLoading = true
     @State private var error: String?
 
-    init(audioId: String, seekTime: Binding<TimeInterval?> = .constant(nil)) {
+    init(
+        audioId: String,
+        knownDuration: TimeInterval? = nil,
+        seekTime: Binding<TimeInterval?> = .constant(nil)
+    ) {
         self.audioId = audioId
+        self.knownDuration = knownDuration
         self._seekTime = seekTime
     }
 
@@ -72,6 +78,7 @@ struct AudioPlayerView: View {
                         )
                     }
                     .frame(height: 14)
+                    .allowsHitTesting(player.duration > 0)
 
                     // Time + controls
                     HStack {
@@ -88,6 +95,7 @@ struct AudioPlayerView: View {
                             Image(systemName: "gobackward.15")
                                 .font(.title3)
                         }
+                        .disabled(player.duration <= 0)
 
                         // Play/Pause
                         Button {
@@ -109,6 +117,7 @@ struct AudioPlayerView: View {
                             Image(systemName: "goforward.15")
                                 .font(.title3)
                         }
+                        .disabled(player.duration <= 0)
 
                         Spacer()
 
@@ -166,7 +175,7 @@ struct AudioPlayerView: View {
         do {
             let playbackURL: PlaybackURLResponse = try await APIClient.shared.get("/audio/transcriptions/\(audioId)/audio")
             if let url = URL(string: playbackURL.url) {
-                player.load(url: url)
+                player.load(url: url, knownDuration: knownDuration)
                 if let seekTime {
                     player.seek(seconds: seekTime)
                     player.play()
@@ -188,6 +197,7 @@ struct PlaybackURLResponse: Codable {
 
 // MARK: - Audio Player Service
 
+@MainActor
 @Observable
 class AudioPlayerService {
     var isPlaying = false
@@ -198,6 +208,7 @@ class AudioPlayerService {
 
     private var avPlayer: AVPlayer?
     private var timeObserver: Any?
+    private var durationLoadTask: Task<Void, Never>?
 
     var formattedCurrentTime: String {
         formatTime(currentTime)
@@ -207,7 +218,12 @@ class AudioPlayerService {
         formatTime(duration)
     }
 
-    func load(url: URL) {
+    func load(url: URL, knownDuration: TimeInterval? = nil) {
+        stop()
+        currentTime = 0
+        progress = 0
+        duration = Self.validDuration(knownDuration) ?? 0
+
         // Switch to playback mode so audio comes from speaker, not earpiece
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
@@ -216,21 +232,39 @@ class AudioPlayerService {
             print("Audio session setup failed: \(error)")
         }
 
-        let item = AVPlayerItem(url: url)
+        let asset = AVURLAsset(url: url)
+        let item = AVPlayerItem(asset: asset)
         avPlayer = AVPlayer(playerItem: item)
+
+        // The API already knows the recording duration, so render that value
+        // immediately. Then replace it with the asset's authoritative duration
+        // as soon as AVFoundation has loaded the remote metadata.
+        durationLoadTask = Task { [weak self] in
+            do {
+                let loadedDuration = try await asset.load(.duration).seconds
+                guard !Task.isCancelled,
+                      let loadedDuration = Self.validDuration(loadedDuration)
+                else { return }
+                self?.duration = loadedDuration
+            } catch {
+                // The server-provided fallback remains usable when the remote
+                // asset cannot expose its metadata before playback begins.
+            }
+        }
 
         // Observe time
         timeObserver = avPlayer?.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
             queue: .main
-        ) { [weak self] time in
-            guard let self, let item = self.avPlayer?.currentItem else { return }
+        ) { time in
             let current = time.seconds
-            let total = item.duration.seconds
-            guard total.isFinite && total > 0 else { return }
-            self.currentTime = current
-            self.duration = total
-            self.progress = CGFloat(current / total)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let total = self.duration
+                guard total.isFinite && total > 0 else { return }
+                self.currentTime = current
+                self.progress = min(1, max(0, CGFloat(current / total)))
+            }
         }
     }
 
@@ -245,10 +279,13 @@ class AudioPlayerService {
     }
 
     func stop() {
+        durationLoadTask?.cancel()
+        durationLoadTask = nil
         avPlayer?.pause()
         if let observer = timeObserver {
             avPlayer?.removeTimeObserver(observer)
         }
+        timeObserver = nil
         avPlayer = nil
         isPlaying = false
     }
@@ -283,5 +320,10 @@ class AudioPlayerService {
         let mins = Int(time) / 60
         let secs = Int(time) % 60
         return "\(mins):\(String(format: "%02d", secs))"
+    }
+
+    private static func validDuration(_ value: TimeInterval?) -> TimeInterval? {
+        guard let value, value.isFinite, value > 0 else { return nil }
+        return value
     }
 }
