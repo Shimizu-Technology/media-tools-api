@@ -425,6 +425,42 @@ func (db *DB) FailBackgroundJob(ctx context.Context, jobID, workerID, message st
 	return nil
 }
 
+// RequeueBackgroundJob releases a retryable job while preserving its attempt
+// count. Only the worker that owns the current lease may reschedule it.
+func (db *DB) RequeueBackgroundJob(
+	ctx context.Context,
+	jobID, workerID, message string,
+	delay time.Duration,
+	resetAttempts bool,
+) error {
+	if delay < 0 {
+		delay = 0
+	}
+	result, err := db.ExecContext(ctx, `
+		UPDATE background_jobs
+		SET status = 'queued',
+			run_at = NOW() + ($3 * INTERVAL '1 millisecond'),
+			attempts = CASE WHEN $5 THEN 0 ELSE attempts END,
+			locked_by = NULL,
+			locked_at = NULL,
+			lease_expires_at = NULL,
+			completed_at = NULL,
+			last_error = $4
+		WHERE id = $1 AND status = 'running' AND locked_by = $2`,
+		jobID, workerID, delay.Milliseconds(), message, resetAttempts)
+	if err != nil {
+		return fmt.Errorf("requeue background job: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect background job retry: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("background job retry lost its lease")
+	}
+	return nil
+}
+
 func (db *DB) CountQueuedBackgroundJobs(ctx context.Context) (int, error) {
 	var count int
 	if err := db.GetContext(ctx, &count, `

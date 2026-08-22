@@ -55,6 +55,15 @@ func (s *S3) IsConfigured() bool {
 	return s != nil && s.accessKey != "" && s.secretKey != "" && s.region != "" && s.bucket != ""
 }
 
+// PresignedURLExpiry is the longest window in which a previously issued PUT
+// URL can still create an object after an account deletion request.
+func (s *S3) PresignedURLExpiry() time.Duration {
+	if s == nil {
+		return 0
+	}
+	return s.expiry
+}
+
 func (s *S3) BuildKey(filename string) string {
 	base := filepath.Base(filename)
 	if s.prefix == "" {

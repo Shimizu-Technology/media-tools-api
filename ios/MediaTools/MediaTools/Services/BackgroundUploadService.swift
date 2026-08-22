@@ -2,11 +2,30 @@ import Foundation
 
 struct BackgroundUploadMetadata: Codable, Equatable, Sendable {
     let recordingID: UUID
+    let ownerID: String?
     let filename: String
     let objectKey: String
     let sizeBytes: Int64
     let mimeType: String
     let contentType: String
+
+    init(
+        recordingID: UUID,
+        ownerID: String? = nil,
+        filename: String,
+        objectKey: String,
+        sizeBytes: Int64,
+        mimeType: String,
+        contentType: String
+    ) {
+        self.recordingID = recordingID
+        self.ownerID = ownerID
+        self.filename = filename
+        self.objectKey = objectKey
+        self.sizeBytes = sizeBytes
+        self.mimeType = mimeType
+        self.contentType = contentType
+    }
 }
 
 enum BackgroundUploadEvent: Sendable {
@@ -91,6 +110,21 @@ final class BackgroundUploadService: NSObject, URLSessionDelegate, URLSessionTas
             session.getAllTasks { tasks in
                 let identifiers = tasks.compactMap { Self.metadata(for: $0)?.recordingID }
                 continuation.resume(returning: Set(identifiers))
+            }
+        }
+    }
+
+    func cancel(recordingIDs: Set<UUID>) async {
+        guard !recordingIDs.isEmpty else { return }
+        await withCheckedContinuation { continuation in
+            session.getAllTasks { tasks in
+                for task in tasks {
+                    guard let recordingID = Self.metadata(for: task)?.recordingID,
+                          recordingIDs.contains(recordingID)
+                    else { continue }
+                    task.cancel()
+                }
+                continuation.resume()
             }
         }
     }

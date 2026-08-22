@@ -38,6 +38,11 @@ components:
       in: header
       name: X-API-Key
       description: API key for authentication. Create one via POST /api/v1/keys.
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Clerk session token for user-account routes.
 
   schemas:
     Transcript:
@@ -940,6 +945,40 @@ paths:
       tags: [Authentication]
       summary: Get the signed-in user
       responses: {"200": {description: Current user}}
+  /account:
+    delete:
+      tags: [Authentication]
+      summary: Permanently delete the signed-in account and its data
+      description: |
+        Immediately purges account-owned database content and queues durable
+        cleanup of raw audio objects and the Clerk identity. A second object
+        cleanup runs after issued upload URLs expire.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmation]
+              properties:
+                confirmation:
+                  type: string
+                  enum: [DELETE]
+      responses:
+        "202":
+          description: Account deletion accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, example: pending}
+                  requested_at: {type: string, format: date-time}
+                  cleanup_after: {type: string, format: date-time}
+        "400": {description: Confirmation missing or account is not Clerk-managed}
+        "503": {description: Account deletion is temporarily unavailable}
   /auth/refresh:
     post:
       tags: [Authentication]

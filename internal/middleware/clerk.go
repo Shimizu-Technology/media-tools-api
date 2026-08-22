@@ -286,6 +286,9 @@ func ClerkAuth(db *database.DB, jwksCache *JWKSCache, clerkSecretKey string) gin
 			c.Abort()
 			return
 		}
+		if rejectAccountDeletionTombstone(c, db, clerkUserID) {
+			return
+		}
 
 		// Fast path: returning user already linked to Clerk (no external API call)
 		user, err := db.GetUserByClerkID(c.Request.Context(), clerkUserID)

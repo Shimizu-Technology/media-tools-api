@@ -5,6 +5,7 @@ struct TranscriptionWatch: Identifiable, Codable, Equatable, Sendable {
     let title: String
     let createdAt: Date
     let recordingID: UUID?
+    var ownerID: String?
     var authenticationPausedAt: Date?
 
     init(
@@ -12,12 +13,14 @@ struct TranscriptionWatch: Identifiable, Codable, Equatable, Sendable {
         title: String,
         createdAt: Date,
         recordingID: UUID? = nil,
+        ownerID: String? = nil,
         authenticationPausedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
         self.createdAt = createdAt
         self.recordingID = recordingID
+        self.ownerID = ownerID
         self.authenticationPausedAt = authenticationPausedAt
     }
 }

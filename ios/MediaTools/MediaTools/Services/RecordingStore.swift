@@ -57,7 +57,7 @@ struct RecordingStore {
         guard fileManager.fileExists(atPath: manifestURL.path) else { return [] }
         let data = try Data(contentsOf: manifestURL)
         let manifest = try Self.decoder.decode(Manifest.self, from: data)
-        guard manifest.version == 1 else {
+        guard manifest.version == 1 || manifest.version == 2 else {
             throw CocoaError(.coderReadCorrupt)
         }
         return manifest.recordings
@@ -66,7 +66,7 @@ struct RecordingStore {
     }
 
     func saveRecordings(_ recordings: [LocalRecording]) throws {
-        let manifest = Manifest(version: 1, recordings: recordings)
+        let manifest = Manifest(version: 2, recordings: recordings)
         let data = try Self.encoder.encode(manifest)
         try data.write(
             to: manifestURL,
@@ -74,7 +74,11 @@ struct RecordingStore {
         )
     }
 
-    func makeRecording(contentType: String, now: Date = Date()) -> LocalRecording {
+    func makeRecording(
+        contentType: String,
+        ownerID: String? = nil,
+        now: Date = Date()
+    ) -> LocalRecording {
         let id = UUID()
         let recording = LocalRecording(
             id: id,
@@ -96,7 +100,8 @@ struct RecordingStore {
             uploadObjectKey: nil,
             uploadSizeBytes: nil,
             uploadMimeType: nil,
-            uploadTaskIdentifier: nil
+            uploadTaskIdentifier: nil,
+            ownerID: ownerID
         )
         return recording
     }
@@ -111,6 +116,7 @@ struct RecordingStore {
     func importRecording(
         from sourceURL: URL,
         contentType: String,
+        ownerID: String? = nil,
         now: Date = Date()
     ) throws -> LocalRecording {
         let id = UUID()
@@ -131,7 +137,8 @@ struct RecordingStore {
             uploadObjectKey: nil,
             uploadSizeBytes: nil,
             uploadMimeType: nil,
-            uploadTaskIdentifier: nil
+            uploadTaskIdentifier: nil,
+            ownerID: ownerID
         )
         try fileManager.copyItem(at: sourceURL, to: fileURL(for: recording))
         try protectRecordingFile(recording)

@@ -1,12 +1,14 @@
 import SwiftUI
 import ClerkKit
-import ClerkKitUI
 
 struct SettingsView: View {
     @Environment(Clerk.self) private var clerk
+    @Environment(RecordingUploadCoordinator.self) private var uploadCoordinator
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
+
+    private let tokenSync = TokenSyncService.shared
 
     @State private var health: HealthResponse?
     @State private var healthError: String?
@@ -15,6 +17,10 @@ struct SettingsView: View {
     @State private var notificationState: NotificationPermissionState = .notRequested
     @State private var isSigningOut = false
     @State private var signOutError: String?
+    @State private var showDeleteAccount = false
+    @State private var deletionConfirmation = ""
+    @State private var isDeletingAccount = false
+    @State private var deleteAccountError: String?
 
     var body: some View {
         ScrollView {
@@ -24,6 +30,7 @@ struct SettingsView: View {
                 quickCaptureSection
                 helpSection
                 advancedSection
+                deleteAccountSection
                 signOutSection
             }
             .padding(.horizontal, 16)
@@ -35,6 +42,11 @@ struct SettingsView: View {
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await refreshNotificationState() }
+        }
+        .sheet(isPresented: $showDeleteAccount) {
+            deleteAccountConfirmationSheet
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -112,8 +124,11 @@ struct SettingsView: View {
                 SectionHeader(text: "Account", icon: "person.circle")
 
                 HStack(spacing: 12) {
-                    UserButton()
+                    Text(initials(for: user))
+                        .font(Theme.body(16, weight: .bold))
+                        .foregroundStyle(Theme.surface)
                         .frame(width: 48, height: 48)
+                        .background(Theme.brand400, in: Circle())
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text(displayName(for: user))
@@ -131,6 +146,112 @@ struct SettingsView: View {
                     Spacer()
                 }
                 .cardStyle()
+            }
+        }
+    }
+
+    private var deleteAccountSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionHeader(text: "Danger zone", icon: "exclamationmark.triangle")
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Delete account")
+                    .font(Theme.body(15, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text("Permanently removes your recordings, transcripts, PDFs, chats, collections, developer keys, and account. Device recordings owned by this account are also removed.")
+                    .font(Theme.caption(13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button(role: .destructive) {
+                    deletionConfirmation = ""
+                    deleteAccountError = nil
+                    showDeleteAccount = true
+                } label: {
+                    Label("Delete account and data", systemImage: "trash")
+                        .font(Theme.body(14, weight: .semibold))
+                        .foregroundStyle(Theme.error)
+                        .frame(maxWidth: .infinity, minHeight: 46)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: Theme.radiusMedium)
+                                .stroke(Theme.error.opacity(0.45), lineWidth: 1)
+                        }
+                }
+                .disabled(isDeletingAccount)
+            }
+            .cardStyle(padding: 14)
+        }
+    }
+
+    private var deleteAccountConfirmationSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Image(systemName: "trash.circle.fill")
+                        .font(.system(size: 44))
+                        .foregroundStyle(Theme.error)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Permanently delete your account?")
+                            .font(Theme.heading(24))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("This cannot be undone. Export any device recordings you want to keep before continuing. Server data is purged immediately; secure provider cleanup continues in the background.")
+                            .font(Theme.body(14))
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Type DELETE to confirm")
+                            .font(Theme.caption(12, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                        TextField("DELETE", text: $deletionConfirmation)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                            .font(Theme.mono(16))
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 48)
+                            .background(Theme.surfaceCard)
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: Theme.radiusMedium)
+                                    .stroke(Theme.borderSubtle, lineWidth: 1)
+                            }
+                    }
+
+                    if let deleteAccountError {
+                        Text(deleteAccountError)
+                            .font(Theme.caption(13))
+                            .foregroundStyle(Theme.error)
+                    }
+
+                    Button(role: .destructive) {
+                        Task { await deleteAccount() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if isDeletingAccount { ProgressView().tint(.white) }
+                            Text(isDeletingAccount ? "Deleting…" : "Permanently delete account")
+                        }
+                        .font(Theme.body(15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(
+                            deletionConfirmation == "DELETE" ? Theme.error : Theme.textMuted,
+                            in: RoundedRectangle(cornerRadius: Theme.radiusMedium)
+                        )
+                    }
+                    .disabled(deletionConfirmation != "DELETE" || isDeletingAccount)
+                }
+                .padding(20)
+            }
+            .background(Theme.surface)
+            .navigationTitle("Delete account")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showDeleteAccount = false }
+                        .disabled(isDeletingAccount)
+                }
             }
         }
     }
@@ -338,6 +459,12 @@ struct SettingsView: View {
         return name.isEmpty ? "Media Tools account" : name
     }
 
+    private func initials(for user: User) -> String {
+        let characters = [user.firstName, user.lastName]
+            .compactMap { $0?.first }
+        return characters.isEmpty ? "MT" : String(characters.prefix(2))
+    }
+
     private func settingsLink(
         title: String,
         detail: String,
@@ -394,10 +521,45 @@ struct SettingsView: View {
 
         do {
             try await clerk.auth.signOut()
+            await uploadCoordinator.setActiveOwnerID(nil)
         } catch {
             signOutError = "Couldn’t sign out. Please try again."
         }
     }
+
+    private func deleteAccount() async {
+        guard deletionConfirmation == "DELETE", let ownerID = clerk.user?.id else { return }
+        isDeletingAccount = true
+        deleteAccountError = nil
+        defer { isDeletingAccount = false }
+
+        do {
+            try await APIClient.shared.delete(
+                "/account",
+                body: DeleteAccountRequest(confirmation: deletionConfirmation)
+            )
+        } catch {
+            deleteAccountError = error.localizedDescription
+            return
+        }
+
+        await uploadCoordinator.removeLocalAccountData(ownerID: ownerID)
+        // The server has accepted an irreversible deletion request. Stop the
+        // share-extension sync before clearing its token so a still-present
+        // Clerk session cannot write the credential back if sign-out fails.
+        tokenSync.stopSyncing()
+        tokenSync.clearToken()
+        do {
+            try await clerk.auth.signOut()
+            showDeleteAccount = false
+        } catch {
+            deleteAccountError = "Your account deletion is underway, but this device could not finish signing out. Close and reopen Media Tools."
+        }
+    }
+}
+
+private struct DeleteAccountRequest: Encodable {
+    let confirmation: String
 }
 
 private struct SettingsActionRow: View {
