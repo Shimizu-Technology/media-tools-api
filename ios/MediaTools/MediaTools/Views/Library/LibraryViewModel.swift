@@ -76,6 +76,10 @@ final class LibraryViewModel {
     private let previewItems: [LibraryListItem]?
     private let pageSize: Int
     private var loadedQuery: LibraryQuery?
+    /// Changes whenever a reload supersedes in-flight work. Main-actor code is
+    /// re-entrant across `await`, so the query alone cannot identify a stale
+    /// pagination response from before a refresh.
+    private var reloadGeneration = 0
 
     init(
         service: MediaToolsService = .shared,
@@ -140,6 +144,7 @@ final class LibraryViewModel {
 
     private func shouldPrefetch(after reference: LibraryReference) -> Bool {
         guard hasMore,
+              !isLoading,
               !isLoadingMore,
               let index = items.firstIndex(where: { $0.reference == reference })
         else { return false }
@@ -147,6 +152,8 @@ final class LibraryViewModel {
     }
 
     private func reload(for requestedQuery: LibraryQuery, clearExisting: Bool) async {
+        reloadGeneration += 1
+        let generation = reloadGeneration
         if clearExisting {
             items = []
             visibleReference = nil
@@ -158,14 +165,17 @@ final class LibraryViewModel {
         isLoading = true
         loadError = nil
         defer {
-            if requestedQuery == query {
+            if requestedQuery == query, generation == reloadGeneration {
                 isLoading = false
             }
         }
 
         if let previewItems {
             let filtered = filteredPreviewItems(previewItems, for: requestedQuery)
-            guard requestedQuery == query, !Task.isCancelled else { return }
+            guard requestedQuery == query,
+                  generation == reloadGeneration,
+                  !Task.isCancelled
+            else { return }
             let loadedPageCount = clearExisting ? 1 : max(1, currentPage)
             let visibleCount = min(filtered.count, loadedPageCount * pageSize)
             items = Array(filtered.prefix(visibleCount))
@@ -186,13 +196,19 @@ final class LibraryViewModel {
 
             for page in 1...pagesToReload {
                 let response = try await listItems(page: page, for: requestedQuery)
-                guard !Task.isCancelled, requestedQuery == query else { return }
+                guard !Task.isCancelled,
+                      requestedQuery == query,
+                      generation == reloadGeneration
+                else { return }
                 latestResponse = response
                 refreshedItems.append(contentsOf: response.data)
                 if page >= response.totalPages { break }
             }
 
-            guard let latestResponse else { return }
+            guard let latestResponse,
+                  requestedQuery == query,
+                  generation == reloadGeneration
+            else { return }
             items = deduplicated(refreshedItems)
             currentPage = latestResponse.page
             totalPages = latestResponse.totalPages
@@ -200,20 +216,27 @@ final class LibraryViewModel {
             loadedQuery = requestedQuery
             updateSpotlightIndex(items, for: requestedQuery)
         } catch {
-            guard !Task.isCancelled, requestedQuery == query else { return }
+            guard !Task.isCancelled,
+                  requestedQuery == query,
+                  generation == reloadGeneration
+            else { return }
             loadError = error.localizedDescription
         }
     }
 
     private func loadNextPage(for requestedQuery: LibraryQuery) async {
-        guard hasMore, !isLoadingMore else { return }
+        guard hasMore, !isLoading, !isLoadingMore else { return }
+        let generation = reloadGeneration
         isLoadingMore = true
         loadError = nil
         defer { isLoadingMore = false }
 
         if let previewItems {
             let filtered = filteredPreviewItems(previewItems, for: requestedQuery)
-            guard requestedQuery == query, !Task.isCancelled else { return }
+            guard requestedQuery == query,
+                  generation == reloadGeneration,
+                  !Task.isCancelled
+            else { return }
             let nextPage = currentPage + 1
             let endIndex = min(filtered.count, nextPage * pageSize)
             items = Array(filtered.prefix(endIndex))
@@ -226,14 +249,20 @@ final class LibraryViewModel {
 
         do {
             let response = try await listItems(page: currentPage + 1, for: requestedQuery)
-            guard !Task.isCancelled, requestedQuery == query else { return }
+            guard !Task.isCancelled,
+                  requestedQuery == query,
+                  generation == reloadGeneration
+            else { return }
             items = deduplicated(items + response.data)
             currentPage = response.page
             totalPages = response.totalPages
             totalItems = response.totalItems
             loadedQuery = requestedQuery
         } catch {
-            guard !Task.isCancelled, requestedQuery == query else { return }
+            guard !Task.isCancelled,
+                  requestedQuery == query,
+                  generation == reloadGeneration
+            else { return }
             loadError = error.localizedDescription
         }
     }
