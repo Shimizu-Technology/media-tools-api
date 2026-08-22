@@ -6,6 +6,7 @@ import { AppShell } from './components/AppShell'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { ScrollToTop } from './components/ScrollToTop'
 import { AuthProvider } from './contexts/AuthContext'
+import { AIProcessingConsentProvider } from './contexts/AIProcessingConsentContext'
 import { getCurrentUser, type User } from './lib/api'
 import { setAuthTokenGetter } from './lib/apiAuth'
 
@@ -147,7 +148,7 @@ function AppFooter() {
 }
 
 function ClerkAppContent() {
-  const { getToken, isLoaded, isSignedIn } = useAuth()
+  const { getToken, isLoaded, isSignedIn, userId } = useAuth()
   const [user, setUser] = useState<User | null>(null)
   const [isUserLoading, setIsUserLoading] = useState(false)
 
@@ -195,7 +196,9 @@ function ClerkAppContent() {
       user={user}
       refreshUser={refreshUser}
     >
-      <AppRoutes />
+      <AIProcessingConsentProvider ownerID={userId ?? null}>
+        <AppRoutes />
+      </AIProcessingConsentProvider>
     </AuthProvider>
   )
 }
@@ -222,7 +225,9 @@ function NoClerkAppContent() {
       user={null}
       refreshUser={async () => undefined}
     >
-      <AppRoutes />
+      <AIProcessingConsentProvider ownerID="local-api-key">
+        <AppRoutes />
+      </AIProcessingConsentProvider>
     </AuthProvider>
   )
 }

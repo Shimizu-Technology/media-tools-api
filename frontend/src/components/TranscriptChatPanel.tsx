@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { CitationRow } from './CitationChip';
 import { getChat, sendChatMessage, type ChatItemType, type ChatMessage, type Citation } from '../lib/api';
 import { itemDetailPath } from '../lib/library';
+import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
 
 interface TranscriptChatPanelProps {
   itemId: string;
@@ -16,6 +17,7 @@ interface TranscriptChatPanelProps {
 }
 
 export function TranscriptChatPanel({ itemId, itemType, onCitationClick }: TranscriptChatPanelProps) {
+  const { requestConsent: requestAIProcessingConsent } = useAIProcessingConsent();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -58,6 +60,7 @@ export function TranscriptChatPanel({ itemId, itemType, onCitationClick }: Trans
   const handleSend = async () => {
     const text = input.trim();
     if (!text || isSending) return;
+    if (!(await requestAIProcessingConsent())) return;
     setIsSending(true);
     setError('');
     setInput('');

@@ -15,6 +15,7 @@ private enum TranscriptViewMode: String, CaseIterable, Identifiable {
 struct ItemDetailView: View {
     let item: LibraryItem
     @Environment(\.openURL) private var openURL
+    @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @State private var transcript: Transcript?
     @State private var audio: AudioTranscription?
     @State private var pdf: PDFExtraction?
@@ -963,6 +964,7 @@ struct ItemDetailView: View {
 
     private func retryAudioTranscription() async {
         guard isAudioItem else { return }
+        guard await aiProcessingConsent.requestPermission() else { return }
         isRetrying = true
         detailError = nil
         defer { isRetrying = false }
@@ -977,6 +979,7 @@ struct ItemDetailView: View {
     }
 
     private func formatTranscriptForReadability() async {
+        guard await aiProcessingConsent.requestPermission() else { return }
         guard isAudioItem, !isFormattingTranscript else { return }
         isFormattingTranscript = true
         detailError = nil
@@ -1061,6 +1064,7 @@ struct ItemDetailView: View {
     }
 
     private func generateSummary() async {
+        guard await aiProcessingConsent.requestPermission() else { return }
         isLoadingSummary = true
         Haptics.light()
         defer { isLoadingSummary = false }

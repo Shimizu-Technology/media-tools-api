@@ -1,7 +1,8 @@
 import { lazy, Suspense, useState } from 'react';
-import { Check, KeyRound, Moon, Settings, Sun, UserRound } from 'lucide-react';
+import { BrainCircuit, Check, KeyRound, Moon, Settings, Sun, UserRound } from 'lucide-react';
 import { useAuthContext } from '../contexts/useAuthContext';
 import { useTheme } from '../hooks/useTheme';
+import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
 
 const DeleteAccountSection = lazy(() => import('../components/DeleteAccountSection').then((module) => ({ default: module.DeleteAccountSection })));
 
@@ -9,6 +10,7 @@ export function SettingsPage() {
   const { user, isClerkEnabled } = useAuthContext();
   const { isDark, toggle } = useTheme();
   const [cleared, setCleared] = useState(false);
+  const { hasConsent: hasAIConsent, requestConsent: requestAIConsent, revokeConsent: revokeAIConsent } = useAIProcessingConsent();
 
   const clearLocalKey = () => {
     localStorage.removeItem('mta_api_key');
@@ -27,6 +29,31 @@ export function SettingsPage() {
         <p className="mt-3 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
           {isClerkEnabled ? 'Manage your account context and workspace appearance.' : 'Manage account context, appearance, and local development credentials.'}
         </p>
+      </section>
+
+      <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
+              <BrainCircuit className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>Third-party AI processing</h2>
+              <p className="mt-2 max-w-xl text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
+                {hasAIConsent ? 'Allowed for this account. You can revoke permission for future transcription, formatting, summary, and chat requests.' : 'Not allowed. Media Tools will ask before sharing content with OpenAI, OpenRouter, or a selected model provider.'}
+              </p>
+              <a href="/privacy#ai-processing" className="mt-2 inline-flex min-h-11 items-center text-sm font-semibold underline" style={{ color: 'var(--color-brand-500)' }}>Review AI and privacy details</a>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => hasAIConsent ? revokeAIConsent() : void requestAIConsent()}
+            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl border px-4 text-sm font-semibold transition hover:bg-white/[0.06]"
+            style={{ borderColor: 'var(--color-border)', color: hasAIConsent ? 'var(--color-danger)' : 'var(--color-text-primary)' }}
+          >
+            {hasAIConsent ? 'Revoke permission' : 'Review and allow'}
+          </button>
+        </div>
       </section>
 
       <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>

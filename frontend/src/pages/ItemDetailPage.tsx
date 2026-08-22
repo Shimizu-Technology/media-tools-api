@@ -4,6 +4,7 @@ import { AlertCircle, Archive, ArrowLeft, BookOpen, Check, Clock3, Copy, Downloa
 import { AddToCollectionModal } from '../components/AddToCollectionModal';
 import { SummaryPanel } from '../components/SummaryPanel';
 import { TranscriptChatPanel } from '../components/TranscriptChatPanel';
+import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
 import { CitationRow } from '../components/CitationChip';
 import {
   downloadAudioExport,
@@ -33,6 +34,7 @@ import { formatTimestamp } from '../lib/citations';
 type DetailItem = Transcript | AudioTranscription | PDFExtraction;
 
 export function ItemDetailPage() {
+  const { requestConsent: requestAIProcessingConsent } = useAIProcessingConsent();
   const { itemType, itemId } = useParams();
   const type = itemType as ItemDetailType;
   const [item, setItem] = useState<DetailItem | null>(null);
@@ -145,6 +147,7 @@ export function ItemDetailPage() {
 
   const handleRetry = async () => {
     if (type !== 'audio' || !itemId) return;
+    if (!(await requestAIProcessingConsent())) return;
     setIsActing(true);
     setError('');
     try {
@@ -158,6 +161,7 @@ export function ItemDetailPage() {
 
   const handleAudioSummary = async () => {
     if (type !== 'audio' || !itemId) return;
+    if (!(await requestAIProcessingConsent())) return;
     setIsActing(true);
     setError('');
     try {
@@ -171,6 +175,7 @@ export function ItemDetailPage() {
 
   const handleTranscriptFormatting = async () => {
     if (type !== 'audio' || !itemId) return;
+    if (!(await requestAIProcessingConsent())) return;
     setIsActing(true);
     setError('');
     try {

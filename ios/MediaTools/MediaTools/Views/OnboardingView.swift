@@ -100,9 +100,9 @@ struct OnboardingView: View {
                             color: Theme.brand400,
                             title: "Private, durable, and ready",
                             subtitle:
-                                "Recordings stay recoverable on this iPhone until the server accepts them. Your transcripts, PDFs, summaries, chats, and collections remain connected to your account.",
+                                "Recordings stay recoverable on this iPhone until the server accepts them. Before the first transcription, summary, formatting, or chat request, Media Tools explains which third-party AI providers receive your content and asks your permission.",
                             note:
-                                "Next: open Shortcuts and add Media Tools → Quick Record to your Action Button. You can review these steps in Settings anytime."
+                                "Your AI permission is account-scoped and can be revoked in Settings. Next, add Media Tools → Quick Record to your Action Button."
                         ) {
                             Button {
                                 guard let url = URL(string: "shortcuts://") else { return }

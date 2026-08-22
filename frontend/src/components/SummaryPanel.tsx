@@ -14,6 +14,7 @@ import {
 import { CitationRow } from './CitationChip';
 import { createSummary, getSummaries, getSummaryErrorMessage, type Citation, type MediaSegment, type Summary } from '../lib/api';
 import { formatTimestamp } from '../lib/citations';
+import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
 
 interface SummaryPanelProps {
   transcriptId: string;
@@ -37,6 +38,7 @@ export function SummaryPanel({
   segments = [],
   onCitationClick = () => undefined,
 }: SummaryPanelProps) {
+  const { requestConsent: requestAIProcessingConsent } = useAIProcessingConsent();
   const [activeTab, setActiveTab] = useState<TabId>('transcript');
   const [summary, setSummary] = useState<Summary | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -127,6 +129,7 @@ export function SummaryPanel({
   }, []);
 
   const handleGenerateSummary = async () => {
+    if (!(await requestAIProcessingConsent())) return;
     setIsGenerating(true);
     setError('');
     setSummary(null);

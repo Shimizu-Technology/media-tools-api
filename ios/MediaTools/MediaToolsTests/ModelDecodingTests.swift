@@ -2,6 +2,51 @@ import XCTest
 @testable import MediaTools
 
 final class ModelDecodingTests: XCTestCase {
+    @MainActor
+    func testAIProcessingConsentIsExplicitAccountScopedAndRevocable() async {
+        let suiteName = "AIProcessingConsentTests.\(UUID().uuidString)"
+        let defaults = try! XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let manager = AIProcessingConsentManager(defaults: defaults)
+        manager.setActiveOwnerID("owner-a")
+        XCTAssertFalse(manager.hasConsent)
+
+        let request = Task { await manager.requestPermission() }
+        await Task.yield()
+        XCTAssertTrue(manager.isPresentingDisclosure)
+        manager.allow()
+        let granted = await request.value
+        XCTAssertTrue(granted)
+        XCTAssertTrue(manager.hasConsent)
+
+        manager.setActiveOwnerID("owner-b")
+        XCTAssertFalse(manager.hasConsent, "permission must not leak between accounts")
+        manager.setActiveOwnerID("owner-a")
+        XCTAssertTrue(manager.hasConsent)
+
+        manager.revoke()
+        XCTAssertFalse(manager.hasConsent)
+    }
+
+    @MainActor
+    func testAIProcessingConsentDeclineLeavesRequestBlocked() async {
+        let suiteName = "AIProcessingConsentTests.\(UUID().uuidString)"
+        let defaults = try! XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let manager = AIProcessingConsentManager(defaults: defaults)
+        manager.setActiveOwnerID("owner-a")
+        let request = Task { await manager.requestPermission() }
+        await Task.yield()
+        manager.decline()
+
+        let granted = await request.value
+        XCTAssertFalse(granted)
+        XCTAssertFalse(manager.hasConsent)
+        XCTAssertFalse(manager.isPresentingDisclosure)
+    }
+
     private func mediaBox(_ type: String, payload: Data) -> Data {
         let size = UInt32(payload.count + 8)
         var data = Data([

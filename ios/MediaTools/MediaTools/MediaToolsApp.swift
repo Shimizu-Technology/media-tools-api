@@ -8,6 +8,7 @@ struct MediaToolsApp: App {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var recordingCoordinator = RecordingCoordinator.shared
     @State private var uploadCoordinator = RecordingUploadCoordinator.shared
+    @State private var aiProcessingConsent = AIProcessingConsentManager.shared
 
     init() {
         Clerk.configure(publishableKey: Configuration.clerkPublishableKey)
@@ -27,6 +28,13 @@ struct MediaToolsApp: App {
             rootView
                 .environment(recordingCoordinator)
                 .environment(uploadCoordinator)
+                .environment(aiProcessingConsent)
+                .sheet(isPresented: Binding(
+                    get: { aiProcessingConsent.isPresentingDisclosure },
+                    set: { if !$0 { aiProcessingConsent.decline() } }
+                )) {
+                    AIProcessingDisclosureView(manager: aiProcessingConsent)
+                }
                 .onChange(of: scenePhase) { _, phase in
                     guard phase == .active else { return }
                     uploadCoordinator.resumePendingWork()

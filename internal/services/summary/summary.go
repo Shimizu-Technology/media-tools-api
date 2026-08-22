@@ -163,7 +163,9 @@ type responseFormat struct {
 }
 
 type providerPreferences struct {
-	Sort string `json:"sort,omitempty"`
+	Sort           string `json:"sort,omitempty"`
+	DataCollection string `json:"data_collection"`
+	ZDR            bool   `json:"zdr"`
 }
 
 type chatMessage struct {
@@ -509,10 +511,15 @@ func (s *Service) SummarizeAudio(ctx context.Context, transcriptText string, opt
 }
 
 func (s *Service) providerPreferences() *providerPreferences {
-	if s.providerSort == "" {
-		return nil
+	// User content can include private recordings, documents, and chat prompts.
+	// Enforce OpenRouter's strongest per-request privacy controls regardless of
+	// dashboard defaults: do not route to providers that collect prompt data and
+	// require an endpoint that retains no prompt or completion content.
+	return &providerPreferences{
+		Sort:           s.providerSort,
+		DataCollection: "deny",
+		ZDR:            true,
 	}
-	return &providerPreferences{Sort: s.providerSort}
 }
 
 // getAudioSystemPrompt returns a system prompt tailored to the content type (MTA-24).
