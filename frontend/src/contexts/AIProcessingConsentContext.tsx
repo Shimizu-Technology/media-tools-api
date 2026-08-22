@@ -96,7 +96,7 @@ function AIProcessingConsentSession({ ownerID, children }: { ownerID: string | n
 
 function AIProcessingDisclosureDialog({ onAllow, onDecline }: { onAllow: () => void; onDecline: () => void }) {
   return (
-    <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center" role="presentation">
+    <div className="fixed inset-0 z-[100] flex items-end justify-center p-4 backdrop-blur-sm sm:items-center" style={{ backgroundColor: 'var(--color-modal-scrim)' }} role="presentation">
       <section
         role="dialog"
         aria-modal="true"
@@ -136,7 +136,7 @@ function AIProcessingDisclosureDialog({ onAllow, onDecline }: { onAllow: () => v
           <button type="button" onClick={onDecline} className="min-h-12 rounded-xl border px-4 text-sm font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
             Not now
           </button>
-          <button type="button" onClick={onAllow} autoFocus className="min-h-12 rounded-xl px-4 text-sm font-semibold text-white" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+          <button type="button" onClick={onAllow} autoFocus className="min-h-12 rounded-xl px-4 text-sm font-semibold" style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)' }}>
             Allow AI processing
           </button>
         </div>

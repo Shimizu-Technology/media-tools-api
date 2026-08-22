@@ -204,10 +204,10 @@ function ClerkAppContent() {
 }
 
 function NoClerkAppContent() {
-  const [hasApiKey, setHasApiKey] = useState(!!localStorage.getItem('mta_api_key'))
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('mta_api_key'))
 
   useEffect(() => {
-    const check = () => setHasApiKey(!!localStorage.getItem('mta_api_key'))
+    const check = () => setApiKey(localStorage.getItem('mta_api_key'))
     window.addEventListener('storage', check)
     const interval = setInterval(check, 2000)
     return () => {
@@ -219,17 +219,48 @@ function NoClerkAppContent() {
   return (
     <AuthProvider
       isClerkEnabled={false}
-      isAuthenticated={hasApiKey}
+      isAuthenticated={Boolean(apiKey)}
       isLoading={false}
       canUseWorkspace={false}
       user={null}
       refreshUser={async () => undefined}
     >
-      <AIProcessingConsentProvider ownerID="local-api-key">
-        <AppRoutes />
-      </AIProcessingConsentProvider>
+      <APIKeyConsentScope key={apiKey ?? 'no-api-key'} apiKey={apiKey} />
     </AuthProvider>
   )
+}
+
+function APIKeyConsentScope({ apiKey }: { apiKey: string | null }) {
+  const [ownerID, setOwnerID] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!apiKey) return
+
+    let cancelled = false
+    void fingerprintAPIKey(apiKey).then((fingerprint) => {
+      if (!cancelled && fingerprint) setOwnerID(`api-key:${fingerprint}`)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [apiKey])
+
+  return (
+    <AIProcessingConsentProvider ownerID={ownerID}>
+      <AppRoutes />
+    </AIProcessingConsentProvider>
+  )
+}
+
+async function fingerprintAPIKey(apiKey: string): Promise<string | null> {
+  try {
+    if (!globalThis.crypto?.subtle) return null
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(apiKey))
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  } catch {
+    // Without a safe, one-way account scope, AI requests remain blocked.
+    return null
+  }
 }
 
 function App() {

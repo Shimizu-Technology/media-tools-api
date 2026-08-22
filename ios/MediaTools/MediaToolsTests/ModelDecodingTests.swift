@@ -22,6 +22,7 @@ final class ModelDecodingTests: XCTestCase {
 
         manager.setActiveOwnerID("owner-b")
         XCTAssertFalse(manager.hasConsent, "permission must not leak between accounts")
+        XCTAssertTrue(manager.hasConsent(ownerID: "owner-a"))
         manager.setActiveOwnerID("owner-a")
         XCTAssertTrue(manager.hasConsent)
 
@@ -585,10 +586,17 @@ final class ModelDecodingTests: XCTestCase {
         recorder.markUploadFinalizing(recording.id)
 
         let service = SuspendedRecordingUploadService()
+        let consentSuite = "AIProcessingConsentTests.\(UUID().uuidString)"
+        let consentDefaults = try XCTUnwrap(UserDefaults(suiteName: consentSuite))
+        defer { consentDefaults.removePersistentDomain(forName: consentSuite) }
+        let consent = AIProcessingConsentManager(defaults: consentDefaults)
+        consent.setActiveOwnerID("user_original")
+        consent.allow()
         let uploader = RecordingUploadCoordinator(
             recorder: recorder,
             service: service,
-            watchStore: try TranscriptionWatchStore(rootDirectory: directory)
+            watchStore: try TranscriptionWatchStore(rootDirectory: directory),
+            aiProcessingConsent: consent
         )
         await uploader.setActiveOwnerID("user_original")
         for _ in 0..<20 where !service.completeStarted {
@@ -614,6 +622,64 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertNil(recorder.recording(withID: recording.id)?.remoteTranscriptionID)
         XCTAssertNil(uploader.latestItem)
         XCTAssertEqual(service.completionOwnerIDs, ["user_original"])
+    }
+
+    @MainActor
+    func testPendingFinalizationWaitsForExplicitAIConsent() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let consentSuite = "AIProcessingConsentTests.\(UUID().uuidString)"
+        let consentDefaults = try XCTUnwrap(UserDefaults(suiteName: consentSuite))
+        defer {
+            consentDefaults.removePersistentDomain(forName: consentSuite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        var recording = store.makeRecording(contentType: "meeting", ownerID: "user_current")
+        recording.state = .ready
+        try finalizedM4AData().write(to: store.fileURL(for: recording))
+        try store.saveRecordings([recording])
+        let recorder = RecordingCoordinator(store: store)
+        recorder.setActiveOwnerID("user_current")
+        recorder.markWaitingForUpload(recording.id)
+        recorder.markUploadStarted(
+            recording.id,
+            objectKey: "audio/current/meeting.m4a",
+            sizeBytes: 42,
+            mimeType: "audio/mp4",
+            taskIdentifier: 19
+        )
+        recorder.markUploadFinalizing(recording.id)
+
+        let consent = AIProcessingConsentManager(defaults: consentDefaults)
+        consent.setActiveOwnerID("user_current")
+        let service = SuspendedRecordingUploadService()
+        let uploader = RecordingUploadCoordinator(
+            recorder: recorder,
+            service: service,
+            watchStore: try TranscriptionWatchStore(rootDirectory: directory),
+            aiProcessingConsent: consent
+        )
+
+        await uploader.setActiveOwnerID("user_current")
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertFalse(service.completeStarted)
+        XCTAssertEqual(recorder.recording(withID: recording.id)?.state, .finalizingUpload)
+
+        consent.allow()
+        uploader.resumePendingWork()
+        for _ in 0..<20 where !service.completeStarted { await Task.yield() }
+        XCTAssertTrue(service.completeStarted)
+        XCTAssertEqual(service.completionOwnerIDs, ["user_current"])
+
+        service.resumeCompletion(
+            try APIClient.makeDecoder().decode(
+                AudioTranscription.self,
+                from: Data(#"{"id":"audio-after-consent","status":"pending"}"#.utf8)
+            )
+        )
+        await Task.yield()
     }
 
     @MainActor

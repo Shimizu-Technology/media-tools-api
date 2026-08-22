@@ -126,11 +126,10 @@ class ShareViewController: UIViewController {
 
                 // Audio
                 if provider.hasItemConformingToTypeIdentifier(UTType.audio.identifier) {
-                    provider.loadItem(forTypeIdentifier: UTType.audio.identifier) { [weak self] item, _ in
-                        if let url = item as? URL {
-                            Task { await self?.uploadFile(url, endpoint: "/audio/transcribe", mimeType: "audio/m4a") }
-                        }
-                    }
+                    // Audio transcription shares the recording with third-party AI.
+                    // This future extension target cannot present the main app's
+                    // account-scoped disclosure, so it must never bypass consent.
+                    showError("Open Media Tools to review AI processing and transcribe this audio.")
                     return
                 }
 

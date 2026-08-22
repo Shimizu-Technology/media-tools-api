@@ -48,7 +48,7 @@ export function SettingsPage() {
           <button
             type="button"
             onClick={() => hasAIConsent ? revokeAIConsent() : void requestAIConsent()}
-            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl border px-4 text-sm font-semibold transition hover:bg-white/[0.06]"
+            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl border px-4 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)]"
             style={{ borderColor: 'var(--color-border)', color: hasAIConsent ? 'var(--color-danger)' : 'var(--color-text-primary)' }}
           >
             {hasAIConsent ? 'Revoke permission' : 'Review and allow'}
@@ -85,7 +85,7 @@ export function SettingsPage() {
               <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>Switch between light and dark mode.</p>
             </div>
           </div>
-          <button type="button" onClick={toggle} className="inline-flex min-h-11 items-center justify-center rounded-xl border px-4 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
+          <button type="button" onClick={toggle} className="inline-flex min-h-11 items-center justify-center rounded-xl border px-4 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
             Use {isDark ? 'light' : 'dark'} mode
           </button>
         </div>
@@ -102,7 +102,7 @@ export function SettingsPage() {
               <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>Clear the API key stored in this browser for local development mode.</p>
             </div>
           </div>
-          <button type="button" onClick={clearLocalKey} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ borderColor: 'var(--color-border)', color: cleared ? 'var(--color-success)' : 'var(--color-text-primary)' }}>
+          <button type="button" onClick={clearLocalKey} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)]" style={{ borderColor: 'var(--color-border)', color: cleared ? 'var(--color-success)' : 'var(--color-text-primary)' }}>
             {cleared && <Check className="h-4 w-4" />}
             {cleared ? 'Cleared' : 'Clear local key'}
           </button>

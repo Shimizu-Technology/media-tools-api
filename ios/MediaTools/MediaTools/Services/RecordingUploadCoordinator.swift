@@ -66,6 +66,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     private let transport: BackgroundUploadService
     private let watchStore: TranscriptionWatchStore?
     private let localAccountDefaults: UserDefaults
+    private let aiProcessingConsent: AIProcessingConsentManager
     private var watches: [TranscriptionWatch] = []
     private var uploadTasks: [UUID: Task<Void, Never>] = [:]
     private var retryTasks: [UUID: Task<Void, Never>] = [:]
@@ -79,7 +80,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         service: any RecordingUploadServicing = MediaToolsService.shared,
         transport: BackgroundUploadService = .shared,
         watchStore: TranscriptionWatchStore? = nil,
-        localAccountDefaults: UserDefaults = .standard
+        localAccountDefaults: UserDefaults = .standard,
+        aiProcessingConsent: AIProcessingConsentManager? = nil
     ) {
         self.recorder = recorder ?? .shared
         self.service = service
@@ -90,6 +92,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             self.watchStore = try? TranscriptionWatchStore()
         }
         self.localAccountDefaults = localAccountDefaults
+        self.aiProcessingConsent = aiProcessingConsent ?? .shared
         #if DEBUG
         simulatesUpload = ProcessInfo.processInfo.arguments.contains("-ui-test-simulated-upload")
         #else
@@ -100,7 +103,11 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     }
 
     func queue(_ recording: LocalRecording) {
-        guard recording.canUpload, recording.ownerID == recorder.activeOwnerID else { return }
+        guard recording.canUpload,
+              let ownerID = recording.ownerID,
+              ownerID == recorder.activeOwnerID,
+              aiProcessingConsent.hasConsent(ownerID: ownerID)
+        else { return }
         recorder.markWaitingForUpload(recording.id)
         retryAttempts[recording.id] = 0
         process(recordingID: recording.id)
@@ -327,6 +334,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         guard uploadTasks[recordingID] == nil,
               let recording = recorder.recording(withID: recordingID),
               let ownerID = recording.ownerID,
+              aiProcessingConsent.hasConsent(ownerID: ownerID),
               isActiveOwner(recordingID: recordingID, expectedOwnerID: ownerID),
               recording.state == .waitingForUpload || recording.state == .uploadFailed,
               let fileURL = recorder.fileURL(for: recording)
@@ -338,7 +346,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             guard self.isActiveOwner(
                 recordingID: recordingID,
                 expectedOwnerID: ownerID
-            ), !Task.isCancelled else { return }
+            ), self.aiProcessingConsent.hasConsent(ownerID: ownerID),
+               !Task.isCancelled else { return }
             if self.simulatesUpload {
                 await self.simulateUpload(recording: recording, ownerID: ownerID)
                 return
@@ -358,7 +367,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 guard self.isActiveOwner(
                     recordingID: recordingID,
                     expectedOwnerID: ownerID
-                ), !Task.isCancelled else { return }
+                ), self.aiProcessingConsent.hasConsent(ownerID: ownerID),
+                   !Task.isCancelled else { return }
                 let metadata = BackgroundUploadMetadata(
                     recordingID: recording.id,
                     ownerID: ownerID,
@@ -409,7 +419,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         ownerID: String
     ) async {
         guard let recording = recorder.recording(withID: recordingID),
-              isActiveOwner(recordingID: recordingID, expectedOwnerID: ownerID)
+              isActiveOwner(recordingID: recordingID, expectedOwnerID: ownerID),
+              aiProcessingConsent.hasConsent(ownerID: ownerID)
         else { return }
         do {
             let item = try await service.uploadAudio(
@@ -435,6 +446,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         guard uploadTasks[recordingID] == nil,
               let recording = recorder.recording(withID: recordingID),
               let ownerID = recording.ownerID,
+              aiProcessingConsent.hasConsent(ownerID: ownerID),
               isActiveOwner(recordingID: recordingID, expectedOwnerID: ownerID),
               recording.state == .finalizingUpload,
               let objectKey = recording.uploadObjectKey,
@@ -447,7 +459,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             guard self.isActiveOwner(
                 recordingID: recordingID,
                 expectedOwnerID: ownerID
-            ), !Task.isCancelled else { return }
+            ), self.aiProcessingConsent.hasConsent(ownerID: ownerID),
+               !Task.isCancelled else { return }
             do {
                 let item = try await self.service.completeAudioUpload(
                     AudioUploadCompleteRequest(

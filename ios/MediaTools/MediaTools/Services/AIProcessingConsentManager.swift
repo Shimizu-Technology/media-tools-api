@@ -23,7 +23,11 @@ final class AIProcessingConsentManager {
 
     var hasConsent: Bool {
         guard let activeOwnerID else { return false }
-        return consentedOwnerIDs.contains(activeOwnerID)
+        return hasConsent(ownerID: activeOwnerID)
+    }
+
+    func hasConsent(ownerID: String) -> Bool {
+        consentedOwnerIDs.contains(ownerID)
     }
 
     func setActiveOwnerID(_ ownerID: String?) {
