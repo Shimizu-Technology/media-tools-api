@@ -103,6 +103,7 @@ struct ChatView: View {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         guard await aiProcessingConsent.requestPermission() else { return }
+        guard !isSending else { return }
 
         let tempId = UUID().uuidString
         withAnimation(Theme.springSnappy) {

@@ -61,6 +61,7 @@ export function TranscriptChatPanel({ itemId, itemType, onCitationClick }: Trans
     const text = input.trim();
     if (!text || isSending) return;
     if (!(await requestAIProcessingConsent())) return;
+    if (isSending) return;
     setIsSending(true);
     setError('');
     setInput('');

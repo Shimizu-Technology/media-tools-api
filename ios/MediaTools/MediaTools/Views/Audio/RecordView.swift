@@ -719,10 +719,11 @@ struct RecordView: View {
     }
 
     private func queueForAIProcessing(_ recording: LocalRecording) async {
-        guard !recording.isUploadInProgress,
-              await aiProcessingConsent.requestPermission() else { return }
+        guard await aiProcessingConsent.requestPermission(),
+              let currentRecording = recorder.recording(withID: recording.id),
+              !currentRecording.isUploadInProgress else { return }
         error = nil
-        uploader.queue(recording)
+        uploader.queue(currentRecording)
         Haptics.light()
     }
 

@@ -235,7 +235,10 @@ struct ItemDetailView: View {
     private var actionButtons: some View {
         HStack(spacing: 12) {
             Button {
-                showChat = true
+                Task {
+                    guard await aiProcessingConsent.requestPermission() else { return }
+                    showChat = true
+                }
             } label: {
                 Label("Chat", systemImage: "bubble.left.and.bubble.right")
                     .frame(maxWidth: .infinity)
@@ -965,6 +968,7 @@ struct ItemDetailView: View {
     private func retryAudioTranscription() async {
         guard isAudioItem else { return }
         guard await aiProcessingConsent.requestPermission() else { return }
+        guard !isRetrying else { return }
         isRetrying = true
         detailError = nil
         defer { isRetrying = false }
@@ -1065,6 +1069,7 @@ struct ItemDetailView: View {
 
     private func generateSummary() async {
         guard await aiProcessingConsent.requestPermission() else { return }
+        guard !isLoadingSummary else { return }
         isLoadingSummary = true
         Haptics.light()
         defer { isLoadingSummary = false }
