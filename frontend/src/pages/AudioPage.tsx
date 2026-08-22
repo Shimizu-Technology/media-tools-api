@@ -54,6 +54,7 @@ import {
 import { usePolling } from '../hooks/usePolling';
 import { TranscriptChatPanel } from '../components/TranscriptChatPanel';
 import { CapturePageHeader } from '../components/CapturePageHeader';
+import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
 
 /**
  * Audio transcription page (MTA-16, MTA-22, MTA-23, MTA-24, MTA-25, MTA-26).
@@ -254,6 +255,7 @@ async function clearPendingRecording(): Promise<void> {
 }
 
 export function AudioPage() {
+  const { requestConsent: requestAIProcessingConsent } = useAIProcessingConsent();
   const [searchParams, setSearchParams] = useSearchParams();
   
   // Upload state
@@ -671,6 +673,8 @@ export function AudioPage() {
       return;
     }
 
+    if (!(await requestAIProcessingConsent())) return;
+
     setIsProcessing(true);
     setError('');
     setRecoveredDraft(false);
@@ -727,6 +731,7 @@ export function AudioPage() {
 
   const handleSummarize = async () => {
     if (!result) return;
+    if (!(await requestAIProcessingConsent())) return;
     setIsSummarizing(true);
     setError('');
 
@@ -819,6 +824,7 @@ export function AudioPage() {
 
   const handleRetryStoredAudio = async () => {
     if (!result) return;
+    if (!(await requestAIProcessingConsent())) return;
     setIsRetrying(true);
     setError('');
     try {

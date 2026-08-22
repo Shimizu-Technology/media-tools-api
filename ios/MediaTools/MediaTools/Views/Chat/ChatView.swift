@@ -5,6 +5,7 @@ struct ChatView: View {
     let itemId: String
     let onCitationTap: ((Citation) -> Void)?
     @Environment(\.openURL) private var openURL
+    @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
 
     @State private var messages: [ChatMessage] = []
     @State private var input = ""
@@ -101,6 +102,8 @@ struct ChatView: View {
     private func send() async {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        guard await aiProcessingConsent.requestPermission() else { return }
+        guard !isSending else { return }
 
         let tempId = UUID().uuidString
         withAnimation(Theme.springSnappy) {

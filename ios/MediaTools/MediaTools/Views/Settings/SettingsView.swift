@@ -4,6 +4,7 @@ import ClerkKit
 struct SettingsView: View {
     @Environment(Clerk.self) private var clerk
     @Environment(RecordingUploadCoordinator.self) private var uploadCoordinator
+    @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
@@ -28,6 +29,7 @@ struct SettingsView: View {
                 accountSection
                 preferencesSection
                 quickCaptureSection
+                aiProcessingSection
                 helpSection
                 advancedSection
                 deleteAccountSection
@@ -282,6 +284,48 @@ struct SettingsView: View {
                 )
             }
             .cardStyle(padding: 12)
+        }
+    }
+
+    private var aiProcessingSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionHeader(text: "AI processing", icon: "brain.head.profile")
+
+            VStack(alignment: .leading, spacing: 12) {
+                Label {
+                    Text(aiProcessingConsent.hasConsent
+                         ? "Allowed for this account on this iPhone."
+                         : "Not allowed. Media Tools will ask before sharing content with third-party AI providers.")
+                        .font(Theme.body(14))
+                        .foregroundStyle(Theme.textPrimary)
+                } icon: {
+                    Image(systemName: aiProcessingConsent.hasConsent ? "checkmark.shield.fill" : "hand.raised.fill")
+                        .foregroundStyle(aiProcessingConsent.hasConsent ? Theme.success : Theme.brand400)
+                }
+
+                Text("This controls future transcription, readable formatting, summary, and chat requests. Processing already started may finish.")
+                    .font(Theme.caption(13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    if aiProcessingConsent.hasConsent {
+                        aiProcessingConsent.revoke()
+                    } else {
+                        Task { _ = await aiProcessingConsent.requestPermission() }
+                    }
+                } label: {
+                    Label(
+                        aiProcessingConsent.hasConsent ? "Revoke permission" : "Review and allow",
+                        systemImage: aiProcessingConsent.hasConsent ? "xmark.shield" : "info.circle"
+                    )
+                    .font(Theme.body(14, weight: .semibold))
+                    .foregroundStyle(aiProcessingConsent.hasConsent ? Theme.error : Theme.brand400)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+            }
+            .cardStyle(padding: 14)
         }
     }
 
@@ -544,6 +588,7 @@ struct SettingsView: View {
         }
 
         await uploadCoordinator.removeLocalAccountData(ownerID: ownerID)
+        aiProcessingConsent.removeConsent(ownerID: ownerID)
         // The server has accepted an irreversible deletion request. Stop the
         // share-extension sync before clearing its token so a still-present
         // Clerk session cannot write the credential back if sign-out fails.

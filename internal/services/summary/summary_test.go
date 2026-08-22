@@ -2,11 +2,33 @@ package summary
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 	"testing"
 )
+
+func TestProviderPreferencesRequireZeroRetentionAndDenyCollection(t *testing.T) {
+	service := NewWithModels("key", "model", "chat-model", "throughput")
+	body, err := json.Marshal(chatRequest{Provider: service.providerPreferences()})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	encoded := string(body)
+	for _, required := range []string{`"sort":"throughput"`, `"data_collection":"deny"`, `"zdr":true`} {
+		if !strings.Contains(encoded, required) {
+			t.Fatalf("provider preferences %s missing %s", encoded, required)
+		}
+	}
+}
+
+func TestProviderPreferencesRemainPresentWithoutCustomSort(t *testing.T) {
+	prefs := New("key", "model").providerPreferences()
+	if prefs == nil || prefs.Sort != "" || prefs.DataCollection != "deny" || !prefs.ZDR {
+		t.Fatalf("provider preferences = %#v, want privacy controls without a sort override", prefs)
+	}
+}
 
 func TestSummaryMaxTokensUsesBoundedBudgets(t *testing.T) {
 	tests := []struct {

@@ -72,6 +72,50 @@ export function PrivacyPage() {
           </ul>
         </Section>
 
+        <section id="ai-processing" className="scroll-mt-24">
+          <h2 className="mb-3 text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+            AI Processing and Your Permission
+          </h2>
+          <div className="space-y-3 leading-relaxed">
+            <p>
+              Media Tools asks for your explicit permission before it first sends
+              your content to a third-party AI service. Declining leaves recording,
+              local recovery, library browsing, playback, export, and non-AI text
+              extraction available, but transcription, readable formatting,
+              AI summaries, and AI chat will not run.
+            </p>
+            <ul className="list-disc space-y-2 pl-5">
+              <li>
+                <strong style={{ color: 'var(--color-text-primary)' }}>OpenAI</strong> receives
+                audio segments for speech-to-text transcription. If OpenRouter is
+                unavailable, OpenAI may also receive transcript or document text
+                and chat prompts as a fallback for summaries, formatting, or answers.
+              </li>
+              <li>
+                <strong style={{ color: 'var(--color-text-primary)' }}>OpenRouter and the model provider it selects</strong> receive
+                transcript or document text, relevant source excerpts, and your chat
+                prompts to produce readable formatting, summaries, citations, and answers.
+                Media Tools requires OpenRouter to route these requests only to
+                zero-data-retention endpoints and denies provider data collection.
+              </li>
+            </ul>
+            <p>
+              OpenAI states that API data is not used to train its models by default.
+              Its audio-transcription endpoint has no abuse-monitoring or application-state
+              retention under its published API data controls; eligible direct text requests
+              may be retained for abuse monitoring for up to 30 days. OpenRouter states that
+              it does not retain prompt or response content unless the account opts into
+              logging; Media Tools additionally requests zero-data-retention routing.
+              Providers may retain non-content request metadata such as token counts and latency.
+            </p>
+            <p>
+              Permission is stored separately for each signed-in account on each device.
+              You can revoke it in Settings at any time. Revocation blocks future AI
+              requests on that device; a request already being processed may finish.
+            </p>
+          </div>
+        </section>
+
         <Section title="Third-Party Services">
           <ul className="list-disc pl-5 space-y-2">
             <li>
@@ -83,14 +127,14 @@ export function PrivacyPage() {
             </li>
             <li>
               <strong style={{ color: 'var(--color-text-primary)' }}>OpenAI (Whisper)</strong> —
-              Audio transcription.{' '}
-              <a href="https://openai.com/privacy" className="underline" style={{ color: 'var(--color-brand-500)' }}>
-                Privacy policy
+              Audio transcription and fallback text processing.{' '}
+              <a href="https://openai.com/enterprise-privacy/" className="underline" style={{ color: 'var(--color-brand-500)' }}>
+                API privacy details
               </a>
             </li>
             <li>
               <strong style={{ color: 'var(--color-text-primary)' }}>OpenRouter</strong> —
-              AI chat and summarization.{' '}
+              Zero-data-retention routing for AI chat, summaries, and readable formatting.{' '}
               <a href="https://openrouter.ai/privacy" className="underline" style={{ color: 'var(--color-brand-500)' }}>
                 Privacy policy
               </a>

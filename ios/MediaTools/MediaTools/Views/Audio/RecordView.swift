@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct RecordView: View {
     @Environment(RecordingCoordinator.self) private var recorder
     @Environment(RecordingUploadCoordinator.self) private var uploader
+    @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var contentType = "general"
     @State private var isUploading = false
@@ -643,11 +644,7 @@ struct RecordView: View {
                     .accessibilityIdentifier("recording.save.\(recording.id.uuidString)")
                 } else {
                     Button {
-                        if !recording.isUploadInProgress {
-                            error = nil
-                            uploader.queue(recording)
-                            Haptics.light()
-                        }
+                        Task { await queueForAIProcessing(recording) }
                     } label: {
                         if recording.isUploadInProgress {
                             HStack(spacing: 8) {
@@ -696,8 +693,7 @@ struct RecordView: View {
         error = nil
         do {
             let recording = try recorder.importRecording(from: url, contentType: contentType)
-            uploader.queue(recording)
-            Haptics.light()
+            await queueForAIProcessing(recording)
         } catch {
             self.error = error.localizedDescription
             Haptics.error()
@@ -705,6 +701,7 @@ struct RecordView: View {
     }
 
     private func retryTranscription(id: String) async {
+        guard await aiProcessingConsent.requestPermission() else { return }
         isUploading = true
         defer { isUploading = false }
         error = nil
@@ -719,6 +716,15 @@ struct RecordView: View {
             self.error = error.localizedDescription
             Haptics.error()
         }
+    }
+
+    private func queueForAIProcessing(_ recording: LocalRecording) async {
+        guard await aiProcessingConsent.requestPermission(),
+              let currentRecording = recorder.recording(withID: recording.id),
+              !currentRecording.isUploadInProgress else { return }
+        error = nil
+        uploader.queue(currentRecording)
+        Haptics.light()
     }
 
     private func startPolling(id: String) {

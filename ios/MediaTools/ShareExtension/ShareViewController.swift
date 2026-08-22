@@ -4,8 +4,8 @@ import UniformTypeIdentifiers
 /// Share Sheet extension for Media Tools.
 ///
 /// Accepts:
-/// - URLs (video links → transcribe)
-/// - Audio files → upload & transcribe
+/// - URLs (directs people to the main app for consent-aware transcription)
+/// - Audio files (directs people to the main app for consent-aware transcription)
 /// - PDF files → upload & extract
 ///
 /// Auth: reads the Clerk session token from shared Keychain group.
@@ -116,21 +116,20 @@ class ShareViewController: UIViewController {
             for provider in attachments {
                 // URL
                 if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
-                    provider.loadItem(forTypeIdentifier: UTType.url.identifier) { [weak self] item, error in
-                        if let url = item as? URL {
-                            Task { await self?.submitURL(url.absoluteString) }
-                        }
-                    }
+                    // A video without usable native subtitles can fall back to
+                    // third-party AI transcription on the server. Keep this
+                    // future extension target from bypassing the main app's
+                    // account-scoped disclosure.
+                    showError("Open Media Tools to review AI processing and transcribe this video.")
                     return
                 }
 
                 // Audio
                 if provider.hasItemConformingToTypeIdentifier(UTType.audio.identifier) {
-                    provider.loadItem(forTypeIdentifier: UTType.audio.identifier) { [weak self] item, _ in
-                        if let url = item as? URL {
-                            Task { await self?.uploadFile(url, endpoint: "/audio/transcribe", mimeType: "audio/m4a") }
-                        }
-                    }
+                    // Audio transcription shares the recording with third-party AI.
+                    // This future extension target cannot present the main app's
+                    // account-scoped disclosure, so it must never bypass consent.
+                    showError("Open Media Tools to review AI processing and transcribe this audio.")
                     return
                 }
 
@@ -150,32 +149,6 @@ class ShareViewController: UIViewController {
     }
 
     // MARK: - API Calls
-
-    private func submitURL(_ urlString: String) async {
-        updateStatus("Submitting for transcription...")
-
-        guard let endpoint = URL(string: apiBaseURL + "/api/v1/transcripts") else {
-            showError("Invalid API URL")
-            return
-        }
-
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        applyAuth(to: &request)
-        request.httpBody = try? JSONEncoder().encode(["url": urlString])
-
-        do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
-                showSuccess("Submitted! Transcription will appear in your library shortly.")
-            } else {
-                showError("Failed to submit. Please try again.")
-            }
-        } catch {
-            showError("Network error: \(error.localizedDescription)")
-        }
-    }
 
     private func uploadFile(_ fileURL: URL, endpoint: String, mimeType: String) async {
         updateStatus("Uploading \(fileURL.lastPathComponent)...")

@@ -5,6 +5,7 @@ import ClerkKitUI
 struct ContentView: View {
     @Environment(Clerk.self) private var clerk
     @Environment(RecordingUploadCoordinator.self) private var uploadCoordinator
+    @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @State private var showAuth = false
     private let tokenSync = TokenSyncService.shared
 
@@ -27,6 +28,7 @@ struct ContentView: View {
         }
         .task(id: clerk.user?.id) {
             await uploadCoordinator.setActiveOwnerID(clerk.user?.id)
+            aiProcessingConsent.setActiveOwnerID(clerk.user?.id)
         }
         .sheet(isPresented: $showAuth) {
             AuthView()
