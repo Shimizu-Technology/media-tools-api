@@ -440,6 +440,47 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     @MainActor
+    func testPendingDeletedAccountCleanupRetriesBeforeAnotherOwnerActivates() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let defaultsSuite = "MediaToolsTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        var deletedOwnerRecording = store.makeRecording(
+            contentType: "voice_memo",
+            ownerID: "user_deleted"
+        )
+        deletedOwnerRecording.state = .ready
+        let audioURL = store.fileURL(for: deletedOwnerRecording)
+        try cafData(unknownDataLength: true).write(to: audioURL)
+        try store.saveRecordings([deletedOwnerRecording])
+        defaults.set(
+            ["user_deleted"],
+            forKey: RecordingUploadCoordinator.pendingLocalAccountDeletionOwnerIDsKey
+        )
+
+        let recorder = RecordingCoordinator(store: store)
+        let watchStore = try TranscriptionWatchStore(rootDirectory: directory)
+        let uploader = RecordingUploadCoordinator(
+            recorder: recorder,
+            watchStore: watchStore,
+            localAccountDefaults: defaults
+        )
+
+        await uploader.setActiveOwnerID("user_new")
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: audioURL.path))
+        XCTAssertFalse(uploader.hasPendingLocalAccountDeletion(ownerID: "user_deleted"))
+        XCTAssertTrue(recorder.pendingRecordings.isEmpty)
+        XCTAssertEqual(recorder.activeOwnerID, "user_new")
+    }
+
+    @MainActor
     func testDiscardingLocalRecordingDeletesAudioAndManifestEntry() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

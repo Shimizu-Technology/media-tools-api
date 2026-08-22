@@ -543,7 +543,7 @@ struct SettingsView: View {
             return
         }
 
-        try? await uploadCoordinator.removeLocalAccountData(ownerID: ownerID)
+        await uploadCoordinator.removeLocalAccountData(ownerID: ownerID)
         // The server has accepted an irreversible deletion request. Stop the
         // share-extension sync before clearing its token so a still-present
         // Clerk session cannot write the credential back if sign-out fails.

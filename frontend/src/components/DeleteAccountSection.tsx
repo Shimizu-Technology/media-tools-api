@@ -16,6 +16,10 @@ function clearLocalAccountState() {
   }
 }
 
+/**
+ * Presents Media Tools' destructive account-deletion confirmation and routes
+ * the request through the application purge before Clerk sign-out.
+ */
 export function DeleteAccountSection() {
   const { signOut } = useClerk();
   const [isOpen, setIsOpen] = useState(false);
@@ -57,7 +61,7 @@ export function DeleteAccountSection() {
           </div>
         </div>
         {!isOpen && (
-          <button type="button" onClick={() => setIsOpen(true)} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold transition hover:bg-red-500/10" style={{ borderColor: 'color-mix(in srgb, var(--color-error) 48%, var(--color-border))', color: 'var(--color-error)' }}>
+          <button type="button" onClick={() => setIsOpen(true)} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold transition hover:bg-[var(--color-error-soft)]" style={{ borderColor: 'color-mix(in srgb, var(--color-error) 48%, var(--color-border))', color: 'var(--color-error)' }}>
             <Trash2 className="h-4 w-4" />
             Delete account
           </button>
@@ -73,7 +77,7 @@ export function DeleteAccountSection() {
           {error && <p role="alert" className="mt-3 text-sm" style={{ color: 'var(--color-error)' }}>{error}</p>}
           <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <button type="button" disabled={isDeleting} onClick={() => { setIsOpen(false); setConfirmation(''); setError(null); }} className="min-h-11 rounded-xl px-4 text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Cancel</button>
-            <button type="button" disabled={confirmation !== 'DELETE' || isDeleting} onClick={() => void permanentlyDelete()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-45" style={{ backgroundColor: 'var(--color-error)' }}>
+            <button type="button" disabled={confirmation !== 'DELETE' || isDeleting} onClick={() => void permanentlyDelete()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45" style={{ backgroundColor: 'var(--color-error)', color: 'var(--color-on-brand)' }}>
               {isDeleting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               {isDeleting ? 'Deleting…' : 'Permanently delete account'}
             </button>

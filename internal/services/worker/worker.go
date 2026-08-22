@@ -838,8 +838,12 @@ func (p *Pool) runClaimedJob(workerNumber int, claimed *models.BackgroundJob) {
 	defer cancel()
 	if err != nil {
 		var retryable *retryableJobError
-		if errors.As(err, &retryable) && claimed.Attempts < claimed.MaxAttempts {
-			if markErr := p.db.RequeueBackgroundJob(markCtx, job.QueueID, p.instanceID, err.Error(), retryable.delay); markErr != nil {
+		if errors.As(err, &retryable) && (claimed.Attempts < claimed.MaxAttempts || job.Type == JobAccountDeletion) {
+			// Account deletion is a privacy guarantee, not ordinary best-effort
+			// background work. Reset its attempt counter whenever it is safely
+			// requeued so a long provider outage cannot strand user data.
+			resetAttempts := job.Type == JobAccountDeletion
+			if markErr := p.db.RequeueBackgroundJob(markCtx, job.QueueID, p.instanceID, err.Error(), retryable.delay, resetAttempts); markErr != nil {
 				log.Printf("⚠️  Failed to requeue durable job %s: %v", job.QueueID, markErr)
 			} else {
 				leaseRecovery.stopSignaling()

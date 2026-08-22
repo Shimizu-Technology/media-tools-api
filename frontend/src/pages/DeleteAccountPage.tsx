@@ -2,6 +2,7 @@ import { ArrowRight, ShieldCheck, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuthContext } from '../contexts/useAuthContext';
 
+/** Explains the cross-platform deletion path for people and store reviewers. */
 export function DeleteAccountPage() {
   const { isAuthenticated } = useAuthContext();
 
@@ -35,7 +36,7 @@ export function DeleteAccountPage() {
           Deletion cannot be undone. Export anything you want to keep first. On iPhone, device recordings owned by the deleted account are removed as part of the process.
         </p>
 
-        <Link to={isAuthenticated ? '/app/settings' : '/app'} className="mt-8 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white transition hover:opacity-90 sm:w-auto" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+        <Link to={isAuthenticated ? '/app/settings' : '/app'} className="mt-8 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold transition hover:opacity-90 sm:w-auto" style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)' }}>
           {isAuthenticated ? 'Open account settings' : 'Sign in to delete account'}
           <ArrowRight className="h-4 w-4" />
         </Link>

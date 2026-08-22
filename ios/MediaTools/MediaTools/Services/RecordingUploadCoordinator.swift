@@ -18,6 +18,8 @@ enum TranscriptionWatchFailureDisposition: Equatable {
 final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     static let shared = RecordingUploadCoordinator()
     static let maximumAuthenticationPauseAge: TimeInterval = 30 * 24 * 60 * 60
+    static let pendingLocalAccountDeletionOwnerIDsKey =
+        "pendingLocalAccountDeletionOwnerIDs"
 
     private(set) var latestItem: AudioTranscription?
     private(set) var statusMessage: String?
@@ -36,6 +38,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     private let service: MediaToolsService
     private let transport: BackgroundUploadService
     private let watchStore: TranscriptionWatchStore?
+    private let localAccountDefaults: UserDefaults
     private var watches: [TranscriptionWatch] = []
     private var uploadTasks: [UUID: Task<Void, Never>] = [:]
     private var retryTasks: [UUID: Task<Void, Never>] = [:]
@@ -48,7 +51,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         recorder: RecordingCoordinator? = nil,
         service: MediaToolsService = .shared,
         transport: BackgroundUploadService = .shared,
-        watchStore: TranscriptionWatchStore? = nil
+        watchStore: TranscriptionWatchStore? = nil,
+        localAccountDefaults: UserDefaults = .standard
     ) {
         self.recorder = recorder ?? .shared
         self.service = service
@@ -58,6 +62,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         } else {
             self.watchStore = try? TranscriptionWatchStore()
         }
+        self.localAccountDefaults = localAccountDefaults
         #if DEBUG
         simulatesUpload = ProcessInfo.processInfo.arguments.contains("-ui-test-simulated-upload")
         #else
@@ -78,6 +83,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     /// account. Work owned by another account is paused instead of ever being
     /// finalized with the new account's bearer token.
     func setActiveOwnerID(_ ownerID: String?) async {
+        await retryPendingLocalAccountDeletions()
         recorder.setActiveOwnerID(ownerID)
         if let ownerID {
             for index in watches.indices where watches[index].ownerID == nil {
@@ -111,7 +117,25 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         }
     }
 
-    func removeLocalAccountData(ownerID: String) async throws {
+    /// Records the deletion intent before touching files. A transient device
+    /// storage failure therefore remains retryable across app launches and can
+    /// never make the old recordings eligible for another account to claim.
+    func removeLocalAccountData(ownerID: String) async {
+        markLocalAccountDeletionPending(ownerID)
+        _ = await cleanLocalAccountData(ownerID: ownerID)
+    }
+
+    func hasPendingLocalAccountDeletion(ownerID: String) -> Bool {
+        pendingLocalAccountDeletionOwnerIDs.contains(ownerID)
+    }
+
+    private func retryPendingLocalAccountDeletions() async {
+        for ownerID in pendingLocalAccountDeletionOwnerIDs {
+            _ = await cleanLocalAccountData(ownerID: ownerID)
+        }
+    }
+
+    private func cleanLocalAccountData(ownerID: String) async -> Bool {
         let recordingIDs = recorder.recordingIDsOwned(by: ownerID)
         if recorder.isRecording,
            recordingIDs.contains(where: { recorder.recording(withID: $0)?.state == .recording }) {
@@ -136,8 +160,47 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             $0.ownerID == ownerID || $0.recordingID.map(recordingIDs.contains) == true
         }
         persistWatches()
-        try recorder.deleteRecordingsOwned(by: ownerID)
         recorder.setActiveOwnerID(nil)
+        do {
+            try recorder.deleteRecordingsOwned(by: ownerID)
+            clearPendingLocalAccountDeletion(ownerID)
+            return true
+        } catch {
+            statusMessage = "Device cleanup will retry automatically."
+            return false
+        }
+    }
+
+    private var pendingLocalAccountDeletionOwnerIDs: Set<String> {
+        Set(
+            localAccountDefaults.stringArray(
+                forKey: Self.pendingLocalAccountDeletionOwnerIDsKey
+            ) ?? []
+        )
+    }
+
+    private func markLocalAccountDeletionPending(_ ownerID: String) {
+        var ownerIDs = pendingLocalAccountDeletionOwnerIDs
+        ownerIDs.insert(ownerID)
+        localAccountDefaults.set(
+            ownerIDs.sorted(),
+            forKey: Self.pendingLocalAccountDeletionOwnerIDsKey
+        )
+    }
+
+    private func clearPendingLocalAccountDeletion(_ ownerID: String) {
+        var ownerIDs = pendingLocalAccountDeletionOwnerIDs
+        ownerIDs.remove(ownerID)
+        if ownerIDs.isEmpty {
+            localAccountDefaults.removeObject(
+                forKey: Self.pendingLocalAccountDeletionOwnerIDsKey
+            )
+        } else {
+            localAccountDefaults.set(
+                ownerIDs.sorted(),
+                forKey: Self.pendingLocalAccountDeletionOwnerIDsKey
+            )
+        }
     }
 
     func resumePendingWork() {

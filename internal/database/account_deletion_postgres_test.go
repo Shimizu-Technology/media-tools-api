@@ -120,6 +120,31 @@ func TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup(t *testing.T) {
 	if jobStatus != "queued" {
 		t.Fatalf("deletion job status = %q", jobStatus)
 	}
+	var deletionJobID string
+	if err := db.GetContext(ctx, &deletionJobID, `
+		UPDATE background_jobs
+		SET status = 'running', attempts = max_attempts, locked_by = 'test-worker',
+			locked_at = NOW(), lease_expires_at = NOW() + INTERVAL '1 minute'
+		WHERE job_type = 'account_deletion' AND resource_id = $1
+		RETURNING id`, request.ID); err != nil {
+		t.Fatalf("exhaust deletion job attempts: %v", err)
+	}
+	if err := db.RequeueBackgroundJob(
+		ctx, deletionJobID, "test-worker", "provider unavailable", time.Minute, true,
+	); err != nil {
+		t.Fatalf("durably requeue deletion job: %v", err)
+	}
+	var retried struct {
+		Status   string `db:"status"`
+		Attempts int    `db:"attempts"`
+	}
+	if err := db.GetContext(ctx, &retried, `
+		SELECT status, attempts FROM background_jobs WHERE id = $1`, deletionJobID); err != nil {
+		t.Fatalf("load requeued deletion job: %v", err)
+	}
+	if retried.Status != "queued" || retried.Attempts != 0 {
+		t.Fatalf("requeued deletion job = %#v, want queued with reset attempts", retried)
+	}
 	if err := db.MarkAccountIdentityDeleted(ctx, request.ID); err != nil {
 		t.Fatalf("MarkAccountIdentityDeleted() error = %v", err)
 	}
