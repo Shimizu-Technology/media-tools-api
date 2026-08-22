@@ -1,0 +1,24 @@
+Turn recordings, audio files, YouTube videos, and PDFs into an organized workspace you can search, review, and understand.
+
+RECORD WITHOUT BABYSITTING YOUR SCREEN
+Start a recording in Media Tools or with the Action Button and Shortcuts. Recording can continue while your iPhone is locked or you use another app. Pause for a break, resume when the conversation continues, and stop from the app or Live Activity.
+
+KEEP IMPORTANT AUDIO RECOVERABLE
+New recordings are saved on your iPhone first. Export a device copy when you need one, or send it for transcription when you are ready.
+
+TRANSCRIBE AND REVIEW
+Upload common audio formats, record directly, or add supported video links. Read the transcript with timestamps and play the source audio from the same screen.
+
+SUMMARIZE WITH SOURCES
+Create structured summaries, key points, and action items. Citations link back to the supporting transcript or document text so you can verify important details.
+
+ASK QUESTIONS ABOUT YOUR CONTENT
+Chat with a recording, transcript, PDF, or collection. Media Tools answers from the selected source and includes citations when supporting evidence is available.
+
+ORGANIZE YOUR WORKSPACE
+Keep transcripts, recordings, PDFs, and conversations together in collections. Rename items, search your library, and return to the same place in long lists.
+
+PRIVACY CONTROLS YOU CAN FIND
+Media Tools asks before sending content to third-party AI providers. You can revoke AI permission, export device recordings, delete individual items, or permanently delete your account and associated data from Settings. Media Tools does not use your content for advertising or cross-app tracking.
+
+AI-generated transcripts and answers can be incomplete or wrong. Review important output against the original source, and record or upload content only when you have the necessary rights and permission.

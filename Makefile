@@ -5,7 +5,7 @@
 
 GO_PACKAGES := $(shell go list ./... | grep -v '/frontend/node_modules/')
 
-.PHONY: help build run test gate security-scan clean docker docker-up docker-down migrate lint fmt vet frontend dev
+.PHONY: help build run test gate security-scan ios-release-preflight clean docker docker-up docker-down migrate lint fmt vet frontend dev
 
 # Default target — show help
 help: ## Show this help message
@@ -34,6 +34,9 @@ gate: ## Run the complete backend, frontend, and available iOS verification gate
 
 security-scan: ## Scan repository history and the working tree for committed credentials
 	./scripts/scan-secrets.sh
+
+ios-release-preflight: ## Verify iOS release source and optional ARCHIVE_PATH / EXPORT_PATH
+	./scripts/ios-release-preflight.sh $(if $(ARCHIVE_PATH),--archive "$(ARCHIVE_PATH)",) $(if $(EXPORT_PATH),--export "$(EXPORT_PATH)",)
 
 test-cover: ## Run tests with coverage report
 	go test -coverprofile=coverage.out $(GO_PACKAGES)

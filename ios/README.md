@@ -4,9 +4,9 @@ Native SwiftUI app for Media Tools API — transcribe videos, record audio, mana
 
 ## Requirements
 
-- Xcode 16.4+
+- Xcode 26+ for TestFlight or App Store archives
 - iOS 18.5+
-- Swift 5 language mode (compiled by the Xcode 16.4 toolchain)
+- Swift 5 language mode
 - Active Media Tools API instance
 
 ## Setup
@@ -88,6 +88,24 @@ swift ios/scripts/generate-icon.swift
 ### 6. Build & Run
 
 Select your device or simulator and hit Run (⌘R).
+
+### 7. Run release preflight
+
+Apple requires iOS submissions to use the iOS 26 SDK or later. Validate the
+source configuration before archiving, then validate the signed archive itself:
+
+```bash
+make ios-release-preflight
+make ios-release-preflight ARCHIVE_PATH=/path/to/MediaTools.xcarchive
+make ios-release-preflight \
+  ARCHIVE_PATH=/path/to/MediaTools.xcarchive \
+  EXPORT_PATH=/path/to/AppStoreExport
+```
+
+The checked-in App Store copy, privacy-label mapping, review notes, and remaining
+launch blockers live in `ios/app-store/`. A development Clerk key is suitable
+for TestFlight testing only; public App Store submission remains blocked until
+the production Clerk domain and a non-expiring review account are ready.
 
 ## Architecture
 
