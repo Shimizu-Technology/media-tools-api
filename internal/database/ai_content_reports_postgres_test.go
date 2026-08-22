@@ -167,5 +167,10 @@ func insertAIReportTranscript(t *testing.T, db *DB, userID string) string {
 		RETURNING id`, uuid.NewString()[:12], userID).Scan(&id); err != nil {
 		t.Fatalf("insert transcript: %v", err)
 	}
+	t.Cleanup(func() {
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM transcripts WHERE id = $1`, id); err != nil {
+			t.Errorf("delete AI report test transcript: %v", err)
+		}
+	})
 	return id
 }
