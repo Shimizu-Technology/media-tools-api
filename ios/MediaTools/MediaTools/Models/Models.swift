@@ -325,6 +325,54 @@ struct ChatResponse: Codable {
     let messages: [ChatMessage]
 }
 
+enum AIContentReportTargetType: String, Codable {
+    case chatMessage = "chat_message"
+    case transcriptSummary = "transcript_summary"
+    case audioSummary = "audio_summary"
+}
+
+enum AIContentReportCategory: String, CaseIterable, Codable, Identifiable {
+    case dangerous
+    case hateOrHarassment = "hate_or_harassment"
+    case sexual
+    case privacy
+    case deceptive
+    case other
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .dangerous: "Dangerous or illegal"
+        case .hateOrHarassment: "Hate or harassment"
+        case .sexual: "Sexual content"
+        case .privacy: "Privacy concern"
+        case .deceptive: "Deceptive or inaccurate"
+        case .other: "Something else"
+        }
+    }
+}
+
+struct AIContentReportTarget: Identifiable {
+    let targetType: AIContentReportTargetType
+    let targetId: String
+
+    var id: String { "\(targetType.rawValue):\(targetId)" }
+}
+
+struct AIContentReportRequest: Codable {
+    let targetType: AIContentReportTargetType
+    let targetId: String
+    let category: AIContentReportCategory
+    let details: String
+}
+
+struct AIContentReportReceipt: Codable {
+    let id: String
+    let status: String
+    let alreadyReported: Bool
+}
+
 // MARK: - Summary
 
 struct Summary: Codable {

@@ -21,6 +21,9 @@
   --color-text-secondary: #4f5e66;
   --color-text-muted: #718089;
   --color-on-brand: #ffffff;
+  --color-on-brand-soft: rgba(255, 255, 255, 0.12);
+  --color-on-brand-overlay: rgba(255, 255, 255, 0.18);
+  --color-on-brand-border: rgba(255, 255, 255, 0.5);
   
   /* Border */
   --color-border: #dce3e6;
@@ -40,6 +43,7 @@
   --color-success-subtle: rgba(24, 185, 133, 0.12);
   --color-warning: #f59e0b;
   --color-warning-subtle: rgba(245, 158, 11, 0.1);
+  --color-warning-border: rgba(245, 158, 11, 0.4);
   --color-error: #ef4444;
   --color-error-subtle: rgba(239, 68, 68, 0.12);
   --color-error-soft: rgba(239, 68, 68, 0.08);

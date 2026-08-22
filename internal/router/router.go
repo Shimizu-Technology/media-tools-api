@@ -179,6 +179,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		protected.DELETE("/collections/:id/items/:itemId", h.RemoveCollectionItem)
 		protected.GET("/collections/:id/chat", h.GetCollectionChat)
 		protected.POST("/collections/:id/chat", h.PostCollectionChat)
+		protected.POST("/ai-content-reports", h.CreateAIContentReport)
 
 		// Unified library and exact workspace metrics
 		protected.GET("/library/items", h.ListLibraryItems)
@@ -196,6 +197,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 
 		// Ops
 		protected.GET("/ops/audio/health", h.GetAudioOpsHealth)
+		protected.GET("/ops/ai-content-reports", h.ListAIContentReports)
+		protected.PATCH("/ops/ai-content-reports/:id", h.UpdateAIContentReport)
 	}
 
 	// --- Static Frontend Serving (SPA) ---

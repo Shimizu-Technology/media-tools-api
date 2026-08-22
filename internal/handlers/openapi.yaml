@@ -192,6 +192,33 @@ components:
           items:
             $ref: "#/components/schemas/ChatMessage"
 
+    AIContentReport:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        target_type:
+          type: string
+          enum: [chat_message, transcript_summary, audio_summary]
+        target_id: {type: string, format: uuid}
+        subject_type:
+          type: string
+          enum: [transcript, audio, pdf, collection]
+        subject_id: {type: string, format: uuid}
+        category:
+          type: string
+          enum: [dangerous, hate_or_harassment, sexual, privacy, deceptive, other]
+        details: {type: string, maxLength: 1000}
+        content_snapshot:
+          type: object
+          additionalProperties: true
+          description: Selected AI output only; no separate source content is attached.
+        status:
+          type: string
+          enum: [open, reviewing, resolved, dismissed]
+        admin_note: {type: string, maxLength: 1000}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
     Citation:
       type: object
       required: [segment_id, item_type, item_id]
@@ -1233,8 +1260,68 @@ paths:
       tags: [Webhooks]
       summary: Delete a webhook
       responses: {"200": {description: Webhook deleted}}
+  /ai-content-reports:
+    post:
+      tags: [Safety]
+      summary: Report an owned AI response or summary
+      description: Saves a server-selected snapshot of the reported AI output without attaching separate source media or text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_type, target_id, category]
+              properties:
+                target_type: {type: string, enum: [chat_message, transcript_summary, audio_summary]}
+                target_id: {type: string, format: uuid}
+                category: {type: string, enum: [dangerous, hate_or_harassment, sexual, privacy, deceptive, other]}
+                details: {type: string, maxLength: 1000}
+      responses:
+        "201": {description: Report created}
+        "200": {description: Output was already reported by this actor}
+        "404": {description: Owned reportable output not found}
   /ops/audio/health:
     get:
       tags: [Operations]
       summary: Get owner-only audio pipeline health
       responses: {"200": {description: Audio operations health}, "403": {description: Owner access required}}
+  /ops/ai-content-reports:
+    get:
+      tags: [Operations, Safety]
+      summary: List owner-only AI output moderation reports
+      responses:
+        "200":
+          description: Moderation queue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: "#/components/schemas/AIContentReport"}
+        "403": {description: Owner access required}
+  /ops/ai-content-reports/{id}:
+    patch:
+      tags: [Operations, Safety]
+      summary: Record an owner moderation disposition
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: {type: string, enum: [reviewing, resolved, dismissed]}
+                admin_note: {type: string, maxLength: 1000}
+      responses:
+        "200":
+          description: Updated moderation report
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AIContentReport"}
+        "403": {description: Owner access required}

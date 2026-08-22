@@ -395,6 +395,22 @@ final class MediaToolsService {
         return try await api.get(path)
     }
 
+    func reportAIContent(
+        target: AIContentReportTarget,
+        category: AIContentReportCategory,
+        details: String
+    ) async throws -> AIContentReportReceipt {
+        try await api.post(
+            "/ai-content-reports",
+            body: AIContentReportRequest(
+                targetType: target.targetType,
+                targetId: target.targetId,
+                category: category,
+                details: details
+            )
+        )
+    }
+
     // MARK: - Summary
 
     func getSummaries(transcriptId: String) async throws -> [Summary] {

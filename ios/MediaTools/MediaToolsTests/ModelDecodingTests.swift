@@ -1558,6 +1558,32 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(query["search"], "payroll & tax")
         XCTAssertEqual(query["sort_dir"], "asc")
     }
+
+    func testAIContentReportModelsMatchTheCrossPlatformAPIContract() throws {
+        let receipt = try APIClient.makeDecoder().decode(
+            AIContentReportReceipt.self,
+            from: Data(
+                #"{"id":"6ec65a31-eceb-4fc7-94bd-16793240bc24","status":"open","already_reported":false}"#.utf8
+            )
+        )
+        XCTAssertEqual(receipt.status, "open")
+        XCTAssertFalse(receipt.alreadyReported)
+
+        let request = AIContentReportRequest(
+            targetType: .chatMessage,
+            targetId: "6ec65a31-eceb-4fc7-94bd-16793240bc24",
+            category: .hateOrHarassment,
+            details: "Concerning response"
+        )
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoder.encode(request)) as? [String: String]
+        )
+        XCTAssertEqual(object["target_type"], "chat_message")
+        XCTAssertEqual(object["category"], "hate_or_harassment")
+        XCTAssertEqual(AIContentReportCategory.allCases.count, 6)
+    }
 }
 
 @MainActor

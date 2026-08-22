@@ -51,6 +51,19 @@ func TestSummaryMaxTokensUsesBoundedBudgets(t *testing.T) {
 	}
 }
 
+func TestSystemPromptsApplyAIContentSafeguardsWithoutBlockingNeutralAnalysis(t *testing.T) {
+	for name, prompt := range map[string]string{
+		"video": getVideoSystemPrompt("general"),
+		"audio": getAudioSystemPrompt("meeting"),
+	} {
+		for _, expected := range []string{"child sexual abuse", "operational harmful instructions", "neutrally summarize"} {
+			if !strings.Contains(prompt, expected) {
+				t.Fatalf("%s prompt missing %q: %s", name, expected, prompt)
+			}
+		}
+	}
+}
+
 func TestProviderErrorDoesNotExposeUpstreamPayload(t *testing.T) {
 	body := []byte(`{"error":{"message":"Add credits at https://openrouter.ai/settings/credits","metadata":{"error_type":"payment_required","user_id":"private-user"}}}`)
 	err := newProviderError("OpenRouter", http.StatusPaymentRequired, body)

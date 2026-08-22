@@ -62,6 +62,15 @@ func TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup(t *testing.T) {
 		INSERT INTO media_item_preferences (user_id, item_type, item_id) VALUES ($1, 'audio', $2)`, userID, audioID); err != nil {
 		t.Fatalf("insert account-owned metadata: %v", err)
 	}
+	var reportID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO ai_content_reports (
+			target_type, target_id, subject_type, subject_id,
+			user_id, category, content_snapshot
+		) VALUES ('audio_summary', $1, 'audio', $1, $2, 'other', '{"summary_text":"Reported output"}')
+		RETURNING id`, audioID, userID).Scan(&reportID); err != nil {
+		t.Fatalf("insert AI content report: %v", err)
+	}
 
 	cleanupAfter := time.Now().UTC().Add(time.Hour)
 	request, err := db.RequestAccountDeletion(ctx, userID, clerkID, cleanupAfter)
@@ -86,6 +95,7 @@ func TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup(t *testing.T) {
 		"transcripts":          transcriptID,
 		"audio_transcriptions": audioID,
 		"pdf_extractions":      pdfID,
+		"ai_content_reports":   reportID,
 	} {
 		var count int
 		query := "SELECT COUNT(*) FROM " + table + " WHERE id = $1"

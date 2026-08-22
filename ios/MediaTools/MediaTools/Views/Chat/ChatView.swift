@@ -11,6 +11,7 @@ struct ChatView: View {
     @State private var input = ""
     @State private var isSending = false
     @State private var error: String?
+    @State private var reportTarget: AIContentReportTarget?
     @FocusState private var inputFocused: Bool
 
     private let service = MediaToolsService.shared
@@ -28,7 +29,11 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(messages, id: \.stableId) { message in
-                            ChatBubble(message: message, onCitationTap: openCitation)
+                            ChatBubble(
+                                message: message,
+                                onCitationTap: openCitation,
+                                onReport: beginReport
+                            )
                                 .id(message.stableId)
                                 .transition(.opacity.combined(with: .scale(scale: 0.95)))
                         }
@@ -86,6 +91,17 @@ struct ChatView: View {
         }
         .background(Theme.surface)
         .task { await loadHistory() }
+        .sheet(item: $reportTarget) { target in
+            AIContentReportSheet(target: target)
+        }
+        .alert("Couldn't send message", isPresented: Binding(
+            get: { error != nil },
+            set: { if !$0 { error = nil } }
+        )) {
+            Button("OK", role: .cancel) { error = nil }
+        } message: {
+            Text(error ?? "Please try again.")
+        }
     }
 
     private func loadHistory() async {
@@ -122,14 +138,6 @@ struct ChatView: View {
             }
         } catch {
             self.error = error.localizedDescription
-            withAnimation(Theme.springSnappy) {
-                messages.append(ChatMessage(
-                    id: UUID().uuidString,
-                    role: "assistant",
-                    content: "Sorry, something went wrong. Please try again.",
-                    citations: nil
-                ))
-            }
         }
 
         isSending = false
@@ -156,6 +164,14 @@ struct ChatView: View {
             openURL(url)
         }
     }
+
+    private func beginReport(_ message: ChatMessage) {
+        guard !message.role.isEmpty,
+              message.role == "assistant",
+              let messageID = message.id
+        else { return }
+        reportTarget = AIContentReportTarget(targetType: .chatMessage, targetId: messageID)
+    }
 }
 
 // MARK: - Chat Bubble
@@ -163,6 +179,7 @@ struct ChatView: View {
 struct ChatBubble: View {
     let message: ChatMessage
     let onCitationTap: (Citation) -> Void
+    let onReport: (ChatMessage) -> Void
 
     private var isUser: Bool { message.role == "user" }
 
@@ -185,6 +202,19 @@ struct ChatBubble: View {
 
                 if !isUser, let citations = message.citations, !citations.isEmpty {
                     CitationChips(citations: citations, onTap: onCitationTap)
+                }
+
+                if !isUser, message.id != nil {
+                    Button {
+                        onReport(message)
+                    } label: {
+                        Label("Report response", systemImage: "flag")
+                            .font(Theme.caption(12, weight: .semibold))
+                            .frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.textMuted)
+                    .accessibilityHint("Opens an in-app safety report for this AI response")
                 }
             }
             .textSelection(.enabled)
