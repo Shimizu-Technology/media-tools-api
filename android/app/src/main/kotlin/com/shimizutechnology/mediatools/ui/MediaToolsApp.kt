@@ -98,7 +98,10 @@ private fun SignedInApp(ownerId: String) {
     val context = LocalContext.current
     val api = remember { MediaToolsApi(BuildConfig.API_BASE_URL, ClerkSessionTokenProvider()) }
     val consentStore = remember { AIProcessingConsentStore(AndroidConsentPreferences(context)) }
-    val libraryViewModel: LibraryViewModel = viewModel(factory = LibraryViewModel.factory(api))
+    val libraryViewModel: LibraryViewModel = viewModel(
+        key = "library:$ownerId",
+        factory = LibraryViewModel.factory(api),
+    )
     val navController = rememberNavController()
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
     val topLevelRoutes = setOf("library", "settings")

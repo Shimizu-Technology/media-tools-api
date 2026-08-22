@@ -41,13 +41,17 @@ class ClerkSessionTokenProvider : SessionTokenProvider {
     override fun currentOwnerId(): String? = Clerk.user?.id
 }
 
+interface LibraryRepository {
+    suspend fun listLibrary(page: Int, perPage: Int = 20): PaginatedResponse<LibraryItem>
+}
+
 class MediaToolsApi(
     private val baseUrl: String,
     private val tokenProvider: SessionTokenProvider,
     private val client: OkHttpClient = OkHttpClient(),
     private val json: Json = Json { ignoreUnknownKeys = true; explicitNulls = false },
-) {
-    suspend fun listLibrary(page: Int, perPage: Int = 20): PaginatedResponse<LibraryItem> =
+) : LibraryRepository {
+    override suspend fun listLibrary(page: Int, perPage: Int): PaginatedResponse<LibraryItem> =
         get("/library/items?page=${page.coerceAtLeast(1)}&per_page=${perPage.coerceIn(1, 100)}&sort_dir=desc")
 
     suspend fun loadDetail(itemType: String, itemId: String): LibraryDetail = when (itemType) {
@@ -130,6 +134,9 @@ class MediaToolsApi(
         }
 
         response.use {
+            if (tokenProvider.currentOwnerId() != expectedOwnerId) {
+                throw MediaToolsAPIException(401, "The signed-in account changed. Try again.")
+            }
             val payload = it.body.string()
             if (!it.isSuccessful) {
                 val serverError = runCatching { json.decodeFromString<APIErrorEnvelope>(payload) }.getOrNull()
