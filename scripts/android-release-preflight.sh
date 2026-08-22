@@ -5,11 +5,21 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+search_file() {
+  local pattern="$1"
+  local file="$2"
+  if command -v rg >/dev/null 2>&1; then
+    rg -q "$pattern" "$file"
+  else
+    grep -Eq "$pattern" "$file"
+  fi
+}
+
 require_source() {
   local pattern="$1"
   local file="$2"
   local message="$3"
-  if ! rg -q "$pattern" "$file"; then
+  if ! search_file "$pattern" "$file"; then
     echo "$message"
     exit 1
   fi
@@ -24,7 +34,7 @@ require_source 'compileSdk = 36' android/app/build.gradle.kts \
 require_source 'android\.permission\.INTERNET' android/app/src/main/AndroidManifest.xml \
   "Android must declare internet access"
 
-if rg -q 'READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STORAGE|READ_MEDIA_(AUDIO|IMAGES|VIDEO)' \
+if search_file 'READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STORAGE|READ_MEDIA_(AUDIO|IMAGES|VIDEO)' \
   android/app/src/main/AndroidManifest.xml; then
   echo "Android must use system document pickers instead of broad media or storage permission"
   exit 1
