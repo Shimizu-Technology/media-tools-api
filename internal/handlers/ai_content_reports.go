@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -73,6 +74,7 @@ func (h *Handler) CreateAIContentReport(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		log.Printf("Failed to save AI output report: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error: "database_error", Message: "Failed to save AI output report", Code: http.StatusInternalServerError,
 		})
@@ -101,6 +103,7 @@ func (h *Handler) ListAIContentReports(c *gin.Context) {
 	}
 	reports, err := h.DB.ListAIContentReports(c.Request.Context(), 100)
 	if err != nil {
+		log.Printf("Failed to load AI output reports: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error: "database_error", Message: "Failed to load AI output reports", Code: http.StatusInternalServerError,
 		})
@@ -152,6 +155,7 @@ func (h *Handler) UpdateAIContentReport(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		log.Printf("Failed to update AI output report %s: %v", c.Param("id"), err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error: "database_error", Message: "Failed to update AI output report", Code: http.StatusInternalServerError,
 		})

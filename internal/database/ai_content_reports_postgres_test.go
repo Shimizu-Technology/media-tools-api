@@ -151,7 +151,9 @@ func insertAIReportUser(t *testing.T, db *DB) string {
 		t.Fatalf("insert user: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, id)
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, id); err != nil {
+			t.Errorf("delete AI report test user: %v", err)
+		}
 	})
 	return id
 }
