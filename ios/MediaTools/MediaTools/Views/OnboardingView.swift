@@ -64,7 +64,7 @@ struct OnboardingView: View {
                             color: microphoneState == .denied ? Theme.warning : Theme.audioColor,
                             title: "Prepare your microphone",
                             subtitle:
-                                "Media Tools only listens after you deliberately start a recording. Audio is saved on this iPhone first, then uploaded when you choose Transcribe.",
+                                "Media Tools only listens after you deliberately start a recording. Only record people when you have their permission and recording is lawful where you are. Audio is saved on this iPhone first, then uploaded when you choose Transcribe.",
                             note: microphoneDetail
                         ) {
                             permissionButton(
@@ -104,17 +104,21 @@ struct OnboardingView: View {
                             note:
                                 "Your AI permission is account-scoped and can be revoked in Settings. Next, add Media Tools → Quick Record to your Action Button."
                         ) {
-                            Button {
-                                guard let url = URL(string: "shortcuts://") else { return }
-                                openURL(url)
-                            } label: {
-                                Label("Open Shortcuts", systemImage: "arrow.up.forward.app")
-                                    .font(Theme.body(15, weight: .semibold))
-                                    .frame(maxWidth: .infinity, minHeight: 48)
+                            VStack(spacing: 10) {
+                                Button {
+                                    guard let url = URL(string: "shortcuts://") else { return }
+                                    openURL(url)
+                                } label: {
+                                    Label("Open Shortcuts", systemImage: "arrow.up.forward.app")
+                                        .font(Theme.body(15, weight: .semibold))
+                                        .frame(maxWidth: .infinity, minHeight: 48)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(Theme.brand400)
+                                .accessibilityHint("Opens Shortcuts so you can configure Quick Record")
+
+                                legalLinks
                             }
-                            .buttonStyle(.bordered)
-                            .tint(Theme.brand400)
-                            .accessibilityHint("Opens Shortcuts so you can configure Quick Record")
                         }
                         .tag(3)
                     }
@@ -169,6 +173,33 @@ struct OnboardingView: View {
                 withAnimation(Theme.springGentle.delay(0.15)) { appeared = true }
             }
         }
+    }
+
+    /// Keeps the public resources compact at normal sizes and reliably tappable
+    /// when Dynamic Type needs a vertical layout.
+    private var legalLinks: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                legalLink("Terms", destination: Configuration.termsURL)
+                legalLink("Privacy", destination: Configuration.privacyURL)
+                legalLink("Support", destination: Configuration.supportURL)
+            }
+
+            VStack(spacing: 0) {
+                legalLink("Terms", destination: Configuration.termsURL)
+                legalLink("Privacy", destination: Configuration.privacyURL)
+                legalLink("Support", destination: Configuration.supportURL)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func legalLink(_ title: String, destination: URL) -> some View {
+        Link(title, destination: destination)
+            .font(Theme.caption(12, weight: .semibold))
+            .foregroundStyle(Theme.brand400)
+            .frame(minWidth: 72, minHeight: 44)
+            .contentShape(Rectangle())
     }
 
     private var pageIndicator: some View {

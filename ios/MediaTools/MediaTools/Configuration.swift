@@ -37,6 +37,11 @@ enum Configuration {
     /// App Group identifier for sharing data with extensions.
     static let appGroupIdentifier = "group.com.shimizu-technology.media-tools"
 
+    static let privacyURL = URL(string: "\(webAppURL)/privacy")!
+    static let termsURL = URL(string: "\(webAppURL)/terms")!
+    static let supportURL = URL(string: "\(webAppURL)/support")!
+    static let accountDeletionURL = URL(string: "\(webAppURL)/delete-account")!
+
     private static func configuredValue(_ key: String) -> String? {
         guard let value = Bundle.main.infoDictionary?[key] as? String else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)

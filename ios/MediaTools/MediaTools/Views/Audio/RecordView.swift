@@ -566,7 +566,7 @@ struct RecordView: View {
         if recorder.statusMessage != nil {
             return "The previous recording is saved. The clock is reset and ready when you are."
         }
-        return "Choose a content type, then tap the microphone. Your audio is saved on this iPhone first."
+        return "Record only with required permission. Choose a content type, then tap the microphone; audio is saved on this iPhone first."
     }
 
     private var captureFootnote: String {

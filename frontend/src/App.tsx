@@ -23,6 +23,8 @@ const OpsPage = lazy(() => import('./pages/OpsPage').then((module) => ({ default
 const CollectionsPage = lazy(() => import('./pages/CollectionsPage').then((module) => ({ default: module.CollectionsPage })))
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage').then((module) => ({ default: module.PrivacyPage })))
 const DeleteAccountPage = lazy(() => import('./pages/DeleteAccountPage').then((module) => ({ default: module.DeleteAccountPage })))
+const TermsPage = lazy(() => import('./pages/TermsPage').then((module) => ({ default: module.TermsPage })))
+const SupportPage = lazy(() => import('./pages/SupportPage').then((module) => ({ default: module.SupportPage })))
 const LandingPage = lazy(() => import('./pages/LandingPage').then((module) => ({ default: module.LandingPage })))
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })))
 const DeveloperPage = lazy(() => import('./pages/DeveloperPage').then((module) => ({ default: module.DeveloperPage })))
@@ -47,6 +49,8 @@ function AppRoutes() {
         <Route path="/docs" element={<DocsPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/delete-account" element={<DeleteAccountPage />} />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/support" element={<SupportPage />} />
       </Route>
 
       <Route path="/audio" element={<LegacyRedirect to="/app/audio" />} />
@@ -114,11 +118,11 @@ function mergeSearch(baseSearch: string, currentSearch: string) {
 function PublicLayout() {
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
-      <header className="sticky top-0 z-50 border-b backdrop-blur" style={{ backgroundColor: 'rgba(11, 13, 16, 0.86)', borderColor: 'var(--color-border)' }}>
+      <header className="sticky top-0 z-50 border-b backdrop-blur" style={{ backgroundColor: 'var(--color-header-bg)', borderColor: 'var(--color-border)' }}>
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
           <Link to="/" className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-              <FileText className="h-5 w-5 text-white" />
+              <FileText className="h-5 w-5" style={{ color: 'var(--color-on-brand)' }} />
             </div>
             <div>
               <div className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>Media Tools</div>
@@ -126,8 +130,8 @@ function PublicLayout() {
             </div>
           </Link>
           <nav className="flex items-center gap-2">
-            <Link to="/docs" className="min-h-11 rounded-xl px-4 py-3 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ color: 'var(--color-text-secondary)' }}>API docs</Link>
-            <Link to="/app" className="min-h-11 rounded-xl px-4 py-3 text-sm font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)' }}>Open app</Link>
+            <Link to="/docs" className="min-h-11 rounded-xl px-4 py-3 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)]" style={{ color: 'var(--color-text-secondary)' }}>API docs</Link>
+            <Link to="/app" className="min-h-11 rounded-xl px-4 py-3 text-sm font-semibold transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)' }}>Open app</Link>
           </nav>
         </div>
       </header>
@@ -141,6 +145,12 @@ function AppFooter() {
   return (
     <footer className="py-8 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
       <span>Built with Go + React by{' '}<a href="https://github.com/Shimizu-Technology" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-brand-500)' }}>Shimizu Technology</a></span>
+      <span className="mx-2" aria-hidden="true">·</span>
+      <Link to="/privacy" style={{ color: 'var(--color-brand-500)' }}>Privacy</Link>
+      <span className="mx-2" aria-hidden="true">·</span>
+      <Link to="/terms" style={{ color: 'var(--color-brand-500)' }}>Terms</Link>
+      <span className="mx-2" aria-hidden="true">·</span>
+      <Link to="/support" style={{ color: 'var(--color-brand-500)' }}>Support</Link>
       <span className="mx-2" aria-hidden="true">·</span>
       <Link to="/delete-account" style={{ color: 'var(--color-brand-500)' }}>Delete account</Link>
     </footer>

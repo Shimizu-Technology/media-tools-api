@@ -178,7 +178,12 @@ export function PrivacyPage() {
 
         <Section title="Contact">
           <p>
-            If you have questions about this privacy policy, contact us at:{' '}
+            If you have questions about this privacy policy, need help, or want
+            to report a safety concern, visit our{' '}
+            <Link to="/support" className="underline" style={{ color: 'var(--color-brand-500)' }}>
+              support page
+            </Link>{' '}
+            or contact us at:{' '}
             <a
               href="mailto:shimizutechnology@gmail.com"
               className="underline"
