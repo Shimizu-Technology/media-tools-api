@@ -55,6 +55,7 @@ const (
 	JobAudioTranscription    JobType = "audio_transcription"
 	JobAudioSummary          JobType = "audio_summary"
 	JobAudioTranscriptFormat JobType = "audio_transcript_formatting"
+	JobAccountDeletion       JobType = "account_deletion"
 )
 
 const whisperTargetBytes = 24 << 20 // Keep below 25MB hard limit to account for multipart overhead
@@ -141,6 +142,10 @@ type AudioPayload struct {
 	OriginalName string `json:"original_name"`
 }
 
+type IdentityDeleter interface {
+	DeleteUser(context.Context, string) error
+}
+
 // Pool manages a pool of worker goroutines.
 type Pool struct {
 	wake                   chan struct{}
@@ -159,6 +164,7 @@ type Pool struct {
 	audioTranscriber       *audio.Transcriber // Audio transcription via Whisper
 	transcriptFormatter    *transcriptformat.Formatter
 	audioStorage           *storage.S3
+	identityDeleter        IdentityDeleter
 	chunkConcurrency       int
 	transcriptionSem       chan struct{}
 	webhooks               *webhookservice.Service // MTA-18: webhook notifications
@@ -191,6 +197,17 @@ func (p *Pool) SetTranscriptFormatter(formatter *transcriptformat.Formatter) {
 
 func (p *Pool) SetAudioStorage(as *storage.S3) {
 	p.audioStorage = as
+}
+
+func (p *Pool) SetIdentityDeleter(deleter IdentityDeleter) {
+	p.identityDeleter = deleter
+}
+
+// Wake asks an event-driven worker to inspect the durable queue. The account
+// deletion request inserts its job in the same transaction as the data purge,
+// so it only needs this signal after commit.
+func (p *Pool) Wake() {
+	p.signalWorkers()
 }
 
 // SetTranscriptionConcurrency bounds parallelism both within one long
@@ -820,6 +837,22 @@ func (p *Pool) runClaimedJob(workerNumber int, claimed *models.BackgroundJob) {
 	markCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err != nil {
+		var retryable *retryableJobError
+		if errors.As(err, &retryable) && claimed.Attempts < claimed.MaxAttempts {
+			if markErr := p.db.RequeueBackgroundJob(markCtx, job.QueueID, p.instanceID, err.Error(), retryable.delay); markErr != nil {
+				log.Printf("⚠️  Failed to requeue durable job %s: %v", job.QueueID, markErr)
+			} else {
+				leaseRecovery.stopSignaling()
+				p.signalWorkers()
+				log.Printf("↻ Worker %d: job %s will retry in %s: %v", workerNumber, job.ID, retryable.delay.Round(time.Second), err)
+			}
+			return
+		}
+		if job.Type == JobAccountDeletion {
+			if updateErr := p.db.FailAccountDeletion(markCtx, job.ID, err.Error()); updateErr != nil {
+				log.Printf("⚠️  Failed to mark account deletion %s failed: %v", job.ID, updateErr)
+			}
+		}
 		if markErr := p.db.FailBackgroundJob(markCtx, job.QueueID, p.instanceID, err.Error()); markErr != nil {
 			log.Printf("⚠️  Failed to mark durable job %s failed: %v", job.QueueID, markErr)
 		} else {
@@ -875,6 +908,8 @@ func (p *Pool) dispatchJob(job Job) (err error) {
 		return p.processAudioSummary(job)
 	case JobAudioTranscriptFormat:
 		return p.processAudioTranscriptFormatting(job)
+	case JobAccountDeletion:
+		return p.processAccountDeletion(job)
 	default:
 		return fmt.Errorf("unknown job type: %s", job.Type)
 	}

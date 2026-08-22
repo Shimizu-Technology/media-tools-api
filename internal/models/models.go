@@ -410,6 +410,33 @@ type User struct {
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 }
 
+// AccountDeletionRequest is the durable coordination record for deleting an
+// account across PostgreSQL, object storage, and Clerk.
+type AccountDeletionRequest struct {
+	ID             string          `json:"id" db:"id"`
+	AppUserID      string          `json:"-" db:"app_user_id"`
+	ClerkUserID    *string         `json:"-" db:"clerk_user_id"`
+	ClerkUserHash  string          `json:"-" db:"clerk_user_hash"`
+	ObjectKeys     json.RawMessage `json:"-" db:"object_keys"`
+	Status         string          `json:"status" db:"status"`
+	CleanupAfter   time.Time       `json:"cleanup_after" db:"cleanup_after"`
+	ClerkDeletedAt *time.Time      `json:"-" db:"clerk_deleted_at"`
+	CompletedAt    *time.Time      `json:"completed_at,omitempty" db:"completed_at"`
+	LastError      string          `json:"-" db:"last_error"`
+	RequestedAt    time.Time       `json:"requested_at" db:"requested_at"`
+	UpdatedAt      time.Time       `json:"updated_at" db:"updated_at"`
+}
+
+type DeleteAccountRequest struct {
+	Confirmation string `json:"confirmation" binding:"required"`
+}
+
+type DeleteAccountResponse struct {
+	Status       string    `json:"status"`
+	RequestedAt  time.Time `json:"requested_at"`
+	CleanupAfter time.Time `json:"cleanup_after"`
+}
+
 type RegisterRequest struct {
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required,min=8"`

@@ -95,6 +95,21 @@ final class BackgroundUploadService: NSObject, URLSessionDelegate, URLSessionTas
         }
     }
 
+    func cancel(recordingIDs: Set<UUID>) async {
+        guard !recordingIDs.isEmpty else { return }
+        await withCheckedContinuation { continuation in
+            session.getAllTasks { tasks in
+                for task in tasks {
+                    guard let recordingID = Self.metadata(for: task)?.recordingID,
+                          recordingIDs.contains(recordingID)
+                    else { continue }
+                    task.cancel()
+                }
+                continuation.resume()
+            }
+        }
+    }
+
     func urlSession(
         _ session: URLSession,
         task: URLSessionTask,

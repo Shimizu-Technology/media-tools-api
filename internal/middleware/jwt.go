@@ -137,6 +137,9 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 				claims, err := jwksCache.ParseToken(tokenString)
 				if err == nil {
 					if claims.Subject != "" {
+						if rejectAccountDeletionTombstone(c, db, claims.Subject) {
+							return
+						}
 						user, err := db.GetUserByClerkID(c.Request.Context(), claims.Subject)
 						if err != nil {
 							// Find or create via email migration flow
@@ -195,6 +198,30 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 		})
 		c.Abort()
 	}
+}
+
+func rejectAccountDeletionTombstone(c *gin.Context, db *database.DB, clerkUserID string) bool {
+	blocked, err := db.HasAccountDeletionTombstone(c.Request.Context(), clerkUserID)
+	if err != nil {
+		log.Printf("❌ Failed to check account deletion tombstone for %s: %v", clerkUserID, err)
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
+			Error:   "authentication_unavailable",
+			Message: "Failed to verify account status",
+			Code:    http.StatusServiceUnavailable,
+		})
+		c.Abort()
+		return true
+	}
+	if !blocked {
+		return false
+	}
+	c.JSON(http.StatusGone, models.ErrorResponse{
+		Error:   "account_deletion_pending",
+		Message: "This account has been deleted or is being deleted.",
+		Code:    http.StatusGone,
+	})
+	c.Abort()
+	return true
 }
 
 // GetUser retrieves the authenticated user from the request context.

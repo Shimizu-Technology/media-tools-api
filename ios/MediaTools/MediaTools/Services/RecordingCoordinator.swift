@@ -22,6 +22,7 @@ final class RecordingCoordinator {
     private(set) var captureState: RecordingCaptureState = .idle
     private(set) var isStarting = false
     private(set) var pendingRecordings: [LocalRecording] = []
+    private(set) var activeOwnerID: String?
     private(set) var duration: TimeInterval = 0
     private(set) var audioLevel: CGFloat = 0
     private(set) var statusMessage: String?
@@ -100,7 +101,38 @@ final class RecordingCoordinator {
     /// The active capture is persisted immediately for crash recovery, but it
     /// should not appear as a second actionable item while recording.
     var availableRecordings: [LocalRecording] {
-        pendingRecordings.filter { $0.state != .recording }
+        pendingRecordings.filter {
+            $0.state != .recording && $0.ownerID == activeOwnerID
+        }
+    }
+
+    /// Switches the visible device workspace. Unowned recordings are legacy or
+    /// signed-out Quick Captures, so the first signed-in account claims them.
+    func setActiveOwnerID(_ ownerID: String?) {
+        activeOwnerID = ownerID
+        guard let ownerID else { return }
+        var changed = false
+        for index in pendingRecordings.indices where pendingRecordings[index].ownerID == nil {
+            pendingRecordings[index].ownerID = ownerID
+            changed = true
+        }
+        if changed {
+            try? persistPendingRecordings()
+        }
+    }
+
+    func recordingIDsOwned(by ownerID: String) -> Set<UUID> {
+        Set(pendingRecordings.lazy.filter { $0.ownerID == ownerID }.map(\.id))
+    }
+
+    func deleteRecordingsOwned(by ownerID: String) throws {
+        guard let store else { throw RecordingCoordinatorError.storageUnavailable }
+        let owned = pendingRecordings.filter { $0.ownerID == ownerID }
+        for recording in owned {
+            try store.deleteFile(for: recording)
+        }
+        pendingRecordings.removeAll { $0.ownerID == ownerID }
+        try persistPendingRecordings()
     }
 
     func fileURL(for recording: LocalRecording) -> URL? {
@@ -415,7 +447,11 @@ final class RecordingCoordinator {
         guard let store else {
             throw RecordingCoordinatorError.storageUnavailable
         }
-        let recording = try store.importRecording(from: sourceURL, contentType: contentType)
+        let recording = try store.importRecording(
+            from: sourceURL,
+            contentType: contentType,
+            ownerID: activeOwnerID
+        )
         if case .failure(let validationError) = RecordingIntegrityValidator.validate(
             url: store.fileURL(for: recording)
         ) {
@@ -532,7 +568,10 @@ final class RecordingCoordinator {
 
         var recording: LocalRecording?
         do {
-            let newRecording = store.makeRecording(contentType: contentType)
+            let newRecording = store.makeRecording(
+                contentType: contentType,
+                ownerID: activeOwnerID
+            )
             recording = newRecording
             pendingRecordings.insert(newRecording, at: 0)
             try persistPendingRecordings()
@@ -589,7 +628,10 @@ final class RecordingCoordinator {
 
         var recording: LocalRecording?
         do {
-            let newRecording = store.makeRecording(contentType: contentType)
+            let newRecording = store.makeRecording(
+                contentType: contentType,
+                ownerID: activeOwnerID
+            )
             recording = newRecording
             // A tiny CAF fixture exercises the crash-recovery validator without
             // depending on Simulator microphone hardware.

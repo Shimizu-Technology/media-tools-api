@@ -33,6 +33,9 @@ struct LocalRecording: Identifiable, Codable, Equatable, Sendable {
     var uploadMimeType: String?
     var uploadTaskIdentifier: Int?
     var remoteTranscriptionID: String? = nil
+    /// Clerk user ID that owns this device copy. Older manifests decode this
+    /// as nil and are claimed by the first signed-in account after migration.
+    var ownerID: String? = nil
 
     var displayTitle: String {
         if let originalFilename, !originalFilename.isEmpty {

@@ -41,6 +41,7 @@ type RouterConfig struct {
 	ClerkIssuer                 string
 	ClerkAudience               string
 	ClerkAuthorizedParty        string
+	ClerkAccountDeletionEnabled bool
 	AllowedOrigins              []string
 	DefaultRateLimit            int
 	DefaultBrowserReadRateLimit int
@@ -63,6 +64,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 
 	h := handlers.NewHandler(cfg.DB, cfg.WorkerPool, cfg.AudioTranscriber, cfg.AudioStorage, cfg.Webhooks, cfg.Summarizer, cfg.JWTSecret, cfg.AdminAPIKey, cfg.OwnerKeyID, cfg.OwnerKeyPrefix, cfg.YtDlpCookiesConfigured)
 	h.Version = cfg.Version
+	h.ClerkAccountDeletionEnabled = cfg.ClerkAccountDeletionEnabled
 	rateLimiter := middleware.NewRateLimiter(
 		cfg.OwnerKeyID,
 		cfg.OwnerKeyPrefix,
@@ -105,6 +107,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	}
 	{
 		jwtProtected.GET("/auth/me", h.GetMe)
+		jwtProtected.DELETE("/account", h.DeleteAccount)
 		if cfg.LegacyAuthEnabled {
 			jwtProtected.POST("/auth/refresh", h.RefreshToken)
 		}

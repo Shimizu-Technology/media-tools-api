@@ -2,6 +2,8 @@
  * Privacy Policy page — required for App Store submission.
  * Accessible at /privacy (no auth required).
  */
+import { Link } from 'react-router-dom';
+
 export function PrivacyPage() {
   return (
     <div className="max-w-3xl mx-auto px-6 py-16">
@@ -15,7 +17,7 @@ export function PrivacyPage() {
         className="text-sm mb-10"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Last updated: August 19, 2026
+        Last updated: August 22, 2026
       </p>
 
       <div className="space-y-8" style={{ color: 'var(--color-text-secondary)' }}>
@@ -104,8 +106,9 @@ export function PrivacyPage() {
           <p>
             Your content is stored as long as your account is active. You can
             delete individual items (transcriptions, audio recordings, PDFs) at
-            any time from your library. Deleted items are permanently removed
-            from our servers and storage.
+            any time from your library. Complete account deletion immediately
+            purges account-owned application data and durably removes raw media
+            and the sign-in identity, including retries if a provider is temporarily unavailable.
           </p>
         </Section>
 
@@ -120,8 +123,12 @@ export function PrivacyPage() {
         <Section title="Your Rights">
           <p>
             You can access, export, or delete your data at any time through the
-            app. To request complete account deletion, contact us at the email
-            below.
+            app. Complete account deletion is available in Settings on iPhone
+            and web. See the{' '}
+            <Link to="/delete-account" className="underline" style={{ color: 'var(--color-brand-500)' }}>
+              account deletion instructions
+            </Link>{' '}
+            without needing to contact support.
           </p>
         </Section>
 

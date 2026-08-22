@@ -15,6 +15,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/config"
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/router"
+	accountservice "github.com/Shimizu-Technology/media-tools-api/internal/services/account"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
@@ -146,6 +147,12 @@ func main() {
 	} else {
 		log.Println("⚠️  Audio S3 storage not configured (raw recordings will not be durable across retries)")
 	}
+	clerkClient := accountservice.NewClerkClient(cfg.ClerkSecretKey)
+	if clerkClient.IsConfigured() {
+		log.Println("✅ Clerk account deletion enabled")
+	} else {
+		log.Println("⚠️  Clerk account deletion disabled (set CLERK_SECRET_KEY to enable)")
+	}
 
 	// Step 4: Create and Start Worker Pool
 	wp := worker.NewPool(cfg.WorkerCount, cfg.JobQueueSize, db, extractor, summarizer)
@@ -153,6 +160,9 @@ func main() {
 	wp.SetAudioTranscriber(audioTranscriber) // Wire audio transcriber for async Whisper jobs
 	wp.SetTranscriptFormatter(transcriptFormatter)
 	wp.SetAudioStorage(audioStorage)
+	if clerkClient.IsConfigured() {
+		wp.SetIdentityDeleter(clerkClient)
+	}
 	wp.SetTranscriptionConcurrency(cfg.WhisperChunkConcurrency, cfg.WhisperGlobalConcurrency)
 	wp.Start()
 
@@ -242,6 +252,7 @@ func main() {
 		ClerkIssuer:                 cfg.ClerkIssuer,
 		ClerkAudience:               cfg.ClerkAudience,
 		ClerkAuthorizedParty:        cfg.ClerkAuthorizedParty,
+		ClerkAccountDeletionEnabled: clerkClient.IsConfigured(),
 		AllowedOrigins:              cfg.AllowedOrigins,
 		DefaultRateLimit:            cfg.DefaultRateLimit,
 		DefaultBrowserReadRateLimit: cfg.DefaultBrowserReadRateLimit,

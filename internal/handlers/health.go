@@ -34,17 +34,18 @@ type readinessChecker interface {
 // variables or service locators, we pass dependencies explicitly.
 // This makes testing easy — just create a Handler with mock dependencies.
 type Handler struct {
-	DB                     *database.DB
-	Worker                 *worker.Pool
-	AudioTranscriber       *audio.Transcriber      // MTA-16: Whisper API transcriber
-	AudioStorage           *storage.S3             // Raw audio storage + playback URLs
-	WebhookService         *webhookservice.Service // MTA-18: Webhook notifications
-	Summarizer             *summary.Service        // MTA-22: AI summary service
-	JWTSecret              string                  // MTA-20: JWT signing secret
-	AdminAPIKey            string                  // Admin key for protected bootstrap operations
-	OwnerAPIKeyID          string                  // Optional owner key ID override
-	OwnerAPIKeyPrefix      string                  // Optional owner key prefix override
-	YtDlpCookiesConfigured bool                    // True when yt-dlp cookies are configured
+	DB                          *database.DB
+	Worker                      *worker.Pool
+	AudioTranscriber            *audio.Transcriber      // MTA-16: Whisper API transcriber
+	AudioStorage                *storage.S3             // Raw audio storage + playback URLs
+	WebhookService              *webhookservice.Service // MTA-18: Webhook notifications
+	Summarizer                  *summary.Service        // MTA-22: AI summary service
+	JWTSecret                   string                  // MTA-20: JWT signing secret
+	AdminAPIKey                 string                  // Admin key for protected bootstrap operations
+	OwnerAPIKeyID               string                  // Optional owner key ID override
+	OwnerAPIKeyPrefix           string                  // Optional owner key prefix override
+	YtDlpCookiesConfigured      bool                    // True when yt-dlp cookies are configured
+	ClerkAccountDeletionEnabled bool                    // Clerk Backend API deletion is configured
 	// Version is the build identifier reported by health endpoints.
 	Version          string
 	readinessChecker readinessChecker

@@ -21,6 +21,7 @@ const WebhooksPage = lazy(() => import('./pages/WebhooksPage').then((module) => 
 const OpsPage = lazy(() => import('./pages/OpsPage').then((module) => ({ default: module.OpsPage })))
 const CollectionsPage = lazy(() => import('./pages/CollectionsPage').then((module) => ({ default: module.CollectionsPage })))
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage').then((module) => ({ default: module.PrivacyPage })))
+const DeleteAccountPage = lazy(() => import('./pages/DeleteAccountPage').then((module) => ({ default: module.DeleteAccountPage })))
 const LandingPage = lazy(() => import('./pages/LandingPage').then((module) => ({ default: module.LandingPage })))
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })))
 const DeveloperPage = lazy(() => import('./pages/DeveloperPage').then((module) => ({ default: module.DeveloperPage })))
@@ -44,6 +45,7 @@ function AppRoutes() {
       <Route element={<PublicLayout />}>
         <Route path="/docs" element={<DocsPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/delete-account" element={<DeleteAccountPage />} />
       </Route>
 
       <Route path="/audio" element={<LegacyRedirect to="/app/audio" />} />
@@ -137,10 +139,9 @@ function PublicLayout() {
 function AppFooter() {
   return (
     <footer className="py-8 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
-      Built with Go + React by{' '}
-      <a href="https://github.com/Shimizu-Technology" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-brand-500)' }}>
-        Shimizu Technology
-      </a>
+      <span>Built with Go + React by{' '}<a href="https://github.com/Shimizu-Technology" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-brand-500)' }}>Shimizu Technology</a></span>
+      <span className="mx-2" aria-hidden="true">·</span>
+      <Link to="/delete-account" style={{ color: 'var(--color-brand-500)' }}>Delete account</Link>
     </footer>
   )
 }

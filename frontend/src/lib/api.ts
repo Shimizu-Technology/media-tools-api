@@ -452,6 +452,21 @@ export async function getCurrentUser(): Promise<User> {
   return handleResponse<User>(res);
 }
 
+export interface AccountDeletionResponse {
+  status: 'pending' | 'processing';
+  requested_at: string;
+  cleanup_after: string;
+}
+
+export async function deleteAccount(confirmation: 'DELETE'): Promise<AccountDeletionResponse> {
+  const res = await fetchWithAuth(`${API_BASE}/account`, {
+    method: 'DELETE',
+    headers: await getHeaders(),
+    body: JSON.stringify({ confirmation }),
+  });
+  return handleResponse<AccountDeletionResponse>(res);
+}
+
 export async function listAPIKeys(): Promise<APIKey[]> {
   const res = await fetchWithAuth(`${API_BASE}/keys`, { headers: await getHeaders() });
   return handleResponse<APIKey[]>(res);

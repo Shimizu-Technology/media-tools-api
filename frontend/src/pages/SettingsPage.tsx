@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Check, KeyRound, Moon, Settings, Sun, UserRound } from 'lucide-react';
 import { useAuthContext } from '../contexts/useAuthContext';
 import { useTheme } from '../hooks/useTheme';
+
+const DeleteAccountSection = lazy(() => import('../components/DeleteAccountSection').then((module) => ({ default: module.DeleteAccountSection })));
 
 export function SettingsPage() {
   const { user, isClerkEnabled } = useAuthContext();
@@ -79,6 +81,12 @@ export function SettingsPage() {
           </button>
         </div>
       </section>}
+
+      {isClerkEnabled && (
+        <Suspense fallback={null}>
+          <DeleteAccountSection />
+        </Suspense>
+      )}
     </div>
   );
 }

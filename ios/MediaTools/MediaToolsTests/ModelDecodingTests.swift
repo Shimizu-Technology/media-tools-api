@@ -405,6 +405,38 @@ final class ModelDecodingTests: XCTestCase {
 
         XCTAssertEqual(recording.state, .ready)
         XCTAssertNil(recording.remoteTranscriptionID)
+        XCTAssertNil(recording.ownerID)
+    }
+
+    @MainActor
+    func testDeviceRecordingsAreClaimedAndIsolatedByClerkOwner() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        var legacy = store.makeRecording(contentType: "voice_memo")
+        legacy.state = .ready
+        var other = store.makeRecording(contentType: "meeting", ownerID: "user_other")
+        other.state = .ready
+        try cafData(unknownDataLength: true).write(to: store.fileURL(for: legacy))
+        try cafData(unknownDataLength: true).write(to: store.fileURL(for: other))
+        try store.saveRecordings([legacy, other])
+
+        let coordinator = RecordingCoordinator(store: store)
+        coordinator.setActiveOwnerID("user_current")
+
+        XCTAssertEqual(coordinator.availableRecordings.map(\.id), [legacy.id])
+        XCTAssertEqual(coordinator.recording(withID: legacy.id)?.ownerID, "user_current")
+        XCTAssertEqual(try store.loadRecordings().first(where: { $0.id == legacy.id })?.ownerID, "user_current")
+
+        coordinator.setActiveOwnerID("user_other")
+        XCTAssertEqual(coordinator.availableRecordings.map(\.id), [other.id])
+
+        try coordinator.deleteRecordingsOwned(by: "user_current")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL(for: legacy).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.fileURL(for: other).path))
+        XCTAssertEqual(coordinator.pendingRecordings.map(\.id), [other.id])
     }
 
     @MainActor

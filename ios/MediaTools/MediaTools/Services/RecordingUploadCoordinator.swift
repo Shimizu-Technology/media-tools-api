@@ -68,15 +68,81 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     }
 
     func queue(_ recording: LocalRecording) {
-        guard recording.canUpload else { return }
+        guard recording.canUpload, recording.ownerID == recorder.activeOwnerID else { return }
         recorder.markWaitingForUpload(recording.id)
         retryAttempts[recording.id] = 0
         process(recordingID: recording.id)
     }
 
+    /// Keeps upload/finalization credentials aligned with the signed-in Clerk
+    /// account. Work owned by another account is paused instead of ever being
+    /// finalized with the new account's bearer token.
+    func setActiveOwnerID(_ ownerID: String?) async {
+        recorder.setActiveOwnerID(ownerID)
+        if let ownerID {
+            for index in watches.indices where watches[index].ownerID == nil {
+                if let recordingID = watches[index].recordingID,
+                   recorder.recording(withID: recordingID)?.ownerID != ownerID {
+                    continue
+                }
+                watches[index].ownerID = ownerID
+            }
+        }
+
+        let activeRecordingIDs = ownerID.map { recorder.recordingIDsOwned(by: $0) } ?? []
+        let allRecordingIDs = Set(recorder.pendingRecordings.map(\.id))
+        let pausedRecordingIDs = allRecordingIDs.subtracting(activeRecordingIDs)
+        for recordingID in pausedRecordingIDs {
+            uploadTasks[recordingID]?.cancel()
+            uploadTasks[recordingID] = nil
+            retryTasks[recordingID]?.cancel()
+            retryTasks[recordingID] = nil
+            retryAttempts[recordingID] = nil
+        }
+        await transport.cancel(recordingIDs: pausedRecordingIDs)
+
+        for watch in watches where watch.ownerID != ownerID {
+            watchTasks[watch.id]?.cancel()
+            watchTasks[watch.id] = nil
+        }
+        persistWatches()
+        if ownerID != nil {
+            resumePendingWork()
+        }
+    }
+
+    func removeLocalAccountData(ownerID: String) async throws {
+        let recordingIDs = recorder.recordingIDsOwned(by: ownerID)
+        if recorder.isRecording,
+           recordingIDs.contains(where: { recorder.recording(withID: $0)?.state == .recording }) {
+            _ = await recorder.stopFromSystem()
+        }
+        for recordingID in recordingIDs {
+            uploadTasks[recordingID]?.cancel()
+            uploadTasks[recordingID] = nil
+            retryTasks[recordingID]?.cancel()
+            retryTasks[recordingID] = nil
+            retryAttempts[recordingID] = nil
+        }
+        await transport.cancel(recordingIDs: recordingIDs)
+        let removedWatches = watches.filter {
+            $0.ownerID == ownerID || $0.recordingID.map(recordingIDs.contains) == true
+        }
+        for watch in removedWatches {
+            watchTasks[watch.id]?.cancel()
+            watchTasks[watch.id] = nil
+        }
+        watches.removeAll {
+            $0.ownerID == ownerID || $0.recordingID.map(recordingIDs.contains) == true
+        }
+        persistWatches()
+        try recorder.deleteRecordingsOwned(by: ownerID)
+        recorder.setActiveOwnerID(nil)
+    }
+
     func resumePendingWork() {
         transport.receiver = self
-        for recording in recorder.pendingRecordings
+        for recording in recorder.availableRecordings
         where recording.state == .serverProcessing {
             guard let remoteID = recording.remoteTranscriptionID,
                   !watches.contains(where: { $0.id == remoteID })
@@ -86,15 +152,16 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                     id: remoteID,
                     title: recording.displayTitle,
                     createdAt: recording.createdAt,
-                    recordingID: recording.id
+                    recordingID: recording.id,
+                    ownerID: recording.ownerID
                 )
             )
         }
-        for watch in watches {
+        for watch in watches where watch.ownerID == recorder.activeOwnerID {
             startWatching(watch)
         }
 
-        for recording in recorder.pendingRecordings {
+        for recording in recorder.availableRecordings {
             switch recording.state {
             case .waitingForUpload:
                 process(recordingID: recording.id)
@@ -111,7 +178,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             try? await Task.sleep(for: .seconds(1))
             guard let self else { return }
             let activeIDs = await self.transport.activeRecordingIDs()
-            for recording in self.recorder.pendingRecordings
+            for recording in self.recorder.availableRecordings
             where recording.state == .uploading && !activeIDs.contains(recording.id) {
                 self.recorder.markWaitingForUpload(
                     recording.id,
@@ -263,7 +330,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             id: item.id,
             title: item.displayTitle,
             createdAt: Date(),
-            recordingID: recordingID
+            recordingID: recordingID,
+            ownerID: recorder.recording(withID: recordingID)?.ownerID
         )
         addWatch(watch)
         startWatching(watch)

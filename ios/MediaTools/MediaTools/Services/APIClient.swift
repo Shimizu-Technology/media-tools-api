@@ -176,6 +176,15 @@ actor APIClient {
         try validateResponse(response, data: data)
     }
 
+    func delete<B: Encodable>(_ path: String, body: B) async throws {
+        let url = URL(string: baseURL + path)!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.httpBody = try encoder.encode(body)
+        let (data, response) = try await data(for: request)
+        try validateResponse(response, data: data)
+    }
+
     /// Upload raw data (audio file) with multipart form.
     func upload<T: Decodable>(
         _ path: String,

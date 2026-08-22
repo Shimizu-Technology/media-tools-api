@@ -14,10 +14,6 @@ struct ContentView: View {
                 MainTabView()
                     .onAppear {
                         tokenSync.startSyncing()
-                        // A saved recording may be paused while Clerk has no
-                        // session. Entering the signed-in workspace is the
-                        // deterministic signal to resume that durable work.
-                        uploadCoordinator.resumePendingWork()
                     }
                     .onDisappear {
                         tokenSync.stopSyncing()
@@ -28,6 +24,9 @@ struct ContentView: View {
                         tokenSync.clearToken()
                     }
             }
+        }
+        .task(id: clerk.user?.id) {
+            await uploadCoordinator.setActiveOwnerID(clerk.user?.id)
         }
         .sheet(isPresented: $showAuth) {
             AuthView()
