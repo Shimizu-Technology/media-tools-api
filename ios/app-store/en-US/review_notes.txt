@@ -1,0 +1,16 @@
+Media Tools requires an account because recordings, transcripts, PDFs, chats, and collections are private, account-scoped workspace data.
+
+Sign in: Use the non-expiring review account supplied in App Review Information. Native Sign in with Apple is also available.
+
+Recording: Open Record and tap the microphone. A red recording card, elapsed timer, waveform, system microphone indicator, and Live Activity remain visible while recording. Locking the phone or switching apps intentionally keeps the user-started recording active. Pause/Resume stops and restarts capture without finalizing the file. Stop & Save finalizes it on the device.
+
+AI disclosure: Before the first transcription, readable-format, summary, or chat request, the app explains that content is sent to OpenAI and, for text features, OpenRouter/model providers. Declining leaves recording, recovery, library browsing, playback, export, and non-AI extraction available.
+
+Account deletion: Settings > Account > Delete Account. The app confirms the destructive action, purges account-owned application data, queues durable provider cleanup, removes device recordings owned by that account, and signs out.
+
+AI safety report: Open an item with a generated summary or chat response and use Report summary or Report response. The report includes the selected output, category, and optional note; it does not attach another copy of the source media.
+
+Support: https://media-tools-gu.netlify.app/support
+Privacy: https://media-tools-gu.netlify.app/privacy
+Terms: https://media-tools-gu.netlify.app/terms
+Deletion instructions: https://media-tools-gu.netlify.app/delete-account

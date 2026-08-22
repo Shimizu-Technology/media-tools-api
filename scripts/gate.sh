@@ -29,38 +29,7 @@ echo "Running frontend checks"
 
 if [[ "$(uname -s)" == "Darwin" ]] && command -v xcodebuild >/dev/null 2>&1; then
   echo "Running iOS build and tests"
-
-  entitlements_path="ios/MediaTools/MediaTools/MediaTools.entitlements"
-  if [[ ! -f "$entitlements_path" ]]; then
-    echo "Missing iOS entitlements file: $entitlements_path"
-    exit 1
-  fi
-
-  if ! apple_sign_in_mode="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.applesignin:0' "$entitlements_path" 2>/dev/null)"; then
-    echo "Sign in with Apple entitlement is missing"
-    exit 1
-  fi
-  if [[ "$apple_sign_in_mode" != "Default" ]]; then
-    echo "Sign in with Apple entitlement is missing or invalid: $apple_sign_in_mode"
-    exit 1
-  fi
-
-  configured_entitlements="$(xcodebuild \
-    -project ios/MediaTools/MediaTools.xcodeproj \
-    -scheme MediaTools \
-    -configuration Release \
-    -showBuildSettings 2>/dev/null \
-    | awk -F ' = ' '
-        /^[[:space:]]*CODE_SIGN_ENTITLEMENTS = / && !found {
-          value = $2
-          found = 1
-        }
-        END { if (found) print value }
-      ')"
-  if [[ "$configured_entitlements" != "MediaTools/MediaTools.entitlements" ]]; then
-    echo "Unexpected iOS entitlements build setting: $configured_entitlements"
-    exit 1
-  fi
+  ./scripts/ios-release-preflight.sh
 
   simulator_id="${IOS_SIMULATOR_ID:-$(xcrun simctl list devices available -j | ruby -rjson -e '
     devices = JSON.parse(STDIN.read).fetch("devices").values.flatten
