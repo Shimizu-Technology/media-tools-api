@@ -64,7 +64,7 @@ struct OnboardingView: View {
                             color: microphoneState == .denied ? Theme.warning : Theme.audioColor,
                             title: "Prepare your microphone",
                             subtitle:
-                                "Media Tools only listens after you deliberately start a recording. Audio is saved on this iPhone first, then uploaded when you choose Transcribe.",
+                                "Media Tools only listens after you deliberately start a recording. Only record people when you have their permission and recording is lawful where you are. Audio is saved on this iPhone first, then uploaded when you choose Transcribe.",
                             note: microphoneDetail
                         ) {
                             permissionButton(
@@ -104,17 +104,27 @@ struct OnboardingView: View {
                             note:
                                 "Your AI permission is account-scoped and can be revoked in Settings. Next, add Media Tools → Quick Record to your Action Button."
                         ) {
-                            Button {
-                                guard let url = URL(string: "shortcuts://") else { return }
-                                openURL(url)
-                            } label: {
-                                Label("Open Shortcuts", systemImage: "arrow.up.forward.app")
-                                    .font(Theme.body(15, weight: .semibold))
-                                    .frame(maxWidth: .infinity, minHeight: 48)
+                            VStack(spacing: 10) {
+                                Button {
+                                    guard let url = URL(string: "shortcuts://") else { return }
+                                    openURL(url)
+                                } label: {
+                                    Label("Open Shortcuts", systemImage: "arrow.up.forward.app")
+                                        .font(Theme.body(15, weight: .semibold))
+                                        .frame(maxWidth: .infinity, minHeight: 48)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(Theme.brand400)
+                                .accessibilityHint("Opens Shortcuts so you can configure Quick Record")
+
+                                HStack(spacing: 12) {
+                                    Link("Terms", destination: Configuration.termsURL)
+                                    Link("Privacy", destination: Configuration.privacyURL)
+                                    Link("Support", destination: Configuration.supportURL)
+                                }
+                                .font(Theme.caption(12, weight: .semibold))
+                                .foregroundStyle(Theme.brand400)
                             }
-                            .buttonStyle(.bordered)
-                            .tint(Theme.brand400)
-                            .accessibilityHint("Opens Shortcuts so you can configure Quick Record")
                         }
                         .tag(3)
                     }

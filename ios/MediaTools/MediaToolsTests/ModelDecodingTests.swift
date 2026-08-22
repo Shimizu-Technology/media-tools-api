@@ -2,6 +2,16 @@ import XCTest
 @testable import MediaTools
 
 final class ModelDecodingTests: XCTestCase {
+    func testPublicComplianceURLsUseTheConfiguredWebApp() {
+        XCTAssertEqual(Configuration.privacyURL.absoluteString, "\(Configuration.webAppURL)/privacy")
+        XCTAssertEqual(Configuration.termsURL.absoluteString, "\(Configuration.webAppURL)/terms")
+        XCTAssertEqual(Configuration.supportURL.absoluteString, "\(Configuration.webAppURL)/support")
+        XCTAssertEqual(
+            Configuration.accountDeletionURL.absoluteString,
+            "\(Configuration.webAppURL)/delete-account"
+        )
+    }
+
     @MainActor
     func testAIProcessingConsentIsExplicitAccountScopedAndRevocable() async {
         let suiteName = "AIProcessingConsentTests.\(UUID().uuidString)"

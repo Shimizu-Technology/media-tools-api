@@ -58,7 +58,7 @@ struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 Label {
-                    Text("One press opens Media Tools and begins recording. After capture starts, you can lock your phone or use another app.")
+                    Text("One press opens Media Tools and begins recording. Use it only when everyone who must consent has done so. After capture starts, you can lock your phone or use another app.")
                         .font(Theme.body(14))
                         .foregroundStyle(Theme.textPrimary)
                 } icon: {
@@ -338,16 +338,34 @@ struct SettingsView: View {
                     title: "Privacy",
                     detail: "How Media Tools handles your content",
                     systemImage: "hand.raised.fill",
-                    destination: URL(string: "https://media-tools-gu.netlify.app/privacy")!
+                    destination: Configuration.privacyURL
                 )
 
                 Divider().overlay(Theme.borderSubtle)
 
                 settingsLink(
-                    title: "Shimizu Technology",
-                    detail: "Product support and company information",
-                    systemImage: "safari.fill",
-                    destination: URL(string: "https://shimizu-technology.com")!
+                    title: "Terms of use",
+                    detail: "Rules for recording, uploads, and AI features",
+                    systemImage: "doc.text.fill",
+                    destination: Configuration.termsURL
+                )
+
+                Divider().overlay(Theme.borderSubtle)
+
+                settingsLink(
+                    title: "Support & safety",
+                    detail: "Get help or report a content concern",
+                    systemImage: "lifepreserver.fill",
+                    destination: Configuration.supportURL
+                )
+
+                Divider().overlay(Theme.borderSubtle)
+
+                settingsLink(
+                    title: "Account deletion help",
+                    detail: "Public instructions available without signing in",
+                    systemImage: "person.crop.circle.badge.minus",
+                    destination: Configuration.accountDeletionURL
                 )
 
                 Divider().overlay(Theme.borderSubtle)

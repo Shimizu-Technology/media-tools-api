@@ -1,0 +1,32 @@
+import { Link } from 'react-router-dom';
+
+export function SupportPage() {
+  return (
+    <main className="mx-auto max-w-3xl px-6 py-16">
+      <div className="rounded-[2rem] border p-6 sm:p-8" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+        <p className="text-xs font-semibold uppercase tracking-[0.2em]" style={{ color: 'var(--color-brand-500)' }}>Media Tools support</p>
+        <h1 className="mt-4 text-3xl font-bold" style={{ color: 'var(--color-text-primary)' }}>Help, safety, and account support</h1>
+        <p className="mt-4 leading-7" style={{ color: 'var(--color-text-secondary)' }}>Email <a href="mailto:shimizutechnology@gmail.com" className="font-semibold underline" style={{ color: 'var(--color-brand-500)' }}>shimizutechnology@gmail.com</a>. Include the device, app version, what you were doing, and any visible error. Do not email passwords, API keys, private recordings, or full transcripts.</p>
+      </div>
+
+      <div className="mt-8 space-y-6">
+        <SupportCard title="Recording or upload problem">
+          Keep the saved-on-device recording until support is complete. Export a copy before discarding it. For a failed transcription, include the file type, approximate duration, and the error message—not the media itself unless support specifically requests a secure transfer.
+        </SupportCard>
+        <SupportCard title="Report harmful or inappropriate AI output">
+          Email us with the item, AI feature, approximate date and time, and why the output is concerning. You can report illegal, dangerous, hateful, sexual, privacy-invasive, or otherwise inappropriate output. Do not include private source content unless support specifically requests a secure transfer.
+        </SupportCard>
+        <SupportCard title="Privacy or account request">
+          Review the <Link to="/privacy" className="underline" style={{ color: 'var(--color-brand-500)' }}>Privacy Policy</Link>, manage AI permission in Settings, or follow the public <Link to="/delete-account" className="underline" style={{ color: 'var(--color-brand-500)' }}>account deletion instructions</Link>. Account deletion does not require contacting support.
+        </SupportCard>
+        <SupportCard title="Recording responsibility">
+          Only record or upload content when you have the necessary rights and permission. If someone may be recorded, follow the consent and notice laws that apply where the recording occurs.
+        </SupportCard>
+      </div>
+    </main>
+  );
+}
+
+function SupportCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return <section className="rounded-2xl border p-5" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}><h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>{title}</h2><div className="mt-3 leading-7" style={{ color: 'var(--color-text-secondary)' }}>{children}</div></section>;
+}

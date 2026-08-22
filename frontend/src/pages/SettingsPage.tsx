@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from 'react';
-import { BrainCircuit, Check, KeyRound, Moon, Settings, Sun, UserRound } from 'lucide-react';
+import { BrainCircuit, Check, ExternalLink, KeyRound, Moon, Settings, Sun, UserRound } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useAuthContext } from '../contexts/useAuthContext';
 import { useTheme } from '../hooks/useTheme';
 import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
@@ -53,6 +54,23 @@ export function SettingsPage() {
           >
             {hasAIConsent ? 'Revoke permission' : 'Review and allow'}
           </button>
+        </div>
+      </section>
+
+      <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+        <h2 className="text-xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>Help and legal</h2>
+        <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>Public resources are available without signing in.</p>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          {[
+            ['/privacy', 'Privacy policy'],
+            ['/terms', 'Terms of use'],
+            ['/support', 'Support and safety'],
+            ['/delete-account', 'Account deletion help'],
+          ].map(([href, label]) => (
+            <Link key={href} to={href} className="inline-flex min-h-11 items-center justify-between rounded-xl border px-4 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
+              {label}<ExternalLink className="h-4 w-4" style={{ color: 'var(--color-text-muted)' }} />
+            </Link>
+          ))}
         </div>
       </section>
 
