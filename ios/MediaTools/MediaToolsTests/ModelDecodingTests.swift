@@ -440,6 +440,42 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     @MainActor
+    func testInterruptedLegacyOwnerClaimCannotMoveToAnotherAccount() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let defaultsSuite = "MediaToolsTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        var legacy = store.makeRecording(contentType: "voice_memo")
+        legacy.state = .ready
+        try cafData(unknownDataLength: true).write(to: store.fileURL(for: legacy))
+        try store.saveRecordings([legacy])
+        defaults.set(
+            "user_original",
+            forKey: RecordingCoordinator.pendingLegacyRecordingOwnerIDKey
+        )
+
+        let coordinator = RecordingCoordinator(
+            store: store,
+            localAccountDefaults: defaults
+        )
+        coordinator.setActiveOwnerID("user_new")
+
+        XCTAssertEqual(coordinator.recording(withID: legacy.id)?.ownerID, "user_original")
+        XCTAssertTrue(coordinator.availableRecordings.isEmpty)
+        XCTAssertEqual(
+            try store.loadRecordings().first?.ownerID,
+            "user_original"
+        )
+        XCTAssertNil(defaults.string(forKey: RecordingCoordinator.pendingLegacyRecordingOwnerIDKey))
+    }
+
+    @MainActor
     func testPendingDeletedAccountCleanupRetriesBeforeAnotherOwnerActivates() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

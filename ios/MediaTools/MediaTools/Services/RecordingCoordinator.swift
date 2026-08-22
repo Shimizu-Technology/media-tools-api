@@ -18,6 +18,7 @@ enum RecordingCaptureState: Equatable {
 @Observable
 final class RecordingCoordinator {
     static let shared = RecordingCoordinator()
+    static let pendingLegacyRecordingOwnerIDKey = "pendingLegacyRecordingOwnerID"
 
     private(set) var captureState: RecordingCaptureState = .idle
     private(set) var isStarting = false
@@ -42,6 +43,7 @@ final class RecordingCoordinator {
     private let simulatesCapture: Bool
     private let activityManager: RecordingActivityManaging
     private let availableCapacity: (URL) -> Int64?
+    private let localAccountDefaults: UserDefaults
 
     static let minimumStartCapacityBytes: Int64 = 100 * 1_024 * 1_024
     static let criticalRecordingCapacityBytes: Int64 = 50 * 1_024 * 1_024
@@ -57,6 +59,7 @@ final class RecordingCoordinator {
         store: RecordingStore? = nil,
         simulatesCapture: Bool? = nil,
         activityManager: RecordingActivityManaging? = nil,
+        localAccountDefaults: UserDefaults = .standard,
         availableCapacity: @escaping (URL) -> Int64? = RecordingStorageCapacity.available
     ) {
         #if DEBUG
@@ -67,6 +70,7 @@ final class RecordingCoordinator {
         #endif
         self.activityManager = activityManager ?? RecordingActivityManager.shared
         self.availableCapacity = availableCapacity
+        self.localAccountDefaults = localAccountDefaults
 
         if let store {
             self.store = store
@@ -108,16 +112,29 @@ final class RecordingCoordinator {
 
     /// Switches the visible device workspace. Unowned recordings are legacy or
     /// signed-out Quick Captures, so the first signed-in account claims them.
+    /// The intended owner is saved separately before rewriting the manifest;
+    /// if that rewrite fails, a later account can never claim the same files.
     func setActiveOwnerID(_ ownerID: String?) {
         activeOwnerID = ownerID
         guard let ownerID else { return }
-        var changed = false
+        let pendingClaimOwnerID = localAccountDefaults.string(
+            forKey: Self.pendingLegacyRecordingOwnerIDKey
+        )
+        let hasUnownedRecordings = pendingRecordings.contains { $0.ownerID == nil }
+        guard pendingClaimOwnerID != nil || hasUnownedRecordings else { return }
+        let claimOwnerID = pendingClaimOwnerID ?? ownerID
+        localAccountDefaults.set(
+            claimOwnerID,
+            forKey: Self.pendingLegacyRecordingOwnerIDKey
+        )
         for index in pendingRecordings.indices where pendingRecordings[index].ownerID == nil {
-            pendingRecordings[index].ownerID = ownerID
-            changed = true
+            pendingRecordings[index].ownerID = claimOwnerID
         }
-        if changed {
-            try? persistPendingRecordings()
+        do {
+            try persistPendingRecordings()
+            localAccountDefaults.removeObject(forKey: Self.pendingLegacyRecordingOwnerIDKey)
+        } catch {
+            errorMessage = "Device recordings are protected, but their account assignment will retry."
         }
     }
 

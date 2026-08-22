@@ -159,10 +159,14 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         watches.removeAll {
             $0.ownerID == ownerID || $0.recordingID.map(recordingIDs.contains) == true
         }
-        persistWatches()
+        let watchesPersisted = persistWatches()
         recorder.setActiveOwnerID(nil)
         do {
             try recorder.deleteRecordingsOwned(by: ownerID)
+            guard watchesPersisted else {
+                statusMessage = "Device cleanup will retry automatically."
+                return false
+            }
             clearPendingLocalAccountDeletion(ownerID)
             return true
         } catch {
@@ -543,11 +547,14 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         )
     }
 
-    private func persistWatches() {
+    @discardableResult
+    private func persistWatches() -> Bool {
         do {
             try watchStore?.save(watches)
+            return true
         } catch {
             statusMessage = "Completion alerts could not be saved. Check Library for status."
+            return false
         }
     }
 
