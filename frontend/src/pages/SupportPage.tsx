@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom';
+import { SupportCard } from '../components/legal/SupportCard';
 
+/** Provides public troubleshooting, safety-reporting, privacy, and recording guidance. */
 export function SupportPage() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
@@ -25,8 +27,4 @@ export function SupportPage() {
       </div>
     </main>
   );
-}
-
-function SupportCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section className="rounded-2xl border p-5" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}><h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>{title}</h2><div className="mt-3 leading-7" style={{ color: 'var(--color-text-secondary)' }}>{children}</div></section>;
 }

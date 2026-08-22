@@ -117,13 +117,7 @@ struct OnboardingView: View {
                                 .tint(Theme.brand400)
                                 .accessibilityHint("Opens Shortcuts so you can configure Quick Record")
 
-                                HStack(spacing: 12) {
-                                    Link("Terms", destination: Configuration.termsURL)
-                                    Link("Privacy", destination: Configuration.privacyURL)
-                                    Link("Support", destination: Configuration.supportURL)
-                                }
-                                .font(Theme.caption(12, weight: .semibold))
-                                .foregroundStyle(Theme.brand400)
+                                legalLinks
                             }
                         }
                         .tag(3)
@@ -179,6 +173,33 @@ struct OnboardingView: View {
                 withAnimation(Theme.springGentle.delay(0.15)) { appeared = true }
             }
         }
+    }
+
+    /// Keeps the public resources compact at normal sizes and reliably tappable
+    /// when Dynamic Type needs a vertical layout.
+    private var legalLinks: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                legalLink("Terms", destination: Configuration.termsURL)
+                legalLink("Privacy", destination: Configuration.privacyURL)
+                legalLink("Support", destination: Configuration.supportURL)
+            }
+
+            VStack(spacing: 0) {
+                legalLink("Terms", destination: Configuration.termsURL)
+                legalLink("Privacy", destination: Configuration.privacyURL)
+                legalLink("Support", destination: Configuration.supportURL)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func legalLink(_ title: String, destination: URL) -> some View {
+        Link(title, destination: destination)
+            .font(Theme.caption(12, weight: .semibold))
+            .foregroundStyle(Theme.brand400)
+            .frame(minWidth: 72, minHeight: 44)
+            .contentShape(Rectangle())
     }
 
     private var pageIndicator: some View {
