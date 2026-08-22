@@ -43,7 +43,10 @@ actor APIClient {
 
     // MARK: - Auth
 
-    private func authHeaders(forceRefresh: Bool = false) async throws -> [String: String] {
+    private func authHeaders(
+        forceRefresh: Bool = false,
+        expectedOwnerID: String? = nil
+    ) async throws -> [String: String] {
         var headers: [String: String] = [
             "Content-Type": "application/json",
             "Accept": "application/json"
@@ -57,6 +60,12 @@ actor APIClient {
         guard let session = await Clerk.shared.session else {
             throw APIError.authenticationRequired(message: "Sign in to continue.")
         }
+        if let expectedOwnerID, session.user?.id != expectedOwnerID {
+            throw APIError.authenticationRequired(
+                message: "The signed-in account changed. Switch back to continue this upload."
+            )
+        }
+        let sessionID = session.id
         let options = Session.GetTokenOptions(skipCache: forceRefresh)
         let token: String?
         do {
@@ -78,6 +87,14 @@ actor APIClient {
                 message: "Your sign-in session could not be refreshed. Sign out and sign in again."
             )
         }
+        guard let currentSession = await Clerk.shared.session,
+              currentSession.id == sessionID,
+              expectedOwnerID == nil || currentSession.user?.id == expectedOwnerID
+        else {
+            throw APIError.authenticationRequired(
+                message: "The signed-in account changed. Switch back to continue this upload."
+            )
+        }
         headers["Authorization"] = "Bearer \(token)"
 
         return headers
@@ -85,10 +102,14 @@ actor APIClient {
 
     private func authenticatedRequest(
         from originalRequest: URLRequest,
-        forceRefresh: Bool = false
+        forceRefresh: Bool = false,
+        expectedOwnerID: String? = nil
     ) async throws -> URLRequest {
         var request = originalRequest
-        for (key, value) in try await authHeaders(forceRefresh: forceRefresh) {
+        for (key, value) in try await authHeaders(
+            forceRefresh: forceRefresh,
+            expectedOwnerID: expectedOwnerID
+        ) {
             // Multipart requests carry their boundary in Content-Type; never
             // replace it with the JSON default while applying auth headers.
             if key.caseInsensitiveCompare("Content-Type") == .orderedSame,
@@ -103,48 +124,79 @@ actor APIClient {
     /// Send an authenticated API request and recover once from a rejected
     /// cached Clerk token. The retry is deliberately limited to one attempt so
     /// a revoked session never creates a request loop.
-    private func data(for originalRequest: URLRequest) async throws -> (Data, URLResponse) {
-        let request = try await authenticatedRequest(from: originalRequest)
+    private func data(
+        for originalRequest: URLRequest,
+        expectedOwnerID: String? = nil
+    ) async throws -> (Data, URLResponse) {
+        let request = try await authenticatedRequest(
+            from: originalRequest,
+            expectedOwnerID: expectedOwnerID
+        )
         let firstResponse = try await session.data(for: request)
         guard (firstResponse.1 as? HTTPURLResponse)?.statusCode == 401 else {
             return firstResponse
         }
 
-        let retryRequest = try await authenticatedRequest(from: originalRequest, forceRefresh: true)
+        let retryRequest = try await authenticatedRequest(
+            from: originalRequest,
+            forceRefresh: true,
+            expectedOwnerID: expectedOwnerID
+        )
         return try await session.data(for: retryRequest)
     }
 
     private func upload(
         for originalRequest: URLRequest,
-        fromFile fileURL: URL
+        fromFile fileURL: URL,
+        expectedOwnerID: String? = nil
     ) async throws -> (Data, URLResponse) {
-        let request = try await authenticatedRequest(from: originalRequest)
+        let request = try await authenticatedRequest(
+            from: originalRequest,
+            expectedOwnerID: expectedOwnerID
+        )
         let firstResponse = try await session.upload(for: request, fromFile: fileURL)
         guard (firstResponse.1 as? HTTPURLResponse)?.statusCode == 401 else {
             return firstResponse
         }
 
-        let retryRequest = try await authenticatedRequest(from: originalRequest, forceRefresh: true)
+        let retryRequest = try await authenticatedRequest(
+            from: originalRequest,
+            forceRefresh: true,
+            expectedOwnerID: expectedOwnerID
+        )
         return try await session.upload(for: retryRequest, fromFile: fileURL)
     }
 
     // MARK: - HTTP Methods
 
-    func get<T: Decodable>(_ path: String) async throws -> T {
+    func get<T: Decodable>(
+        _ path: String,
+        expectedOwnerID: String? = nil
+    ) async throws -> T {
         let url = URL(string: baseURL + path)!
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        let (data, response) = try await data(for: request)
+        let (data, response) = try await data(
+            for: request,
+            expectedOwnerID: expectedOwnerID
+        )
         try validateResponse(response, data: data)
         return try decoder.decode(T.self, from: data)
     }
 
-    func post<T: Decodable, B: Encodable>(_ path: String, body: B) async throws -> T {
+    func post<T: Decodable, B: Encodable>(
+        _ path: String,
+        body: B,
+        expectedOwnerID: String? = nil
+    ) async throws -> T {
         let url = URL(string: baseURL + path)!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = try encoder.encode(body)
-        let (data, response) = try await data(for: request)
+        let (data, response) = try await data(
+            for: request,
+            expectedOwnerID: expectedOwnerID
+        )
         try validateResponse(response, data: data)
         return try decoder.decode(T.self, from: data)
     }
@@ -237,7 +289,8 @@ actor APIClient {
         fileURL: URL,
         filename: String,
         mimeType: String,
-        fields: [String: String] = [:]
+        fields: [String: String] = [:],
+        expectedOwnerID: String? = nil
     ) async throws -> T {
         let boundary = UUID().uuidString
         let bodyURL = FileManager.default.temporaryDirectory
@@ -259,7 +312,11 @@ actor APIClient {
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
-        let (data, response) = try await upload(for: request, fromFile: bodyURL)
+        let (data, response) = try await upload(
+            for: request,
+            fromFile: bodyURL,
+            expectedOwnerID: expectedOwnerID
+        )
         try validateResponse(response, data: data)
         return try decoder.decode(T.self, from: data)
     }

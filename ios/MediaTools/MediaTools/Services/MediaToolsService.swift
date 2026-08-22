@@ -56,8 +56,14 @@ final class MediaToolsService {
         }
     }
 
-    func getAudioItem(_ id: String) async throws -> AudioTranscription {
-        let item: AudioTranscription = try await api.get("/audio/transcriptions/\(id)")
+    func getAudioItem(
+        _ id: String,
+        expectedOwnerID: String? = nil
+    ) async throws -> AudioTranscription {
+        let item: AudioTranscription = try await api.get(
+            "/audio/transcriptions/\(id)",
+            expectedOwnerID: expectedOwnerID
+        )
         upsertAudioItem(item)
         return item
     }
@@ -66,7 +72,8 @@ final class MediaToolsService {
         fileURL: URL,
         filename: String,
         mimeType: String,
-        contentType: String = "general"
+        contentType: String = "general",
+        expectedOwnerID: String? = nil
     ) async throws -> AudioTranscription {
         let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
         guard let size = attributes[.size] as? NSNumber, size.int64Value > 0 else {
@@ -78,7 +85,8 @@ final class MediaToolsService {
             presign = try await presignAudioUpload(
                 filename: filename,
                 mimeType: mimeType,
-                sizeBytes: size.int64Value
+                sizeBytes: size.int64Value,
+                expectedOwnerID: expectedOwnerID
             )
         } catch let apiError as APIError where apiError.permitsMultipartUploadFallback {
             // Local and self-hosted environments may intentionally omit S3.
@@ -88,7 +96,8 @@ final class MediaToolsService {
                 fileURL: fileURL,
                 filename: filename,
                 mimeType: mimeType,
-                contentType: contentType
+                contentType: contentType,
+                expectedOwnerID: expectedOwnerID
             )
         } catch {
             throw error
@@ -108,7 +117,10 @@ final class MediaToolsService {
         var completionError: Error?
         for attempt in 0..<3 {
             do {
-                let item = try await completeAudioUpload(completion)
+                let item = try await completeAudioUpload(
+                    completion,
+                    expectedOwnerID: expectedOwnerID
+                )
                 return item
             } catch {
                 completionError = error
@@ -126,7 +138,8 @@ final class MediaToolsService {
     func presignAudioUpload(
         filename: String,
         mimeType: String,
-        sizeBytes: Int64
+        sizeBytes: Int64,
+        expectedOwnerID: String? = nil
     ) async throws -> AudioUploadPresignResponse {
         try await api.post(
             "/audio/uploads/presign",
@@ -134,16 +147,19 @@ final class MediaToolsService {
                 filename: filename,
                 contentType: mimeType,
                 sizeBytes: sizeBytes
-            )
+            ),
+            expectedOwnerID: expectedOwnerID
         )
     }
 
     func completeAudioUpload(
-        _ completion: AudioUploadCompleteRequest
+        _ completion: AudioUploadCompleteRequest,
+        expectedOwnerID: String? = nil
     ) async throws -> AudioTranscription {
         let item: AudioTranscription = try await api.post(
             "/audio/uploads/complete",
-            body: completion
+            body: completion,
+            expectedOwnerID: expectedOwnerID
         )
         upsertAudioItem(item)
         return item
@@ -184,14 +200,16 @@ final class MediaToolsService {
         fileURL: URL,
         filename: String,
         mimeType: String,
-        contentType: String
+        contentType: String,
+        expectedOwnerID: String?
     ) async throws -> AudioTranscription {
         let item: AudioTranscription = try await api.uploadFile(
             "/audio/transcribe",
             fileURL: fileURL,
             filename: filename,
             mimeType: mimeType,
-            fields: ["content_type": contentType]
+            fields: ["content_type": contentType],
+            expectedOwnerID: expectedOwnerID
         )
         upsertAudioItem(item)
         return item

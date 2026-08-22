@@ -8,6 +8,33 @@ enum TranscriptionWatchFailureDisposition: Equatable {
     case stop
 }
 
+@MainActor
+protocol RecordingUploadServicing: AnyObject {
+    func getAudioItem(
+        _ id: String,
+        expectedOwnerID: String?
+    ) async throws -> AudioTranscription
+    func uploadAudio(
+        fileURL: URL,
+        filename: String,
+        mimeType: String,
+        contentType: String,
+        expectedOwnerID: String?
+    ) async throws -> AudioTranscription
+    func presignAudioUpload(
+        filename: String,
+        mimeType: String,
+        sizeBytes: Int64,
+        expectedOwnerID: String?
+    ) async throws -> AudioUploadPresignResponse
+    func completeAudioUpload(
+        _ completion: AudioUploadCompleteRequest,
+        expectedOwnerID: String?
+    ) async throws -> AudioTranscription
+}
+
+extension MediaToolsService: RecordingUploadServicing {}
+
 /// Durable orchestration for recordings after capture finishes.
 ///
 /// The recording manifest remains the source of truth until server processing
@@ -35,7 +62,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     }
 
     private let recorder: RecordingCoordinator
-    private let service: MediaToolsService
+    private let service: any RecordingUploadServicing
     private let transport: BackgroundUploadService
     private let watchStore: TranscriptionWatchStore?
     private let localAccountDefaults: UserDefaults
@@ -49,7 +76,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
 
     init(
         recorder: RecordingCoordinator? = nil,
-        service: MediaToolsService = .shared,
+        service: any RecordingUploadServicing = MediaToolsService.shared,
         transport: BackgroundUploadService = .shared,
         watchStore: TranscriptionWatchStore? = nil,
         localAccountDefaults: UserDefaults = .standard
@@ -106,6 +133,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             retryAttempts[recordingID] = nil
         }
         await transport.cancel(recordingIDs: pausedRecordingIDs)
+        hasReconciledTransfers = false
 
         for watch in watches where watch.ownerID != ownerID {
             watchTasks[watch.id]?.cancel()
@@ -241,12 +269,18 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
 
         guard !hasReconciledTransfers else { return }
         hasReconciledTransfers = true
+        let reconciledOwnerID = recorder.activeOwnerID
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
             guard let self else { return }
             let activeIDs = await self.transport.activeRecordingIDs()
+            guard self.recorder.activeOwnerID == reconciledOwnerID else { return }
             for recording in self.recorder.availableRecordings
             where recording.state == .uploading && !activeIDs.contains(recording.id) {
+                guard self.isActiveOwner(
+                    recordingID: recording.id,
+                    expectedOwnerID: reconciledOwnerID
+                ) else { continue }
                 self.recorder.markWaitingForUpload(
                     recording.id,
                     message: "The interrupted upload will resume automatically."
@@ -257,6 +291,16 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     }
 
     func receiveBackgroundUploadEvent(_ event: BackgroundUploadEvent) {
+        let metadata: BackgroundUploadMetadata
+        switch event {
+        case .progress(let value, _), .completed(let value), .failed(let value, _, _):
+            metadata = value
+        }
+        guard let ownerID = metadata.ownerID
+                ?? recorder.recording(withID: metadata.recordingID)?.ownerID,
+              isActiveOwner(recordingID: metadata.recordingID, expectedOwnerID: ownerID)
+        else { return }
+
         switch event {
         case .progress(let metadata, let fractionCompleted):
             recorder.updateUploadProgress(metadata.recordingID, progress: fractionCompleted)
@@ -282,6 +326,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     private func process(recordingID: UUID) {
         guard uploadTasks[recordingID] == nil,
               let recording = recorder.recording(withID: recordingID),
+              let ownerID = recording.ownerID,
+              isActiveOwner(recordingID: recordingID, expectedOwnerID: ownerID),
               recording.state == .waitingForUpload || recording.state == .uploadFailed,
               let fileURL = recorder.fileURL(for: recording)
         else { return }
@@ -289,8 +335,12 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         uploadTasks[recordingID] = Task { [weak self] in
             guard let self else { return }
             defer { self.uploadTasks[recordingID] = nil }
+            guard self.isActiveOwner(
+                recordingID: recordingID,
+                expectedOwnerID: ownerID
+            ), !Task.isCancelled else { return }
             if self.simulatesUpload {
-                await self.simulateUpload(recording: recording)
+                await self.simulateUpload(recording: recording, ownerID: ownerID)
                 return
             }
             do {
@@ -302,10 +352,16 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 let presign = try await self.service.presignAudioUpload(
                     filename: recording.uploadFilename,
                     mimeType: mimeType,
-                    sizeBytes: size.int64Value
+                    sizeBytes: size.int64Value,
+                    expectedOwnerID: ownerID
                 )
+                guard self.isActiveOwner(
+                    recordingID: recordingID,
+                    expectedOwnerID: ownerID
+                ), !Task.isCancelled else { return }
                 let metadata = BackgroundUploadMetadata(
                     recordingID: recording.id,
+                    ownerID: ownerID,
                     filename: recording.uploadFilename,
                     objectKey: presign.objectKey,
                     sizeBytes: size.int64Value,
@@ -328,24 +384,49 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 self.retryAttempts[recordingID] = 0
                 self.statusMessage = "Uploading in the background"
             } catch let apiError as APIError where apiError.permitsMultipartUploadFallback {
-                await self.performForegroundFallback(recordingID: recordingID, fileURL: fileURL)
+                guard self.isActiveOwner(
+                    recordingID: recordingID,
+                    expectedOwnerID: ownerID
+                ), !Task.isCancelled else { return }
+                await self.performForegroundFallback(
+                    recordingID: recordingID,
+                    fileURL: fileURL,
+                    ownerID: ownerID
+                )
             } catch {
+                guard self.isActiveOwner(
+                    recordingID: recordingID,
+                    expectedOwnerID: ownerID
+                ), !Task.isCancelled else { return }
                 self.handlePreparationFailure(error, recordingID: recordingID)
             }
         }
     }
 
-    private func performForegroundFallback(recordingID: UUID, fileURL: URL) async {
-        guard let recording = recorder.recording(withID: recordingID) else { return }
+    private func performForegroundFallback(
+        recordingID: UUID,
+        fileURL: URL,
+        ownerID: String
+    ) async {
+        guard let recording = recorder.recording(withID: recordingID),
+              isActiveOwner(recordingID: recordingID, expectedOwnerID: ownerID)
+        else { return }
         do {
             let item = try await service.uploadAudio(
                 fileURL: fileURL,
                 filename: recording.uploadFilename,
                 mimeType: Self.mimeType(for: fileURL),
-                contentType: recording.contentType
+                contentType: recording.contentType,
+                expectedOwnerID: ownerID
             )
-            accept(item: item, recordingID: recordingID)
+            guard isActiveOwner(recordingID: recordingID, expectedOwnerID: ownerID),
+                  !Task.isCancelled
+            else { return }
+            accept(item: item, recordingID: recordingID, ownerID: ownerID)
         } catch {
+            guard isActiveOwner(recordingID: recordingID, expectedOwnerID: ownerID),
+                  !Task.isCancelled
+            else { return }
             handlePreparationFailure(error, recordingID: recordingID)
         }
     }
@@ -353,6 +434,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     private func finalize(recordingID: UUID) {
         guard uploadTasks[recordingID] == nil,
               let recording = recorder.recording(withID: recordingID),
+              let ownerID = recording.ownerID,
+              isActiveOwner(recordingID: recordingID, expectedOwnerID: ownerID),
               recording.state == .finalizingUpload,
               let objectKey = recording.uploadObjectKey,
               let sizeBytes = recording.uploadSizeBytes
@@ -361,6 +444,10 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         uploadTasks[recordingID] = Task { [weak self] in
             guard let self else { return }
             defer { self.uploadTasks[recordingID] = nil }
+            guard self.isActiveOwner(
+                recordingID: recordingID,
+                expectedOwnerID: ownerID
+            ), !Task.isCancelled else { return }
             do {
                 let item = try await self.service.completeAudioUpload(
                     AudioUploadCompleteRequest(
@@ -368,10 +455,19 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                         originalName: recording.uploadFilename,
                         sizeBytes: sizeBytes,
                         contentType: recording.contentType
-                    )
+                    ),
+                    expectedOwnerID: ownerID
                 )
-                self.accept(item: item, recordingID: recordingID)
+                guard self.isActiveOwner(
+                    recordingID: recordingID,
+                    expectedOwnerID: ownerID
+                ), !Task.isCancelled else { return }
+                self.accept(item: item, recordingID: recordingID, ownerID: ownerID)
             } catch {
+                guard self.isActiveOwner(
+                    recordingID: recordingID,
+                    expectedOwnerID: ownerID
+                ), !Task.isCancelled else { return }
                 if Self.isAuthenticationFailure(error) {
                     self.pauseForAuthentication(recordingID: recordingID, finalizing: true)
                 } else if Self.isRetryable(error) {
@@ -385,8 +481,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         }
     }
 
-    private func accept(item: AudioTranscription, recordingID: UUID) {
-        guard recorder.recording(withID: recordingID) != nil else { return }
+    private func accept(item: AudioTranscription, recordingID: UUID, ownerID: String) {
+        guard isActiveOwner(recordingID: recordingID, expectedOwnerID: ownerID) else { return }
         recorder.markServerAccepted(recordingID, transcriptionID: item.id)
         retryAttempts[recordingID] = nil
         retryTasks[recordingID]?.cancel()
@@ -412,7 +508,10 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     }
 
     private func startWatching(_ watch: TranscriptionWatch) {
-        guard watchTasks[watch.id] == nil else { return }
+        guard watchTasks[watch.id] == nil,
+              let ownerID = watch.ownerID,
+              recorder.activeOwnerID == ownerID
+        else { return }
         watchTasks[watch.id] = Task { [weak self] in
             guard let self else { return }
             defer { self.watchTasks[watch.id] = nil }
@@ -436,7 +535,16 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             var failures = 0
             while !Task.isCancelled {
                 do {
-                    let item = try await self.service.getAudioItem(watch.id)
+                    guard self.recorder.activeOwnerID == ownerID,
+                          !Task.isCancelled
+                    else { return }
+                    let item = try await self.service.getAudioItem(
+                        watch.id,
+                        expectedOwnerID: ownerID
+                    )
+                    guard self.recorder.activeOwnerID == ownerID,
+                          !Task.isCancelled
+                    else { return }
                     failures = 0
                     self.clearAuthenticationPause(for: watch.id)
                     self.latestItem = item
@@ -472,6 +580,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 } catch is CancellationError {
                     return
                 } catch {
+                    guard self.recorder.activeOwnerID == ownerID,
+                          !Task.isCancelled
+                    else { return }
                     switch Self.watchFailureDisposition(for: error) {
                     case .retry:
                         failures = min(failures + 1, 12)
@@ -669,7 +780,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             ?? "application/octet-stream"
     }
 
-    private func simulateUpload(recording: LocalRecording) async {
+    private func simulateUpload(recording: LocalRecording, ownerID: String) async {
         recorder.markUploadStarted(
             recording.id,
             objectKey: "ui-test/\(recording.filename)",
@@ -695,7 +806,15 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             recorder.markUploadFailed(recording.id, message: "UI test fixture could not be created.")
             return
         }
-        accept(item: item, recordingID: recording.id)
+        accept(item: item, recordingID: recording.id, ownerID: ownerID)
+    }
+
+    private func isActiveOwner(recordingID: UUID, expectedOwnerID: String?) -> Bool {
+        guard let expectedOwnerID,
+              recorder.activeOwnerID == expectedOwnerID,
+              recorder.recording(withID: recordingID)?.ownerID == expectedOwnerID
+        else { return false }
+        return true
     }
 
     private func simulatedItem(

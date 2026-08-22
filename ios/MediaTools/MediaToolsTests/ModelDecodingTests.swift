@@ -517,6 +517,107 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     @MainActor
+    func testDelayedFinalizationCannotCrossAnAccountSwitch() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        var recording = store.makeRecording(contentType: "meeting", ownerID: "user_original")
+        recording.state = .ready
+        try finalizedM4AData().write(to: store.fileURL(for: recording))
+        try store.saveRecordings([recording])
+        let recorder = RecordingCoordinator(store: store)
+        recorder.setActiveOwnerID("user_original")
+        recorder.markWaitingForUpload(recording.id)
+        recorder.markUploadStarted(
+            recording.id,
+            objectKey: "audio/original/meeting.m4a",
+            sizeBytes: 42,
+            mimeType: "audio/mp4",
+            taskIdentifier: 17
+        )
+        recorder.markUploadFinalizing(recording.id)
+
+        let service = SuspendedRecordingUploadService()
+        let uploader = RecordingUploadCoordinator(
+            recorder: recorder,
+            service: service,
+            watchStore: try TranscriptionWatchStore(rootDirectory: directory)
+        )
+        await uploader.setActiveOwnerID("user_original")
+        for _ in 0..<20 where !service.completeStarted {
+            await Task.yield()
+        }
+        XCTAssertTrue(service.completeStarted)
+        XCTAssertEqual(service.completionOwnerIDs, ["user_original"])
+
+        await uploader.setActiveOwnerID("user_new")
+        service.resumeCompletion(
+            try APIClient.makeDecoder().decode(
+                AudioTranscription.self,
+                from: Data(#"{"id":"audio-cross-account","status":"pending"}"#.utf8)
+            )
+        )
+        await Task.yield()
+
+        XCTAssertEqual(recorder.activeOwnerID, "user_new")
+        XCTAssertEqual(
+            recorder.recording(withID: recording.id)?.state,
+            .finalizingUpload
+        )
+        XCTAssertNil(recorder.recording(withID: recording.id)?.remoteTranscriptionID)
+        XCTAssertNil(uploader.latestItem)
+        XCTAssertEqual(service.completionOwnerIDs, ["user_original"])
+    }
+
+    @MainActor
+    func testDelayedBackgroundCompletionIsIgnoredForAnotherOwner() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = try RecordingStore(rootDirectory: directory)
+        var recording = store.makeRecording(contentType: "meeting", ownerID: "user_original")
+        recording.state = .ready
+        try finalizedM4AData().write(to: store.fileURL(for: recording))
+        try store.saveRecordings([recording])
+        let recorder = RecordingCoordinator(store: store)
+        recorder.setActiveOwnerID("user_original")
+        recorder.markWaitingForUpload(recording.id)
+        recorder.markUploadStarted(
+            recording.id,
+            objectKey: "audio/original/meeting.m4a",
+            sizeBytes: 42,
+            mimeType: "audio/mp4",
+            taskIdentifier: 18
+        )
+        let uploader = RecordingUploadCoordinator(
+            recorder: recorder,
+            service: SuspendedRecordingUploadService(),
+            watchStore: try TranscriptionWatchStore(rootDirectory: directory)
+        )
+
+        await uploader.setActiveOwnerID("user_new")
+        uploader.receiveBackgroundUploadEvent(
+            .completed(
+                metadata: BackgroundUploadMetadata(
+                    recordingID: recording.id,
+                    ownerID: "user_original",
+                    filename: recording.uploadFilename,
+                    objectKey: "audio/original/meeting.m4a",
+                    sizeBytes: 42,
+                    mimeType: "audio/mp4",
+                    contentType: recording.contentType
+                )
+            )
+        )
+
+        XCTAssertEqual(recorder.recording(withID: recording.id)?.state, .uploading)
+        XCTAssertNil(recorder.recording(withID: recording.id)?.remoteTranscriptionID)
+    }
+
+    @MainActor
     func testDiscardingLocalRecordingDeletesAudioAndManifestEntry() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -796,6 +897,7 @@ final class ModelDecodingTests: XCTestCase {
     func testBackgroundUploadMetadataSurvivesTaskDescriptionRoundTrip() throws {
         let metadata = BackgroundUploadMetadata(
             recordingID: UUID(),
+            ownerID: "user_uploading",
             filename: "memo.m4a",
             objectKey: "audio/random.m4a",
             sizeBytes: 42,
@@ -807,6 +909,20 @@ final class ModelDecodingTests: XCTestCase {
             from: JSONEncoder().encode(metadata)
         )
         XCTAssertEqual(restored, metadata)
+        XCTAssertEqual(restored.ownerID, "user_uploading")
+
+        let legacyData = try JSONSerialization.data(withJSONObject: [
+            "recordingID": UUID().uuidString,
+            "filename": "legacy.m4a",
+            "objectKey": "audio/legacy.m4a",
+            "sizeBytes": 42,
+            "mimeType": "audio/mp4",
+            "contentType": "voice_memo",
+        ])
+        XCTAssertNil(try JSONDecoder().decode(
+            BackgroundUploadMetadata.self,
+            from: legacyData
+        ).ownerID)
     }
 
     func testTranscriptionWatchStorePersistsAndRemovesCompletedItems() throws {
@@ -1377,5 +1493,54 @@ private final class TestRecordingActivityManager: RecordingActivityManaging {
     func end(recordingID: UUID?, finalDuration: TimeInterval) async {
         endCount += 1
         endedRecordingIDs.append(recordingID)
+    }
+}
+
+@MainActor
+private final class SuspendedRecordingUploadService: RecordingUploadServicing {
+    private(set) var completeStarted = false
+    private(set) var completionOwnerIDs: [String?] = []
+    private var completionContinuation: CheckedContinuation<AudioTranscription, Error>?
+
+    func getAudioItem(
+        _ id: String,
+        expectedOwnerID: String?
+    ) async throws -> AudioTranscription {
+        throw APIError.invalidResponse
+    }
+
+    func uploadAudio(
+        fileURL: URL,
+        filename: String,
+        mimeType: String,
+        contentType: String,
+        expectedOwnerID: String?
+    ) async throws -> AudioTranscription {
+        throw APIError.invalidResponse
+    }
+
+    func presignAudioUpload(
+        filename: String,
+        mimeType: String,
+        sizeBytes: Int64,
+        expectedOwnerID: String?
+    ) async throws -> AudioUploadPresignResponse {
+        throw APIError.invalidResponse
+    }
+
+    func completeAudioUpload(
+        _ completion: AudioUploadCompleteRequest,
+        expectedOwnerID: String?
+    ) async throws -> AudioTranscription {
+        completeStarted = true
+        completionOwnerIDs.append(expectedOwnerID)
+        return try await withCheckedThrowingContinuation { continuation in
+            completionContinuation = continuation
+        }
+    }
+
+    func resumeCompletion(_ item: AudioTranscription) {
+        completionContinuation?.resume(returning: item)
+        completionContinuation = nil
     }
 }
