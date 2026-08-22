@@ -40,6 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.clerk.api.Clerk
+import com.clerk.api.network.serialization.ClerkResult
 import com.shimizutechnology.mediatools.AppLinks
 import com.shimizutechnology.mediatools.api.MediaToolsApi
 import com.shimizutechnology.mediatools.consent.AIProcessingConsentStore
@@ -52,6 +53,7 @@ fun SettingsScreen(api: MediaToolsApi, consentStore: AIProcessingConsentStore, o
     var hasAIConsent by remember(ownerId) { mutableStateOf(consentStore.hasConsent(ownerId)) }
     var showAIDisclosure by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
+    var accountMessage by remember { mutableStateOf<String?>(null) }
     var deletionMessage by remember { mutableStateOf<String?>(null) }
 
     Column(
@@ -102,12 +104,19 @@ fun SettingsScreen(api: MediaToolsApi, consentStore: AIProcessingConsentStore, o
 
         SettingsSection("Account") {
             OutlinedButton(
-                onClick = { scope.launch { Clerk.auth.signOut() } },
+                onClick = {
+                    scope.launch {
+                        if (Clerk.auth.signOut() is ClerkResult.Failure) {
+                            accountMessage = "Media Tools could not sign out. Check your connection and try again."
+                        }
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null)
                 Text("Sign out", Modifier.padding(start = 8.dp))
             }
+            accountMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
 
         SettingsSection("Danger zone") {
@@ -144,7 +153,11 @@ fun SettingsScreen(api: MediaToolsApi, consentStore: AIProcessingConsentStore, o
                 consentStore.revoke(ownerId)
                 hasAIConsent = false
                 showDelete = false
-                scope.launch { Clerk.auth.signOut() }
+                scope.launch {
+                    if (Clerk.auth.signOut() is ClerkResult.Failure) {
+                        deletionMessage = "Your account deletion is underway, but this device could not finish signing out. Close and reopen Media Tools."
+                    }
+                }
             },
             onError = { deletionMessage = it },
         )

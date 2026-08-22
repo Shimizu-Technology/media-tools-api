@@ -36,6 +36,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.clerk.api.Clerk
+import com.clerk.api.session.pendingTaskKey
 import com.clerk.ui.auth.AuthView
 import com.shimizutechnology.mediatools.AppLinks
 import com.shimizutechnology.mediatools.BuildConfig
@@ -58,13 +59,14 @@ fun MediaToolsApp() {
 
     val initialized by Clerk.isInitialized.collectAsState(initial = false)
     val initializationError by Clerk.initializationError.collectAsState(initial = null)
+    val session by Clerk.sessionFlow.collectAsState(initial = Clerk.session)
     val user by Clerk.userFlow.collectAsState(initial = Clerk.user)
     when {
         initializationError != null -> AuthUnavailableScreen()
         !initialized -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
-        user == null -> AuthView(modifier = Modifier.fillMaxSize())
+        user == null || session == null || session?.pendingTaskKey != null -> AuthView(modifier = Modifier.fillMaxSize())
         else -> key(user!!.id) { SignedInApp(ownerId = user!!.id) }
     }
 }
