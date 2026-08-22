@@ -46,18 +46,46 @@ or the Media Tools admin key in the iOS target. Before uploading a release,
 inspect the archived app's `Info.plist` and confirm `CLERK_PUBLISHABLE_KEY` is
 non-empty.
 
+### 4. Enable Sign in with Apple
+
+The app target includes the `com.apple.developer.applesignin` entitlement and
+uses Clerk's prebuilt native `AuthView`. Once Apple is enabled for the Clerk
+instance, Clerk presents the native Sign in with Apple option without a custom
+authentication screen.
+
+Before distributing a build that offers Google sign-in:
+
+1. In Apple Developer → Certificates, Identifiers & Profiles, enable **Sign in
+   with Apple** as the primary capability for
+   `com.ShimizuTechnology.MediaTools`.
+2. In Clerk Dashboard → SSO connections, add Apple for all users and enable it
+   for sign-up and sign-in.
+3. Add and keep a native application mapping for App ID prefix
+   `4T358A5S74` and bundle ID `com.ShimizuTechnology.MediaTools`.
+4. Archive with automatic signing and inspect the signed app. Its entitlements
+   must contain `com.apple.developer.applesignin = [Default]`.
+5. Test both a new Apple account and a returning account on a physical device,
+   including **Hide My Email**, sign-out, sign-in, and in-app account deletion.
+
+The checked-in Clerk key intentionally remains a development-instance key.
+Moving Clerk to production is a separate launch step that requires a controlled
+custom domain. Web Sign in with Apple also requires an Apple Services ID,
+verified website domain/return URL, private key, and private-email-relay setup;
+those web credentials are not required for this app's native flow and must not
+be committed to the repository.
+
 `API_BASE_URL` can also be supplied as a build setting. It otherwise defaults
 to the production Render API. Use a local HTTP URL only for simulator
 development; `Info.plist` permits local networking but does not relax transport
 security for arbitrary remote hosts.
 
-### 4. Generate App Icon (only when replacing it)
+### 5. Generate App Icon (only when replacing it)
 
 ```bash
 swift ios/scripts/generate-icon.swift
 ```
 
-### 5. Build & Run
+### 6. Build & Run
 
 Select your device or simulator and hit Run (⌘R).
 
