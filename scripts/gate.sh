@@ -50,7 +50,13 @@ if [[ "$(uname -s)" == "Darwin" ]] && command -v xcodebuild >/dev/null 2>&1; the
     -scheme MediaTools \
     -configuration Release \
     -showBuildSettings 2>/dev/null \
-    | awk -F ' = ' '/^[[:space:]]*CODE_SIGN_ENTITLEMENTS = / { print $2; exit }')"
+    | awk -F ' = ' '
+        /^[[:space:]]*CODE_SIGN_ENTITLEMENTS = / && !found {
+          value = $2
+          found = 1
+        }
+        END { if (found) print value }
+      ')"
   if [[ "$configured_entitlements" != "MediaTools/MediaTools.entitlements" ]]; then
     echo "Unexpected iOS entitlements build setting: $configured_entitlements"
     exit 1
