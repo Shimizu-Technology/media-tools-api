@@ -3,7 +3,9 @@
  * Accessible at /privacy (no auth required).
  */
 import { Link } from 'react-router-dom';
+import { PrivacySection } from '../components/legal/PrivacySection';
 
+/** Explains Media Tools data collection, processing, retention, and user controls. */
 export function PrivacyPage() {
   return (
     <div className="max-w-3xl mx-auto px-6 py-16">
@@ -21,16 +23,16 @@ export function PrivacyPage() {
       </p>
 
       <div className="space-y-8" style={{ color: 'var(--color-text-secondary)' }}>
-        <Section title="Overview">
+        <PrivacySection title="Overview">
           <p>
             ST Media Tools ("Media Tools", "we", "our") is a media transcription
             and AI-powered analysis platform built by Shimizu Technology. This
             policy explains how we collect, use, and protect your information
             when you use our iOS app and web application.
           </p>
-        </Section>
+        </PrivacySection>
 
-        <Section title="Information We Collect">
+        <PrivacySection title="Information We Collect">
           <ul className="list-disc pl-5 space-y-2">
             <li>
               <strong style={{ color: 'var(--color-text-primary)' }}>Account information</strong> —
@@ -53,6 +55,12 @@ export function PrivacyPage() {
               Messages you send when chatting with AI about your content.
             </li>
             <li>
+              <strong style={{ color: 'var(--color-text-primary)' }}>AI output reports</strong> —
+              If you report an AI response or summary, we keep the selected output,
+              report category, optional note, and review status. We do not attach a
+              separate copy of the source recording, transcript, or document.
+            </li>
+            <li>
               <strong style={{ color: 'var(--color-text-primary)' }}>Microphone access</strong> —
               The iOS app requests microphone permission solely for recording
               audio after you deliberately start a recording. An active recording
@@ -61,16 +69,17 @@ export function PrivacyPage() {
               interrupts the audio session. We never start listening on our own.
             </li>
           </ul>
-        </Section>
+        </PrivacySection>
 
-        <Section title="How We Use Your Information">
+        <PrivacySection title="How We Use Your Information">
           <ul className="list-disc pl-5 space-y-2">
             <li>To transcribe your audio and video content using OpenAI Whisper</li>
             <li>To generate AI-powered summaries and enable AI chat about your content</li>
             <li>To store and organize your media library and collections</li>
             <li>To authenticate your account and protect your data</li>
+            <li>To review reported AI output and improve safety safeguards</li>
           </ul>
-        </Section>
+        </PrivacySection>
 
         <section id="ai-processing" className="scroll-mt-24">
           <h2 className="mb-3 text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>
@@ -116,7 +125,7 @@ export function PrivacyPage() {
           </div>
         </section>
 
-        <Section title="Third-Party Services">
+        <PrivacySection title="Third-Party Services">
           <ul className="list-disc pl-5 space-y-2">
             <li>
               <strong style={{ color: 'var(--color-text-primary)' }}>Clerk</strong> —
@@ -144,9 +153,9 @@ export function PrivacyPage() {
               Secure file storage for uploaded audio.
             </li>
           </ul>
-        </Section>
+        </PrivacySection>
 
-        <Section title="Data Retention">
+        <PrivacySection title="Data Retention">
           <p>
             Your content is stored as long as your account is active. You can
             delete individual items (transcriptions, audio recordings, PDFs) at
@@ -154,17 +163,17 @@ export function PrivacyPage() {
             purges account-owned application data and durably removes raw media
             and the sign-in identity, including retries if a provider is temporarily unavailable.
           </p>
-        </Section>
+        </PrivacySection>
 
-        <Section title="Data Security">
+        <PrivacySection title="Data Security">
           <p>
             All data is transmitted over HTTPS. Audio files are stored in
             encrypted Amazon S3 buckets. Authentication is handled by Clerk
             with industry-standard security practices.
           </p>
-        </Section>
+        </PrivacySection>
 
-        <Section title="Your Rights">
+        <PrivacySection title="Your Rights">
           <p>
             You can access, export, or delete your data at any time through the
             app. Complete account deletion is available in Settings on iPhone
@@ -174,9 +183,9 @@ export function PrivacyPage() {
             </Link>{' '}
             without needing to contact support.
           </p>
-        </Section>
+        </PrivacySection>
 
-        <Section title="Contact">
+        <PrivacySection title="Contact">
           <p>
             If you have questions about this privacy policy, need help, or want
             to report a safety concern, visit our{' '}
@@ -192,22 +201,8 @@ export function PrivacyPage() {
               shimizutechnology@gmail.com
             </a>
           </p>
-        </Section>
+        </PrivacySection>
       </div>
     </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section>
-      <h2
-        className="text-lg font-semibold mb-3"
-        style={{ color: 'var(--color-text-primary)' }}
-      >
-        {title}
-      </h2>
-      <div className="leading-relaxed">{children}</div>
-    </section>
   );
 }

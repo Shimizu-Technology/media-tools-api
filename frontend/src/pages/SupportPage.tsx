@@ -16,7 +16,7 @@ export function SupportPage() {
           Keep the saved-on-device recording until support is complete. Export a copy before discarding it. For a failed transcription, include the file type, approximate duration, and the error message—not the media itself unless support specifically requests a secure transfer.
         </SupportCard>
         <SupportCard title="Report harmful or inappropriate AI output">
-          Email us with the item, AI feature, approximate date and time, and why the output is concerning. You can report illegal, dangerous, hateful, sexual, privacy-invasive, or otherwise inappropriate output. Do not include private source content unless support specifically requests a secure transfer.
+          Use <strong style={{ color: 'var(--color-text-primary)' }}>Report response</strong> in AI chat or <strong style={{ color: 'var(--color-text-primary)' }}>Report summary</strong> beside a generated summary. The in-app report sends the selected AI output, category, and optional note for review without attaching a separate source recording, transcript, or document. You can also email support about a safety concern, but the in-app report is the fastest way to identify the exact output.
         </SupportCard>
         <SupportCard title="Privacy or account request">
           Review the <Link to="/privacy" className="underline" style={{ color: 'var(--color-brand-500)' }}>Privacy Policy</Link>, manage AI permission in Settings, or follow the public <Link to="/delete-account" className="underline" style={{ color: 'var(--color-brand-500)' }}>account deletion instructions</Link>. Account deletion does not require contacting support.

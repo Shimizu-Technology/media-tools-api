@@ -41,6 +41,7 @@ struct ItemDetailView: View {
     @State private var detailError: String?
     @State private var pollingWarning: String?
     @State private var detailPollingTask: Task<Void, Never>?
+    @State private var reportTarget: AIContentReportTarget?
 
     private let service = MediaToolsService.shared
 
@@ -111,6 +112,9 @@ struct ItemDetailView: View {
         }
         .sheet(isPresented: $showRenameSheet) {
             renameSheet
+        }
+        .sheet(item: $reportTarget) { target in
+            AIContentReportSheet(target: target)
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -511,6 +515,22 @@ struct ItemDetailView: View {
                                 .clipShape(Capsule())
                         }
                     }
+                }
+
+                if let summaryID = summary.id {
+                    Button {
+                        reportTarget = AIContentReportTarget(
+                            targetType: isAudioItem ? .audioSummary : .transcriptSummary,
+                            targetId: summaryID
+                        )
+                    } label: {
+                        Label("Report summary", systemImage: "flag")
+                            .font(Theme.caption(12, weight: .semibold))
+                            .frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.textMuted)
+                    .accessibilityHint("Opens an in-app safety report for this AI summary")
                 }
             }
             .accentCardStyle()

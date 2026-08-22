@@ -107,6 +107,22 @@ export interface ChatResponse {
   messages: ChatMessage[];
 }
 
+export type AIContentReportTargetType = 'chat_message' | 'transcript_summary' | 'audio_summary';
+
+export type AIContentReportCategory =
+  | 'dangerous'
+  | 'hate_or_harassment'
+  | 'sexual'
+  | 'privacy'
+  | 'deceptive'
+  | 'other';
+
+export interface AIContentReportReceipt {
+  id: string;
+  status: string;
+  already_reported: boolean;
+}
+
 export interface APIKey {
   id: string;
   key_prefix: string;
@@ -287,6 +303,21 @@ export interface AudioOpsHealth {
   completed: number;
   created_last24h: number;
   timestamp: string;
+}
+
+export interface AIContentReport {
+  id: string;
+  target_type: AIContentReportTargetType;
+  target_id: string;
+  subject_type: ChatItemType;
+  subject_id: string;
+  category: AIContentReportCategory;
+  details?: string;
+  content_snapshot: Record<string, unknown>;
+  status: 'open' | 'reviewing' | 'resolved' | 'dismissed';
+  admin_note?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface PDFExtraction {
@@ -570,6 +601,25 @@ export async function sendChatMessage(
   return handleResponse<ChatResponse>(res);
 }
 
+export async function reportAIContent(input: {
+  targetType: AIContentReportTargetType;
+  targetId: string;
+  category: AIContentReportCategory;
+  details?: string;
+}): Promise<AIContentReportReceipt> {
+  const res = await fetchWithAuth(`${API_BASE}/ai-content-reports`, {
+    method: 'POST',
+    headers: await getHeaders(),
+    body: JSON.stringify({
+      target_type: input.targetType,
+      target_id: input.targetId,
+      category: input.category,
+      details: input.details,
+    }),
+  });
+  return handleResponse<AIContentReportReceipt>(res);
+}
+
 export async function deleteTranscript(id: string): Promise<void> {
   const res = await fetchWithAuth(`${API_BASE}/transcripts/${id}`, { method: 'DELETE', headers: await getHeaders() });
   if (!res.ok && res.status !== 404) {
@@ -801,6 +851,24 @@ export async function getAudioPlaybackUrl(id: string): Promise<AudioPlaybackResp
 export async function getAudioOpsHealth(): Promise<AudioOpsHealth> {
   const res = await fetchWithAuth(`${API_BASE}/ops/audio/health`, { headers: getAPIKeyHeaders() });
   return handleResponse<AudioOpsHealth>(res);
+}
+
+export async function getAIContentReports(): Promise<{ data: AIContentReport[] }> {
+  const res = await fetchWithAuth(`${API_BASE}/ops/ai-content-reports`, { headers: await getHeaders() });
+  return handleResponse<{ data: AIContentReport[] }>(res);
+}
+
+export async function updateAIContentReport(
+  id: string,
+  status: 'reviewing' | 'resolved' | 'dismissed',
+  adminNote = '',
+): Promise<AIContentReport> {
+  const res = await fetchWithAuth(`${API_BASE}/ops/ai-content-reports/${id}`, {
+    method: 'PATCH',
+    headers: await getHeaders(),
+    body: JSON.stringify({ status, admin_note: adminNote }),
+  });
+  return handleResponse<AIContentReport>(res);
 }
 
 export async function listAudioTranscriptions(params?: {

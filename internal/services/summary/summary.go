@@ -25,6 +25,7 @@ const (
 	mediumSummaryMaxTokens   = 3_000
 	detailedSummaryMaxTokens = 5_000
 	chatMaxTokens            = 1_200
+	aiSafetyPolicy           = " Do not generate or encourage child sexual abuse, violent wrongdoing, self-harm, hateful harassment, privacy abuse, fraud, deception, malware, or other illegal harm. You may neutrally summarize or analyze sensitive source material, but do not expand it into operational harmful instructions. Refuse requests that seek to facilitate harm and offer a safer alternative."
 )
 
 // Service handles AI summary generation.
@@ -436,7 +437,8 @@ func (s *Service) ChatTranscript(ctx context.Context, contextLabel, transcriptTe
 	}
 
 	systemPrompt := "You are a helpful assistant that answers questions about a " + contextLabel + ". " +
-		"Only use information from the content. If the answer is not in the content, say you don't know."
+		"Only use information from the content. If the answer is not in the content, say you don't know." +
+		aiSafetyPolicy
 	transcriptContext := buildTranscriptContext(transcriptText)
 
 	reqMessages := []chatMessage{
@@ -534,9 +536,9 @@ func getAudioSystemPrompt(contentType string) string {
 	}
 
 	if p, ok := prompts[contentType]; ok {
-		return p
+		return p + aiSafetyPolicy
 	}
-	return prompts["general"]
+	return prompts["general"] + aiSafetyPolicy
 }
 
 // buildAudioPrompt constructs the prompt for audio summarization (MTA-22, MTA-24).
@@ -670,9 +672,9 @@ func getVideoSystemPrompt(contentType string) string {
 	}
 
 	if p, ok := prompts[contentType]; ok {
-		return p
+		return p + aiSafetyPolicy
 	}
-	return "You are an expert content summarizer. You extract the most important information and present it clearly. You identify key points, actionable takeaways, and important details."
+	return "You are an expert content summarizer. You extract the most important information and present it clearly. You identify key points, actionable takeaways, and important details." + aiSafetyPolicy
 }
 
 func buildPrompt(transcript string, opts Options) string {

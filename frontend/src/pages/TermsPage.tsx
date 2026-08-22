@@ -23,7 +23,7 @@ export function TermsPage() {
         </TermsSection>
 
         <TermsSection title="AI features">
-          <p>AI-generated transcripts, formatting, summaries, citations, and answers can be incomplete or wrong. Review important output against the original source and do not rely on it as professional medical, legal, financial, or safety advice. Media Tools asks before sharing content with third-party AI providers; details and revocation controls are in the <Link to="/privacy#ai-processing" className="underline" style={{ color: 'var(--color-brand-500)' }}>Privacy Policy</Link>.</p>
+          <p>AI-generated transcripts, formatting, summaries, citations, and answers can be incomplete or wrong. Review important output against the original source and do not rely on it as professional medical, legal, financial, or safety advice. Use the in-app report control for harmful, deceptive, privacy-invasive, or otherwise inappropriate AI output. Media Tools asks before sharing content with third-party AI providers; processing, reporting, and revocation details are in the <Link to="/privacy#ai-processing" className="underline" style={{ color: 'var(--color-brand-500)' }}>Privacy Policy</Link>.</p>
         </TermsSection>
 
         <TermsSection title="Service availability and changes">

@@ -9,6 +9,7 @@ import { CitationRow } from './CitationChip';
 import { getChat, sendChatMessage, type ChatItemType, type ChatMessage, type Citation } from '../lib/api';
 import { itemDetailPath } from '../lib/library';
 import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
+import { AIContentReportButton } from './AIContentReportButton';
 
 interface TranscriptChatPanelProps {
   itemId: string;
@@ -151,12 +152,21 @@ export function TranscriptChatPanel({ itemId, itemType, onCitationClick }: Trans
                     className="max-w-[92%] sm:max-w-[75%] px-4 py-3 rounded-xl text-sm leading-relaxed"
                     style={{
                       backgroundColor: isUser ? 'var(--color-brand-500)' : 'var(--color-surface-overlay)',
-                      color: isUser ? 'white' : 'var(--color-text-secondary)',
+                      color: isUser ? 'var(--color-on-brand)' : 'var(--color-text-secondary)',
                       border: isUser ? 'none' : '1px solid var(--color-border)',
                     }}
                   >
                     <MarkdownMessage content={m.content} isUser={isUser} />
                     {!isUser && <CitationRow citations={m.citations} onClick={openCitation} />}
+                    {!isUser && (
+                      <div className="mt-2 border-t pt-1" style={{ borderColor: 'var(--color-border)' }}>
+                        <AIContentReportButton
+                          targetType="chat_message"
+                          targetId={m.id}
+                          label="Report response"
+                        />
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               );
@@ -229,8 +239,8 @@ export function TranscriptChatPanel({ itemId, itemType, onCitationClick }: Trans
             <div
               className="flex items-center gap-2 mt-3 p-3 rounded-lg text-sm"
               style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                border: '1px solid rgba(239, 68, 68, 0.24)',
+                backgroundColor: 'var(--color-error-subtle)',
+                border: '1px solid var(--color-error-border)',
                 color: 'var(--color-error)',
               }}
             >
@@ -268,7 +278,7 @@ function MarkdownMessage({ content, isUser }: { content: string; isUser: boolean
             target="_blank"
             rel="noreferrer"
             className="underline underline-offset-2"
-            style={{ color: isUser ? 'white' : 'var(--color-brand-400)' }}
+            style={{ color: isUser ? 'var(--color-on-brand)' : 'var(--color-brand-400)' }}
           >
             {children}
           </a>
@@ -277,8 +287,8 @@ function MarkdownMessage({ content, isUser }: { content: string; isUser: boolean
           <code
             className="px-1.5 py-0.5 rounded text-xs font-mono"
             style={{
-              backgroundColor: isUser ? 'rgba(255,255,255,0.18)' : 'var(--color-surface)',
-              color: isUser ? 'white' : 'var(--color-brand-400)',
+              backgroundColor: isUser ? 'var(--color-on-brand-overlay)' : 'var(--color-surface)',
+              color: isUser ? 'var(--color-on-brand)' : 'var(--color-brand-400)',
               border: isUser ? 'none' : '1px solid var(--color-border)',
             }}
           >
@@ -289,9 +299,9 @@ function MarkdownMessage({ content, isUser }: { content: string; isUser: boolean
           <pre
             className="p-3 rounded-lg text-xs overflow-x-auto mb-2 last:mb-0"
             style={{
-              backgroundColor: isUser ? 'rgba(255,255,255,0.12)' : 'var(--color-surface)',
+              backgroundColor: isUser ? 'var(--color-on-brand-soft)' : 'var(--color-surface)',
               border: isUser ? 'none' : '1px solid var(--color-border)',
-              color: isUser ? 'white' : 'var(--color-text-secondary)',
+              color: isUser ? 'var(--color-on-brand)' : 'var(--color-text-secondary)',
             }}
           >
             {children}
@@ -304,7 +314,7 @@ function MarkdownMessage({ content, isUser }: { content: string; isUser: boolean
           <blockquote
             className="pl-3 border-l-2 mb-2 last:mb-0"
             style={{
-              borderColor: isUser ? 'rgba(255,255,255,0.5)' : 'var(--color-border)',
+              borderColor: isUser ? 'var(--color-on-brand-border)' : 'var(--color-border)',
             }}
           >
             {children}

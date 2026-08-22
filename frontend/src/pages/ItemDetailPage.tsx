@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-r
 import { AlertCircle, Archive, ArrowLeft, BookOpen, Check, Clock3, Copy, Download, ExternalLink, FileAudio, FileText, FolderPlus, Loader2, Play, RefreshCw, Search, Sparkles, Star, Tag, X } from 'lucide-react';
 import { AddToCollectionModal } from '../components/AddToCollectionModal';
 import { SummaryPanel } from '../components/SummaryPanel';
+import { AIContentReportButton } from '../components/AIContentReportButton';
 import { TranscriptChatPanel } from '../components/TranscriptChatPanel';
 import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
 import { CitationRow } from '../components/CitationChip';
@@ -326,7 +327,7 @@ export function ItemDetailPage() {
         </div>
       </header>
 
-      {error && <div role="alert" className="flex items-start gap-3 rounded-2xl border p-4 text-sm" style={{ borderColor: 'var(--color-danger)', color: 'var(--color-danger)', backgroundColor: 'rgba(239, 68, 68, 0.08)' }}><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
+      {error && <div role="alert" className="flex items-start gap-3 rounded-2xl border p-4 text-sm" style={{ borderColor: 'var(--color-error-border)', color: 'var(--color-danger)', backgroundColor: 'var(--color-error-soft)' }}><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
 
       <section className="flex flex-col gap-4 rounded-2xl border p-4 sm:flex-row sm:items-center" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
         <div className="flex items-center gap-2 text-sm font-semibold"><Tag className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} /> Tags</div>
@@ -342,13 +343,13 @@ export function ItemDetailPage() {
 
       {active && <div className="rounded-2xl border p-5" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}><div className="flex items-center gap-3"><Loader2 className="h-5 w-5 animate-spin" style={{ color: 'var(--color-brand-500)' }} /><div><p className="font-semibold">{view.progressLabel}</p><p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>This page updates automatically. You can safely leave and return later.</p></div></div>{view.progress > 0 && <div className="mt-4 h-2 overflow-hidden rounded-full" style={{ backgroundColor: 'var(--color-surface-overlay)' }}><div className="h-full rounded-full transition-all" style={{ width: `${Math.min(view.progress, 100)}%`, backgroundColor: 'var(--color-brand-500)' }} /></div>}</div>}
 
-      {item.status === 'failed' && <div className="flex flex-col items-start justify-between gap-4 rounded-2xl border p-5 sm:flex-row sm:items-center" style={{ borderColor: 'rgba(239, 68, 68, 0.35)', backgroundColor: 'rgba(239, 68, 68, 0.08)' }}><div><p className="font-semibold" style={{ color: 'var(--color-danger)' }}>Processing failed</p><p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>{view.errorMessage || 'The job could not be completed.'}</p></div>{type === 'audio' && <ActionButton label="Retry transcription" icon={RefreshCw} onClick={() => void handleRetry()} disabled={isActing} />}</div>}
+      {item.status === 'failed' && <div className="flex flex-col items-start justify-between gap-4 rounded-2xl border p-5 sm:flex-row sm:items-center" style={{ borderColor: 'var(--color-error-border)', backgroundColor: 'var(--color-error-soft)' }}><div><p className="font-semibold" style={{ color: 'var(--color-danger)' }}>Processing failed</p><p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>{view.errorMessage || 'The job could not be completed.'}</p></div>{type === 'audio' && <ActionButton label="Retry transcription" icon={RefreshCw} onClick={() => void handleRetry()} disabled={isActing} />}</div>}
 
       {type === 'transcript' && complete && <section ref={playerSectionRef} className="overflow-hidden rounded-2xl border" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}><div className="flex items-center gap-2 border-b p-4" style={{ borderColor: 'var(--color-border)' }}><Play className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} /><h2 className="font-semibold">Source video</h2><span className="ml-auto text-xs" style={{ color: 'var(--color-text-muted)' }}>Citations jump here</span></div><div className="aspect-video bg-black"><iframe ref={videoRef} className="h-full w-full" src={`https://www.youtube.com/embed/${(item as Transcript).youtube_id}?enablejsapi=1&playsinline=1&rel=0&start=${Math.max(0, Number(searchParams.get('t')) || 0)}`} title={`Source video: ${view.title}`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen /></div></section>}
 
       {type === 'audio' && audioURL && <section ref={playerSectionRef} className="rounded-2xl border p-5" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}><div className="mb-3 flex items-center gap-2"><Play className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} /><h2 className="font-semibold">Original recording</h2><span className="ml-auto text-xs" style={{ color: 'var(--color-text-muted)' }}>Citations jump here</span></div><audio ref={audioRef} className="w-full" controls preload="metadata" src={audioURL}>Your browser does not support audio playback.</audio></section>}
 
-      {type === 'audio' && (item as AudioTranscription).quality_warning && <section className="rounded-2xl border p-5" style={{ borderColor: 'rgba(245, 158, 11, 0.4)', backgroundColor: 'rgba(245, 158, 11, 0.08)' }}><div className="flex items-start gap-3"><AlertCircle className="mt-0.5 h-5 w-5 shrink-0" style={{ color: 'var(--color-warning)' }} /><div><h2 className="font-semibold">Partial transcript recovered</h2><p className="mt-1 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{(item as AudioTranscription).quality_warning}</p>{((item as AudioTranscription).omitted_ranges || []).length > 0 && <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>Omitted: {(item as AudioTranscription).omitted_ranges?.map((range) => `${formatDuration(range.start)}–${formatDuration(range.end)}`).join(', ')}</p>}</div></div></section>}
+      {type === 'audio' && (item as AudioTranscription).quality_warning && <section className="rounded-2xl border p-5" style={{ borderColor: 'var(--color-warning-border)', backgroundColor: 'var(--color-warning-subtle)' }}><div className="flex items-start gap-3"><AlertCircle className="mt-0.5 h-5 w-5 shrink-0" style={{ color: 'var(--color-warning)' }} /><div><h2 className="font-semibold">Partial transcript recovered</h2><p className="mt-1 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{(item as AudioTranscription).quality_warning}</p>{((item as AudioTranscription).omitted_ranges || []).length > 0 && <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>Omitted: {(item as AudioTranscription).omitted_ranges?.map((range) => `${formatDuration(range.start)}–${formatDuration(range.end)}`).join(', ')}</p>}</div></div></section>}
 
       {complete && <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
         <div className="min-w-0 space-y-6">
@@ -478,7 +479,7 @@ function AudioSummary({ item, onGenerate, isActing, onCitationClick }: { item: A
       </div>
       {pending && <p className="mt-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>You can leave this page or start another upload. The summary will keep running.</p>}
       {item.summary_status === 'failed' && (
-        <div role="alert" className="mt-4 flex items-start gap-3 rounded-xl border p-4" style={{ borderColor: 'rgba(239, 68, 68, 0.3)', backgroundColor: 'rgba(239, 68, 68, 0.08)' }}>
+        <div role="alert" className="mt-4 flex items-start gap-3 rounded-xl border p-4" style={{ borderColor: 'var(--color-error-border)', backgroundColor: 'var(--color-error-soft)' }}>
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" style={{ color: 'var(--color-danger)' }} />
           <div>
             <p className="text-sm font-semibold">Summary couldn't be generated</p>
@@ -492,6 +493,9 @@ function AudioSummary({ item, onGenerate, isActing, onCitationClick }: { item: A
           <ListBlock title="Key points" items={item.key_points} citations={item.summary_evidence?.key_points} onCitationClick={onCitationClick} />
           <ListBlock title="Action items" items={item.action_items} citations={item.summary_evidence?.action_items} onCitationClick={onCitationClick} />
           <ListBlock title="Decisions" items={item.decisions} citations={item.summary_evidence?.decisions} onCitationClick={onCitationClick} />
+          <div className="border-t pt-2" style={{ borderColor: 'var(--color-border)' }}>
+            <AIContentReportButton targetType="audio_summary" targetId={item.id} label="Report summary" />
+          </div>
         </div>
       ) : !pending && item.summary_status !== 'failed' && (
         <p className="mt-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>Create structured notes, key points, decisions, and action items from this recording.</p>

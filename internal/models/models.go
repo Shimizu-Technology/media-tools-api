@@ -166,6 +166,37 @@ type ChatResponse struct {
 	Messages []TranscriptChatMessage `json:"messages"`
 }
 
+// AIContentReport is an account-scoped moderation record for a selected AI
+// response. ContentSnapshot contains the output being reported, not its source.
+type AIContentReport struct {
+	ID              string          `json:"id" db:"id"`
+	TargetType      string          `json:"target_type" db:"target_type"`
+	TargetID        string          `json:"target_id" db:"target_id"`
+	SubjectType     string          `json:"subject_type" db:"subject_type"`
+	SubjectID       string          `json:"subject_id" db:"subject_id"`
+	UserID          *string         `json:"-" db:"user_id"`
+	APIKeyID        *string         `json:"-" db:"api_key_id"`
+	Category        string          `json:"category" db:"category"`
+	Details         string          `json:"details,omitempty" db:"details"`
+	ContentSnapshot json.RawMessage `json:"content_snapshot,omitempty" db:"content_snapshot"`
+	Status          string          `json:"status" db:"status"`
+	AdminNote       string          `json:"admin_note,omitempty" db:"admin_note"`
+	CreatedAt       time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at" db:"updated_at"`
+}
+
+type CreateAIContentReportRequest struct {
+	TargetType string `json:"target_type" binding:"required"`
+	TargetID   string `json:"target_id" binding:"required"`
+	Category   string `json:"category" binding:"required"`
+	Details    string `json:"details,omitempty"`
+}
+
+type UpdateAIContentReportRequest struct {
+	Status    string `json:"status" binding:"required"`
+	AdminNote string `json:"admin_note,omitempty"`
+}
+
 type CreateAPIKeyRequest struct {
 	Name      string `json:"name" binding:"required"`
 	RateLimit int    `json:"rate_limit,omitempty"`
