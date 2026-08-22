@@ -27,6 +27,25 @@ echo "Running frontend checks"
   npm run audit:prod
 )
 
+if [[ -x android/gradlew ]]; then
+  echo "Running Android source preflight"
+  ./scripts/android-release-preflight.sh
+
+  android_sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+  if [[ -z "$android_sdk_root" && "$(uname -s)" == "Darwin" && -d "$HOME/Library/Android/sdk" ]]; then
+    android_sdk_root="$HOME/Library/Android/sdk"
+  fi
+  if [[ -n "$android_sdk_root" && -d "$android_sdk_root" ]]; then
+    echo "Running Android lint, tests, and debug build"
+    (
+      cd android
+      ANDROID_HOME="$android_sdk_root" CI=true ./gradlew --no-daemon lint testDebugUnitTest assembleDebug
+    )
+  else
+    echo "Skipping Android SDK checks because no Android SDK is configured"
+  fi
+fi
+
 if [[ "$(uname -s)" == "Darwin" ]] && command -v xcodebuild >/dev/null 2>&1; then
   echo "Running iOS build and tests"
   ./scripts/ios-release-preflight.sh

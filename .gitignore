@@ -35,6 +35,14 @@ Thumbs.db
 xcuserdata/
 *.xcuserstate
 
+# Android / Gradle
+.gradle/
+android/.gradle/
+android/local.properties
+android/**/build/
+*.jks
+*.keystore
+
 # Docker
 *.log
 
