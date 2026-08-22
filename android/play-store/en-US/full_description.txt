@@ -1,0 +1,9 @@
+Media Tools keeps recordings, video transcripts, and PDF text together in one account-scoped library.
+
+Review source text, read AI-generated summaries, and report an AI output from inside the app when something looks unsafe or inaccurate. Media Tools clearly identifies AI-generated content and reminds you to verify important details against the source.
+
+Your account stays synchronized across Android, iPhone, and the web. AI processing is optional: Media Tools asks before this Android device sends content to third-party AI providers, and you can revoke that permission in Settings.
+
+You can permanently delete your account and associated data inside the app. Privacy, terms, support, and web account-deletion links are also available from Settings.
+
+Only record or upload content when you have the necessary rights and permission. Recording consent laws vary by location.
