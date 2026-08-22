@@ -80,6 +80,10 @@ final class LibraryViewModel {
     /// re-entrant across `await`, so the query alone cannot identify a stale
     /// pagination response from before a refresh.
     private var reloadGeneration = 0
+    /// Separately owns the pagination loading indicator. A refresh invalidates
+    /// an older page request immediately, while that request's eventual defer
+    /// must not clear the indicator for a newer page request.
+    private var paginationGeneration = 0
 
     init(
         service: MediaToolsService = .shared,
@@ -154,6 +158,8 @@ final class LibraryViewModel {
     private func reload(for requestedQuery: LibraryQuery, clearExisting: Bool) async {
         reloadGeneration += 1
         let generation = reloadGeneration
+        paginationGeneration += 1
+        isLoadingMore = false
         if clearExisting {
             items = []
             visibleReference = nil
@@ -227,14 +233,21 @@ final class LibraryViewModel {
     private func loadNextPage(for requestedQuery: LibraryQuery) async {
         guard hasMore, !isLoading, !isLoadingMore else { return }
         let generation = reloadGeneration
+        paginationGeneration += 1
+        let pageGeneration = paginationGeneration
         isLoadingMore = true
         loadError = nil
-        defer { isLoadingMore = false }
+        defer {
+            if pageGeneration == paginationGeneration {
+                isLoadingMore = false
+            }
+        }
 
         if let previewItems {
             let filtered = filteredPreviewItems(previewItems, for: requestedQuery)
             guard requestedQuery == query,
                   generation == reloadGeneration,
+                  pageGeneration == paginationGeneration,
                   !Task.isCancelled
             else { return }
             let nextPage = currentPage + 1
@@ -251,7 +264,8 @@ final class LibraryViewModel {
             let response = try await listItems(page: currentPage + 1, for: requestedQuery)
             guard !Task.isCancelled,
                   requestedQuery == query,
-                  generation == reloadGeneration
+                  generation == reloadGeneration,
+                  pageGeneration == paginationGeneration
             else { return }
             items = deduplicated(items + response.data)
             currentPage = response.page
@@ -261,7 +275,8 @@ final class LibraryViewModel {
         } catch {
             guard !Task.isCancelled,
                   requestedQuery == query,
-                  generation == reloadGeneration
+                  generation == reloadGeneration,
+                  pageGeneration == paginationGeneration
             else { return }
             loadError = error.localizedDescription
         }
