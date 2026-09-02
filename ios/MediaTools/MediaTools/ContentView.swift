@@ -111,15 +111,16 @@ struct WelcomeView: View {
                     Button {
                         showAuth = true
                     } label: {
-                        Label("Sign in", systemImage: "arrow.right")
+                        Label("Sign in or create account", systemImage: "arrow.right")
                             .frame(maxWidth: .infinity)
                     }
                     .brandButtonStyle()
 
-                    Text("Your account keeps recordings, transcripts, PDFs, chats, and collections together.")
+                    Text("Continue with Apple, Google, or email. Apple lets you keep your email private.")
                         .font(Theme.caption(12))
                         .foregroundStyle(Theme.textMuted)
                         .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("welcome.authentication.options")
 
                     Text("Powered by Shimizu Technology")
                         .font(Theme.caption(11))

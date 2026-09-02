@@ -12,16 +12,23 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertEqual(progress.value as? String, "Step 1 of 4")
         XCTAssertTrue(app.buttons["Skip setup"].isHittable)
 
-        let continueButton = app.buttons["Continue"]
-        continueButton.tap()
+        let nextButton = app.buttons["onboarding.next"]
+        XCTAssertEqual(nextButton.label, "Next")
+        nextButton.tap()
         XCTAssertTrue(app.staticTexts["Prepare your microphone"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Allow microphone"].exists || app.buttons["Open device Settings"].exists || app.buttons["Microphone ready"].exists)
+        let microphonePermission = app.buttons["onboarding.microphone.permission"]
+        XCTAssertTrue(microphonePermission.exists)
+        XCTAssertTrue(["Continue", "Open device Settings", "Microphone ready"].contains(microphonePermission.label))
+        XCTAssertFalse(app.buttons["Allow microphone"].exists)
 
-        continueButton.tap()
+        nextButton.tap()
         XCTAssertTrue(app.staticTexts["Know when it’s ready"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Enable completion alerts"].exists || app.buttons["Open device Settings"].exists || app.buttons["Completion alerts ready"].exists)
+        let notificationPermission = app.buttons["onboarding.notifications.permission"]
+        XCTAssertTrue(notificationPermission.exists)
+        XCTAssertTrue(["Continue", "Open device Settings", "Completion alerts ready"].contains(notificationPermission.label))
+        XCTAssertFalse(app.buttons["Enable completion alerts"].exists)
 
-        continueButton.tap()
+        nextButton.tap()
         XCTAssertTrue(app.staticTexts["Private, durable, and ready"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Open Shortcuts"].exists)
         XCTAssertTrue(app.buttons["Continue to sign in"].isHittable)
@@ -38,18 +45,33 @@ final class MediaToolsUITests: XCTestCase {
         app.launch()
         defer { XCUIDevice.shared.orientation = .portrait }
 
-        let continueButton = app.buttons["Continue"]
-        XCTAssertTrue(continueButton.waitForExistence(timeout: 10))
-        XCTAssertTrue(continueButton.isHittable)
+        let nextButton = app.buttons["onboarding.next"]
+        XCTAssertTrue(nextButton.waitForExistence(timeout: 10))
+        XCTAssertEqual(nextButton.label, "Next")
+        XCTAssertTrue(nextButton.isHittable)
 
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(continueButton.waitForExistence(timeout: 5))
-        XCTAssertTrue(continueButton.isHittable)
+        XCTAssertTrue(nextButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(nextButton.isHittable)
         XCTAssertTrue(app.buttons["Skip setup"].isHittable)
 
-        continueButton.tap()
+        nextButton.tap()
         XCTAssertTrue(app.staticTexts["Prepare your microphone"].waitForExistence(timeout: 5))
-        XCTAssertTrue(continueButton.isHittable)
+        XCTAssertTrue(nextButton.isHittable)
+    }
+
+    func testWelcomeMakesEquivalentAuthenticationOptionsDiscoverable() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-test-welcome"]
+        app.launch()
+
+        XCTAssertTrue(app.buttons["Sign in or create account"].waitForExistence(timeout: 10))
+        let options = app.staticTexts["welcome.authentication.options"]
+        XCTAssertTrue(options.exists)
+        XCTAssertEqual(
+            options.label,
+            "Continue with Apple, Google, or email. Apple lets you keep your email private."
+        )
     }
 
     func testMainWorkspaceConnectsCaptureAndOrganizationDestinations() {

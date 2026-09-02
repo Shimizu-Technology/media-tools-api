@@ -51,6 +51,10 @@ struct MediaToolsApp: App {
         if ProcessInfo.processInfo.arguments.contains("-ui-test-onboarding") {
             OnboardingView(isComplete: .constant(false))
                 .preferredColorScheme(.dark)
+        } else if ProcessInfo.processInfo.arguments.contains("-ui-test-welcome") {
+            ContentView()
+                .environment(Clerk.shared)
+                .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-main") {
             MainTabView()
                 .environment(Clerk.shared)

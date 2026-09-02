@@ -103,9 +103,12 @@ make ios-release-preflight \
 ```
 
 The checked-in App Store copy, privacy-label mapping, review notes, and remaining
-launch blockers live in `ios/app-store/`. A development Clerk key is suitable
-for TestFlight testing only; public App Store submission remains blocked until
-the production Clerk domain and a non-expiring review account are ready.
+launch checks live in `ios/app-store/`. The owner explicitly chose to keep the
+Clerk development instance for the initial App Store release instead of buying
+a custom domain. Release preflight therefore verifies the live development
+instance's required Apple and Google strategies, and App Review receives a
+dedicated non-expiring account. Re-audit this tradeoff before migrating Clerk or
+changing the authentication configuration.
 
 ## Architecture
 
