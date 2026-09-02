@@ -7,11 +7,20 @@ struct ContentView: View {
     @Environment(RecordingUploadCoordinator.self) private var uploadCoordinator
     @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @State private var showAuth = false
+    private let forceSignedOutForUITesting: Bool
     private let tokenSync = TokenSyncService.shared
+
+    init(forceSignedOutForUITesting: Bool = false) {
+        self.forceSignedOutForUITesting = forceSignedOutForUITesting
+    }
+
+    private var activeUserID: String? {
+        forceSignedOutForUITesting ? nil : clerk.user?.id
+    }
 
     var body: some View {
         Group {
-            if clerk.user != nil {
+            if activeUserID != nil {
                 MainTabView()
                     .onAppear {
                         tokenSync.startSyncing()
@@ -26,9 +35,9 @@ struct ContentView: View {
                     }
             }
         }
-        .task(id: clerk.user?.id) {
-            await uploadCoordinator.setActiveOwnerID(clerk.user?.id)
-            aiProcessingConsent.setActiveOwnerID(clerk.user?.id)
+        .task(id: activeUserID) {
+            await uploadCoordinator.setActiveOwnerID(activeUserID)
+            aiProcessingConsent.setActiveOwnerID(activeUserID)
         }
         .sheet(isPresented: $showAuth) {
             AuthView()
@@ -111,15 +120,16 @@ struct WelcomeView: View {
                     Button {
                         showAuth = true
                     } label: {
-                        Label("Sign in", systemImage: "arrow.right")
+                        Label("Sign in or create account", systemImage: "arrow.right")
                             .frame(maxWidth: .infinity)
                     }
                     .brandButtonStyle()
 
-                    Text("Your account keeps recordings, transcripts, PDFs, chats, and collections together.")
+                    Text("Continue with Apple, Google, or email. Apple lets you keep your email private.")
                         .font(Theme.caption(12))
                         .foregroundStyle(Theme.textMuted)
                         .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("welcome.authentication.options")
 
                     Text("Powered by Shimizu Technology")
                         .font(Theme.caption(11))

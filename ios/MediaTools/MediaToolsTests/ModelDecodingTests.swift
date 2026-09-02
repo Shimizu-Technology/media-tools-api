@@ -298,6 +298,13 @@ final class ModelDecodingTests: XCTestCase {
             Bundle.main.object(forInfoDictionaryKey: "NSMicrophoneUsageDescription") as? String
         )
         XCTAssertTrue(microphonePurpose.contains("only after you start a recording"))
+        let shippedMetadataStrings = Bundle.main.infoDictionary?.values.compactMap { $0 as? String } ?? []
+        for forbiddenPermissionPrompt in ["Allow microphone", "Enable completion alerts"] {
+            XCTAssertFalse(
+                shippedMetadataStrings.contains { $0.contains(forbiddenPermissionPrompt) },
+                "Shipped metadata must not use a coercive custom permission label"
+            )
+        }
 
         let manifestURL = try XCTUnwrap(
             Bundle.main.url(forResource: "PrivacyInfo", withExtension: "xcprivacy")

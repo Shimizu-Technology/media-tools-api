@@ -1,6 +1,8 @@
 Media Tools requires an account because recordings, transcripts, PDFs, chats, and collections are private, account-scoped workspace data.
 
-Sign in: Use the non-expiring review account supplied in App Review Information. Native Sign in with Apple is also available.
+Sign in: Tap Sign in or create account. The authentication sheet presents the Apple logo as an equivalent option alongside Google and email/password; wider layouts label it Continue with Apple. The native Apple flow requests only name and email and supports Hide My Email. You may instead use the non-expiring review account supplied in App Review Information.
+
+Resolved from the September 2 review: The microphone education screen now uses the neutral Continue label before iOS presents its system permission dialog. Notification education uses the same neutral wording. The prior Allow microphone and Enable completion alerts labels have been removed.
 
 Recording: Open Record and tap the microphone. A red recording card, elapsed timer, waveform, system microphone indicator, and Live Activity remain visible while recording. Locking the phone or switching apps intentionally keeps the user-started recording active. Pause/Resume stops and restarts capture without finalizing the file. Stop & Save finalizes it on the device.
 

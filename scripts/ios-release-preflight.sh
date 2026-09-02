@@ -31,7 +31,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-for command_name in xcodebuild xcrun plutil ruby sips codesign security unzip; do
+for command_name in xcodebuild xcrun plutil ruby sips codesign security unzip curl; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "Missing required command: $command_name"
     exit 1
@@ -44,8 +44,11 @@ info_plist="ios/MediaTools/MediaTools/Info.plist"
 privacy_manifest="ios/MediaTools/MediaTools/PrivacyInfo.xcprivacy"
 entitlements_path="ios/MediaTools/MediaTools/MediaTools.entitlements"
 metadata_path="ios/app-store/en-US"
+native_auth_release_path="ios/app-store/native-auth-release.json"
+native_auth_validator_path="scripts/validate-ios-native-auth-release.rb"
+native_auth_validator_test_path="scripts/validate-ios-native-auth-release_test.rb"
 
-for required_path in "$project_path" "$info_plist" "$privacy_manifest" "$entitlements_path" "$metadata_path"; do
+for required_path in "$project_path" "$info_plist" "$privacy_manifest" "$entitlements_path" "$metadata_path" "$native_auth_release_path" "$native_auth_validator_path" "$native_auth_validator_test_path"; do
   if [[ ! -e "$required_path" ]]; then
     echo "Missing release input: $required_path"
     exit 1
@@ -89,13 +92,58 @@ clerk_key="$(build_setting CLERK_PUBLISHABLE_KEY)"
 [[ "$team_id" == "4T358A5S74" ]] || { echo "Unexpected Apple team: $team_id"; exit 1; }
 [[ "$marketing_version" == "1.0" ]] || { echo "Unexpected marketing version: $marketing_version"; exit 1; }
 [[ "$build_number" =~ ^[0-9]+$ ]] || { echo "Build number is not numeric: $build_number"; exit 1; }
-(( build_number >= 9 )) || { echo "Build number must be 9 or later; found $build_number"; exit 1; }
+(( build_number >= 10 )) || { echo "Build number must be 10 or later; found $build_number"; exit 1; }
 [[ "$configured_entitlements" == "MediaTools/MediaTools.entitlements" ]] || { echo "Unexpected entitlements setting: $configured_entitlements"; exit 1; }
 [[ -n "$clerk_key" ]] || { echo "Release build is missing CLERK_PUBLISHABLE_KEY"; exit 1; }
 
 if [[ "$clerk_key" == pk_test_* ]]; then
-  echo "Notice: the Release target uses a Clerk development key; this build is TestFlight-only until Clerk production is configured"
+  echo "Notice: the Release target uses the owner-approved Clerk development instance"
 fi
+
+IOS_SOURCE_ROOT="ios/MediaTools/MediaTools" IOS_INFO_PLIST="$info_plist" ruby <<'RUBY'
+root = ENV.fetch("IOS_SOURCE_ROOT")
+info_plist = ENV.fetch("IOS_INFO_PLIST")
+forbidden = ["Allow microphone", "Enable completion alerts"]
+release_inputs = Dir.glob(File.join(root, "**", "*.swift")) + [info_plist]
+offenders = release_inputs.filter do |path|
+  forbidden.any? { |copy| File.read(path, encoding: "UTF-8").include?(copy) }
+end
+abort "Permission education must use neutral action labels such as Continue or Next: #{offenders.join(', ')}" unless offenders.empty?
+RUBY
+
+clerk_frontend_api="$(CLERK_KEY="$clerk_key" ruby <<'RUBY'
+require "base64"
+key = ENV.fetch("CLERK_KEY")
+encoded = key.sub(/\Apk_(?:test|live)_/, "")
+decoded = Base64.urlsafe_decode64(encoded).delete_suffix("$")
+abort "Invalid Clerk publishable key payload" unless decoded.match?(/\A[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\z/i)
+puts "https://#{decoded}"
+RUBY
+)"
+
+# This public host identifies the Clerk instance that is configured for this
+# app's API and native Apple registration. Pinning it prevents a different
+# development tenant with superficially similar providers from being shipped.
+approved_clerk_frontend_api="https://welcomed-earwig-86.clerk.accounts.dev"
+[[ "$clerk_frontend_api" == "$approved_clerk_frontend_api" ]] || {
+  echo "Release build uses an unapproved Clerk tenant: $clerk_frontend_api"
+  exit 1
+}
+
+ruby "$native_auth_validator_test_path"
+CLERK_FRONTEND_API="$clerk_frontend_api" \
+APPLE_TEAM_ID="$team_id" \
+APP_BUNDLE_ID="$bundle_id" \
+ruby "$native_auth_validator_path" "$native_auth_release_path"
+
+clerk_environment="$(curl --fail --silent --show-error --max-time 15 "$clerk_frontend_api/v1/environment")"
+CLERK_ENVIRONMENT="$clerk_environment" ruby <<'RUBY'
+require "json"
+environment = JSON.parse(ENV.fetch("CLERK_ENVIRONMENT"))
+strategies = environment.fetch("auth_config").fetch("identification_strategies")
+abort "Shipping Clerk environment does not offer Sign in with Apple" unless strategies.include?("oauth_apple")
+abort "Shipping Clerk environment unexpectedly dropped Google sign-in" unless strategies.include?("oauth_google")
+RUBY
 
 if ! apple_sign_in_mode="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.applesignin:0' "$entitlements_path" 2>/dev/null)"; then
   echo "Sign in with Apple entitlement is missing"

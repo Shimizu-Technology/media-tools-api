@@ -73,6 +73,7 @@ struct OnboardingView: View {
                                 isComplete: microphoneState == .enabled,
                                 action: handleMicrophoneAction
                             )
+                            .accessibilityIdentifier("onboarding.microphone.permission")
                         }
                         .tag(1)
 
@@ -91,6 +92,7 @@ struct OnboardingView: View {
                                 isComplete: notificationState == .enabled,
                                 action: handleNotificationAction
                             )
+                            .accessibilityIdentifier("onboarding.notifications.permission")
                         }
                         .tag(2)
 
@@ -138,7 +140,7 @@ struct OnboardingView: View {
                             finish()
                         }
                     } label: {
-                        Text(currentPage < pageCount - 1 ? "Continue" : "Continue to sign in")
+                        Text(currentPage < pageCount - 1 ? "Next" : "Continue to sign in")
                             .font(Theme.heading(16))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity, minHeight: 52)
@@ -148,6 +150,7 @@ struct OnboardingView: View {
                             )
                     }
                     .frame(width: max(0, geometry.size.width - 48))
+                    .accessibilityIdentifier("onboarding.next")
                     .padding(.top, 18)
                     .padding(.bottom, 20)
                     .opacity(appeared ? 1 : 0)
@@ -318,7 +321,7 @@ struct OnboardingView: View {
         switch microphoneState {
         case .enabled: "Microphone access is ready."
         case .denied: "Microphone access is off. You can enable it in device Settings."
-        case .notRequested: "When you tap Allow microphone, iOS will ask for access."
+        case .notRequested: "When you tap Continue, iOS will ask for microphone access."
         }
     }
 
@@ -326,7 +329,7 @@ struct OnboardingView: View {
         switch microphoneState {
         case .enabled: "Microphone ready"
         case .denied: "Open device Settings"
-        case .notRequested: "Allow microphone"
+        case .notRequested: "Continue"
         }
     }
 
@@ -342,7 +345,8 @@ struct OnboardingView: View {
         switch notificationState {
         case .enabled: "Completion alerts are on."
         case .denied: "Completion alerts are off. You can change this in device Settings."
-        case .notRequested: "Alerts are optional and only describe Media Tools work you started."
+        case .notRequested:
+            "Completion alerts are optional. When you tap Continue, iOS will ask whether to allow them."
         }
     }
 
@@ -350,7 +354,7 @@ struct OnboardingView: View {
         switch notificationState {
         case .enabled: "Completion alerts ready"
         case .denied: "Open device Settings"
-        case .notRequested: "Enable completion alerts"
+        case .notRequested: "Continue"
         }
     }
 

@@ -51,6 +51,13 @@ struct MediaToolsApp: App {
         if ProcessInfo.processInfo.arguments.contains("-ui-test-onboarding") {
             OnboardingView(isComplete: .constant(false))
                 .preferredColorScheme(.dark)
+        } else if ProcessInfo.processInfo.arguments.contains("-ui-test-welcome") {
+            // Clerk persists sessions in the Keychain. Force this one test
+            // route signed out so an earlier simulator login cannot bypass
+            // the welcome screen that App Review needs to discover.
+            ContentView(forceSignedOutForUITesting: true)
+                .environment(Clerk.shared)
+                .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-main") {
             MainTabView()
                 .environment(Clerk.shared)
