@@ -31,7 +31,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-for command_name in xcodebuild xcrun plutil ruby sips codesign security unzip curl rg; do
+for command_name in xcodebuild xcrun plutil ruby sips codesign security unzip curl; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "Missing required command: $command_name"
     exit 1
@@ -97,11 +97,14 @@ if [[ "$clerk_key" == pk_test_* ]]; then
   echo "Notice: the Release target uses the owner-approved Clerk development instance"
 fi
 
-if rg -n 'Allow microphone|Enable completion alerts' \
-  ios/MediaTools/MediaTools >/dev/null; then
-  echo "Permission education must use neutral action labels such as Continue or Next"
-  exit 1
-fi
+IOS_SOURCE_ROOT="ios/MediaTools/MediaTools" ruby <<'RUBY'
+root = ENV.fetch("IOS_SOURCE_ROOT")
+forbidden = ["Allow microphone", "Enable completion alerts"]
+offenders = Dir.glob(File.join(root, "**", "*.swift")).filter do |path|
+  forbidden.any? { |copy| File.read(path, encoding: "UTF-8").include?(copy) }
+end
+abort "Permission education must use neutral action labels such as Continue or Next: #{offenders.join(', ')}" unless offenders.empty?
+RUBY
 
 clerk_frontend_api="$(CLERK_KEY="$clerk_key" ruby <<'RUBY'
 require "base64"
