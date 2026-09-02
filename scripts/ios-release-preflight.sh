@@ -45,8 +45,10 @@ privacy_manifest="ios/MediaTools/MediaTools/PrivacyInfo.xcprivacy"
 entitlements_path="ios/MediaTools/MediaTools/MediaTools.entitlements"
 metadata_path="ios/app-store/en-US"
 native_auth_release_path="ios/app-store/native-auth-release.json"
+native_auth_validator_path="scripts/validate-ios-native-auth-release.rb"
+native_auth_validator_test_path="scripts/validate-ios-native-auth-release_test.rb"
 
-for required_path in "$project_path" "$info_plist" "$privacy_manifest" "$entitlements_path" "$metadata_path" "$native_auth_release_path"; do
+for required_path in "$project_path" "$info_plist" "$privacy_manifest" "$entitlements_path" "$metadata_path" "$native_auth_release_path" "$native_auth_validator_path" "$native_auth_validator_test_path"; do
   if [[ ! -e "$required_path" ]]; then
     echo "Missing release input: $required_path"
     exit 1
@@ -128,23 +130,11 @@ approved_clerk_frontend_api="https://welcomed-earwig-86.clerk.accounts.dev"
   exit 1
 }
 
+ruby "$native_auth_validator_test_path"
 CLERK_FRONTEND_API="$clerk_frontend_api" \
 APPLE_TEAM_ID="$team_id" \
 APP_BUNDLE_ID="$bundle_id" \
-NATIVE_AUTH_RELEASE_PATH="$native_auth_release_path" ruby <<'RUBY'
-require "date"
-require "json"
-
-attestation = JSON.parse(File.read(ENV.fetch("NATIVE_AUTH_RELEASE_PATH"), encoding: "UTF-8"))
-abort "Clerk native-app mapping is not confirmed for this release" unless attestation["appleNativeMappingConfirmed"] == true
-abort "Native-auth attestation has the wrong Clerk tenant" unless attestation["clerkFrontendAPI"] == ENV.fetch("CLERK_FRONTEND_API")
-abort "Native-auth attestation has the wrong Apple team" unless attestation["appleTeamID"] == ENV.fetch("APPLE_TEAM_ID")
-abort "Native-auth attestation has the wrong bundle ID" unless attestation["bundleID"] == ENV.fetch("APP_BUNDLE_ID")
-expected_source = "Clerk Dashboard > Configure > Native applications"
-abort "Native-auth attestation was not confirmed in Clerk's Native applications dashboard" unless attestation["confirmationSource"] == expected_source
-# `confirmedOn` is intentionally an ISO 8601 calendar date, not an event timestamp.
-Date.iso8601(attestation.fetch("confirmedOn"))
-RUBY
+ruby "$native_auth_validator_path" "$native_auth_release_path"
 
 clerk_environment="$(curl --fail --silent --show-error --max-time 15 "$clerk_frontend_api/v1/environment")"
 CLERK_ENVIRONMENT="$clerk_environment" ruby <<'RUBY'

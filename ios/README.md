@@ -34,7 +34,7 @@ been verified.
 
 ### 3. Configure Clerk
 
-1. Go to [Clerk Dashboard](https://dashboard.clerk.com) → Native Applications
+1. Go to [Clerk Dashboard](https://dashboard.clerk.com) → Configure → Native applications
 2. Enable **Native API**
 3. Add bundle ID `com.ShimizuTechnology.MediaTools`
 
