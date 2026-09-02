@@ -116,6 +116,15 @@ puts "https://#{decoded}"
 RUBY
 )"
 
+# This public host identifies the Clerk instance that is configured for this
+# app's API and native Apple registration. Pinning it prevents a different
+# development tenant with superficially similar providers from being shipped.
+approved_clerk_frontend_api="https://welcomed-earwig-86.clerk.accounts.dev"
+[[ "$clerk_frontend_api" == "$approved_clerk_frontend_api" ]] || {
+  echo "Release build uses an unapproved Clerk tenant: $clerk_frontend_api"
+  exit 1
+}
+
 clerk_environment="$(curl --fail --silent --show-error --max-time 15 "$clerk_frontend_api/v1/environment")"
 CLERK_ENVIRONMENT="$clerk_environment" ruby <<'RUBY'
 require "json"

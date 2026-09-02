@@ -52,7 +52,10 @@ struct MediaToolsApp: App {
             OnboardingView(isComplete: .constant(false))
                 .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-welcome") {
-            ContentView()
+            // Clerk persists sessions in the Keychain. Force this one test
+            // route signed out so an earlier simulator login cannot bypass
+            // the welcome screen that App Review needs to discover.
+            ContentView(forceSignedOutForUITesting: true)
                 .environment(Clerk.shared)
                 .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-main") {
