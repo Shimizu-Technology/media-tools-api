@@ -85,7 +85,8 @@ Before selecting a build for public review:
 1. Confirm the shipping Clerk environment advertises both Apple and Google and
    retains the iOS native-app mapping for this bundle ID. Update
    `native-auth-release.json` only after confirming the mapping in Clerk's
-   dashboard; the preflight pins its tenant, Apple team, and bundle ID.
+   Native Applications dashboard; the preflight pins its tenant, Apple team,
+   bundle ID, exact dashboard source, and ISO 8601 calendar confirmation date.
 2. Verify native Apple and Google sign-in, Hide My Email, sign-out, and account
    deletion on a physical device.
 3. Supply a non-expiring reviewer account in App Review Information. Keep its

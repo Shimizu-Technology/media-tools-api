@@ -140,8 +140,10 @@ abort "Clerk native-app mapping is not confirmed for this release" unless attest
 abort "Native-auth attestation has the wrong Clerk tenant" unless attestation["clerkFrontendAPI"] == ENV.fetch("CLERK_FRONTEND_API")
 abort "Native-auth attestation has the wrong Apple team" unless attestation["appleTeamID"] == ENV.fetch("APPLE_TEAM_ID")
 abort "Native-auth attestation has the wrong bundle ID" unless attestation["bundleID"] == ENV.fetch("APP_BUNDLE_ID")
-abort "Native-auth attestation is missing a confirmation source" if attestation.fetch("confirmationSource", "").strip.empty?
-Date.iso8601(attestation.fetch("confirmedAt"))
+expected_source = "Clerk Dashboard > Configure > Native applications"
+abort "Native-auth attestation was not confirmed in Clerk's Native applications dashboard" unless attestation["confirmationSource"] == expected_source
+# `confirmedOn` is intentionally an ISO 8601 calendar date, not an event timestamp.
+Date.iso8601(attestation.fetch("confirmedOn"))
 RUBY
 
 clerk_environment="$(curl --fail --silent --show-error --max-time 15 "$clerk_frontend_api/v1/environment")"
