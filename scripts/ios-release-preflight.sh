@@ -44,8 +44,9 @@ info_plist="ios/MediaTools/MediaTools/Info.plist"
 privacy_manifest="ios/MediaTools/MediaTools/PrivacyInfo.xcprivacy"
 entitlements_path="ios/MediaTools/MediaTools/MediaTools.entitlements"
 metadata_path="ios/app-store/en-US"
+native_auth_release_path="ios/app-store/native-auth-release.json"
 
-for required_path in "$project_path" "$info_plist" "$privacy_manifest" "$entitlements_path" "$metadata_path"; do
+for required_path in "$project_path" "$info_plist" "$privacy_manifest" "$entitlements_path" "$metadata_path" "$native_auth_release_path"; do
   if [[ ! -e "$required_path" ]]; then
     echo "Missing release input: $required_path"
     exit 1
@@ -97,10 +98,12 @@ if [[ "$clerk_key" == pk_test_* ]]; then
   echo "Notice: the Release target uses the owner-approved Clerk development instance"
 fi
 
-IOS_SOURCE_ROOT="ios/MediaTools/MediaTools" ruby <<'RUBY'
+IOS_SOURCE_ROOT="ios/MediaTools/MediaTools" IOS_INFO_PLIST="$info_plist" ruby <<'RUBY'
 root = ENV.fetch("IOS_SOURCE_ROOT")
+info_plist = ENV.fetch("IOS_INFO_PLIST")
 forbidden = ["Allow microphone", "Enable completion alerts"]
-offenders = Dir.glob(File.join(root, "**", "*.swift")).filter do |path|
+release_inputs = Dir.glob(File.join(root, "**", "*.swift")) + [info_plist]
+offenders = release_inputs.filter do |path|
   forbidden.any? { |copy| File.read(path, encoding: "UTF-8").include?(copy) }
 end
 abort "Permission education must use neutral action labels such as Continue or Next: #{offenders.join(', ')}" unless offenders.empty?
@@ -124,6 +127,22 @@ approved_clerk_frontend_api="https://welcomed-earwig-86.clerk.accounts.dev"
   echo "Release build uses an unapproved Clerk tenant: $clerk_frontend_api"
   exit 1
 }
+
+CLERK_FRONTEND_API="$clerk_frontend_api" \
+APPLE_TEAM_ID="$team_id" \
+APP_BUNDLE_ID="$bundle_id" \
+NATIVE_AUTH_RELEASE_PATH="$native_auth_release_path" ruby <<'RUBY'
+require "date"
+require "json"
+
+attestation = JSON.parse(File.read(ENV.fetch("NATIVE_AUTH_RELEASE_PATH"), encoding: "UTF-8"))
+abort "Clerk native-app mapping is not confirmed for this release" unless attestation["appleNativeMappingConfirmed"] == true
+abort "Native-auth attestation has the wrong Clerk tenant" unless attestation["clerkFrontendAPI"] == ENV.fetch("CLERK_FRONTEND_API")
+abort "Native-auth attestation has the wrong Apple team" unless attestation["appleTeamID"] == ENV.fetch("APPLE_TEAM_ID")
+abort "Native-auth attestation has the wrong bundle ID" unless attestation["bundleID"] == ENV.fetch("APP_BUNDLE_ID")
+abort "Native-auth attestation is missing a confirmation source" if attestation.fetch("confirmationSource", "").strip.empty?
+Date.iso8601(attestation.fetch("confirmedAt"))
+RUBY
 
 clerk_environment="$(curl --fail --silent --show-error --max-time 15 "$clerk_frontend_api/v1/environment")"
 CLERK_ENVIRONMENT="$clerk_environment" ruby <<'RUBY'

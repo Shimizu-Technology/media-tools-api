@@ -13,10 +13,11 @@ implements it. Run `make ios-release-preflight` before an archive and again with
 - Minimum OS: iOS 18.5
 - Release compiler: Xcode 26.6 / iOS 26.5 SDK
 - TestFlight/App Store: build 10 addresses Apple's September 2 rejection after
-  the Clerk development Apple connection and native-app mapping are enabled and
-  verified on a physical device. The owner has explicitly chosen to keep the
-  Clerk development instance for this release; re-audit that decision before a
-  future production migration.
+  the Clerk development Apple connection and native-app mapping were enabled.
+  The checked-in `native-auth-release.json` records the dashboard mapping that
+  release preflight requires. The owner has explicitly chosen to keep the Clerk
+  development instance for this release; re-audit that decision before a future
+  production migration.
 
 Apple requires iOS uploads to use the iOS 26 SDK or later as of April 28, 2026.
 See [Submitting to the App Store](https://developer.apple.com/app-store/submitting/).
@@ -82,7 +83,9 @@ Set:
 Before selecting a build for public review:
 
 1. Confirm the shipping Clerk environment advertises both Apple and Google and
-   retains the iOS native-app mapping for this bundle ID.
+   retains the iOS native-app mapping for this bundle ID. Update
+   `native-auth-release.json` only after confirming the mapping in Clerk's
+   dashboard; the preflight pins its tenant, Apple team, and bundle ID.
 2. Verify native Apple and Google sign-in, Hide My Email, sign-out, and account
    deletion on a physical device.
 3. Supply a non-expiring reviewer account in App Review Information. Keep its

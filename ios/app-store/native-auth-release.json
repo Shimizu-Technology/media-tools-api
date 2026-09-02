@@ -1,0 +1,8 @@
+{
+  "clerkFrontendAPI": "https://welcomed-earwig-86.clerk.accounts.dev",
+  "appleTeamID": "4T358A5S74",
+  "bundleID": "com.ShimizuTechnology.MediaTools",
+  "appleNativeMappingConfirmed": true,
+  "confirmedAt": "2026-09-02",
+  "confirmationSource": "Clerk Dashboard > Configure > Native applications"
+}
