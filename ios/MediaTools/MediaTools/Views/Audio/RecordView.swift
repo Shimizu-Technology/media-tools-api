@@ -77,6 +77,31 @@ struct RecordView: View {
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
 
+                    if !recorder.pendingSharedItems.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionHeader(text: "Shares needing attention", icon: "square.and.arrow.down")
+                            Text("These files are still saved on this iPhone. Retry importing or export the original.")
+                                .font(Theme.caption(12))
+                                .foregroundStyle(Theme.textSecondary)
+                            ForEach(recorder.pendingSharedItems) { item in
+                                HStack {
+                                    Text(item.originalName)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Button("Retry") { recorder.importSharedItems() }
+                                    if let fileURL = recorder.sharedFileURL(for: item) {
+                                        ShareLink(item: fileURL) {
+                                            Image(systemName: "square.and.arrow.up")
+                                        }
+                                        .accessibilityLabel("Export \(item.originalName)")
+                                    }
+                                }
+                                .font(Theme.caption(13))
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+
                     // Upload result / polling status
                     if let result = uploadResult {
                         VStack(spacing: 8) {

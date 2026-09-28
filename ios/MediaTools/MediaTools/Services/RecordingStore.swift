@@ -117,9 +117,10 @@ struct RecordingStore {
         from sourceURL: URL,
         contentType: String,
         ownerID: String? = nil,
+        id: UUID = UUID(),
+        originalName: String? = nil,
         now: Date = Date()
     ) throws -> LocalRecording {
-        let id = UUID()
         let sourceExtension = sourceURL.pathExtension.lowercased()
         let filename = sourceExtension.isEmpty
             ? "\(id.uuidString.lowercased()).audio"
@@ -127,7 +128,7 @@ struct RecordingStore {
         let recording = LocalRecording(
             id: id,
             filename: filename,
-            originalFilename: sourceURL.lastPathComponent,
+            originalFilename: originalName ?? sourceURL.lastPathComponent,
             createdAt: now,
             duration: 0,
             contentType: contentType,
@@ -140,6 +141,12 @@ struct RecordingStore {
             uploadTaskIdentifier: nil,
             ownerID: ownerID
         )
+        // A previous process may have died after copying but before saving the
+        // manifest. The inbox still owns the source, so replacing that orphan
+        // is safe and makes the import retryable.
+        if fileManager.fileExists(atPath: fileURL(for: recording).path) {
+            try fileManager.removeItem(at: fileURL(for: recording))
+        }
         try fileManager.copyItem(at: sourceURL, to: fileURL(for: recording))
         try protectRecordingFile(recording)
         return recording

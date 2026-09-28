@@ -49,6 +49,7 @@ struct ContentView: View {
 
 struct WelcomeView: View {
     @Binding var showAuth: Bool
+    @Environment(RecordingCoordinator.self) private var recorder
 
     var body: some View {
         ZStack {
@@ -115,6 +116,37 @@ struct WelcomeView: View {
                     .overlay {
                         RoundedRectangle(cornerRadius: Theme.radiusLarge)
                             .stroke(Theme.borderSubtle, lineWidth: 1)
+                    }
+
+                    if !recorder.availableRecordings.isEmpty || !recorder.pendingSharedItems.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("Saved on this iPhone", systemImage: "iphone.and.arrow.forward")
+                                .font(Theme.body(16, weight: .semibold))
+                                .foregroundStyle(Theme.textPrimary)
+                            Text("Your recordings are safe here. Sign in to review and transcribe them.")
+                                .font(Theme.caption(13))
+                                .foregroundStyle(Theme.textSecondary)
+                            ForEach(recorder.availableRecordings) { recording in
+                                if let fileURL = recorder.fileURL(for: recording) {
+                                    ShareLink(item: fileURL) {
+                                        Label(recording.displayTitle, systemImage: "square.and.arrow.up")
+                                    }
+                                    .font(Theme.caption(13))
+                                }
+                            }
+                            ForEach(recorder.pendingSharedItems) { item in
+                                if let fileURL = recorder.sharedFileURL(for: item) {
+                                    ShareLink(item: fileURL) {
+                                        Label(item.originalName, systemImage: "square.and.arrow.up")
+                                    }
+                                    .font(Theme.caption(13))
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(Theme.surfaceCard)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusLarge))
                     }
 
                     Button {
