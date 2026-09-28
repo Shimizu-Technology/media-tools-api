@@ -73,10 +73,10 @@ to stay current; see [App Privacy Details](https://developer.apple.com/app-store
 
 Set:
 
-- Privacy Policy URL: `https://media-tools-gu.netlify.app/privacy`
-- User Privacy Choices URL: `https://media-tools-gu.netlify.app/delete-account`
-- Support URL: `https://media-tools-gu.netlify.app/support`
-- Marketing URL: `https://media-tools-gu.netlify.app/`
+- Privacy Policy URL: `https://media.shimizu-technology.com/privacy`
+- User Privacy Choices URL: `https://media.shimizu-technology.com/delete-account`
+- Support URL: `https://media.shimizu-technology.com/support`
+- Marketing URL: `https://media.shimizu-technology.com/`
 
 ## App Review prerequisites
 

@@ -28,7 +28,7 @@ enum Configuration {
         if let url = configuredValue("WEB_APP_URL") {
             return url
         }
-        return "https://media-tools-gu.netlify.app"
+        return "https://media.shimizu-technology.com"
     }()
 
     /// Keychain access group shared between the main app and share extension.
