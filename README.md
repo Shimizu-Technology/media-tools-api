@@ -249,13 +249,13 @@ not copy its hard-coded identity into future migrations.
 | `ADMIN_API_KEY` | Yes | Independent bootstrap key, minimum 32 characters |
 | `CLERK_SECRET_KEY` | Browser auth | Clerk Backend API key for syncing signed-in users |
 | `CLERK_JWKS_URL` | Browser auth | Clerk JWKS URL for validating signed-in users |
-| `CLERK_AUTHORIZED_PARTY` | Browser auth | Frontend origin allowed in Clerk token `azp` claim |
+| `CLERK_AUTHORIZED_PARTY` | Browser auth | Comma-separated frontend origins allowed in Clerk token `azp` claim |
 | `LEGACY_AUTH_ENABLED` | Optional | Enable legacy email/password auth routes; defaults off in release |
 | `DEFAULT_RATE_LIMIT` | Optional | Requests/hour for API keys and signed-in browser mutations; defaults to 100 |
 | `DEFAULT_BROWSER_READ_RATE_LIMIT` | Optional | GET/HEAD requests/hour for signed-in browser users; defaults to 10,000 |
 | `OPENROUTER_API_KEY` | For summaries | OpenRouter API key |
 | `OPENAI_API_KEY` | For audio | OpenAI API key (Whisper) |
-| `CORS_ORIGIN` | Yes | Frontend URL (e.g., https://your-app.netlify.app) |
+| `CORS_ORIGIN` | Yes | Comma-separated frontend origins (e.g., https://your-app.example) |
 | `YT_DLP_COOKIES_FILE` | Optional | Path to cookies.txt for login-required/private Vimeo links |
 | `YT_DLP_COOKIES_B64` | Optional | Base64-encoded cookies.txt contents (for env-only platforms) |
 | `GIN_MODE` | Recommended | Set to `release` |

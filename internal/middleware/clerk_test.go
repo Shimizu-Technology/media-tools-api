@@ -22,6 +22,28 @@ func TestValidateAuthorizedParty(t *testing.T) {
 			actual:   "",
 		},
 		{
+			name:     "old browser origin during migration",
+			expected: "https://media-tools-gu.netlify.app, https://media.shimizu-technology.com",
+			actual:   "https://media-tools-gu.netlify.app",
+		},
+		{
+			name:     "new browser origin during migration",
+			expected: "https://media-tools-gu.netlify.app, https://media.shimizu-technology.com",
+			actual:   "https://media.shimizu-technology.com",
+		},
+		{
+			name:      "unknown browser origin during migration",
+			expected:  "https://media-tools-gu.netlify.app, https://media.shimizu-technology.com",
+			actual:    "https://attacker.example",
+			wantError: true,
+		},
+		{
+			name:      "empty allowlist entries do not disable check",
+			expected:  ", ,",
+			actual:    "https://attacker.example",
+			wantError: true,
+		},
+		{
 			name:     "constraint disabled",
 			expected: "",
 			actual:   "https://another.example",
