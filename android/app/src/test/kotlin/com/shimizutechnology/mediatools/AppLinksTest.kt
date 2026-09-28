@@ -12,7 +12,7 @@ class AppLinksTest {
             .forEach { value ->
                 val uri = URI(value)
                 assertEquals("https", uri.scheme)
-                assertEquals("media-tools-gu.netlify.app", uri.host)
+                assertEquals("media.shimizu-technology.com", uri.host)
                 assertTrue(uri.path.isNotBlank())
             }
     }

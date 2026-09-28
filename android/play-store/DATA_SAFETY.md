@@ -21,7 +21,7 @@ This is the source-backed answer key for the Play Console form. Re-audit every d
 - Data is encrypted in transit: **Yes**.
 - Users can request deletion: **Yes**.
 - In-app deletion path: **Settings → Delete account and data**.
-- Web deletion URL: `https://media-tools-gu.netlify.app/delete-account`.
-- Privacy policy: `https://media-tools-gu.netlify.app/privacy`.
+- Web deletion URL: `https://media.shimizu-technology.com/delete-account`.
+- Privacy policy: `https://media.shimizu-technology.com/privacy`.
 - Account creation: **Yes**, through Clerk authentication.
 - Independent security review: answer only after obtaining the review Google describes; do not claim one from automated tests.
