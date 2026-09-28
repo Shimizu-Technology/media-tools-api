@@ -121,12 +121,18 @@ func (c *JWKSCache) ParseToken(tokenString string) (*ClerkClaims, error) {
 // token, so their signed tokens can legitimately omit azp. Keep rejecting a
 // conflicting browser azp while allowing an absent native claim; signature,
 // expiry, and issuer validation still bind every accepted token to this Clerk
-// instance.
+// instance. A comma-separated allowlist lets both web origins work during a
+// domain migration without dropping this check.
 func validateAuthorizedParty(expected, actual string) error {
-	if expected != "" && actual != "" && actual != expected {
-		return fmt.Errorf("unexpected authorized party")
+	if expected == "" || actual == "" {
+		return nil
 	}
-	return nil
+	for _, party := range strings.Split(expected, ",") {
+		if allowed := strings.TrimSpace(party); allowed != "" && actual == allowed {
+			return nil
+		}
+	}
+	return fmt.Errorf("unexpected authorized party")
 }
 
 // GetKey returns the RSA public key for the given key ID, fetching from JWKS if needed.
