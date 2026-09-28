@@ -37,7 +37,7 @@ struct AIProcessingDisclosureView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     Button {
-                        openURL(URL(string: "https://media-tools-gu.netlify.app/privacy#ai-processing")!)
+                        openURL(URL(string: "https://media.shimizu-technology.com/privacy#ai-processing")!)
                     } label: {
                         Label("Read AI and privacy details", systemImage: "arrow.up.right.square")
                             .font(Theme.body(14, weight: .semibold))

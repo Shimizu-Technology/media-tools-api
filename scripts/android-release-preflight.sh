@@ -41,7 +41,7 @@ if search_file 'READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STO
 fi
 
 for url in privacy terms support delete-account; do
-  require_source "https://media-tools-gu\.netlify\.app/$url" \
+  require_source "https://media\.shimizu-technology\.com/$url" \
     android/app/src/main/kotlin/com/shimizutechnology/mediatools/AppLinks.kt \
     "Android is missing its public $url URL"
 done

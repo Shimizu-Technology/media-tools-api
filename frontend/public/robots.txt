@@ -1,11 +1,11 @@
 # Media Tools API
-# https://media-tools-gu.netlify.app
+# https://media.shimizu-technology.com
 
 User-agent: *
 Allow: /
 
 # Sitemap location
-Sitemap: https://media-tools-gu.netlify.app/sitemap.xml
+Sitemap: https://media.shimizu-technology.com/sitemap.xml
 
 # Disallow API endpoints
 Disallow: /api/

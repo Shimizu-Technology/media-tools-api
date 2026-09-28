@@ -12,7 +12,7 @@ Account deletion: Settings > Account > Delete Account. The app confirms the dest
 
 AI safety report: Open an item with a generated summary or chat response and use Report summary or Report response. The report includes the selected output, category, and optional note; it does not attach another copy of the source media.
 
-Support: https://media-tools-gu.netlify.app/support
-Privacy: https://media-tools-gu.netlify.app/privacy
-Terms: https://media-tools-gu.netlify.app/terms
-Deletion instructions: https://media-tools-gu.netlify.app/delete-account
+Support: https://media.shimizu-technology.com/support
+Privacy: https://media.shimizu-technology.com/privacy
+Terms: https://media.shimizu-technology.com/terms
+Deletion instructions: https://media.shimizu-technology.com/delete-account

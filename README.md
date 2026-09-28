@@ -2,7 +2,7 @@
 
 A media processing API for YouTube transcripts, recording transcription, PDF extraction, and AI-powered summaries. Built with Go and React.
 
-**Live Demo:** [media-tools-gu.netlify.app](https://media-tools-gu.netlify.app)
+**Live Demo:** [media.shimizu-technology.com](https://media.shimizu-technology.com)
 
 Media Tools exists to turn source material into a durable private workspace,
 not a one-time conversion result. A video, recording, or PDF becomes a
