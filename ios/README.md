@@ -81,6 +81,21 @@ to the production Render API. Use a local HTTP URL only for simulator
 development; `Info.plist` permits local networking but does not relax transport
 security for arbitrary remote hosts.
 
+### Passkey domain association
+
+The app is prepared to use passkeys for
+`media.shimizu-technology.com`. Its Associated Domains entitlement is
+`webcredentials:media.shimizu-technology.com`, and the site serves
+`/.well-known/apple-app-site-association` with the verified app identifier
+`4T358A5S74.com.ShimizuTechnology.MediaTools`. Keep the web passkey relying
+party ID on this domain: changing it would require registering new passkeys.
+This association alone does not change the current Clerk sign-in flow.
+
+Before distributing a passkey-enabled iOS build, verify that the production
+association URL responds with JSON and no redirect, that the Apple Developer
+App ID has Associated Domains enabled, and that the signed app and provisioning
+profile contain the entitlement. The Share Extension does not request passkeys.
+
 ### 5. Generate App Icon (only when replacing it)
 
 ```bash

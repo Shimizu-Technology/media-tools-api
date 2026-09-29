@@ -27,6 +27,9 @@ echo "Running frontend checks"
   npm run audit:prod
 )
 
+echo "Checking passkey domain association"
+python3 scripts/verify-passkey-domain.py
+
 if [[ -x android/gradlew ]]; then
   echo "Running Android source preflight"
   ./scripts/android-release-preflight.sh
