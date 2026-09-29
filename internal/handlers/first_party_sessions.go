@@ -57,7 +57,8 @@ func (h *Handler) BootstrapFirstPartySession(c *gin.Context) {
 }
 
 type refreshSessionRequest struct {
-	RefreshToken string `json:"refresh_token" binding:"required"`
+	RefreshToken     string `json:"refresh_token" binding:"required"`
+	NextRefreshToken string `json:"next_refresh_token"`
 }
 
 func (h *Handler) RefreshFirstPartySession(c *gin.Context) {
@@ -66,11 +67,14 @@ func (h *Handler) RefreshFirstPartySession(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Refresh credential is required", Code: http.StatusBadRequest})
 		return
 	}
-	pair, err := h.DB.RefreshFirstPartySession(c.Request.Context(), req.RefreshToken)
+	pair, err := h.DB.RefreshFirstPartySessionWithSuccessor(c.Request.Context(), req.RefreshToken, req.NextRefreshToken)
 	switch {
 	case err == nil:
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, pair)
+	case errors.Is(err, database.ErrInvalidSuccessorToken):
+		log.Printf("refresh session rejected: invalid successor credential")
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Next refresh credential is invalid", Code: http.StatusBadRequest})
 	case errors.Is(err, database.ErrSessionAlreadyRotated):
 		c.JSON(http.StatusConflict, models.ErrorResponse{Error: "session_refresh_in_progress", Message: "Session was just refreshed; retry with the latest stored credential", Code: http.StatusConflict})
 	case errors.Is(err, database.ErrSessionReplay), errors.Is(err, database.ErrSessionInvalid):

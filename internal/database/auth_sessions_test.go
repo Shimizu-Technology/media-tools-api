@@ -40,7 +40,11 @@ func TestFirstPartySessionRotationReplayAndRevocation(t *testing.T) {
 		VALUES ($1, '', 'Session Test') RETURNING id`, uuid.NewString()+"@example.com").Scan(&userID); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, userID) })
+	t.Cleanup(func() {
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, userID); err != nil {
+			t.Errorf("cleanup user fixture: %v", err)
+		}
+	})
 
 	pair, err := db.CreateFirstPartySession(ctx, userID, "ios", "Test iPhone")
 	if err != nil {
@@ -80,6 +84,56 @@ func TestFirstPartySessionRotationReplayAndRevocation(t *testing.T) {
 	}
 	if _, err := db.RefreshFirstPartySession(ctx, rotated.RefreshToken); !errors.Is(err, ErrSessionInvalid) {
 		t.Fatalf("replayed session still refreshes: %v", err)
+	}
+}
+
+func TestFirstPartyRefreshRecoversLostResponse(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	var userID string
+	if err := db.QueryRowContext(ctx, `INSERT INTO users (email, password_hash) VALUES ($1, '') RETURNING id`, uuid.NewString()+"@example.com").Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, userID); err != nil {
+			t.Errorf("cleanup user fixture: %v", err)
+		}
+	})
+	initial, err := db.CreateFirstPartySession(ctx, userID, "ios", "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := randomAuthToken("mta_rt_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := db.RefreshFirstPartySessionWithSuccessor(ctx, initial.RefreshToken, next)
+	if err != nil || first.RefreshToken != next {
+		t.Fatalf("initial rotation = %#v, %v", first, err)
+	}
+	oldHash, _ := authTokenHash(initial.RefreshToken, "mta_rt_")
+	if _, err := db.ExecContext(ctx, `UPDATE auth_refresh_tokens SET consumed_at = $2, expires_at = $3 WHERE token_hash = $1`, oldHash, time.Now().Add(-time.Hour), time.Now().Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := db.RefreshFirstPartySessionWithSuccessor(ctx, initial.RefreshToken, next)
+	if err != nil || recovered.RefreshToken != next || recovered.AccessToken == first.AccessToken || recovered.SessionID != first.SessionID {
+		t.Fatalf("recover interrupted response = %#v, %v", recovered, err)
+	}
+	if _, _, err := db.GetUserByFirstPartyAccessToken(ctx, recovered.AccessToken); err != nil {
+		t.Fatalf("recovered access credential failed: %v", err)
+	}
+	third, err := randomAuthToken("mta_rt_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RefreshFirstPartySessionWithSuccessor(ctx, next, third); err != nil {
+		t.Fatalf("advance to third credential: %v", err)
+	}
+	if _, err := db.RefreshFirstPartySessionWithSuccessor(ctx, initial.RefreshToken, next); !errors.Is(err, ErrSessionAlreadyRotated) {
+		t.Fatalf("stale recovery after successor was spent = %v", err)
+	}
+	if _, _, err := db.GetUserByFirstPartyAccessToken(ctx, recovered.AccessToken); err != nil {
+		t.Fatalf("stale recovery revoked device: %v", err)
 	}
 }
 
