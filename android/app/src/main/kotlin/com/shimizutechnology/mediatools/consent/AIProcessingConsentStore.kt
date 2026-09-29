@@ -18,7 +18,7 @@ class AndroidConsentPreferences(context: Context) : ConsentPreferences {
 }
 
 /**
- * Stores explicit AI permission per Clerk user on this installation. The raw user ID is never
+ * Stores explicit AI permission per account on this installation. The raw user ID is never
  * written to preferences, and a versioned key lets a material disclosure change require consent
  * again without weakening older releases.
  */
@@ -28,6 +28,14 @@ class AIProcessingConsentStore(private val preferences: ConsentPreferences) {
     fun allow(ownerId: String) = preferences.putBoolean(key(ownerId), true)
 
     fun revoke(ownerId: String) = preferences.remove(key(ownerId))
+
+    /** Only call after the server verifies Clerk identity and returns its stable users.id. */
+    fun migrateVerifiedOwner(clerkId: String, userId: String) {
+        require(clerkId.isNotBlank() && userId.isNotBlank())
+        if (clerkId == userId || !hasConsent(clerkId)) return
+        preferences.putBoolean(key(userId), true)
+        preferences.remove(key(clerkId))
+    }
 
     internal fun key(ownerId: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(ownerId.toByteArray(Charsets.UTF_8))

@@ -16,6 +16,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 interface SessionTokenProvider {
     suspend fun token(expectedOwnerId: String, forceRefresh: Boolean = false): String
+    suspend fun refreshAfterRejectedToken(expectedOwnerId: String, rejectedToken: String): String =
+        token(expectedOwnerId, forceRefresh = true)
     fun currentOwnerId(): String?
 }
 
@@ -125,10 +127,12 @@ class MediaToolsApi(
     private suspend inline fun <reified T> execute(path: String, method: String, body: String?): T {
         val expectedOwnerId = tokenProvider.currentOwnerId()
             ?: throw MediaToolsAPIException(401, "Sign in to continue.")
-        val first = executeOnce(path, method, body, expectedOwnerId, forceRefresh = false)
+        val firstToken = tokenProvider.token(expectedOwnerId, forceRefresh = false)
+        val first = executeOnce(path, method, body, expectedOwnerId, firstToken)
         val response = if (first.code == 401) {
             first.close()
-            executeOnce(path, method, body, expectedOwnerId, forceRefresh = true)
+            val replacement = tokenProvider.refreshAfterRejectedToken(expectedOwnerId, firstToken)
+            executeOnce(path, method, body, expectedOwnerId, replacement)
         } else {
             first
         }
@@ -156,13 +160,16 @@ class MediaToolsApi(
         method: String,
         body: String?,
         expectedOwnerId: String,
-        forceRefresh: Boolean,
+        token: String,
     ) = withContext(Dispatchers.IO) {
+        if (tokenProvider.currentOwnerId() != expectedOwnerId) {
+            throw MediaToolsAPIException(401, "The signed-in account changed. Try again.")
+        }
         val requestBody = body?.toRequestBody(JSON_MEDIA_TYPE)
         val request = Request.Builder()
             .url(baseUrl.trimEnd('/') + path)
             .header("Accept", "application/json")
-            .header("Authorization", "Bearer ${tokenProvider.token(expectedOwnerId, forceRefresh)}")
+            .header("Authorization", "Bearer $token")
             .method(method, requestBody)
             .build()
         client.newCall(request).execute()

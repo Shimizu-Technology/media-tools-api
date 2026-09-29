@@ -9,6 +9,7 @@ clerk = "1.1.3"
 serialization = "1.11.0"
 coroutines = "1.11.0"
 okhttp = "5.4.0"
+desugar = "2.1.5"
 
 [libraries]
 activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity" }
@@ -26,6 +27,7 @@ clerk-ui = { module = "com.clerk:clerk-android-ui", version.ref = "clerk" }
 kotlinx-serialization = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 kotlinx-coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+desugar-jdk = { module = "com.android.tools:desugar_jdk_libs", version.ref = "desugar" }
 mockwebserver = { module = "com.squareup.okhttp3:mockwebserver", version.ref = "okhttp" }
 junit = "junit:junit:4.13.2"
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }

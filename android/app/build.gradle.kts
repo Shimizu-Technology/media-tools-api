@@ -31,11 +31,16 @@ android {
         val configuredKey = clerkKey ?: "pk_test_placeholder_for_ci"
         buildConfigField("String", "CLERK_PUBLISHABLE_KEY", "\"$configuredKey\"")
         buildConfigField("String", "API_BASE_URL", "\"https://media-tools-api-x9r7.onrender.com/api/v1\"")
+        val firstPartySessions = providers.gradleProperty("MEDIA_TOOLS_FIRST_PARTY_ANDROID_AUTH")
+            .orElse(providers.environmentVariable("MEDIA_TOOLS_FIRST_PARTY_ANDROID_AUTH"))
+            .orNull == "true"
+        buildConfigField("boolean", "FIRST_PARTY_ANDROID_AUTH_ENABLED", firstPartySessions.toString())
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 
@@ -76,6 +81,7 @@ dependencies {
     implementation(libs.kotlinx.serialization)
     implementation(libs.kotlinx.coroutines)
     implementation(libs.okhttp)
+    coreLibraryDesugaring(libs.desugar.jdk)
 
     debugImplementation(libs.compose.ui.tooling)
     testImplementation(libs.junit)
