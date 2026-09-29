@@ -195,6 +195,8 @@ function ClerkAppContent() {
     let cancelled = false
     const restore = async () => {
       setIsUserLoading(true)
+      setHasWebSession(false)
+      setUser(null)
       if (!isSignedIn) localStorage.removeItem('mta_jwt_token')
       try {
         if (webSessionEnabled) {
@@ -202,7 +204,6 @@ function ClerkAppContent() {
           const existingClerkID = await restoreWebSession()
           if (existingClerkID !== null && userId && existingClerkID !== userId) {
             await logoutWebSession()
-            setWebSessionActive(false)
           } else if (existingClerkID !== null) {
             setWebSessionActive(true)
           }

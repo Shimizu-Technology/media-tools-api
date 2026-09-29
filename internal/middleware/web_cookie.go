@@ -43,7 +43,7 @@ func ValidWebCookieMutation(c *gin.Context, allowedOrigins []string) bool {
 // left alone, so native clients and agents retain their existing behavior.
 func WebCookieAuth(allowedOrigins []string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !strings.HasPrefix(c.Request.URL.Path, "/api/v1/") || c.GetHeader("Authorization") != "" || c.GetHeader("X-API-Key") != "" {
+		if !strings.HasPrefix(c.Request.URL.Path, "/api/v1/") || strings.HasPrefix(c.Request.URL.Path, "/api/v1/auth/web/session/") || c.GetHeader("Authorization") != "" || c.GetHeader("X-API-Key") != "" {
 			c.Next()
 			return
 		}

@@ -71,3 +71,22 @@ func TestWebCookieAuthDoesNotReplaceExplicitCredentials(t *testing.T) {
 		t.Fatalf("got %d", response.Code)
 	}
 }
+
+func TestWebCookieAuthLeavesWebSessionEndpointsToTheirOwnChecks(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(WebCookieAuth([]string{"https://media.example.com"}))
+	r.POST("/api/v1/auth/web/session/refresh", func(c *gin.Context) {
+		if c.GetHeader("Authorization") != "" {
+			t.Error("cookie middleware intercepted refresh endpoint")
+		}
+		c.Status(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/web/session/refresh", nil)
+	req.AddCookie(&http.Cookie{Name: WebAccessCookie, Value: "mta_at_example"})
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, req)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("got %d", response.Code)
+	}
+}
