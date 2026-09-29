@@ -150,6 +150,9 @@ if ! apple_sign_in_mode="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.develope
   exit 1
 fi
 [[ "$apple_sign_in_mode" == "Default" ]] || { echo "Unexpected Sign in with Apple mode: $apple_sign_in_mode"; exit 1; }
+passkey_domain="webcredentials:media.shimizu-technology.com"
+configured_passkey_domain="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.associated-domains:0' "$entitlements_path")"
+[[ "$configured_passkey_domain" == "$passkey_domain" ]] || { echo "Unexpected passkey associated domain: $configured_passkey_domain"; exit 1; }
 
 encryption_exempt="$(/usr/libexec/PlistBuddy -c 'Print :ITSAppUsesNonExemptEncryption' "$info_plist")"
 microphone_copy="$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$info_plist")"
@@ -239,6 +242,8 @@ if [[ -n "$archive_path" ]]; then
   codesign -d --entitlements :- "$app_path" >"$preflight_tmp/app-entitlements.plist" 2>/dev/null
   archived_apple_mode="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.applesignin:0' "$preflight_tmp/app-entitlements.plist")"
   [[ "$archived_apple_mode" == "Default" ]] || { echo "Signed archive is missing Sign in with Apple"; exit 1; }
+  archived_passkey_domain="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.associated-domains:0' "$preflight_tmp/app-entitlements.plist")"
+  [[ "$archived_passkey_domain" == "$passkey_domain" ]] || { echo "Signed archive is missing the passkey associated domain"; exit 1; }
   archived_app_group="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "$preflight_tmp/app-entitlements.plist")"
   [[ "$archived_app_group" == "group.com.shimizu-technology.media-tools" ]] || { echo "Signed archive is missing the share App Group"; exit 1; }
 
@@ -255,6 +260,8 @@ if [[ -n "$archive_path" ]]; then
     security cms -D -i "$app_path/embedded.mobileprovision" >"$preflight_tmp/profile.plist"
     profile_app_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$preflight_tmp/profile.plist")"
     [[ "$profile_app_id" == "$team_id.$bundle_id" ]] || { echo "Provisioning profile app identifier does not match: $profile_app_id"; exit 1; }
+    profile_passkey_domain="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.associated-domains:0' "$preflight_tmp/profile.plist")"
+    [[ "$profile_passkey_domain" == "$passkey_domain" ]] || { echo "Provisioning profile is missing the passkey associated domain"; exit 1; }
   fi
 fi
 
@@ -275,6 +282,7 @@ if [[ -n "$export_path" ]]; then
   exported_app_id="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:entitlements:application-identifier" "$distribution_summary")"
   exported_get_task_allow="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:entitlements:get-task-allow" "$distribution_summary")"
   exported_apple_mode="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:entitlements:com.apple.developer.applesignin:0" "$distribution_summary")"
+  exported_passkey_domain="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:entitlements:com.apple.developer.associated-domains:0" "$distribution_summary")"
   exported_certificate="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:certificate:type" "$distribution_summary")"
   embedded_indexes="$(plutil -convert json -o - "$distribution_summary" | ruby -rjson -e '
     binaries = JSON.parse(STDIN.read).fetch("MediaTools.ipa").fetch(0).fetch("embeddedBinaries")
@@ -298,6 +306,7 @@ if [[ -n "$export_path" ]]; then
   [[ "$exported_app_id" == "$team_id.$bundle_id" ]] || { echo "Exported application identifier does not match"; exit 1; }
   [[ "$exported_get_task_allow" == "false" ]] || { echo "App Store export is debuggable"; exit 1; }
   [[ "$exported_apple_mode" == "Default" ]] || { echo "App Store export is missing Sign in with Apple"; exit 1; }
+  [[ "$exported_passkey_domain" == "$passkey_domain" ]] || { echo "App Store export is missing the passkey associated domain"; exit 1; }
   [[ "$exported_certificate" == *"Apple Distribution"* ]] || { echo "App Store export is not distribution-signed: $exported_certificate"; exit 1; }
   [[ "$widget_build" == "$build_number" ]] || { echo "Widget build number does not match the app"; exit 1; }
   [[ "$widget_id" == "$team_id.$bundle_id.Widget" ]] || { echo "Exported widget identity does not match"; exit 1; }
