@@ -39,15 +39,19 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.clerk.api.Clerk
-import com.clerk.api.network.serialization.ClerkResult
 import com.shimizutechnology.mediatools.AppLinks
 import com.shimizutechnology.mediatools.api.MediaToolsApi
 import com.shimizutechnology.mediatools.consent.AIProcessingConsentStore
 import kotlinx.coroutines.launch
 
 @Composable
-fun SettingsScreen(api: MediaToolsApi, consentStore: AIProcessingConsentStore, ownerId: String) {
+fun SettingsScreen(
+    api: MediaToolsApi,
+    consentStore: AIProcessingConsentStore,
+    ownerId: String,
+    onSignOut: suspend () -> Unit,
+    onDeleted: suspend () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var hasAIConsent by remember(ownerId) { mutableStateOf(consentStore.hasConsent(ownerId)) }
@@ -106,7 +110,9 @@ fun SettingsScreen(api: MediaToolsApi, consentStore: AIProcessingConsentStore, o
             OutlinedButton(
                 onClick = {
                     scope.launch {
-                        if (Clerk.auth.signOut() is ClerkResult.Failure) {
+                        try {
+                            onSignOut()
+                        } catch (_: Exception) {
                             accountMessage = "Media Tools could not sign out. Check your connection and try again."
                         }
                     }
@@ -154,7 +160,9 @@ fun SettingsScreen(api: MediaToolsApi, consentStore: AIProcessingConsentStore, o
                 hasAIConsent = false
                 showDelete = false
                 scope.launch {
-                    if (Clerk.auth.signOut() is ClerkResult.Failure) {
+                    try {
+                        onDeleted()
+                    } catch (_: Exception) {
                         deletionMessage = "Your account deletion is underway, but this device could not finish signing out. Close and reopen Media Tools."
                     }
                 }

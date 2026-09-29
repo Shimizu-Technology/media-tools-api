@@ -88,7 +88,7 @@ class MediaToolsApiTest {
 
         assertTrue(error is MediaToolsAPIException)
         assertEquals("The signed-in account changed. Try again.", error?.message)
-        assertEquals(1, server.requestCount)
+        assertEquals(0, server.requestCount)
     }
 }
 

@@ -32,6 +32,18 @@ class AIProcessingConsentStoreTest {
         assertFalse(first.contains("user_sensitive_identifier"))
         assertNotEquals(first, second)
     }
+
+    @Test
+    fun `verified migration moves consent to stable server account only`() {
+        val store = AIProcessingConsentStore(MemoryPreferences())
+        store.allow("clerk-a")
+
+        store.migrateVerifiedOwner("clerk-a", "user-uuid")
+
+        assertTrue(store.hasConsent("user-uuid"))
+        assertFalse(store.hasConsent("clerk-a"))
+        assertFalse(store.hasConsent("other-user"))
+    }
 }
 
 private class MemoryPreferences : ConsentPreferences {
