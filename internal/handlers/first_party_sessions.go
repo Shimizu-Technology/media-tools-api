@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"errors"
+	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -26,16 +28,28 @@ func (h *Handler) BootstrapFirstPartySession(c *gin.Context) {
 	}
 	var req bootstrapSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("bootstrap request binding failed: %v", err)
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Client type and device name are required", Code: http.StatusBadRequest})
 		return
 	}
+	req.DeviceName = strings.TrimSpace(req.DeviceName)
+	if (req.ClientType != "web" && req.ClientType != "ios" && req.ClientType != "android") || len(req.DeviceName) > 80 {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Unsupported client type or device name is too long", Code: http.StatusBadRequest})
+		return
+	}
 	if err := h.DB.EnsureAuthIdentity(c.Request.Context(), user.ID, "clerk", *user.ClerkID); err != nil {
-		c.JSON(http.StatusConflict, models.ErrorResponse{Error: "identity_conflict", Message: "Could not link this identity to the account", Code: http.StatusConflict})
+		log.Printf("bootstrap identity link failed for user %s: %v", user.ID, err)
+		if errors.Is(err, database.ErrIdentityOwnedByOther) {
+			c.JSON(http.StatusConflict, models.ErrorResponse{Error: "identity_conflict", Message: "Could not link this identity to the account", Code: http.StatusConflict})
+		} else {
+			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not link this identity to the account", Code: http.StatusServiceUnavailable})
+		}
 		return
 	}
 	pair, err := h.DB.CreateFirstPartySession(c.Request.Context(), user.ID, req.ClientType, req.DeviceName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "session_creation_failed", Message: "Could not create device session", Code: http.StatusInternalServerError})
+		log.Printf("bootstrap session creation failed for user %s: %v", user.ID, err)
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "session_creation_failed", Message: "Could not create device session", Code: http.StatusServiceUnavailable})
 		return
 	}
 	c.Header("Cache-Control", "no-store")
