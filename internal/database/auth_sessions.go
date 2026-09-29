@@ -25,6 +25,7 @@ var (
 	ErrSessionInvalid        = errors.New("session credential is invalid or expired")
 	ErrSessionAlreadyRotated = errors.New("session credential was just rotated")
 	ErrSessionReplay         = errors.New("consumed session credential was replayed")
+	ErrInvalidSuccessorToken = errors.New("next refresh credential is invalid")
 	ErrIdentityOwnedByOther  = errors.New("identity is linked to another user")
 )
 
@@ -197,7 +198,7 @@ func (db *DB) RefreshFirstPartySessionWithSuccessor(ctx context.Context, credent
 		var valid bool
 		successorHash, valid = authTokenHash(successor, "mta_rt_")
 		if !valid || successorHash == hash {
-			return nil, ErrSessionInvalid
+			return nil, ErrInvalidSuccessorToken
 		}
 	}
 	now := time.Now().UTC()

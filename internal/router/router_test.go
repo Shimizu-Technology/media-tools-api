@@ -96,6 +96,13 @@ func TestFirstPartyBearerAndRefreshHTTP(t *testing.T) {
 	if err := json.Unmarshal(refreshed.Body.Bytes(), &newPair); err != nil || newPair.RefreshToken == pair.RefreshToken {
 		t.Fatalf("refresh response = %#v, %v", newPair, err)
 	}
+	malformed := httptest.NewRequest(http.MethodPost, "/api/v1/auth/session/refresh", strings.NewReader(`{"refresh_token":"`+newPair.RefreshToken+`","next_refresh_token":"bad"}`))
+	malformed.Header.Set("Content-Type", "application/json")
+	malformedResult := httptest.NewRecorder()
+	engine.ServeHTTP(malformedResult, malformed)
+	if malformedResult.Code != http.StatusBadRequest {
+		t.Fatalf("malformed successor status = %d", malformedResult.Code)
+	}
 
 	// A client that persisted its successor before sending can safely retry
 	// the exact same request if the first HTTP response was lost.
