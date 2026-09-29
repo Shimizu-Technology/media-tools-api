@@ -4,7 +4,7 @@
 //
 // Usage:
 //
-//	mta transcribe <url>              Submit a video for transcription
+//	mta transcribe <url-or-file>      Transcribe a video URL or local media file
 //	mta status <id>                   Check transcript status
 //	mta get <id>                      Get full transcript text
 //	mta list [--type video|audio|pdf] List library items
@@ -55,13 +55,16 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
-	if apiKey == "" {
+	if os.Args[1] == "help" || os.Args[1] == "-h" || os.Args[1] == "--help" {
+		printUsage()
+		return
+	}
+	cmd := os.Args[1]
+	args := os.Args[2:]
+	if apiKey == "" && cmd != "transcribe" {
 		fmt.Fprintln(os.Stderr, "Error: MTA_API_KEY not set. Export your API key first.")
 		os.Exit(1)
 	}
-
-	cmd := os.Args[1]
-	args := os.Args[2:]
 
 	var err error
 	switch cmd {
@@ -89,8 +92,6 @@ func main() {
 		err = cmdChatCollection(args)
 	case "health":
 		err = cmdHealth()
-	case "help", "-h", "--help":
-		printUsage()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		printUsage()
@@ -106,7 +107,14 @@ func printUsage() {
 	fmt.Println(`mta — Media Tools API CLI
 
 Commands:
-  transcribe <url>              Submit video URL for transcription (waits for completion)
+  transcribe [flags] <url-or-file>  Print transcript text when processing completes
+    --output text|json          Stable JSON or plain transcript text (default text)
+    --no-wait                   Return video:<id> or audio:<id> for later resumption
+    --resume <kind:id>          Resume an accepted transcription
+    --timeout 30m              Maximum upload and processing time
+    --interval 5s              Poll interval
+    --content-type general     File context: general, phone_call, meeting,
+                               voice_memo, interview, or lecture
   status <id>                   Check transcript status
   get <id>                      Print full transcript text
   list [--type video|audio|pdf] List library items
@@ -205,57 +213,7 @@ func cmdHealth() error {
 }
 
 func cmdTranscribe(args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: mta transcribe <url>")
-	}
-	videoURL := args[0]
-
-	// Submit
-	body, err := doPost("/transcripts", map[string]string{"url": videoURL})
-	if err != nil {
-		return fmt.Errorf("submit failed: %w", err)
-	}
-
-	var result struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
-		Title  string `json:"title"`
-	}
-	json.Unmarshal(body, &result)
-	fmt.Printf("Submitted: %s (status: %s)\n", result.ID, result.Status)
-
-	// Poll for completion
-	fmt.Print("Waiting for transcription")
-	for i := 0; i < 30; i++ {
-		time.Sleep(5 * time.Second)
-		fmt.Print(".")
-
-		statusBody, err := doGet("/transcripts/" + result.ID)
-		if err != nil {
-			continue
-		}
-		json.Unmarshal(statusBody, &result)
-		if result.Status == "completed" {
-			fmt.Printf("\n✅ Complete: %s\n", result.Title)
-			fmt.Printf("   ID: %s\n", result.ID)
-
-			// Get word count
-			var full struct {
-				WordCount int `json:"word_count"`
-			}
-			json.Unmarshal(statusBody, &full)
-			fmt.Printf("   Words: %d\n", full.WordCount)
-			return nil
-		}
-		if result.Status == "failed" {
-			var errResult struct {
-				ErrorMessage string `json:"error_message"`
-			}
-			json.Unmarshal(statusBody, &errResult)
-			return fmt.Errorf("transcription failed: %s", errResult.ErrorMessage)
-		}
-	}
-	return fmt.Errorf("timed out waiting for transcription (ID: %s)", result.ID)
+	return runTranscribe(args, os.Stdout, os.Stderr)
 }
 
 func cmdStatus(args []string) error {
