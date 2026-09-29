@@ -118,6 +118,23 @@ func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 	}
 	defer tx.Rollback()
 	var userID string
+	// Match replacement's lock order (account, then code). A concurrent rotate
+	// can invalidate this candidate while we wait, so consumption is rechecked.
+	err = tx.GetContext(ctx, &userID, `SELECT user_id FROM auth_recovery_codes WHERE code_hash = $1 AND consumed_at IS NULL`, hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRecoveryCodeInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find recovery account: %w", err)
+	}
+	var lockedID string
+	err = tx.GetContext(ctx, &lockedID, `SELECT id FROM users WHERE id = $1 FOR UPDATE`, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRecoveryCodeInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock recovery account: %w", err)
+	}
 	err = tx.GetContext(ctx, &userID, `
 		UPDATE auth_recovery_codes SET consumed_at = $2
 		WHERE code_hash = $1 AND consumed_at IS NULL RETURNING user_id`, hash, now)
