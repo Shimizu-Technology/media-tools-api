@@ -99,6 +99,11 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		r.POST("/api/v1/auth/login", h.Login)
 	}
 	if cfg.FirstPartyAuthEnabled && cfg.DB != nil {
+		passkeys, err := handlers.NewPasskeyAuthenticator()
+		if err != nil {
+			panic("invalid passkey relying-party configuration: " + err.Error())
+		}
+		h.Passkeys = passkeys
 		// A still-valid Clerk identity is the bridge to the same existing user.
 		// Never exchange an API key or a legacy JWT for a device session.
 		if jwksCache != nil {
@@ -107,6 +112,10 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			clerkSession.POST("/session/bootstrap", h.BootstrapFirstPartySession)
 		}
 		r.POST("/api/v1/auth/session/refresh", h.RefreshFirstPartySession)
+		passkeyLogin := r.Group("/api/v1/auth/passkeys/login")
+		passkeyLogin.Use(rateLimiter.RateLimitUnauthenticated(300))
+		passkeyLogin.POST("/begin", h.BeginPasskeyLogin)
+		passkeyLogin.POST("/finish", h.FinishPasskeyLogin)
 	}
 
 	// --- JWT-protected routes (MTA-20) — accepts Clerk or legacy JWT ---
@@ -125,6 +134,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		if cfg.FirstPartyAuthEnabled {
 			jwtProtected.GET("/auth/sessions", h.ListFirstPartySessions)
 			jwtProtected.DELETE("/auth/sessions/:id", h.RevokeFirstPartySession)
+			jwtProtected.POST("/auth/passkeys/register/begin", h.BeginPasskeyRegistration)
+			jwtProtected.POST("/auth/passkeys/register/finish", h.FinishPasskeyRegistration)
 		}
 		jwtProtected.DELETE("/account", h.DeleteAccount)
 		if cfg.LegacyAuthEnabled {
