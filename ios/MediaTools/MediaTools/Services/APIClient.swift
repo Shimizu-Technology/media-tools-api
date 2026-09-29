@@ -68,7 +68,14 @@ actor APIClient {
         guard let session = await Clerk.shared.session else {
             throw APIError.authenticationRequired(message: "Sign in to continue.")
         }
-        if let expectedOwnerID, session.user?.id != expectedOwnerID {
+        let expectedClerkID: String?
+        if let expectedOwnerID {
+            expectedClerkID = await DeviceSessionController.shared
+                .clerkIDForFallbackOwner(expectedOwnerID) ?? expectedOwnerID
+        } else {
+            expectedClerkID = nil
+        }
+        if let expectedClerkID, session.user?.id != expectedClerkID {
             throw APIError.authenticationRequired(
                 message: "The signed-in account changed. Switch back to continue this upload."
             )
@@ -97,7 +104,7 @@ actor APIClient {
         }
         guard let currentSession = await Clerk.shared.session,
               currentSession.id == sessionID,
-              expectedOwnerID == nil || currentSession.user?.id == expectedOwnerID
+              expectedClerkID == nil || currentSession.user?.id == expectedClerkID
         else {
             throw APIError.authenticationRequired(
                 message: "The signed-in account changed. Switch back to continue this upload."

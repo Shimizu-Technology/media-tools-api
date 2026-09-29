@@ -629,7 +629,7 @@ struct SettingsView: View {
         defer { isSigningOut = false }
 
         do {
-            try await deviceSession.revokeAndClear()
+            try await deviceSession.revokeOrSuspend()
             if clerk.user != nil {
                 try await clerk.auth.signOut()
             }

@@ -208,6 +208,63 @@ final class DeviceSessionTests: XCTestCase {
     }
 
     @MainActor
+    func testUnavailableRevocationSuspendsDeviceAccessAndRetriesLater() async throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: pair, verifiedClerkID: "clerk-a",
+                                pendingNextRefreshToken: nil)
+        )
+        let controller = DeviceSessionController(
+            transport: RevocationDeviceSessionTransport(),
+            baseURL: URL(string: "https://example.test/api/v1")!,
+            store: store,
+            enabled: true
+        )
+
+        try await controller.revokeOrSuspend()
+        XCTAssertEqual(store.value?.pendingRevocation, true)
+        let suspendedToken = try await controller.accessToken(
+            expectedOwnerID: "server-a", forceRefresh: false
+        )
+        XCTAssertNil(suspendedToken)
+
+        let restoredOwner = await controller.activate(clerkID: nil)
+        XCTAssertNil(restoredOwner)
+        XCTAssertNil(store.value)
+    }
+
+    @MainActor
+    func testRollbackKeepsVerifiedLocalOwnerOnClerkFallback() async throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: pair, verifiedClerkID: "clerk-a",
+                                pendingNextRefreshToken: nil)
+        )
+        let controller = DeviceSessionController(
+            transport: DisabledSessionTransport(),
+            baseURL: URL(string: "https://example.test/api/v1")!,
+            store: store,
+            enabled: true
+        )
+
+        try await controller.revokeOrSuspend()
+        XCTAssertEqual(store.value?.pendingRevocation, true)
+        let sameOwner = await controller.activate(clerkID: "clerk-a")
+        XCTAssertEqual(sameOwner, "server-a")
+        XCTAssertEqual(controller.clerkIDForFallbackOwner("server-a"), "clerk-a")
+        let otherOwner = await controller.activate(clerkID: "clerk-b")
+        XCTAssertEqual(otherOwner, "clerk-b")
+    }
+
+    @MainActor
     func testOldRefreshCannotInvalidateClearedSession() async throws {
         let pair = DeviceSessionPair(
             sessionID: "session-a", userID: "server-a", accessToken: "mta_at_expired",

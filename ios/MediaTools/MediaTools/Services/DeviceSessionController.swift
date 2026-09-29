@@ -28,6 +28,8 @@ struct StoredDeviceSession: Codable, Equatable {
     let verifiedClerkID: String
     /// Written before refresh so a lost response can retry the same rotation.
     var pendingNextRefreshToken: String?
+    /// A signed-out credential retained only to retry server revocation.
+    var pendingRevocation: Bool? = nil
 }
 
 /// App-only Keychain item. The future Share Extension must not receive this
@@ -116,8 +118,14 @@ final class DeviceSessionController {
     }
 
     var verifiedMigration: (clerkID: String, userID: String)? {
-        guard let stored else { return nil }
+        guard let stored, stored.pendingRevocation != true else { return nil }
         return (stored.verifiedClerkID, stored.pair.userID)
+    }
+
+    func clerkIDForFallbackOwner(_ ownerID: String) -> String? {
+        guard let stored, stored.pendingRevocation == true,
+              stored.pair.userID == ownerID else { return nil }
+        return stored.verifiedClerkID
     }
 
     /// Called before exposing an account workspace. A different Clerk account
@@ -126,6 +134,18 @@ final class DeviceSessionController {
         guard enabled else {
             activeUserID = clerkID
             return clerkID
+        }
+        if let stored, stored.pendingRevocation == true {
+            do {
+                try await revokeAndClear()
+            } catch {
+                // A suspended credential is never used for the workspace.
+                // Clerk can still serve a currently signed-in account.
+                let ownerID = clerkID == stored.verifiedClerkID
+                    ? stored.pair.userID : clerkID
+                activeUserID = ownerID
+                return ownerID
+            }
         }
         if needsSignIn {
             guard clerkID != nil else {
@@ -173,10 +193,13 @@ final class DeviceSessionController {
     }
 
     /// Returns nil only when the staged client has no first-party credential.
-    func accessToken(expectedOwnerID: String?, forceRefresh: Bool) async throws -> String? {
+    func accessToken(expectedOwnerID: String?, forceRefresh: Bool,
+                     forRevocation: Bool = false) async throws -> String? {
         guard enabled, let stored else { return nil }
+        if stored.pendingRevocation == true && !forRevocation { return nil }
         if let currentClerkID = Clerk.shared.user?.id,
-           currentClerkID != stored.verifiedClerkID {
+           currentClerkID != stored.verifiedClerkID,
+           !(forRevocation && stored.pendingRevocation == true) {
             throw APIError.authenticationRequired(
                 message: "The signed-in account changed. Switch back to continue this upload."
             )
@@ -232,9 +255,30 @@ final class DeviceSessionController {
         clear()
     }
 
+    /// Complete local sign-out even when server revocation is unavailable.
+    /// The suspended credential remains device-only and can only be used to
+    /// retry revocation; it cannot authenticate API workspace requests.
+    func revokeOrSuspend() async throws {
+        let sessionID = stored?.pair.sessionID
+        do {
+            try await revokeAndClear()
+        } catch {
+            guard var value = stored, value.pair.sessionID == sessionID else { throw error }
+            value.pendingRevocation = true
+            try store.save(value)
+            stored = value
+            generation += 1
+            refreshTask?.cancel()
+            refreshTask = nil
+            activeUserID = nil
+            needsSignIn = false
+        }
+    }
+
     private func revoke(sessionID: String, forceRefresh: Bool) async throws {
         guard let token = try await accessToken(expectedOwnerID: stored?.pair.userID,
-                                                forceRefresh: forceRefresh) else {
+                                                forceRefresh: forceRefresh,
+                                                forRevocation: true) else {
             throw APIError.authenticationRequired(message: "Sign in to finish signing out.")
         }
         var request = URLRequest(url: baseURL.appendingPathComponent("auth/sessions/\(sessionID)"))
@@ -320,7 +364,8 @@ final class DeviceSessionController {
         guard startingGeneration == generation,
               stored?.pair.sessionID == value.pair.sessionID,
               stored?.pendingNextRefreshToken == next,
-              Clerk.shared.user?.id == nil || Clerk.shared.user?.id == value.verifiedClerkID,
+              Clerk.shared.user?.id == nil || Clerk.shared.user?.id == value.verifiedClerkID
+                || value.pendingRevocation == true,
               !Task.isCancelled else { throw CancellationError() }
         guard pair.userID == value.pair.userID,
               pair.sessionID == value.pair.sessionID,

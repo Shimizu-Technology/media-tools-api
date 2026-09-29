@@ -256,8 +256,10 @@ Live Activity provides a visible Stop action.
   the app can finish it with the device session.
 - **Safe rollout** — The iOS flag defaults off. With the flag off, API requests
   continue using Clerk. The Share Extension only copies files into the local
-  inbox; it receives no device-session credential. Signing out clears the local
-  credential, and account deletion clears it with local account data.
+  inbox; it receives no device-session credential. Signing out revokes and
+  clears the credential. If the API cannot confirm revocation, the app suspends
+  device-session access, signs out locally, and retains the Keychain item only
+  to retry revocation later. Account deletion clears it with local account data.
 - **Token Sync** — The existing Clerk token sync remains for the staged rollout.
 
 ### UX
