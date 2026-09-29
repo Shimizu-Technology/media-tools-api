@@ -138,3 +138,20 @@ func TestTranscribeRejectsUnsupportedFileBeforeRequest(t *testing.T) {
 		t.Fatal(fmt.Sprint(err))
 	}
 }
+
+func TestResumeStopsOnUnauthorizedInsteadOfPolling(t *testing.T) {
+	checks := 0
+	withTestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		checks++
+		w.WriteHeader(http.StatusUnauthorized)
+		io.WriteString(w, `{"error":"unauthorized"}`)
+	}))
+	var stdout, stderr bytes.Buffer
+	err := runTranscribe([]string{"--resume", "audio:existing-1", "--interval", "1ms"}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 401") {
+		t.Fatalf("error = %v", err)
+	}
+	if checks != 1 || stdout.Len() != 0 {
+		t.Errorf("checks=%d stdout=%q", checks, stdout.String())
+	}
+}

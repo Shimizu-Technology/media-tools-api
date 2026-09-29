@@ -30,6 +30,15 @@ type transcriptionResult struct {
 	ErrorMessage   string `json:"error_message,omitempty"`
 }
 
+type apiStatusError struct {
+	status int
+	body   string
+}
+
+func (e apiStatusError) Error() string {
+	return fmt.Sprintf("HTTP %d: %s", e.status, e.body)
+}
+
 func (r transcriptionResult) reference() string { return r.Kind + ":" + r.ID }
 
 func parseReference(value string) (transcriptionResult, error) {
@@ -70,6 +79,9 @@ func runTranscribe(args []string, stdout, stderr io.Writer) error {
 
 	var result transcriptionResult
 	if *resume != "" {
+		if *noWait {
+			return fmt.Errorf("--no-wait cannot be combined with --resume")
+		}
 		if flags.NArg() != 0 {
 			return fmt.Errorf("--resume cannot be combined with a source")
 		}
@@ -95,6 +107,9 @@ func runTranscribe(args []string, stdout, stderr io.Writer) error {
 		if parsed.Scheme == "http" || parsed.Scheme == "https" {
 			if parsed.Host == "" {
 				return fmt.Errorf("video URL has no host")
+			}
+			if *contentType != "general" {
+				return fmt.Errorf("--content-type applies only to local files")
 			}
 			result, err = submitVideo(ctx, source)
 		} else {
@@ -204,12 +219,16 @@ func sendTranscriptionRequest(req *http.Request) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	const maxResponseBytes = 32 << 20
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, err
 	}
+	if len(data) > maxResponseBytes {
+		return nil, fmt.Errorf("API response exceeded 32 MB")
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+		return nil, apiStatusError{status: resp.StatusCode, body: strings.TrimSpace(string(data))}
 	}
 	return data, nil
 }
@@ -266,8 +285,11 @@ func waitForTranscription(ctx context.Context, ref transcriptionResult, interval
 		} else {
 			// Retry transient status failures. Invalid credentials, missing
 			// records, and malformed responses require human intervention.
-			message := err.Error()
-			if strings.Contains(message, "HTTP 401:") || strings.Contains(message, "HTTP 403:") || strings.Contains(message, "HTTP 404:") || strings.Contains(message, "decode API response") {
+			var statusError apiStatusError
+			if errors.As(err, &statusError) && statusError.status < 500 && statusError.status != http.StatusTooManyRequests {
+				return ref, fmt.Errorf("check %s: %w", ref.reference(), err)
+			}
+			if strings.Contains(err.Error(), "decode API response") || strings.Contains(err.Error(), "omitted transcription ID") {
 				return ref, fmt.Errorf("check %s: %w", ref.reference(), err)
 			}
 			fmt.Fprintf(stderr, "Status check for %s failed; retrying: %v\n", ref.reference(), err)
