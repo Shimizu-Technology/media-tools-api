@@ -96,4 +96,25 @@ func TestFirstPartyBearerAndRefreshHTTP(t *testing.T) {
 	if err := json.Unmarshal(refreshed.Body.Bytes(), &newPair); err != nil || newPair.RefreshToken == pair.RefreshToken {
 		t.Fatalf("refresh response = %#v, %v", newPair, err)
 	}
+
+	// A client that persisted its successor before sending can safely retry
+	// the exact same request if the first HTTP response was lost.
+	clientNext, err := database.RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"refresh_token":"` + newPair.RefreshToken + `","next_refresh_token":"` + clientNext + `"}`
+	for attempt := 0; attempt < 2; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/session/refresh", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("recovery attempt %d status = %d: %s", attempt, response.Code, response.Body.String())
+		}
+		var recovered database.AuthTokenPair
+		if err := json.Unmarshal(response.Body.Bytes(), &recovered); err != nil || recovered.RefreshToken != clientNext {
+			t.Fatalf("recovery attempt %d pair = %#v, %v", attempt, recovered, err)
+		}
+	}
 }
