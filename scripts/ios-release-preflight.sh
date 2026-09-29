@@ -276,14 +276,22 @@ if [[ -n "$export_path" ]]; then
   exported_get_task_allow="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:entitlements:get-task-allow" "$distribution_summary")"
   exported_apple_mode="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:entitlements:com.apple.developer.applesignin:0" "$distribution_summary")"
   exported_certificate="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:certificate:type" "$distribution_summary")"
-  widget_build="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:embeddedBinaries:0:buildNumber" "$distribution_summary")"
-  widget_get_task_allow="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:embeddedBinaries:0:entitlements:get-task-allow" "$distribution_summary")"
+  embedded_indexes="$(plutil -convert json -o - "$distribution_summary" | ruby -rjson -e '
+    binaries = JSON.parse(STDIN.read).fetch("MediaTools.ipa").fetch(0).fetch("embeddedBinaries")
+    widget = binaries.each_index.select { |index| binaries[index]["name"] == "MediaToolsWidget.appex" }
+    share = binaries.each_index.select { |index| binaries[index]["name"] == "ShareExtension.appex" }
+    abort "Expected one widget and one Share Extension in export" unless widget.length == 1 && share.length == 1
+    puts "#{widget.first} #{share.first}"
+  ')"
+  read -r widget_index share_index <<< "$embedded_indexes"
+  widget_build="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:embeddedBinaries:${widget_index}:buildNumber" "$distribution_summary")"
+  widget_id="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:embeddedBinaries:${widget_index}:entitlements:application-identifier" "$distribution_summary")"
+  widget_get_task_allow="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:embeddedBinaries:${widget_index}:entitlements:get-task-allow" "$distribution_summary")"
   exported_app_group="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:entitlements:com.apple.security.application-groups:0" "$distribution_summary")"
-  share_name="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:embeddedBinaries:1:name" "$distribution_summary")"
-  share_build="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:embeddedBinaries:1:buildNumber" "$distribution_summary")"
-  share_id="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:embeddedBinaries:1:entitlements:application-identifier" "$distribution_summary")"
-  share_group="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:embeddedBinaries:1:entitlements:com.apple.security.application-groups:0" "$distribution_summary")"
-  share_get_task_allow="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:embeddedBinaries:1:entitlements:get-task-allow" "$distribution_summary")"
+  share_build="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:embeddedBinaries:${share_index}:buildNumber" "$distribution_summary")"
+  share_id="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:embeddedBinaries:${share_index}:entitlements:application-identifier" "$distribution_summary")"
+  share_group="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:embeddedBinaries:${share_index}:entitlements:com.apple.security.application-groups:0" "$distribution_summary")"
+  share_get_task_allow="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:embeddedBinaries:${share_index}:entitlements:get-task-allow" "$distribution_summary")"
 
   [[ "$exported_build" == "$build_number" ]] || { echo "Exported build number does not match"; exit 1; }
   [[ "$exported_version" == "$marketing_version" ]] || { echo "Exported marketing version does not match"; exit 1; }
@@ -292,9 +300,10 @@ if [[ -n "$export_path" ]]; then
   [[ "$exported_apple_mode" == "Default" ]] || { echo "App Store export is missing Sign in with Apple"; exit 1; }
   [[ "$exported_certificate" == *"Apple Distribution"* ]] || { echo "App Store export is not distribution-signed: $exported_certificate"; exit 1; }
   [[ "$widget_build" == "$build_number" ]] || { echo "Widget build number does not match the app"; exit 1; }
+  [[ "$widget_id" == "$team_id.$bundle_id.Widget" ]] || { echo "Exported widget identity does not match"; exit 1; }
   [[ "$widget_get_task_allow" == "false" ]] || { echo "Exported widget is debuggable"; exit 1; }
   [[ "$exported_app_group" == "group.com.shimizu-technology.media-tools" ]] || { echo "Exported app is missing the share App Group"; exit 1; }
-  [[ "$share_name" == "ShareExtension.appex" && "$share_build" == "$build_number" ]] || { echo "Exported Share Extension is missing or has the wrong build number"; exit 1; }
+  [[ "$share_build" == "$build_number" ]] || { echo "Exported Share Extension has the wrong build number"; exit 1; }
   [[ "$share_id" == "$team_id.$bundle_id.ShareExtension" && "$share_group" == "$exported_app_group" ]] || { echo "Exported Share Extension identity or App Group does not match"; exit 1; }
   [[ "$share_get_task_allow" == "false" ]] || { echo "Exported Share Extension is debuggable"; exit 1; }
 fi

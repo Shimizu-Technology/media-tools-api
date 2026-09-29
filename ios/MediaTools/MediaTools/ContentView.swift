@@ -123,7 +123,7 @@ struct WelcomeView: View {
                             Label("Saved on this iPhone", systemImage: "iphone.and.arrow.forward")
                                 .font(Theme.body(16, weight: .semibold))
                                 .foregroundStyle(Theme.textPrimary)
-                            Text("Your recordings are safe here. Sign in to review and transcribe them.")
+                            Text("These recordings are saved here. Sign in to review and transcribe them.")
                                 .font(Theme.caption(13))
                                 .foregroundStyle(Theme.textSecondary)
                             ForEach(recorder.availableRecordings) { recording in
