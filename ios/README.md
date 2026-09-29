@@ -256,7 +256,10 @@ Live Activity provides a visible Stop action.
   the app can finish it with the device session.
 - **Safe rollout** — The iOS flag defaults off. With the flag off, API requests
   continue using Clerk while a previously verified local owner ID remains
-  available for recordings. The Share Extension only copies files into the local
+  available for recordings, including after sign-out and relaunch. This local
+  mapping contains no credentials and is removed on account deletion. Migrated
+  AI consent moves to that owner so later activation cannot restore a revoked
+  grant. The Share Extension only copies files into the local
   inbox; it receives no device-session credential. Signing out revokes and
   clears the credential. If the API cannot confirm revocation, the app suspends
   device-session access, signs out locally, and retains the Keychain item only

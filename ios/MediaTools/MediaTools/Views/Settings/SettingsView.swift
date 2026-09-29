@@ -662,6 +662,9 @@ struct SettingsView: View {
            migration.userID == ownerID {
             aiProcessingConsent.removeConsent(ownerID: migration.clerkID)
         }
+        if let clerkID = deviceSession.clerkIDForFallbackOwner(ownerID) {
+            deviceSession.removeLocalOwnerMapping(clerkID: clerkID)
+        }
         deviceSession.clear()
         // The server has accepted an irreversible deletion request. Stop the
         // share-extension sync before clearing its token so a still-present

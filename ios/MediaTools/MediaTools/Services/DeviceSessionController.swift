@@ -39,11 +39,40 @@ protocol DeviceSessionStoring {
     func load() -> StoredDeviceSession?
     func save(_ value: StoredDeviceSession) throws
     func delete()
+    func localOwnerID(for clerkID: String) -> String?
+    func clerkID(forLocalOwnerID ownerID: String) -> String?
+    func saveLocalOwnerID(_ ownerID: String, for clerkID: String)
+    func removeLocalOwnerID(for clerkID: String)
 }
 
 struct DeviceSessionKeychainStore: DeviceSessionStoring {
     private let service = "com.shimizu-technology.media-tools.device-session"
     private let account = "first-party-ios-v1"
+    private let ownerMappingsKey = "verifiedLocalOwnerMappings.v1"
+
+    // This metadata grants no API access. Keep it separate from credentials:
+    // signing out must not disconnect recordings already migrated locally.
+    private var ownerMappings: [String: String] {
+        UserDefaults.standard.dictionary(forKey: ownerMappingsKey) as? [String: String] ?? [:]
+    }
+
+    func localOwnerID(for clerkID: String) -> String? { ownerMappings[clerkID] }
+
+    func clerkID(forLocalOwnerID ownerID: String) -> String? {
+        ownerMappings.first(where: { $0.value == ownerID })?.key
+    }
+
+    func saveLocalOwnerID(_ ownerID: String, for clerkID: String) {
+        var mappings = ownerMappings
+        mappings[clerkID] = ownerID
+        UserDefaults.standard.set(mappings, forKey: ownerMappingsKey)
+    }
+
+    func removeLocalOwnerID(for clerkID: String) {
+        var mappings = ownerMappings
+        mappings.removeValue(forKey: clerkID)
+        UserDefaults.standard.set(mappings, forKey: ownerMappingsKey)
+    }
 
     func load() -> StoredDeviceSession? {
         var query = baseQuery
@@ -117,6 +146,9 @@ final class DeviceSessionController {
         // Keep the verified local-owner mapping available during an iOS flag
         // rollback without ever using its first-party bearer credential.
         self.stored = self.store.load()
+        if let stored {
+            self.store.saveLocalOwnerID(stored.pair.userID, for: stored.verifiedClerkID)
+        }
     }
 
     var verifiedMigration: (clerkID: String, userID: String)? {
@@ -125,15 +157,14 @@ final class DeviceSessionController {
     }
 
     func clerkIDForFallbackOwner(_ ownerID: String) -> String? {
-        guard let stored, stored.pendingRevocation == true || !enabled,
-              stored.pair.userID == ownerID else { return nil }
-        return stored.verifiedClerkID
+        if let clerkID = Clerk.shared.user?.id,
+           store.localOwnerID(for: clerkID) == ownerID { return clerkID }
+        return store.clerkID(forLocalOwnerID: ownerID)
     }
 
     func fallbackOwnerID(for clerkID: String?) -> String? {
         guard let clerkID else { return nil }
-        guard let stored, stored.verifiedClerkID == clerkID else { return clerkID }
-        return stored.pair.userID
+        return store.localOwnerID(for: clerkID) ?? clerkID
     }
 
     /// Called before exposing an account workspace. A different Clerk account
@@ -171,13 +202,13 @@ final class DeviceSessionController {
             } catch {
                 // The server rollout may be disabled. Clerk remains the safe
                 // fallback for this already signed-in account.
-                activeUserID = clerkID
-                return clerkID
+                activeUserID = fallbackOwnerID(for: clerkID)
+                return activeUserID
             }
         }
         guard let stored else {
-            activeUserID = clerkID
-            return clerkID
+            activeUserID = fallbackOwnerID(for: clerkID)
+            return activeUserID
         }
         if stored.pair.accessExpiresAt <= Date().addingTimeInterval(60) {
             do {
@@ -196,7 +227,7 @@ final class DeviceSessionController {
                 }
             }
         }
-        activeUserID = self.stored?.pair.userID ?? clerkID
+        activeUserID = self.stored?.pair.userID ?? fallbackOwnerID(for: clerkID)
         return activeUserID
     }
 
@@ -229,6 +260,10 @@ final class DeviceSessionController {
         activeUserID = nil
         needsSignIn = false
         store.delete()
+    }
+
+    func removeLocalOwnerMapping(clerkID: String) {
+        store.removeLocalOwnerID(for: clerkID)
     }
 
     func revokeAndClear() async throws {
@@ -327,6 +362,7 @@ final class DeviceSessionController {
         let value = StoredDeviceSession(pair: pair, verifiedClerkID: verifiedClerkID,
                                         pendingNextRefreshToken: nil)
         try store.save(value)
+        store.saveLocalOwnerID(pair.userID, for: verifiedClerkID)
         stored = value
         needsSignIn = false
     }

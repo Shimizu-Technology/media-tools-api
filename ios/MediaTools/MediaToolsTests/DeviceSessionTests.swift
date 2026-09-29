@@ -4,10 +4,19 @@ import XCTest
 @MainActor
 private final class MemoryDeviceSessionStore: DeviceSessionStoring {
     var value: StoredDeviceSession?
+    private var ownerMappings: [String: String] = [:]
     init(_ value: StoredDeviceSession?) { self.value = value }
     func load() -> StoredDeviceSession? { value }
     func save(_ value: StoredDeviceSession) throws { self.value = value }
     func delete() { value = nil }
+    func localOwnerID(for clerkID: String) -> String? { ownerMappings[clerkID] }
+    func clerkID(forLocalOwnerID ownerID: String) -> String? {
+        ownerMappings.first(where: { $0.value == ownerID })?.key
+    }
+    func saveLocalOwnerID(_ ownerID: String, for clerkID: String) {
+        ownerMappings[clerkID] = ownerID
+    }
+    func removeLocalOwnerID(for clerkID: String) { ownerMappings.removeValue(forKey: clerkID) }
 }
 
 private actor RecoveringDeviceSessionTransport: DeviceSessionTransport {
@@ -42,6 +51,7 @@ private actor RecoveringDeviceSessionTransport: DeviceSessionTransport {
 
 private actor RevocationDeviceSessionTransport: DeviceSessionTransport {
     private var shouldFail = true
+    init(shouldFail: Bool = true) { self.shouldFail = shouldFail }
 
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         let status = shouldFail ? 503 : 204
@@ -86,6 +96,37 @@ private actor DelayedUnauthorizedTransport: DeviceSessionTransport {
 }
 
 final class DeviceSessionTests: XCTestCase {
+    @MainActor
+    func testSuccessfulSignOutKeepsOwnerMappingForFlagRollbackAndRelaunch() async throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: pair, verifiedClerkID: "clerk-a",
+                                pendingNextRefreshToken: nil)
+        )
+        let controller = DeviceSessionController(
+            transport: RevocationDeviceSessionTransport(shouldFail: false),
+            baseURL: URL(string: "https://example.test/api/v1")!,
+            store: store, enabled: true
+        )
+        try await controller.revokeAndClear()
+        XCTAssertNil(store.value)
+        let relaunched = DeviceSessionController(store: store, enabled: false)
+        let signedOutOwner = await relaunched.activate(clerkID: nil)
+        XCTAssertNil(signedOutOwner)
+        let sameOwner = await relaunched.activate(clerkID: "clerk-a")
+        XCTAssertEqual(sameOwner, "server-a")
+        XCTAssertEqual(relaunched.clerkIDForFallbackOwner("server-a"), "clerk-a")
+        let token = try await relaunched.accessToken(expectedOwnerID: "server-a", forceRefresh: false)
+        XCTAssertNil(token)
+        let otherOwner = await relaunched.activate(clerkID: "clerk-b")
+        XCTAssertEqual(otherOwner, "clerk-b")
+        relaunched.removeLocalOwnerMapping(clerkID: "clerk-a")
+        XCTAssertEqual(relaunched.fallbackOwnerID(for: "clerk-a"), "clerk-a")
+    }
     @MainActor
     func testRefreshRetriesSameJournaledRotationAfterLostResponse() async throws {
         let oldPair = DeviceSessionPair(
