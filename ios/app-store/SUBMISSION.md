@@ -7,13 +7,14 @@ implements it. Run `make ios-release-preflight` before an archive and again with
 ## Current release status
 
 - Version: `1.0`
-- Next TestFlight build: `10`
+- Next TestFlight build: `11`
 - Bundle ID: `com.ShimizuTechnology.MediaTools`
 - Apple team: `4T358A5S74`
 - Minimum OS: iOS 18.5
 - Release compiler: Xcode 26.6 / iOS 26.5 SDK
-- TestFlight/App Store: build 10 addresses Apple's September 2 rejection after
-  the Clerk development Apple connection and native-app mapping were enabled.
+- TestFlight/App Store: build 11 retains the Apple sign-in corrections made
+  after the September 2 rejection and adds the signed Share Extension for
+  on-device Voice Memos and Files testing. Build 10 was already uploaded.
   The checked-in `native-auth-release.json` records the dashboard mapping that
   release preflight requires. The owner has explicitly chosen to keep the Clerk
   development instance for this release; re-audit that decision before a future
