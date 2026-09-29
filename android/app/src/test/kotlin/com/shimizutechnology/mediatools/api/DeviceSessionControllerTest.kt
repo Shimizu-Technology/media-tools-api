@@ -79,6 +79,7 @@ class DeviceSessionControllerTest {
 
         clerkId = "clerk-b"
 
+        assertTrue(controller.hasConflictingExternalIdentity(clerkId))
         assertNull(controller.currentOwnerId())
         assertTrue(runCatching { controller.token("user-uuid") }.exceptionOrNull() is MediaToolsAPIException)
         assertEquals("clerk-a", store.value?.verifiedClerkId)
@@ -86,16 +87,20 @@ class DeviceSessionControllerTest {
 
     @Test
     fun `sign out requires server revocation before clearing local credential`() = runTest {
+        val clerkId: String? = "clerk-b"
         val store = MemorySessionStore(StoredDeviceSession(firstPair.copy(accessExpiresAt = "2027-01-01T00:00:00Z"), "clerk-a"))
         val transport = FakeTransport().apply { responses += SessionResponse(503, "") }
-        val controller = controller(store, transport)
+        val controller = controller(store, transport, externalIdentity = { clerkId })
 
+        assertTrue(controller.hasConflictingExternalIdentity(clerkId))
         assertTrue(runCatching { controller.revokeAndClear() }.isFailure)
         assertNotNull(store.value)
+        assertTrue(controller.hasConflictingExternalIdentity(clerkId))
 
         transport.responses += SessionResponse(204, "")
         controller.revokeAndClear()
         assertNull(store.value)
+        assertFalse(controller.hasConflictingExternalIdentity(clerkId))
         assertNull(controller.currentOwnerId())
         assertEquals("DELETE", transport.calls.last().method)
     }

@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -22,6 +23,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -54,6 +58,7 @@ import com.shimizutechnology.mediatools.ui.library.LibraryDetailScreen
 import com.shimizutechnology.mediatools.ui.library.LibraryScreen
 import com.shimizutechnology.mediatools.ui.library.LibraryViewModel
 import com.shimizutechnology.mediatools.ui.settings.SettingsScreen
+import kotlinx.coroutines.launch
 
 @Composable
 fun MediaToolsApp() {
@@ -81,11 +86,13 @@ fun MediaToolsApp() {
     // immediately update the visible account workspace.
     val sessionRevision by deviceSession.revision.collectAsState()
     val clerkId = user?.id
+    val accountConflict = BuildConfig.FIRST_PARTY_ANDROID_AUTH_ENABLED &&
+        deviceSession.hasConflictingExternalIdentity(clerkId)
     val durableOwnerId = remember(sessionRevision, clerkId) {
         if (BuildConfig.FIRST_PARTY_ANDROID_AUTH_ENABLED) deviceSession.availableOwnerId(clerkId) else null
     }
-    LaunchedEffect(clerkId, session?.id, durableOwnerId) {
-        if (BuildConfig.FIRST_PARTY_ANDROID_AUTH_ENABLED && clerkId != null && session != null &&
+    LaunchedEffect(clerkId, session?.id, durableOwnerId, accountConflict) {
+        if (BuildConfig.FIRST_PARTY_ANDROID_AUTH_ENABLED && !accountConflict && clerkId != null && session != null &&
             session?.pendingTaskKey == null && durableOwnerId == null
         ) {
             runCatching {
@@ -104,6 +111,7 @@ fun MediaToolsApp() {
         }
     }
     when {
+        accountConflict -> AccountSwitchScreen(onSwitch = { deviceSession.revokeAndClear() })
         durableOwnerId != null -> key("device:$durableOwnerId") {
             SignedInApp(
                 ownerId = durableOwnerId,
@@ -145,6 +153,43 @@ fun MediaToolsApp() {
                 },
             )
         }
+    }
+}
+
+@Composable
+private fun AccountSwitchScreen(onSwitch: suspend () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var message by remember { mutableStateOf<String?>(null) }
+    var switching by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier.fillMaxSize().padding(28.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Switch accounts", style = androidx.compose.material3.MaterialTheme.typography.headlineSmall)
+        Text(
+            "This device still has a session for your previous account. Sign out of it before opening the new account.",
+            modifier = Modifier.padding(top = 12.dp),
+            textAlign = TextAlign.Center,
+        )
+        Button(
+            enabled = !switching,
+            onClick = {
+                switching = true
+                message = null
+                scope.launch {
+                    try {
+                        onSwitch()
+                    } catch (_: Exception) {
+                        message = "Could not close the previous session. Check your connection and try again."
+                    } finally {
+                        switching = false
+                    }
+                }
+            },
+            modifier = Modifier.padding(top = 20.dp),
+        ) { Text(if (switching) "Switching…" else "Sign out previous account") }
+        message?.let { Text(it, modifier = Modifier.padding(top = 12.dp)) }
     }
 }
 

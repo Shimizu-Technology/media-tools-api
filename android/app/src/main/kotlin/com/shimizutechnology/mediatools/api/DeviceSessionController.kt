@@ -64,6 +64,9 @@ class DeviceSessionController(
     val verifiedMigration: Pair<String, String>?
         get() = stored?.let { it.verifiedClerkId to it.pair.userId }
 
+    fun hasConflictingExternalIdentity(currentClerkId: String?): Boolean =
+        currentClerkId != null && stored?.verifiedClerkId?.let { it != currentClerkId } == true
+
     /** A different Clerk identity never inherits this device's account. */
     fun availableOwnerId(currentClerkId: String?): String? {
         val value = stored ?: return null
