@@ -102,11 +102,13 @@ func runTranscribe(args []string, stdout, stderr io.Writer) error {
 	defer cancel()
 	if *resume == "" {
 		source := flags.Arg(0)
-		parsed, err := url.Parse(source)
-		if err != nil {
-			return err
-		}
-		if parsed.Scheme == "http" || parsed.Scheme == "https" {
+		var err error
+		lowerSource := strings.ToLower(source)
+		if strings.HasPrefix(lowerSource, "http://") || strings.HasPrefix(lowerSource, "https://") {
+			parsed, parseErr := url.Parse(source)
+			if parseErr != nil {
+				return parseErr
+			}
 			if parsed.Host == "" {
 				return fmt.Errorf("video URL has no host")
 			}

@@ -139,6 +139,27 @@ func TestTranscribeRejectsUnsupportedFileBeforeRequest(t *testing.T) {
 	}
 }
 
+func TestTranscribeAcceptsLocalFilenameWithInvalidURLEscape(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "memo%bad.m4a")
+	if err := os.WriteFile(source, []byte("synthetic audio fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	withTestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/audio/transcribe" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		io.WriteString(w, `{"id":"audio-1","status":"pending"}`)
+	}))
+	var stdout, stderr bytes.Buffer
+	if err := runTranscribe([]string{"--no-wait", source}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if stdout.String() != "audio:audio-1\n" {
+		t.Errorf("stdout = %q", stdout.String())
+	}
+}
+
 func TestResumeStopsOnUnauthorizedInsteadOfPolling(t *testing.T) {
 	checks := 0
 	withTestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
