@@ -9,6 +9,8 @@
  * fetched just-in-time and do not need to be mirrored into localStorage.
  */
 
+import { isWebSessionActive, webCSRFHeaders } from './webSession';
+
 type AuthTokenGetter = (forceRefresh: boolean) => Promise<string | null>;
 
 let authTokenGetter: AuthTokenGetter | null = null;
@@ -26,6 +28,7 @@ async function getClerkToken(forceRefresh = false): Promise<string | null> {
 /** Get auth headers for API calls. Async because Clerk tokens need fetching. */
 export async function getAuthHeadersAsync(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+	if (isWebSessionActive()) return { ...headers, ...webCSRFHeaders() };
 
   // Try token getter first (Clerk)
   if (authTokenGetter) {
@@ -55,6 +58,7 @@ export async function getAuthHeadersAsync(): Promise<Record<string, string>> {
 /** Get upload headers (no Content-Type, let browser set multipart boundary). */
 export async function getAuthUploadHeadersAsync(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {};
+	if (isWebSessionActive()) return webCSRFHeaders();
 
   if (authTokenGetter) {
     const token = await getClerkToken();

@@ -10,8 +10,9 @@ import {
   getRefreshedClerkHeaders,
 } from './apiAuth';
 import { notifyLibraryActivityChanged } from './libraryActivityEvents';
+import { isWebSessionActive, renewWebSession, webSessionEnabled } from './webSession';
 
-const API_BASE = import.meta.env.VITE_API_URL
+const API_BASE = !webSessionEnabled && import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api/v1`
   : '/api/v1';
 
@@ -426,6 +427,9 @@ async function getUploadHeaders(): Promise<Record<string, string>> {
 async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const response = await fetch(input, init);
   if (response.status !== 401) return response;
+	if (isWebSessionActive()) {
+		return await renewWebSession() ? fetch(input, init) : response;
+	}
 
   const existingHeaders = new Headers(init?.headers);
   const isMultipart = init?.body instanceof FormData;

@@ -34,6 +34,8 @@ type RouterConfig struct {
 	JWTSecret                   string
 	LegacyAuthEnabled           bool
 	FirstPartyAuthEnabled       bool
+	WebCookieAuthEnabled        bool
+	WebCookieSecure             bool
 	AdminAPIKey                 string
 	OwnerKeyID                  string
 	OwnerKeyPrefix              string
@@ -62,6 +64,9 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.LimitJSONBody())
 	r.Use(middleware.CORS(cfg.AllowedOrigins))
+	if cfg.FirstPartyAuthEnabled && cfg.WebCookieAuthEnabled {
+		r.Use(middleware.WebCookieAuth(cfg.AllowedOrigins))
+	}
 
 	h := handlers.NewHandler(cfg.DB, cfg.WorkerPool, cfg.AudioTranscriber, cfg.AudioStorage, cfg.Webhooks, cfg.Summarizer, cfg.JWTSecret, cfg.AdminAPIKey, cfg.OwnerKeyID, cfg.OwnerKeyPrefix, cfg.YtDlpCookiesConfigured)
 	h.Version = cfg.Version
@@ -104,12 +109,16 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			panic("invalid passkey relying-party configuration: " + err.Error())
 		}
 		h.Passkeys = passkeys
+		web := handlers.NewWebSessionHandler(cfg.DB, cfg.WebCookieSecure, cfg.AllowedOrigins)
 		// A still-valid Clerk identity is the bridge to the same existing user.
 		// Never exchange an API key or a legacy JWT for a device session.
 		if jwksCache != nil {
 			clerkSession := r.Group("/api/v1/auth")
 			clerkSession.Use(middleware.ClerkAuth(cfg.DB, jwksCache, cfg.ClerkSecretKey))
 			clerkSession.POST("/session/bootstrap", h.BootstrapFirstPartySession)
+			if cfg.WebCookieAuthEnabled {
+				clerkSession.POST("/web/session/bootstrap", web.Bootstrap)
+			}
 		}
 		r.POST("/api/v1/auth/invitations", h.CreateInvitation)
 		r.POST("/api/v1/auth/invitations/redeem", rateLimiter.RateLimitUnauthenticated("invitation", 20), h.RedeemInvitation)
@@ -119,6 +128,12 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		passkeyLogin.POST("/begin", h.BeginPasskeyLogin)
 		passkeyLogin.POST("/finish", h.FinishPasskeyLogin)
 		r.POST("/api/v1/auth/recovery/redeem", rateLimiter.RateLimitUnauthenticated("recovery", 20), h.RedeemRecoveryCode)
+		if cfg.WebCookieAuthEnabled {
+			r.GET("/api/v1/auth/web/session/status", web.Status)
+			r.POST("/api/v1/auth/web/session/prepare", web.Prepare)
+			r.POST("/api/v1/auth/web/session/refresh", web.Refresh)
+			r.POST("/api/v1/auth/web/session/logout", web.Logout)
+		}
 	}
 
 	// --- JWT-protected routes (MTA-20) — accepts Clerk or legacy JWT ---

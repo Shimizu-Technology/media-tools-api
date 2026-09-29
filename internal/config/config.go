@@ -64,6 +64,8 @@ type Config struct {
 	// First-party sessions can be enabled for staged client migration. Clerk
 	// remains accepted until every installed client has moved.
 	FirstPartyAuthEnabled bool
+	// WebCookieAuthEnabled enables the staged, same-origin browser cookie flow.
+	WebCookieAuthEnabled bool
 
 	// Clerk Authentication
 	ClerkPublishableKey  string
@@ -149,6 +151,7 @@ func Load() (*Config, error) {
 		JWTSecret:             getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),
 		LegacyAuthEnabled:     getEnvBool("LEGACY_AUTH_ENABLED", ginMode != "release"),
 		FirstPartyAuthEnabled: getEnvBool("FIRST_PARTY_AUTH_ENABLED", false),
+		WebCookieAuthEnabled:  getEnvBool("WEB_COOKIE_AUTH_ENABLED", false),
 
 		// Clerk Authentication
 		ClerkPublishableKey:  getEnv("CLERK_PUBLISHABLE_KEY", ""),
@@ -186,6 +189,9 @@ func Load() (*Config, error) {
 		} else {
 			return nil, fmt.Errorf("CLERK_AUDIENCE, CLERK_AUTHORIZED_PARTY, or single CORS_ORIGIN must be set in production when Clerk auth is enabled")
 		}
+	}
+	if cfg.WebCookieAuthEnabled && (!cfg.FirstPartyAuthEnabled || cfg.ClerkJWKSURL == "") {
+		return nil, fmt.Errorf("WEB_COOKIE_AUTH_ENABLED requires FIRST_PARTY_AUTH_ENABLED and CLERK_JWKS_URL")
 	}
 
 	// Validate required configuration

@@ -9,6 +9,7 @@ interface AuthContextType {
   canUseWorkspace: boolean;
   user: User | null;
   refreshUser: () => Promise<void>;
+  signOut: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextType>({
@@ -18,4 +19,5 @@ export const AuthContext = createContext<AuthContextType>({
   canUseWorkspace: false,
   user: null,
   refreshUser: async () => undefined,
+  signOut: async () => undefined,
 });

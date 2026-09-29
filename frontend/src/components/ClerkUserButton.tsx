@@ -3,13 +3,14 @@
  * deletion must pass through Media Tools so application data and raw media are
  * removed before the identity provider is called.
  */
-import { SignInButton, SignedIn, SignedOut, useClerk, useUser } from '@clerk/clerk-react';
+import { SignInButton, useUser } from '@clerk/clerk-react';
 import { LogIn, LogOut, Settings } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useAuthContext } from '../contexts/useAuthContext';
 
 /** Keeps account actions in-app so deletion cannot bypass Media Tools cleanup. */
 function SignedInAccountMenu() {
-  const { signOut } = useClerk();
+  const { signOut } = useAuthContext();
   const { user } = useUser();
 
   return (
@@ -26,7 +27,7 @@ function SignedInAccountMenu() {
           <Settings className="h-4 w-4" />
           Account settings
         </Link>
-        <button type="button" onClick={() => void signOut({ redirectUrl: '/' })} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition hover:bg-[var(--color-nav-hover)]" style={{ color: 'var(--color-text-secondary)' }}>
+        <button type="button" onClick={() => void signOut()} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition hover:bg-[var(--color-nav-hover)]" style={{ color: 'var(--color-text-secondary)' }}>
           <LogOut className="h-4 w-4" />
           Sign out
         </button>
@@ -37,19 +38,18 @@ function SignedInAccountMenu() {
 
 /** Renders the Clerk sign-in action or the Media Tools-owned account menu. */
 export function ClerkUserButton() {
+  const { isAuthenticated } = useAuthContext();
   return (
     <>
-      <SignedOut>
+      {!isAuthenticated && (
         <SignInButton mode="modal">
           <button className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:opacity-80" style={{ color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface-overlay)' }}>
             <LogIn className="h-4 w-4" />
             <span className="hidden sm:inline">Sign in</span>
           </button>
         </SignInButton>
-      </SignedOut>
-      <SignedIn>
-        <SignedInAccountMenu />
-      </SignedIn>
+      )}
+      {isAuthenticated && <SignedInAccountMenu />}
     </>
   );
 }
