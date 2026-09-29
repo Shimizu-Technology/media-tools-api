@@ -1,3 +1,7 @@
+# Keep bookmarks and Home Screen shortcuts on the custom domain used by
+# first-party browser sessions and passkeys.
+https://media-tools-gu.netlify.app/* https://media.shimizu-technology.com/:splat 301!
+
 # SEO files - serve directly
 /robots.txt    /robots.txt    200
 /sitemap.xml   /sitemap.xml   200

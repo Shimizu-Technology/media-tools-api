@@ -251,6 +251,7 @@ func jwkToRSAPublicKey(jwk JWK) (*rsa.PublicKey, error) {
 // ClerkClaims represents the JWT claims from a Clerk-issued token.
 type ClerkClaims struct {
 	AuthorizedParty string `json:"azp,omitempty"`
+	SessionID       string `json:"sid,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -325,6 +326,9 @@ func ClerkAuth(db *database.DB, jwksCache *JWKSCache, clerkSecretKey string) gin
 		}
 
 		c.Set(userContextKey, user)
+		if claims.SessionID != "" {
+			c.Set(clerkSessionContextKey, claims.SessionID)
+		}
 		c.Next()
 	}
 }
