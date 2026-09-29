@@ -536,7 +536,15 @@ final class ModelDecodingTests: XCTestCase {
         consent.allow()
         consent.migrateConsent(from: "clerk-a", to: "server-a")
         XCTAssertTrue(consent.hasConsent(ownerID: "server-a"))
+        XCTAssertFalse(consent.hasConsent(ownerID: "clerk-a"))
         XCTAssertFalse(consent.hasConsent(ownerID: "clerk-b"))
+        consent.setActiveOwnerID("server-a")
+        consent.revoke()
+        consent.migrateConsent(from: "clerk-a", to: "server-a")
+        XCTAssertFalse(consent.hasConsent)
+        let relaunchedConsent = AIProcessingConsentManager(defaults: defaults)
+        relaunchedConsent.migrateConsent(from: "clerk-a", to: "server-a")
+        XCTAssertFalse(relaunchedConsent.hasConsent(ownerID: "server-a"))
     }
 
     @MainActor

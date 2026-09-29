@@ -20,7 +20,9 @@ struct ContentView: View {
 
     private var activeUserID: String? {
         if forceSignedOutForUITesting { return nil }
-        guard Configuration.firstPartyIOSAuthEnabled else { return clerk.user?.id }
+        guard Configuration.firstPartyIOSAuthEnabled else {
+            return deviceSession.fallbackOwnerID(for: clerk.user?.id)
+        }
         if let clerkID = clerk.user?.id,
            let migration = deviceSession.verifiedMigration,
            migration.clerkID != clerkID {
@@ -92,9 +94,15 @@ struct ContentView: View {
                 await uploadCoordinator.setActiveOwnerID(ownerID)
                 isResolvingAccount = false
             } else {
-                await uploadCoordinator.setActiveOwnerID(clerkID)
+                let ownerID: String?
+                if forceSignedOutForUITesting {
+                    ownerID = nil
+                } else {
+                    ownerID = await deviceSession.activate(clerkID: clerkID)
+                }
+                await uploadCoordinator.setActiveOwnerID(ownerID)
                 guard !Task.isCancelled else { return }
-                aiProcessingConsent.setActiveOwnerID(clerkID)
+                aiProcessingConsent.setActiveOwnerID(ownerID)
                 isResolvingAccount = false
             }
         }

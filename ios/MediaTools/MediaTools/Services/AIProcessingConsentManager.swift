@@ -83,10 +83,12 @@ final class AIProcessingConsentManager {
     }
 
     /// Only call after a server-verified Clerk bootstrap for this exact user.
-    /// Keep the legacy consent during staged rollback to Clerk authentication.
+    /// Move the grant so a later activation cannot restore revoked permission.
+    /// Rollback uses the verified server owner ID for local consent as well.
     func migrateConsent(from clerkID: String, to userID: String) {
         guard clerkID != userID, hasConsent(ownerID: clerkID) else { return }
         var owners = consentedOwnerIDs
+        owners.remove(clerkID)
         owners.insert(userID)
         defaults.set(owners.sorted(), forKey: Self.consentedOwnersKey)
     }

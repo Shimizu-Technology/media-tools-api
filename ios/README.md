@@ -255,7 +255,8 @@ Live Activity provides a visible Stop action.
   access credentials for API calls. If an upload was waiting when Clerk expired,
   the app can finish it with the device session.
 - **Safe rollout** — The iOS flag defaults off. With the flag off, API requests
-  continue using Clerk. The Share Extension only copies files into the local
+  continue using Clerk while a previously verified local owner ID remains
+  available for recordings. The Share Extension only copies files into the local
   inbox; it receives no device-session credential. Signing out revokes and
   clears the credential. If the API cannot confirm revocation, the app suspends
   device-session access, signs out locally, and retains the Keychain item only

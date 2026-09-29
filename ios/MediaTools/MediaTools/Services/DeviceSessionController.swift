@@ -114,7 +114,9 @@ final class DeviceSessionController {
         self.baseURL = baseURL
         self.store = store ?? DeviceSessionKeychainStore()
         self.enabled = enabled
-        self.stored = enabled ? self.store.load() : nil
+        // Keep the verified local-owner mapping available during an iOS flag
+        // rollback without ever using its first-party bearer credential.
+        self.stored = self.store.load()
     }
 
     var verifiedMigration: (clerkID: String, userID: String)? {
@@ -123,17 +125,23 @@ final class DeviceSessionController {
     }
 
     func clerkIDForFallbackOwner(_ ownerID: String) -> String? {
-        guard let stored, stored.pendingRevocation == true,
+        guard let stored, stored.pendingRevocation == true || !enabled,
               stored.pair.userID == ownerID else { return nil }
         return stored.verifiedClerkID
+    }
+
+    func fallbackOwnerID(for clerkID: String?) -> String? {
+        guard let clerkID else { return nil }
+        guard let stored, stored.verifiedClerkID == clerkID else { return clerkID }
+        return stored.pair.userID
     }
 
     /// Called before exposing an account workspace. A different Clerk account
     /// suspends the old device credential rather than borrowing its local data.
     func activate(clerkID: String?) async -> String? {
         guard enabled else {
-            activeUserID = clerkID
-            return clerkID
+            activeUserID = fallbackOwnerID(for: clerkID)
+            return activeUserID
         }
         if let stored, stored.pendingRevocation == true {
             do {

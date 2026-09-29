@@ -265,6 +265,30 @@ final class DeviceSessionTests: XCTestCase {
     }
 
     @MainActor
+    func testDisabledIOSFlagKeepsVerifiedLocalOwnerWithoutUsingDeviceToken() async throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let controller = DeviceSessionController(
+            store: MemoryDeviceSessionStore(
+                StoredDeviceSession(pair: pair, verifiedClerkID: "clerk-a",
+                                    pendingNextRefreshToken: nil)
+            ),
+            enabled: false
+        )
+
+        XCTAssertEqual(controller.fallbackOwnerID(for: "clerk-a"), "server-a")
+        XCTAssertEqual(controller.fallbackOwnerID(for: "clerk-b"), "clerk-b")
+        XCTAssertEqual(controller.clerkIDForFallbackOwner("server-a"), "clerk-a")
+        let owner = await controller.activate(clerkID: "clerk-a")
+        XCTAssertEqual(owner, "server-a")
+        let token = try await controller.accessToken(expectedOwnerID: "server-a", forceRefresh: false)
+        XCTAssertNil(token)
+    }
+
+    @MainActor
     func testOldRefreshCannotInvalidateClearedSession() async throws {
         let pair = DeviceSessionPair(
             sessionID: "session-a", userID: "server-a", accessToken: "mta_at_expired",
