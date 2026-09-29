@@ -83,6 +83,8 @@
     <string>$(CLERK_PUBLISHABLE_KEY)</string>
     <key>API_BASE_URL</key>
     <string>$(API_BASE_URL)</string>
+    <key>FIRST_PARTY_IOS_AUTH_ENABLED</key>
+    <string>$(FIRST_PARTY_IOS_AUTH_ENABLED)</string>
 
     <!-- App Transport Security (allow localhost in dev) -->
     <key>NSAppTransportSecurity</key>

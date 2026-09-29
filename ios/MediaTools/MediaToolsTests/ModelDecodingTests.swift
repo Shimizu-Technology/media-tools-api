@@ -503,6 +503,43 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     @MainActor
+    func testVerifiedOwnerMigrationMovesOnlyMatchingRecordingsAndConsent() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let suite = "OwnerMigrationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let store = try RecordingStore(rootDirectory: directory)
+        var own = store.makeRecording(contentType: "voice_memo", ownerID: "clerk-a")
+        own.state = .ready
+        var other = store.makeRecording(contentType: "meeting", ownerID: "clerk-b")
+        other.state = .ready
+        try cafData(unknownDataLength: true).write(to: store.fileURL(for: own))
+        try cafData(unknownDataLength: true).write(to: store.fileURL(for: other))
+        try store.saveRecordings([own, other])
+
+        let recorder = RecordingCoordinator(store: store, localAccountDefaults: defaults)
+        try recorder.migrateOwnerID(from: "clerk-a", to: "server-a")
+        try recorder.migrateOwnerID(from: "clerk-a", to: "server-a")
+        recorder.setActiveOwnerID("server-a")
+        XCTAssertEqual(recorder.availableRecordings.map(\.id), [own.id])
+        XCTAssertEqual(try store.loadRecordings().first(where: { $0.id == own.id })?.ownerID,
+                       "server-a")
+        XCTAssertEqual(try store.loadRecordings().first(where: { $0.id == other.id })?.ownerID,
+                       "clerk-b")
+
+        let consent = AIProcessingConsentManager(defaults: defaults)
+        consent.setActiveOwnerID("clerk-a")
+        consent.allow()
+        consent.migrateConsent(from: "clerk-a", to: "server-a")
+        XCTAssertTrue(consent.hasConsent(ownerID: "server-a"))
+        XCTAssertFalse(consent.hasConsent(ownerID: "clerk-b"))
+    }
+
+    @MainActor
     func testInterruptedLegacyOwnerClaimCannotMoveToAnotherAccount() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

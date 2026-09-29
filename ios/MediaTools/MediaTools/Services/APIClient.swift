@@ -2,7 +2,7 @@ import Foundation
 import ClerkKit
 
 /// HTTP client for the Media Tools API.
-/// Uses Clerk session token for authentication.
+/// Uses a staged first-party device session when available, otherwise Clerk.
 actor APIClient {
     static let shared = APIClient()
 
@@ -51,6 +51,14 @@ actor APIClient {
             "Content-Type": "application/json",
             "Accept": "application/json"
         ]
+
+        if let token = try await DeviceSessionController.shared.accessToken(
+            expectedOwnerID: expectedOwnerID,
+            forceRefresh: forceRefresh
+        ) {
+            headers["Authorization"] = "Bearer \(token)"
+            return headers
+        }
 
         guard !Configuration.clerkPublishableKey.isEmpty else {
             throw APIError.authenticationRequired(
@@ -122,7 +130,7 @@ actor APIClient {
     }
 
     /// Send an authenticated API request and recover once from a rejected
-    /// cached Clerk token. The retry is deliberately limited to one attempt so
+    /// cached credential. The retry is deliberately limited to one attempt so
     /// a revoked session never creates a request loop.
     private func data(
         for originalRequest: URLRequest,

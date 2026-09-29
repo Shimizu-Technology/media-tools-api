@@ -82,6 +82,15 @@ final class AIProcessingConsentManager {
         }
     }
 
+    /// Only call after a server-verified Clerk bootstrap for this exact user.
+    /// Keep the legacy consent during staged rollback to Clerk authentication.
+    func migrateConsent(from clerkID: String, to userID: String) {
+        guard clerkID != userID, hasConsent(ownerID: clerkID) else { return }
+        var owners = consentedOwnerIDs
+        owners.insert(userID)
+        defaults.set(owners.sorted(), forKey: Self.consentedOwnersKey)
+    }
+
     private var consentedOwnerIDs: Set<String> {
         Set(defaults.stringArray(forKey: Self.consentedOwnersKey) ?? [])
     }

@@ -141,6 +141,25 @@ final class RecordingCoordinator {
         }
     }
 
+    /// The server verified that a Clerk subject resolves to this users.id.
+    /// Rewrite only that exact subject; another account's recordings stay put.
+    func migrateOwnerID(from clerkID: String, to userID: String) throws {
+        guard clerkID != userID else { return }
+        let previous = pendingRecordings
+        for index in pendingRecordings.indices where pendingRecordings[index].ownerID == clerkID {
+            pendingRecordings[index].ownerID = userID
+        }
+        do {
+            try persistPendingRecordings()
+            if localAccountDefaults.string(forKey: Self.pendingLegacyRecordingOwnerIDKey) == clerkID {
+                localAccountDefaults.set(userID, forKey: Self.pendingLegacyRecordingOwnerIDKey)
+            }
+        } catch {
+            pendingRecordings = previous
+            throw error
+        }
+    }
+
     func recordingIDsOwned(by ownerID: String) -> Set<UUID> {
         Set(pendingRecordings.lazy.filter { $0.ownerID == ownerID }.map(\.id))
     }

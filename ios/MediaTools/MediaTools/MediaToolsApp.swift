@@ -9,6 +9,7 @@ struct MediaToolsApp: App {
     @State private var recordingCoordinator = RecordingCoordinator.shared
     @State private var uploadCoordinator = RecordingUploadCoordinator.shared
     @State private var aiProcessingConsent = AIProcessingConsentManager.shared
+    @State private var deviceSession = DeviceSessionController.shared
 
     init() {
         Clerk.configure(publishableKey: Configuration.clerkPublishableKey)
@@ -29,6 +30,7 @@ struct MediaToolsApp: App {
                 .environment(recordingCoordinator)
                 .environment(uploadCoordinator)
                 .environment(aiProcessingConsent)
+                .environment(deviceSession)
                 .sheet(isPresented: Binding(
                     get: { aiProcessingConsent.isPresentingDisclosure },
                     set: { if !$0 { aiProcessingConsent.decline() } }
