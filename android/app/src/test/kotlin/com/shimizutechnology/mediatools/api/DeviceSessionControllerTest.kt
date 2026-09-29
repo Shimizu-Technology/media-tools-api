@@ -117,6 +117,44 @@ class DeviceSessionControllerTest {
         assertFalse(store.value?.verifiedClerkId.isNullOrBlank())
     }
 
+    @Test
+    fun `rejected refresh still revokes with unexpired access credential`() = runTest {
+        val store = MemorySessionStore(StoredDeviceSession(firstPair.copy(accessExpiresAt = "2027-01-01T00:00:00Z"), "clerk-a"))
+        val transport = FakeTransport().apply { responses += SessionResponse(401, "") }
+        val controller = controller(store, transport)
+        assertTrue(runCatching { controller.token("user-uuid", forceRefresh = true) }.isFailure)
+
+        transport.responses += SessionResponse(503, "")
+        assertTrue(runCatching { controller.revokeAndClear() }.isFailure)
+        assertNotNull(store.value)
+        assertNull(controller.currentOwnerId())
+        assertEquals("DELETE", transport.calls.last().method)
+        assertEquals(firstPair.accessToken, transport.calls.last().bearer)
+
+        transport.responses += SessionResponse(204, "")
+        controller.revokeAndClear()
+        assertNull(store.value)
+        assertEquals("DELETE", transport.calls.last().method)
+    }
+
+    @Test
+    fun `sign out retains rejected expired credential when refresh fails again`() = runTest {
+        val store = MemorySessionStore(StoredDeviceSession(firstPair, "clerk-a"))
+        val transport = FakeTransport().apply {
+            responses += SessionResponse(401, "")
+            responses += SessionResponse(401, "")
+        }
+        val controller = controller(store, transport)
+        assertTrue(runCatching { controller.token("user-uuid") }.isFailure)
+
+        assertTrue(runCatching { controller.revokeAndClear() }.isFailure)
+
+        assertNotNull(store.value)
+        assertNull(controller.currentOwnerId())
+        assertTrue(transport.calls.all { it.path == "/auth/session/refresh" })
+        assertEquals(transport.calls.first().body, transport.calls.last().body)
+    }
+
     private fun controller(
         store: MemorySessionStore,
         transport: FakeTransport,

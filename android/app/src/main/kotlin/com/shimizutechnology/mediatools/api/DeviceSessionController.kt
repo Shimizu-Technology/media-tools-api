@@ -152,7 +152,9 @@ class DeviceSessionController(
     /** Confirm server revocation before deleting the only credential that can revoke it. */
     suspend fun revokeAndClear() = mutex.withLock {
         val value = stored
-        if (value != null && !rejected) {
+        // A rejected refresh does not prove the server revoked this session.
+        // Keep its credentials until DELETE succeeds, including after rejection.
+        if (value != null) {
             val token = if (Instant.parse(value.pair.accessExpiresAt) <= now().plusSeconds(60)) {
                 refreshLocked(value).accessToken
             } else {
