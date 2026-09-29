@@ -33,6 +33,7 @@ type RouterConfig struct {
 	Summarizer                  *summary.Service
 	JWTSecret                   string
 	LegacyAuthEnabled           bool
+	FirstPartyAuthEnabled       bool
 	AdminAPIKey                 string
 	OwnerKeyID                  string
 	OwnerKeyPrefix              string
@@ -97,16 +98,34 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		r.POST("/api/v1/auth/register", h.Register)
 		r.POST("/api/v1/auth/login", h.Login)
 	}
+	if cfg.FirstPartyAuthEnabled && cfg.DB != nil {
+		// A still-valid Clerk identity is the bridge to the same existing user.
+		// Never exchange an API key or a legacy JWT for a device session.
+		if jwksCache != nil {
+			clerkSession := r.Group("/api/v1/auth")
+			clerkSession.Use(middleware.ClerkAuth(cfg.DB, jwksCache, cfg.ClerkSecretKey))
+			clerkSession.POST("/session/bootstrap", h.BootstrapFirstPartySession)
+		}
+		r.POST("/api/v1/auth/session/refresh", h.RefreshFirstPartySession)
+	}
 
 	// --- JWT-protected routes (MTA-20) — accepts Clerk or legacy JWT ---
 	jwtProtected := r.Group("/api/v1")
 	if jwksCache != nil {
-		jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey))
+		jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey, cfg.FirstPartyAuthEnabled))
 	} else {
-		jwtProtected.Use(middleware.JWTAuth(cfg.DB, cfg.JWTSecret))
+		if cfg.FirstPartyAuthEnabled {
+			jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, nil, "", true))
+		} else {
+			jwtProtected.Use(middleware.JWTAuth(cfg.DB, cfg.JWTSecret))
+		}
 	}
 	{
 		jwtProtected.GET("/auth/me", h.GetMe)
+		if cfg.FirstPartyAuthEnabled {
+			jwtProtected.GET("/auth/sessions", h.ListFirstPartySessions)
+			jwtProtected.DELETE("/auth/sessions/:id", h.RevokeFirstPartySession)
+		}
 		jwtProtected.DELETE("/account", h.DeleteAccount)
 		if cfg.LegacyAuthEnabled {
 			jwtProtected.POST("/auth/refresh", h.RefreshToken)
@@ -118,7 +137,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 
 	// --- Protected Routes (API key OR Clerk JWT OR legacy JWT — backward compatible) ---
 	protected := r.Group("/api/v1")
-	protected.Use(middleware.DualAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey))
+	protected.Use(middleware.DualAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey, cfg.FirstPartyAuthEnabled))
 	protected.Use(rateLimiter.RateLimit())
 	{
 		// Transcript endpoints
