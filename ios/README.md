@@ -30,8 +30,9 @@ coordinator and protected audio store remain owned by the app process.
 The Share Extension target is embedded in the app. It copies supported audio
 and MP4 files into an App Group inbox; the app then imports them into its local
 recording queue. Upload still requires account ownership and AI processing
-consent. Before a TestFlight release, verify App Group provisioning for both
-bundle IDs and test sharing from Voice Memos and Files on a physical iPhone.
+consent. Verify App Group provisioning for both bundle IDs before TestFlight.
+Use that build to test Voice Memos and Files sharing on a physical iPhone
+before public release.
 
 ### 3. Configure Clerk
 
