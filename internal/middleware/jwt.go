@@ -19,6 +19,7 @@ import (
 
 const userContextKey = "user"
 const firstPartySessionContextKey = "first_party_session_id"
+const clerkSessionContextKey = "clerk_session_id"
 
 // JWTClaims extends standard JWT claims with user info.
 type JWTClaims struct {
@@ -191,6 +192,9 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 						}
 						if user != nil {
 							c.Set(userContextKey, user)
+							if claims.SessionID != "" {
+								c.Set(clerkSessionContextKey, claims.SessionID)
+							}
 							c.Next()
 							return
 						}
@@ -255,6 +259,23 @@ func GetUser(c *gin.Context) *models.User {
 		return nil
 	}
 	return user
+}
+
+// AuthSessionBinding identifies the verified device or Clerk session that
+// started a sensitive ceremony. Legacy JWTs and API keys have no binding and
+// cannot enroll passkeys.
+func AuthSessionBinding(c *gin.Context) string {
+	if id, ok := c.Get(firstPartySessionContextKey); ok {
+		if sessionID, ok := id.(string); ok && sessionID != "" {
+			return "first-party:" + sessionID
+		}
+	}
+	if id, ok := c.Get(clerkSessionContextKey); ok {
+		if sessionID, ok := id.(string); ok && sessionID != "" {
+			return "clerk:" + sessionID
+		}
+	}
+	return ""
 }
 
 // BearerOnlyAuth accepts Clerk JWT (RS256) or legacy JWT (HS256) Bearer tokens,

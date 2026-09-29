@@ -41,8 +41,7 @@ components:
     BearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: JWT
-      description: Clerk session token for user-account routes.
+      description: Clerk session JWT or first-party access token for user-account routes.
 
   schemas:
     Transcript:
@@ -972,6 +971,93 @@ paths:
       tags: [Authentication]
       summary: Get the signed-in user
       responses: {"200": {description: Current user}}
+  /auth/passkeys/register/begin:
+    post:
+      tags: [Authentication]
+      summary: Begin passkey enrollment for the signed-in account
+      description: |
+        Requires a verified Clerk session JWT with a session ID or a first-party
+        access token. Legacy JWTs and API keys cannot enroll a passkey. The
+        first-party auth feature flag must be enabled. The relying-party ID is
+        media.shimizu-technology.com and user verification is required.
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: One-use registration ceremony and WebAuthn creation options
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ceremony_id, options]
+                properties:
+                  ceremony_id: {type: string, format: uuid}
+                  options: {type: object, description: PublicKeyCredentialCreationOptions with binary members encoded as unpadded base64url}
+        "401": {description: No eligible signed-in session}
+  /auth/passkeys/register/finish:
+    post:
+      tags: [Authentication]
+      summary: Verify and save a passkey for the signed-in account
+      description: |
+        Uses the same account and session as begin. The ceremony is consumed
+        once, even when verification fails. Binary credential response fields
+        must be encoded as unpadded base64url strings.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ceremony_id, credential]
+              properties:
+                ceremony_id: {type: string, format: uuid}
+                credential: {type: object, description: WebAuthn PublicKeyCredential registration JSON}
+      responses:
+        "201": {description: Passkey saved; returns credential_id as unpadded base64url}
+        "401": {description: Session, challenge, or passkey verification failed}
+        "409": {description: Credential is already registered}
+  /auth/passkeys/login/begin:
+    post:
+      tags: [Authentication]
+      summary: Begin discoverable passkey sign-in
+      security: []
+      description: Public endpoint. Requires a discoverable passkey and user verification. Rate limited by network peer.
+      responses:
+        "200":
+          description: One-use login ceremony and WebAuthn request options
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ceremony_id, options]
+                properties:
+                  ceremony_id: {type: string, format: uuid}
+                  options: {type: object, description: PublicKeyCredentialRequestOptions with binary members encoded as unpadded base64url}
+        "429": {description: Too many attempts}
+  /auth/passkeys/login/finish:
+    post:
+      tags: [Authentication]
+      summary: Verify a passkey and create a revocable first-party device session
+      security: []
+      description: The ceremony is consumed once even when verification fails. Rate limited by network peer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ceremony_id, credential, client_type]
+              properties:
+                ceremony_id: {type: string, format: uuid}
+                credential: {type: object, description: WebAuthn PublicKeyCredential assertion JSON with unpadded base64url binary fields}
+                client_type: {type: string, enum: [web, ios, android]}
+                device_name: {type: string, maxLength: 80}
+      responses:
+        "201": {description: First-party access token, refresh token, and session metadata; store securely}
+        "401": {description: Challenge or passkey verification failed}
+        "429": {description: Too many attempts}
   /account:
     delete:
       tags: [Authentication]

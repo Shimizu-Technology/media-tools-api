@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-webauthn/webauthn/webauthn"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
@@ -46,6 +47,7 @@ type Handler struct {
 	OwnerAPIKeyPrefix           string                  // Optional owner key prefix override
 	YtDlpCookiesConfigured      bool                    // True when yt-dlp cookies are configured
 	ClerkAccountDeletionEnabled bool                    // Clerk Backend API deletion is configured
+	Passkeys                    *webauthn.WebAuthn      // Enabled only behind the first-party auth flag
 	// Version is the build identifier reported by health endpoints.
 	Version          string
 	readinessChecker readinessChecker

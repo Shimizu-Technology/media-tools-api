@@ -13,6 +13,7 @@ package middleware
 import (
 	"fmt"
 	"math"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -130,6 +131,28 @@ func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 		c.Header("X-RateLimit-Limit", formatFloat(result.limit))
 		c.Header("X-RateLimit-Remaining", formatFloat(result.remaining))
 
+		c.Next()
+	}
+}
+
+// RateLimitUnauthenticated protects the public passkey challenge endpoints.
+// RemoteAddr comes from the connected network peer, so an untrusted forwarded
+// header cannot give an attacker unlimited fresh buckets.
+func (rl *RateLimiter) RateLimitUnauthenticated(limit int) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		peer, _, err := net.SplitHostPort(c.Request.RemoteAddr)
+		if err != nil {
+			peer = c.Request.RemoteAddr
+		}
+		result := rl.allow("passkey-peer:"+peer, limit)
+		if !result.allowed {
+			c.Header("Retry-After", strconv.Itoa(max(1, int(math.Ceil(result.retryAfter.Seconds())))))
+			c.JSON(http.StatusTooManyRequests, models.ErrorResponse{
+				Error: "rate_limit_exceeded", Message: "Try signing in again later", Code: http.StatusTooManyRequests,
+			})
+			c.Abort()
+			return
+		}
 		c.Next()
 	}
 }
