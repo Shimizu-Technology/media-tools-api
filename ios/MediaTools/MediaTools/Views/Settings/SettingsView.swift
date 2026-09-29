@@ -24,6 +24,9 @@ struct SettingsView: View {
     @State private var isDeletingAccount = false
     @State private var deleteAccountError: String?
     @State private var deviceAccount: DeviceAccount?
+    @State private var isLoadingDeviceAccount = false
+    @State private var deviceAccountError: String?
+    @State private var deviceAccountRetry = 0
 
     var body: some View {
         ScrollView {
@@ -43,12 +46,22 @@ struct SettingsView: View {
         .background(Theme.surface)
         .navigationTitle("Settings")
         .task { await refreshNotificationState() }
-        .task(id: deviceSession.activeUserID) {
+        .task(id: "\(deviceSession.activeUserID ?? "")|\(clerk.user?.id ?? "")|\(deviceAccountRetry)") {
             deviceAccount = nil
+            deviceAccountError = nil
             guard Configuration.firstPartyIOSAuthEnabled,
                   deviceSession.activeUserID != nil,
                   clerk.user == nil else { return }
-            deviceAccount = try? await APIClient.shared.get("/auth/me")
+            isLoadingDeviceAccount = true
+            do {
+                let account: DeviceAccount = try await APIClient.shared.get("/auth/me")
+                guard !Task.isCancelled else { return }
+                deviceAccount = account
+            } catch {
+                guard !Task.isCancelled else { return }
+                deviceAccountError = "Could not load your account details."
+            }
+            isLoadingDeviceAccount = false
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
@@ -158,16 +171,27 @@ struct SettingsView: View {
                 }
                 .cardStyle()
             }
-        } else if let deviceAccount {
+        } else if Configuration.firstPartyIOSAuthEnabled,
+                  deviceSession.activeUserID != nil {
             VStack(alignment: .leading, spacing: 8) {
                 SectionHeader(text: "Account", icon: "person.circle")
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(deviceAccount.name.isEmpty ? "Media Tools account" : deviceAccount.name)
-                        .font(Theme.body(16, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text(deviceAccount.email)
-                        .font(Theme.caption(13))
-                        .foregroundStyle(Theme.textSecondary)
+                VStack(alignment: .leading, spacing: 8) {
+                    if let deviceAccount {
+                        Text(deviceAccount.name.isEmpty ? "Media Tools account" : deviceAccount.name)
+                            .font(Theme.body(16, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text(deviceAccount.email)
+                            .font(Theme.caption(13))
+                            .foregroundStyle(Theme.textSecondary)
+                    } else if isLoadingDeviceAccount {
+                        ProgressView("Loading account…")
+                    } else if let deviceAccountError {
+                        Text(deviceAccountError)
+                            .font(Theme.caption(13))
+                            .foregroundStyle(Theme.error)
+                        Button("Try again") { deviceAccountRetry += 1 }
+                            .frame(minHeight: 44)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .cardStyle()
@@ -605,7 +629,7 @@ struct SettingsView: View {
         defer { isSigningOut = false }
 
         do {
-            await deviceSession.revokeAndClear()
+            try await deviceSession.revokeAndClear()
             if clerk.user != nil {
                 try await clerk.auth.signOut()
             }

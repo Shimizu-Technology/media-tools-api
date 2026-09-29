@@ -40,6 +40,24 @@ private actor RecoveringDeviceSessionTransport: DeviceSessionTransport {
     func bodies() -> [[String: String]] { requestBodies }
 }
 
+private actor RevocationDeviceSessionTransport: DeviceSessionTransport {
+    private var shouldFail = true
+
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        let status = shouldFail ? 503 : 204
+        shouldFail = false
+        return (Data(), HTTPURLResponse(url: request.url!, statusCode: status,
+                                        httpVersion: nil, headerFields: nil)!)
+    }
+}
+
+private actor DisabledSessionTransport: DeviceSessionTransport {
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        return (Data(), HTTPURLResponse(url: request.url!, statusCode: 404,
+                                        httpVersion: nil, headerFields: nil)!)
+    }
+}
+
 final class DeviceSessionTests: XCTestCase {
     @MainActor
     func testRefreshRetriesSameJournaledRotationAfterLostResponse() async throws {
@@ -105,6 +123,60 @@ final class DeviceSessionTests: XCTestCase {
             XCTFail("A different owner must not use this device credential")
         } catch APIError.authenticationRequired {
             // Expected account isolation.
+        }
+    }
+
+    @MainActor
+    func testSignOutRetainsCredentialUntilServerConfirmsRevocation() async throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: pair, verifiedClerkID: "clerk-a",
+                                pendingNextRefreshToken: nil)
+        )
+        let controller = DeviceSessionController(
+            transport: RevocationDeviceSessionTransport(),
+            baseURL: URL(string: "https://example.test/api/v1")!,
+            store: store,
+            enabled: true
+        )
+
+        do {
+            try await controller.revokeAndClear()
+            XCTFail("A failed DELETE must not discard the revocation credential")
+        } catch APIError.httpError(503, _, _) {
+            XCTAssertEqual(store.value?.pair, pair)
+        }
+        try await controller.revokeAndClear()
+        XCTAssertNil(store.value)
+    }
+
+    @MainActor
+    func testSignOutRetainsCredentialWhenSessionRoutesAreUnavailable() async throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: pair, verifiedClerkID: "clerk-a",
+                                pendingNextRefreshToken: nil)
+        )
+        let controller = DeviceSessionController(
+            transport: DisabledSessionTransport(),
+            baseURL: URL(string: "https://example.test/api/v1")!,
+            store: store,
+            enabled: true
+        )
+
+        do {
+            try await controller.revokeAndClear()
+            XCTFail("A missing route does not confirm that the session was revoked")
+        } catch APIError.httpError(404, _, _) {
+            XCTAssertEqual(store.value?.pair, pair)
         }
     }
 }

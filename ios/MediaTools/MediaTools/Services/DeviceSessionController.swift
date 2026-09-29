@@ -200,16 +200,53 @@ final class DeviceSessionController {
         store.delete()
     }
 
-    func revokeAndClear() async {
-        if let sessionID = stored?.pair.sessionID,
-           let token = try? await accessToken(expectedOwnerID: stored?.pair.userID,
-                                              forceRefresh: false) {
-            var request = URLRequest(url: baseURL.appendingPathComponent("auth/sessions/\(sessionID)"))
-            request.httpMethod = "DELETE"
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            _ = try? await transport.data(for: request)
+    func revokeAndClear() async throws {
+        guard let sessionID = stored?.pair.sessionID else {
+            clear()
+            return
         }
+        let startingGeneration = generation
+        do {
+            try await revoke(sessionID: sessionID, forceRefresh: false)
+        } catch APIError.httpError(401, _, _) {
+            do {
+                try await revoke(sessionID: sessionID, forceRefresh: true)
+            } catch APIError.authenticationRequired where needsSignIn {
+                // Refresh confirmed that the server session is invalid.
+            }
+        } catch APIError.httpError(404, _, _) {
+            do {
+                _ = try await refresh()
+            } catch APIError.authenticationRequired where needsSignIn {
+                // A lost DELETE response can leave a 404; refresh confirms
+                // whether the session was actually revoked.
+                guard generation == startingGeneration else { throw CancellationError() }
+                clear()
+                return
+            }
+            try await revoke(sessionID: sessionID, forceRefresh: false)
+        } catch APIError.authenticationRequired where needsSignIn {
+            // Refresh confirmed that the server session is invalid.
+        }
+        guard generation == startingGeneration else { throw CancellationError() }
         clear()
+    }
+
+    private func revoke(sessionID: String, forceRefresh: Bool) async throws {
+        guard let token = try await accessToken(expectedOwnerID: stored?.pair.userID,
+                                                forceRefresh: forceRefresh) else {
+            throw APIError.authenticationRequired(message: "Sign in to finish signing out.")
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent("auth/sessions/\(sessionID)"))
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await transport.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard http.statusCode == 204 else {
+            let errorBody = try? JSONDecoder().decode(ErrorResponse.self, from: data)
+            throw APIError.httpError(statusCode: http.statusCode, code: errorBody?.error,
+                                     message: errorBody?.message ?? "Could not revoke this device")
+        }
     }
 
     private func bootstrap(verifiedClerkID: String) async throws {
@@ -244,9 +281,12 @@ final class DeviceSessionController {
 
     private func refresh() async throws -> DeviceSessionPair {
         if let refreshTask { return try await refreshTask.value }
+        let taskGeneration = generation
         let task = Task { try await refreshOnce() }
         refreshTask = task
-        defer { refreshTask = nil }
+        defer {
+            if generation == taskGeneration { refreshTask = nil }
+        }
         return try await task.value
     }
 

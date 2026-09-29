@@ -540,6 +540,70 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     @MainActor
+    func testVerifiedUploadMigrationMovesPendingDeletionOwner() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let suite = "OwnerMigrationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        defaults.set(["clerk-a"], forKey: RecordingUploadCoordinator.pendingLocalAccountDeletionOwnerIDsKey)
+        let recorder = RecordingCoordinator(
+            store: try RecordingStore(rootDirectory: directory), localAccountDefaults: defaults
+        )
+        let uploader = RecordingUploadCoordinator(
+            recorder: recorder,
+            watchStore: try TranscriptionWatchStore(rootDirectory: directory),
+            localAccountDefaults: defaults
+        )
+
+        try await uploader.migrateOwnerID(from: "clerk-a", to: "server-a")
+
+        XCTAssertFalse(uploader.hasPendingLocalAccountDeletion(ownerID: "clerk-a"))
+        XCTAssertTrue(uploader.hasPendingLocalAccountDeletion(ownerID: "server-a"))
+    }
+
+    @MainActor
+    func testVerifiedUploadMigrationAcceptsQueuedClerkCompletion() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try RecordingStore(rootDirectory: directory)
+        var recording = store.makeRecording(contentType: "meeting", ownerID: "clerk-a")
+        recording.state = .ready
+        try finalizedM4AData().write(to: store.fileURL(for: recording))
+        try store.saveRecordings([recording])
+        let recorder = RecordingCoordinator(store: store)
+        recorder.setActiveOwnerID("clerk-a")
+        recorder.markWaitingForUpload(recording.id)
+        recorder.markUploadStarted(
+            recording.id, objectKey: "audio/clerk-a/meeting.m4a", sizeBytes: 42,
+            mimeType: "audio/mp4", taskIdentifier: 19
+        )
+        let uploader = RecordingUploadCoordinator(
+            recorder: recorder,
+            service: SuspendedRecordingUploadService(),
+            watchStore: try TranscriptionWatchStore(rootDirectory: directory)
+        )
+
+        try await uploader.migrateOwnerID(from: "clerk-a", to: "server-a")
+        await uploader.setActiveOwnerID("server-a")
+        uploader.receiveBackgroundUploadEvent(
+            .completed(metadata: BackgroundUploadMetadata(
+                recordingID: recording.id, ownerID: "clerk-a",
+                filename: recording.uploadFilename,
+                objectKey: "audio/clerk-a/meeting.m4a", sizeBytes: 42,
+                mimeType: "audio/mp4", contentType: recording.contentType
+            ))
+        )
+
+        XCTAssertEqual(recorder.recording(withID: recording.id)?.ownerID, "server-a")
+        XCTAssertEqual(recorder.recording(withID: recording.id)?.state, .finalizingUpload)
+    }
+
+    @MainActor
     func testInterruptedLegacyOwnerClaimCannotMoveToAnotherAccount() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
