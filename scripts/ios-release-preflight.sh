@@ -260,8 +260,11 @@ if [[ -n "$archive_path" ]]; then
     security cms -D -i "$app_path/embedded.mobileprovision" >"$preflight_tmp/profile.plist"
     profile_app_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$preflight_tmp/profile.plist")"
     [[ "$profile_app_id" == "$team_id.$bundle_id" ]] || { echo "Provisioning profile app identifier does not match: $profile_app_id"; exit 1; }
-    profile_passkey_domain="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.associated-domains:0' "$preflight_tmp/profile.plist")"
-    [[ "$profile_passkey_domain" == "$passkey_domain" ]] || { echo "Provisioning profile is missing the passkey associated domain"; exit 1; }
+    profile_passkey_domains="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.associated-domains' "$preflight_tmp/profile.plist")"
+    if [[ "$profile_passkey_domains" != "$passkey_domain" && "$profile_passkey_domains" != "*" && "$profile_passkey_domains" != *"$passkey_domain"* ]]; then
+      echo "Provisioning profile does not allow the passkey associated domain"
+      exit 1
+    fi
   fi
 fi
 
