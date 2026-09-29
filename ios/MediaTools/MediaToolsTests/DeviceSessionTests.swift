@@ -58,6 +58,33 @@ private actor DisabledSessionTransport: DeviceSessionTransport {
     }
 }
 
+private actor DelayedUnauthorizedTransport: DeviceSessionTransport {
+    private var pending: CheckedContinuation<(Data, URLResponse), Error>?
+    private var requestWaiter: CheckedContinuation<Void, Never>?
+    private var requestURL: URL?
+
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        try await withCheckedThrowingContinuation { continuation in
+            requestURL = request.url
+            pending = continuation
+            requestWaiter?.resume()
+            requestWaiter = nil
+        }
+    }
+
+    func waitForRequest() async {
+        if pending != nil { return }
+        await withCheckedContinuation { requestWaiter = $0 }
+    }
+
+    func reject() {
+        let response = HTTPURLResponse(url: requestURL!, statusCode: 401,
+                                       httpVersion: nil, headerFields: nil)!
+        pending?.resume(returning: (Data(), response))
+        pending = nil
+    }
+}
+
 final class DeviceSessionTests: XCTestCase {
     @MainActor
     func testRefreshRetriesSameJournaledRotationAfterLostResponse() async throws {
@@ -177,6 +204,38 @@ final class DeviceSessionTests: XCTestCase {
             XCTFail("A missing route does not confirm that the session was revoked")
         } catch APIError.httpError(404, _, _) {
             XCTAssertEqual(store.value?.pair, pair)
+        }
+    }
+
+    @MainActor
+    func testOldRefreshCannotInvalidateClearedSession() async throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_expired",
+            accessExpiresAt: .distantPast, refreshToken: "mta_rt_old",
+            inactiveExpiresAt: .distantFuture
+        )
+        let transport = DelayedUnauthorizedTransport()
+        let controller = DeviceSessionController(
+            transport: transport,
+            baseURL: URL(string: "https://example.test/api/v1")!,
+            store: MemoryDeviceSessionStore(
+                StoredDeviceSession(pair: pair, verifiedClerkID: "clerk-a",
+                                    pendingNextRefreshToken: nil)
+            ),
+            enabled: true
+        )
+        let request = Task {
+            try await controller.accessToken(expectedOwnerID: "server-a", forceRefresh: false)
+        }
+        await transport.waitForRequest()
+        controller.clear()
+        await transport.reject()
+
+        do {
+            _ = try await request.value
+            XCTFail("A cleared refresh must not succeed")
+        } catch is CancellationError {
+            XCTAssertFalse(controller.needsSignIn)
         }
     }
 }

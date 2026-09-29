@@ -312,6 +312,7 @@ final class DeviceSessionController {
         do {
             pair = try await sendPairRequest(request)
         } catch APIError.httpError(401, _, _) {
+            guard startingGeneration == generation else { throw CancellationError() }
             needsSignIn = true
             activeUserID = nil
             throw APIError.authenticationRequired(message: "Sign in to continue.")
