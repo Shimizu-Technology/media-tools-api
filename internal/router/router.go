@@ -116,6 +116,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		passkeyLogin.Use(rateLimiter.RateLimitUnauthenticated(300))
 		passkeyLogin.POST("/begin", h.BeginPasskeyLogin)
 		passkeyLogin.POST("/finish", h.FinishPasskeyLogin)
+		r.POST("/api/v1/auth/recovery/redeem", rateLimiter.RateLimitUnauthenticated(20), h.RedeemRecoveryCode)
 	}
 
 	// --- JWT-protected routes (MTA-20) — accepts Clerk or legacy JWT ---
@@ -136,6 +137,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			jwtProtected.DELETE("/auth/sessions/:id", h.RevokeFirstPartySession)
 			jwtProtected.POST("/auth/passkeys/register/begin", h.BeginPasskeyRegistration)
 			jwtProtected.POST("/auth/passkeys/register/finish", h.FinishPasskeyRegistration)
+			jwtProtected.GET("/auth/recovery", h.RecoveryCodeStatus)
+			jwtProtected.POST("/auth/recovery", h.ReplaceRecoveryCodes)
 		}
 		jwtProtected.DELETE("/account", h.DeleteAccount)
 		if cfg.LegacyAuthEnabled {
