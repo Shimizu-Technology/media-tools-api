@@ -69,6 +69,10 @@ func parseAudioContentType(value string) (models.AudioContentType, bool) {
 // 2GB keeps room for very long recordings while chunking handles Whisper limits.
 const maxAudioSize = 2 << 30
 
+// Multipart framing and the content_type field sit outside the file-size cap.
+// Leave room for them while still bounding the complete request body.
+const maxAudioRequestSize = maxAudioSize + (1 << 20)
+
 // A presigned URL is intentionally short-lived, but iOS may finish a background
 // transfer while the app remains suspended. Keep the authenticated completion
 // session long enough for the app to be relaunched and finalize that accepted
@@ -118,7 +122,7 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		return
 	}
 
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAudioSize)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAudioRequestSize)
 
 	// Get the uploaded file
 	file, header, err := c.Request.FormFile("file")

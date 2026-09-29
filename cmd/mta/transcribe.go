@@ -35,6 +35,8 @@ type apiStatusError struct {
 	body   string
 }
 
+var errMalformedTranscriptionResponse = errors.New("malformed transcription response")
+
 func (e apiStatusError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", e.status, e.body)
 }
@@ -236,10 +238,10 @@ func sendTranscriptionRequest(req *http.Request) ([]byte, error) {
 func decodeTranscription(kind string, data []byte) (transcriptionResult, error) {
 	result := transcriptionResult{Kind: kind}
 	if err := json.Unmarshal(data, &result); err != nil {
-		return result, fmt.Errorf("decode API response: %w", err)
+		return result, fmt.Errorf("%w: decode API response: %v", errMalformedTranscriptionResponse, err)
 	}
 	if result.ID == "" || result.Status == "" {
-		return result, fmt.Errorf("API response omitted transcription ID or status")
+		return result, fmt.Errorf("%w: API response omitted transcription ID or status", errMalformedTranscriptionResponse)
 	}
 	return result, nil
 }
@@ -289,7 +291,7 @@ func waitForTranscription(ctx context.Context, ref transcriptionResult, interval
 			if errors.As(err, &statusError) && statusError.status < 500 && statusError.status != http.StatusTooManyRequests {
 				return ref, fmt.Errorf("check %s: %w", ref.reference(), err)
 			}
-			if strings.Contains(err.Error(), "decode API response") || strings.Contains(err.Error(), "omitted transcription ID") {
+			if errors.Is(err, errMalformedTranscriptionResponse) {
 				return ref, fmt.Errorf("check %s: %w", ref.reference(), err)
 			}
 			fmt.Fprintf(stderr, "Status check for %s failed; retrying: %v\n", ref.reference(), err)

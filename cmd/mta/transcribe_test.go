@@ -155,3 +155,23 @@ func TestResumeStopsOnUnauthorizedInsteadOfPolling(t *testing.T) {
 		t.Errorf("checks=%d stdout=%q", checks, stdout.String())
 	}
 }
+
+func TestResumeRetriesTransientResponseContainingDecodeMarker(t *testing.T) {
+	checks := 0
+	withTestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		checks++
+		if checks == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			io.WriteString(w, `{"message":"decode API response"}`)
+			return
+		}
+		io.WriteString(w, `{"id":"existing-1","status":"completed","transcript_text":"Recovered transcript"}`)
+	}))
+	var stdout, stderr bytes.Buffer
+	if err := runTranscribe([]string{"--resume", "audio:existing-1", "--interval", "1ms"}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if checks != 2 || stdout.String() != "Recovered transcript\n" {
+		t.Errorf("checks=%d stdout=%q", checks, stdout.String())
+	}
+}
