@@ -120,6 +120,17 @@ func (db *DB) CreatePasskeyCeremony(ctx context.Context, kind, userID, authBindi
 	if err != nil {
 		return "", fmt.Errorf("encode passkey ceremony: %w", err)
 	}
+	// Keep replay evidence briefly, then bound storage without a separate job.
+	// The expiry index makes this cleanup cheap when no old rows exist. Bound
+	// each deletion so a backlog does not make sign-in wait on a large purge.
+	if _, err := db.ExecContext(ctx, `
+		DELETE FROM auth_passkey_ceremonies WHERE id IN (
+			SELECT id FROM auth_passkey_ceremonies
+			WHERE expires_at < NOW() - INTERVAL '1 day'
+			ORDER BY expires_at LIMIT 1000
+		)`); err != nil {
+		return "", fmt.Errorf("prune expired passkey ceremonies: %w", err)
+	}
 	var id string
 	var accountID any
 	if userID != "" {

@@ -59,6 +59,16 @@ func TestPasskeyCeremonyIsBoundExpiresAndCannotReplay(t *testing.T) {
 	if _, err := db.ConsumePasskeyCeremony(ctx, expiredID, "login", "", ""); !errors.Is(err, ErrPasskeyCeremonyInvalid) {
 		t.Fatalf("expired ceremony: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `UPDATE auth_passkey_ceremonies SET expires_at = NOW() - INTERVAL '2 days' WHERE id = $1`, expiredID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreatePasskeyCeremony(ctx, "login", "", "", session); err != nil {
+		t.Fatal(err)
+	}
+	var oldRows int
+	if err := db.GetContext(ctx, &oldRows, `SELECT COUNT(*) FROM auth_passkey_ceremonies WHERE id = $1`, expiredID); err != nil || oldRows != 0 {
+		t.Fatalf("old ceremony rows after prune = %d, %v", oldRows, err)
+	}
 }
 
 func TestPasskeyCredentialCannotMoveAccountsOrOverwriteNewerState(t *testing.T) {
