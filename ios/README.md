@@ -27,10 +27,11 @@ Screen widget, Control Center control, and recording Live Activity. It shares
 only App Intent and ActivityKit value types with the host app; the recording
 coordinator and protected audio store remain owned by the app process.
 
-The Share Extension source remains a prototype and is not wired into the
-checked-in project. Do not treat it as shipping until its target, bundle ID,
-entitlements, signing, App Group/Keychain groups, and on-device behavior have
-been verified.
+The Share Extension target is embedded in the app. It copies supported audio
+and MP4 files into an App Group inbox; the app then imports them into its local
+recording queue. Upload still requires account ownership and AI processing
+consent. Before a TestFlight release, verify App Group provisioning for both
+bundle IDs and test sharing from Voice Memos and Files on a physical iPhone.
 
 ### 3. Configure Clerk
 
@@ -192,7 +193,7 @@ MediaTools/
 - **PDF Upload** — Import PDFs from Files app for text extraction
 
 ### iOS Integration
-- **Share Sheet source** — Prepared for a future Share Extension target; not currently shipped
+- **Share Sheet source** — Save a Voice Memo or supported media file from another app into a durable, local recording queue
 - **Quick Capture** — Start/stop recording from Shortcuts, Siri, the Action
   Button, Back Tap, Control Center, or the Quick Record widget
 - **Live Activity** — Persistent recording state, timer, and Stop & Save action

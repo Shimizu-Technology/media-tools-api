@@ -84,16 +84,23 @@ struct RecordView: View {
                                 .font(Theme.caption(12))
                                 .foregroundStyle(Theme.textSecondary)
                             ForEach(recorder.pendingSharedItems) { item in
-                                HStack {
-                                    Text(item.originalName)
-                                        .lineLimit(1)
-                                    Spacer()
-                                    Button("Retry") { recorder.importSharedItems() }
-                                    if let fileURL = recorder.sharedFileURL(for: item) {
-                                        ShareLink(item: fileURL) {
-                                            Image(systemName: "square.and.arrow.up")
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(item.originalName)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Button("Retry") { recorder.importSharedItems() }
+                                        if let fileURL = recorder.sharedFileURL(for: item) {
+                                            ShareLink(item: fileURL) {
+                                                Image(systemName: "square.and.arrow.up")
+                                            }
+                                            .accessibilityLabel("Export \(item.originalName)")
                                         }
-                                        .accessibilityLabel("Export \(item.originalName)")
+                                    }
+                                    if let reason = recorder.pendingSharedErrors[item.id] {
+                                        Text(reason)
+                                            .foregroundStyle(Theme.error)
+                                            .fixedSize(horizontal: false, vertical: true)
                                     }
                                 }
                                 .font(Theme.caption(13))

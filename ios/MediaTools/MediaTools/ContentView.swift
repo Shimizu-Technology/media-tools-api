@@ -135,11 +135,19 @@ struct WelcomeView: View {
                                 }
                             }
                             ForEach(recorder.pendingSharedItems) { item in
-                                if let fileURL = recorder.sharedFileURL(for: item) {
-                                    ShareLink(item: fileURL) {
-                                        Label(item.originalName, systemImage: "square.and.arrow.up")
+                                VStack(alignment: .leading, spacing: 4) {
+                                    if let fileURL = recorder.sharedFileURL(for: item) {
+                                        ShareLink(item: fileURL) {
+                                            Label(item.originalName, systemImage: "square.and.arrow.up")
+                                        }
+                                        .font(Theme.caption(13))
                                     }
-                                    .font(Theme.caption(13))
+                                    if let reason = recorder.pendingSharedErrors[item.id] {
+                                        Text(reason)
+                                            .font(Theme.caption(12))
+                                            .foregroundStyle(Theme.error)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
                                 }
                             }
                         }

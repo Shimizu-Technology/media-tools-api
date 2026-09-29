@@ -44,4 +44,53 @@ final class ShareInboxStoreTests: XCTestCase {
         XCTAssertThrowsError(try inbox.stageFile(from: source, originalName: "video.mov"))
         XCTAssertTrue(try inbox.pendingItems().isEmpty)
     }
+
+    func testOriginalExtensionWinsOverTemporaryProviderExtension() throws {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        let source = temp.appendingPathComponent("provider.tmp")
+        try Data(repeating: 0x42, count: 16).write(to: source)
+        let inbox = try ShareInboxStore(rootURL: temp.appendingPathComponent("inbox"))
+
+        let item = try inbox.stageFile(from: source, originalName: "Voice Memo.m4a")
+        XCTAssertEqual(item.originalName, "Voice Memo.m4a")
+        XCTAssertEqual(item.storedName, "source.m4a")
+        XCTAssertEqual(inbox.fileURL(for: item).pathExtension, "m4a")
+    }
+
+    func testOversizedFileIsRejectedBeforeCopy() throws {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        let source = temp.appendingPathComponent("large.mp4")
+        FileManager.default.createFile(atPath: source.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: source)
+        try handle.truncate(atOffset: 2 * 1_024 * 1_024 * 1_024 + 1)
+        try handle.close()
+        let inbox = try ShareInboxStore(rootURL: temp.appendingPathComponent("inbox"))
+
+        XCTAssertThrowsError(try inbox.stageFile(from: source, originalName: "large.mp4"))
+        XCTAssertTrue(try inbox.pendingItems().isEmpty)
+    }
+
+    @MainActor
+    func testRepeatedImportOfOneShareDoesNotDuplicateRecording() throws {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        let source = temp.appendingPathComponent("memo.mp3")
+        try Data(repeating: 0x42, count: 16).write(to: source)
+        let inbox = try ShareInboxStore(rootURL: temp.appendingPathComponent("inbox"))
+        let item = try inbox.stageFile(from: source, originalName: "memo.mp3")
+        let store = try RecordingStore(rootDirectory: temp.appendingPathComponent("recordings"))
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "ShareInboxStoreTests.\(UUID().uuidString)"))
+        let coordinator = RecordingCoordinator(store: store, localAccountDefaults: defaults)
+
+        _ = try coordinator.importRecording(from: inbox.fileURL(for: item), contentType: "general", shareID: item.id)
+        _ = try coordinator.importRecording(from: inbox.fileURL(for: item), contentType: "general", shareID: item.id)
+
+        XCTAssertEqual(coordinator.pendingRecordings.count, 1)
+        XCTAssertEqual(try store.loadRecordings().map(\.id), [item.id])
+    }
 }

@@ -24,6 +24,7 @@ final class RecordingCoordinator {
     private(set) var isStarting = false
     private(set) var pendingRecordings: [LocalRecording] = []
     private(set) var pendingSharedItems: [ShareInboxStore.Item] = []
+    private(set) var pendingSharedErrors: [UUID: String] = [:]
     private(set) var activeOwnerID: String?
     private(set) var duration: TimeInterval = 0
     private(set) var audioLevel: CGFloat = 0
@@ -41,6 +42,7 @@ final class RecordingCoordinator {
     private var stateBeforeInterruption: RecordingCaptureState?
     private let notificationObservers = NotificationObserverBag()
     private let store: RecordingStore?
+    private var shareInbox: ShareInboxStore?
     private let simulatesCapture: Bool
     private let activityManager: RecordingActivityManaging
     private let availableCapacity: (URL) -> Int64?
@@ -166,7 +168,14 @@ final class RecordingCoordinator {
     /// must first establish account ownership and AI processing consent.
     func importSharedItems() {
         do {
-            let inbox = try ShareInboxStore()
+            let inbox: ShareInboxStore
+            if let existing = shareInbox {
+                inbox = existing
+            } else {
+                inbox = try ShareInboxStore()
+                shareInbox = inbox
+            }
+            var errors: [UUID: String] = [:]
             for item in try inbox.pendingItems() {
                 do {
                     _ = try importRecording(
@@ -177,10 +186,11 @@ final class RecordingCoordinator {
                     )
                     try inbox.remove(item)
                 } catch {
-                    errorMessage = "Could not import \(item.originalName). The shared file is still saved on this iPhone."
+                    errors[item.id] = error.localizedDescription
                 }
             }
             pendingSharedItems = try inbox.pendingItems()
+            pendingSharedErrors = errors
         } catch {
             errorMessage = "Shared files are unavailable. Restart Media Tools to try again."
         }
@@ -188,7 +198,7 @@ final class RecordingCoordinator {
 
     func sharedFileURL(for item: ShareInboxStore.Item) -> URL? {
         guard pendingSharedItems.contains(where: { $0.id == item.id }) else { return nil }
-        return try? ShareInboxStore().fileURL(for: item)
+        return shareInbox?.fileURL(for: item)
     }
 
     /// Starts capture from the visible app. This path may present the system's

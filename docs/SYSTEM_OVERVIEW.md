@@ -53,9 +53,10 @@ server restart does not silently discard accepted work.
 | SwiftUI iPhone app | Fast capture, recording, library search, details, chat, and collections | Native Clerk session |
 | Go API | Media processing and automation | `X-API-Key` or Clerk/legacy bearer token |
 
-The iPhone client is native SwiftUI, not React Native. Share Extension and
-Widget source files exist as prototypes, but their targets, entitlements,
-signing, and on-device behavior are not part of the shipping app yet.
+The iPhone client is native SwiftUI, not React Native. The Share Extension
+stages supported files locally for the app to import after launch. The widget
+and recording controls provide quick capture. Physical Voice Memos sharing
+still needs TestFlight verification.
 
 ## Data and ownership model
 
