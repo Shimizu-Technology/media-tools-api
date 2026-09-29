@@ -227,7 +227,7 @@ func (db *DB) RefreshFirstPartySessionWithSuccessor(ctx context.Context, credent
 	if err != nil {
 		return nil, fmt.Errorf("load session refresh credential: %w", err)
 	}
-	if row.RevokedAt.Valid || !now.Before(row.TokenExpiresAt) || !now.Before(row.InactiveExpiresAt) {
+	if row.RevokedAt.Valid || !now.Before(row.InactiveExpiresAt) || (!row.ConsumedAt.Valid && !now.Before(row.TokenExpiresAt)) {
 		return nil, ErrSessionInvalid
 	}
 	if row.ConsumedAt.Valid {
@@ -254,6 +254,9 @@ func (db *DB) RefreshFirstPartySessionWithSuccessor(ctx context.Context, credent
 			// The client knows both credentials, but has already advanced past
 			// this pair. Reject the stale request without revoking the device.
 			return nil, ErrSessionAlreadyRotated
+		}
+		if !now.Before(row.TokenExpiresAt) {
+			return nil, ErrSessionInvalid
 		}
 		if now.Sub(row.ConsumedAt.Time) <= duplicateRefreshGrace {
 			return nil, ErrSessionAlreadyRotated

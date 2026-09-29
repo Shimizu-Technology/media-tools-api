@@ -40,7 +40,11 @@ func TestFirstPartySessionRotationReplayAndRevocation(t *testing.T) {
 		VALUES ($1, '', 'Session Test') RETURNING id`, uuid.NewString()+"@example.com").Scan(&userID); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, userID) })
+	t.Cleanup(func() {
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, userID); err != nil {
+			t.Errorf("cleanup user fixture: %v", err)
+		}
+	})
 
 	pair, err := db.CreateFirstPartySession(ctx, userID, "ios", "Test iPhone")
 	if err != nil {
@@ -90,7 +94,11 @@ func TestFirstPartyRefreshRecoversLostResponse(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `INSERT INTO users (email, password_hash) VALUES ($1, '') RETURNING id`, uuid.NewString()+"@example.com").Scan(&userID); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, userID) })
+	t.Cleanup(func() {
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, userID); err != nil {
+			t.Errorf("cleanup user fixture: %v", err)
+		}
+	})
 	initial, err := db.CreateFirstPartySession(ctx, userID, "ios", "Phone")
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +112,7 @@ func TestFirstPartyRefreshRecoversLostResponse(t *testing.T) {
 		t.Fatalf("initial rotation = %#v, %v", first, err)
 	}
 	oldHash, _ := authTokenHash(initial.RefreshToken, "mta_rt_")
-	if _, err := db.ExecContext(ctx, `UPDATE auth_refresh_tokens SET consumed_at = $2 WHERE token_hash = $1`, oldHash, time.Now().Add(-time.Hour)); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE auth_refresh_tokens SET consumed_at = $2, expires_at = $3 WHERE token_hash = $1`, oldHash, time.Now().Add(-time.Hour), time.Now().Add(-time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	recovered, err := db.RefreshFirstPartySessionWithSuccessor(ctx, initial.RefreshToken, next)

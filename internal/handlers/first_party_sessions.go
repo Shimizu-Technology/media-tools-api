@@ -73,6 +73,7 @@ func (h *Handler) RefreshFirstPartySession(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, pair)
 	case errors.Is(err, database.ErrInvalidSuccessorToken):
+		log.Printf("refresh session rejected: invalid successor credential")
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Next refresh credential is invalid", Code: http.StatusBadRequest})
 	case errors.Is(err, database.ErrSessionAlreadyRotated):
 		c.JSON(http.StatusConflict, models.ErrorResponse{Error: "session_refresh_in_progress", Message: "Session was just refreshed; retry with the latest stored credential", Code: http.StatusConflict})
