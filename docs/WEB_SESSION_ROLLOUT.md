@@ -9,9 +9,12 @@ same. Clerk remains available for initial sign-in while passkey login is built.
 1. Deploy migrations 043 and 044 and the API code. Set
    `FIRST_PARTY_AUTH_ENABLED=true` and `WEB_COOKIE_AUTH_ENABLED=true` on Render.
    Keep `CLERK_JWKS_URL` and `CLERK_SECRET_KEY` configured.
-2. Set `CORS_ORIGIN` to the exact web origin. Include every intentionally
-   supported custom or preview origin as a comma-separated entry. Browser
-   session mutations reject requests from origins absent from this list.
+2. Set `CORS_ORIGIN` to the exact canonical web origin,
+   `https://media.shimizu-technology.com`. Include every intentionally
+   supported preview origin as a comma-separated entry. Browser session
+   mutations reject requests from origins absent from this list. The old
+   `media-tools-gu.netlify.app` host redirects to the canonical host so saved
+   Home Screen links use the same cookie origin.
 3. Verify that Netlify serves `/api/v1/health` through the same-origin `/api/*`
    proxy before enabling the browser flag. The public `frontend/public/_redirects`
    proxy targets the current Render API and precedes the SPA fallback.

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -175,12 +176,20 @@ func (h *WebSessionHandler) Logout(c *gin.Context) {
 		return
 	}
 	if refresh, err := c.Cookie(middleware.WebRefreshCookie); err == nil {
-		_ = h.db.RevokeFirstPartySessionByRefreshToken(c.Request.Context(), refresh)
+		if err := h.db.RevokeFirstPartySessionByRefreshToken(c.Request.Context(), refresh); err != nil && !errors.Is(err, database.ErrSessionInvalid) {
+			log.Printf("revoke browser session on logout: %v", err)
+			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not sign out; please try again", Code: http.StatusServiceUnavailable})
+			return
+		}
 	}
 	// A refresh response may have been lost after rotation. In that case the
 	// pending successor is the active credential and must be revoked too.
 	if pending, err := c.Cookie(middleware.WebPendingCookie); err == nil {
-		_ = h.db.RevokeFirstPartySessionByRefreshToken(c.Request.Context(), pending)
+		if err := h.db.RevokeFirstPartySessionByRefreshToken(c.Request.Context(), pending); err != nil && !errors.Is(err, database.ErrSessionInvalid) {
+			log.Printf("revoke pending browser session on logout: %v", err)
+			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not sign out; please try again", Code: http.StatusServiceUnavailable})
+			return
+		}
 	}
 	h.clear(c)
 	c.Header("Cache-Control", "no-store")

@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { useAuthContext } from '../contexts/useAuthContext';
 import { useTheme } from '../hooks/useTheme';
 import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
-import { webSessionEnabled } from '../lib/webSession';
+import { isWebSessionActive } from '../lib/webSession';
 
 const DeleteAccountSection = lazy(() => import('../components/DeleteAccountSection').then((module) => ({ default: module.DeleteAccountSection })));
 
@@ -83,7 +83,7 @@ export function SettingsPage() {
           <div className="min-w-0 flex-1">
             <h2 className="text-xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>Account</h2>
             <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-              {isClerkEnabled ? (webSessionEnabled ? 'Signed in with a Media Tools browser session.' : 'Signed in through Clerk.') : 'Running in local API-key mode.'}
+              {isClerkEnabled ? (isWebSessionActive() ? 'Signed in with a Media Tools browser session.' : 'Signed in through Clerk.') : 'Running in local API-key mode.'}
             </p>
             <div className="mt-4 rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}>
               <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{user?.name || 'Workspace user'}</p>

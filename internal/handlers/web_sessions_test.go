@@ -43,3 +43,70 @@ func TestWebSessionCredentialsAreHostOnlyHttpOnlyAndSameSite(t *testing.T) {
 		t.Error("refresh credential leaked in body")
 	}
 }
+
+func TestWebSessionMutationsRejectInvalidCSRF(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewWebSessionHandler(nil, true, []string{"https://media.example.com"})
+	for _, handler := range []struct {
+		name string
+		call func(*gin.Context)
+	}{
+		{"prepare", h.Prepare},
+		{"refresh", h.Refresh},
+		{"logout", h.Logout},
+	} {
+		t.Run(handler.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(response)
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/web/session/"+handler.name, nil)
+			c.Request.Header.Set("Origin", "https://media.example.com")
+			c.Request.Header.Set(middleware.WebCSRFHeader, "wrong")
+			c.Request.AddCookie(&http.Cookie{Name: middleware.WebCSRFCookie, Value: "expected"})
+			handler.call(c)
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", response.Code)
+			}
+		})
+	}
+}
+
+func TestWebSessionRefreshRequiresPreparation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewWebSessionHandler(nil, true, []string{"https://media.example.com"})
+	response := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(response)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/web/session/refresh", nil)
+	c.Request.Header.Set("Origin", "https://media.example.com")
+	c.Request.Header.Set(middleware.WebCSRFHeader, "matching")
+	c.Request.AddCookie(&http.Cookie{Name: middleware.WebCSRFCookie, Value: "matching"})
+	c.Request.AddCookie(&http.Cookie{Name: middleware.WebRefreshCookie, Value: "mta_rt_existing"})
+	h.Refresh(c)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "refresh_not_prepared") {
+		t.Fatalf("unprepared refresh = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestWebSessionLogoutClearsAllCookies(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewWebSessionHandler(nil, true, []string{"https://media.example.com"})
+	response := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(response)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/web/session/logout", nil)
+	c.Request.Header.Set("Origin", "https://media.example.com")
+	c.Request.Header.Set(middleware.WebCSRFHeader, "matching")
+	c.Request.AddCookie(&http.Cookie{Name: middleware.WebCSRFCookie, Value: "matching"})
+	h.Logout(c)
+	c.Writer.WriteHeaderNow()
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("logout status = %d, want 204", response.Code)
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 4 {
+		t.Fatalf("cleared %d cookies, want 4", len(cookies))
+	}
+	for _, cookie := range cookies {
+		if cookie.MaxAge != -1 || cookie.Value != "" {
+			t.Errorf("cookie %s was not cleared: %+v", cookie.Name, cookie)
+		}
+	}
+}

@@ -3,6 +3,7 @@
  * deletion must pass through Media Tools so application data and raw media are
  * removed before the identity provider is called.
  */
+import { useState } from 'react';
 import { SignInButton, useUser } from '@clerk/clerk-react';
 import { LogIn, LogOut, Settings } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -12,6 +13,16 @@ import { useAuthContext } from '../contexts/useAuthContext';
 function SignedInAccountMenu() {
   const { signOut } = useAuthContext();
   const { user } = useUser();
+  const [signOutError, setSignOutError] = useState(false);
+
+  const handleSignOut = async () => {
+    setSignOutError(false);
+    try {
+      await signOut();
+    } catch {
+      setSignOutError(true);
+    }
+  };
 
   return (
     <details className="group relative">
@@ -27,10 +38,11 @@ function SignedInAccountMenu() {
           <Settings className="h-4 w-4" />
           Account settings
         </Link>
-        <button type="button" onClick={() => void signOut()} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition hover:bg-[var(--color-nav-hover)]" style={{ color: 'var(--color-text-secondary)' }}>
+        <button type="button" onClick={() => void handleSignOut()} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition hover:bg-[var(--color-nav-hover)]" style={{ color: 'var(--color-text-secondary)' }}>
           <LogOut className="h-4 w-4" />
           Sign out
         </button>
+        {signOutError && <p role="alert" className="px-3 py-2 text-xs" style={{ color: 'var(--color-error)' }}>Could not sign out. Please try again.</p>}
       </div>
     </details>
   );
