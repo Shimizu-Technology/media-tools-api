@@ -23,6 +23,8 @@ final class RecordingCoordinator {
     private(set) var captureState: RecordingCaptureState = .idle
     private(set) var isStarting = false
     private(set) var pendingRecordings: [LocalRecording] = []
+    private(set) var pendingSharedItems: [ShareInboxStore.Item] = []
+    private(set) var pendingSharedErrors: [UUID: String] = [:]
     private(set) var activeOwnerID: String?
     private(set) var duration: TimeInterval = 0
     private(set) var audioLevel: CGFloat = 0
@@ -40,6 +42,7 @@ final class RecordingCoordinator {
     private var stateBeforeInterruption: RecordingCaptureState?
     private let notificationObservers = NotificationObserverBag()
     private let store: RecordingStore?
+    private var shareInbox: ShareInboxStore?
     private let simulatesCapture: Bool
     private let activityManager: RecordingActivityManaging
     private let availableCapacity: (URL) -> Int64?
@@ -158,6 +161,44 @@ final class RecordingCoordinator {
 
     func recording(withID id: UUID) -> LocalRecording? {
         pendingRecordings.first { $0.id == id }
+    }
+
+    /// Move completed share-sheet handoffs into the same durable recording
+    /// queue used by Files and Quick Record. Never upload here: the main app
+    /// must first establish account ownership and AI processing consent.
+    func importSharedItems() {
+        do {
+            let inbox: ShareInboxStore
+            if let existing = shareInbox {
+                inbox = existing
+            } else {
+                inbox = try ShareInboxStore()
+                shareInbox = inbox
+            }
+            var errors: [UUID: String] = [:]
+            for item in try inbox.pendingItems() {
+                do {
+                    _ = try importRecording(
+                        from: inbox.fileURL(for: item),
+                        contentType: "general",
+                        shareID: item.id,
+                        originalName: item.originalName
+                    )
+                    try inbox.remove(item)
+                } catch {
+                    errors[item.id] = error.localizedDescription
+                }
+            }
+            pendingSharedItems = try inbox.pendingItems()
+            pendingSharedErrors = errors
+        } catch {
+            errorMessage = "Shared files are unavailable. Restart Media Tools to try again."
+        }
+    }
+
+    func sharedFileURL(for item: ShareInboxStore.Item) -> URL? {
+        guard pendingSharedItems.contains(where: { $0.id == item.id }) else { return nil }
+        return shareInbox?.fileURL(for: item)
     }
 
     /// Starts capture from the visible app. This path may present the system's
@@ -460,14 +501,24 @@ final class RecordingCoordinator {
         }
     }
 
-    func importRecording(from sourceURL: URL, contentType: String) throws -> LocalRecording {
+    func importRecording(
+        from sourceURL: URL,
+        contentType: String,
+        shareID: UUID? = nil,
+        originalName: String? = nil
+    ) throws -> LocalRecording {
         guard let store else {
             throw RecordingCoordinatorError.storageUnavailable
+        }
+        if let shareID, let existing = pendingRecordings.first(where: { $0.id == shareID }) {
+            return existing
         }
         let recording = try store.importRecording(
             from: sourceURL,
             contentType: contentType,
-            ownerID: activeOwnerID
+            ownerID: activeOwnerID,
+            id: shareID ?? UUID(),
+            originalName: originalName
         )
         if case .failure(let validationError) = RecordingIntegrityValidator.validate(
             url: store.fileURL(for: recording)

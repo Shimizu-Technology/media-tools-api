@@ -35,8 +35,12 @@ struct MediaToolsApp: App {
                 )) {
                     AIProcessingDisclosureView(manager: aiProcessingConsent)
                 }
+                .task {
+                    recordingCoordinator.importSharedItems()
+                }
                 .onChange(of: scenePhase) { _, phase in
                     guard phase == .active else { return }
+                    recordingCoordinator.importSharedItems()
                     uploadCoordinator.resumePendingWork()
                 }
         }

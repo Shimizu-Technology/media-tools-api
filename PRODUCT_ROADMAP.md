@@ -255,10 +255,10 @@ Potential exports:
 ### 15. Native Mobile Evolution
 
 The separate native SwiftUI app now ships its core capture, unified library,
-detail, chat, and collection workflows. Next mobile work should simplify the
-five-tab navigation, make settings user-centered, improve compact/iPad layouts,
-add offline recording/upload recovery, and only then graduate the prepared
-Share Extension and Widget source into signed, tested targets.
+detail, chat, collection, Widget, and Share Extension workflows. Next mobile
+work should simplify the five-tab navigation, make settings user-centered,
+improve compact/iPad layouts, and add offline recording/upload recovery.
+Voice Memos sharing and large-file staging still need physical-device checks.
 
 ## Suggested Implementation Order
 
