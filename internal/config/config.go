@@ -61,6 +61,9 @@ type Config struct {
 	// Legacy email/password auth is kept for local/dev compatibility but should
 	// be disabled in production when Clerk is the browser auth source of truth.
 	LegacyAuthEnabled bool
+	// First-party sessions can be enabled for staged client migration. Clerk
+	// remains accepted until every installed client has moved.
+	FirstPartyAuthEnabled bool
 
 	// Clerk Authentication
 	ClerkPublishableKey  string
@@ -143,8 +146,9 @@ func Load() (*Config, error) {
 		OpenAITranscriptFormatModel: getEnv("OPENAI_TRANSCRIPT_FORMAT_MODEL", "gpt-4.1-mini"),
 
 		// JWT Authentication
-		JWTSecret:         getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),
-		LegacyAuthEnabled: getEnvBool("LEGACY_AUTH_ENABLED", ginMode != "release"),
+		JWTSecret:             getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),
+		LegacyAuthEnabled:     getEnvBool("LEGACY_AUTH_ENABLED", ginMode != "release"),
+		FirstPartyAuthEnabled: getEnvBool("FIRST_PARTY_AUTH_ENABLED", false),
 
 		// Clerk Authentication
 		ClerkPublishableKey:  getEnv("CLERK_PUBLISHABLE_KEY", ""),

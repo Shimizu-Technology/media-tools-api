@@ -18,6 +18,7 @@ import (
 )
 
 const userContextKey = "user"
+const firstPartySessionContextKey = "first_party_session_id"
 
 // JWTClaims extends standard JWT claims with user info.
 type JWTClaims struct {
@@ -107,7 +108,8 @@ func JWTAuth(db *database.DB, jwtSecret string) gin.HandlerFunc {
 // DualAuth returns middleware that accepts API key, Clerk JWT, OR legacy JWT.
 // Priority: 1) API key, 2) Clerk JWT (RS256 via JWKS), 3) Legacy JWT (HS256).
 // This ensures backward compatibility while enabling Clerk authentication.
-func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string) gin.HandlerFunc {
+func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string, firstPartyEnabled ...bool) gin.HandlerFunc {
+	acceptFirstParty := len(firstPartyEnabled) > 0 && firstPartyEnabled[0]
 	return func(c *gin.Context) {
 		// Try API key first
 		rawKey := c.GetHeader("X-API-Key")
@@ -131,6 +133,24 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 		authHeader := c.GetHeader("Authorization")
 		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
 			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+			if acceptFirstParty && strings.HasPrefix(tokenString, "mta_at_") {
+				user, sessionID, err := db.GetUserByFirstPartyAccessToken(c.Request.Context(), tokenString)
+				if err == nil {
+					c.Set(userContextKey, user)
+					c.Set(firstPartySessionContextKey, sessionID)
+					c.Next()
+					return
+				}
+				if err != database.ErrSessionInvalid {
+					log.Printf("First-party credential lookup failed: %v", err)
+					c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not verify session", Code: http.StatusServiceUnavailable})
+					c.Abort()
+					return
+				}
+				c.JSON(http.StatusUnauthorized, models.ErrorResponse{Error: "unauthorized", Message: "Invalid or expired session", Code: http.StatusUnauthorized})
+				c.Abort()
+				return
+			}
 
 			// Try Clerk JWT first (RS256 via JWKS) if configured
 			if jwksCache != nil {
@@ -240,9 +260,9 @@ func GetUser(c *gin.Context) *models.User {
 // BearerOnlyAuth accepts Clerk JWT (RS256) or legacy JWT (HS256) Bearer tokens,
 // but NOT API keys. Used for user-scoped routes like /auth/me and /workspace
 // where an API key should not grant access.
-func BearerOnlyAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string) gin.HandlerFunc {
+func BearerOnlyAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string, firstPartyEnabled ...bool) gin.HandlerFunc {
 	// Create DualAuth handler once at init, not per-request
-	dualAuth := DualAuth(db, jwtSecret, jwksCache, clerkSecretKey)
+	dualAuth := DualAuth(db, jwtSecret, jwksCache, clerkSecretKey, firstPartyEnabled...)
 
 	return func(c *gin.Context) {
 		// Reject any request with API key, even if Authorization is also present

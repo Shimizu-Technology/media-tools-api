@@ -244,6 +244,7 @@ func main() {
 		Summarizer:                  summarizer,
 		JWTSecret:                   cfg.JWTSecret,
 		LegacyAuthEnabled:           cfg.LegacyAuthEnabled,
+		FirstPartyAuthEnabled:       cfg.FirstPartyAuthEnabled,
 		AdminAPIKey:                 cfg.AdminAPIKey,
 		OwnerKeyID:                  cfg.OwnerAPIKeyID,
 		OwnerKeyPrefix:              cfg.OwnerAPIKeyPrefix,
