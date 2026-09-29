@@ -248,9 +248,17 @@ Live Activity provides a visible Stop action.
 
 ### Auth
 - **Clerk iOS SDK v1** — Native sign-in/sign-up with prebuilt `AuthView`
-- **Keychain preparation** — Device-only shared-token storage code exists for a
-  future extension, but extension entitlements/targets do not currently ship
-- **Token Sync** — Refreshes that prepared shared token while signed in
+- **Staged device session** — Set `FIRST_PARTY_AUTH_ENABLED=true` on the API and
+  `FIRST_PARTY_IOS_AUTH_ENABLED=YES` in the iOS build to enable it. A current
+  Clerk sign-in bootstraps a session for the same server user. The app stores
+  its rotating refresh credential in the device-only Keychain and uses short
+  access credentials for API calls. If an upload was waiting when Clerk expired,
+  the app can finish it with the device session.
+- **Safe rollout** — The iOS flag defaults off. With the flag off, API requests
+  continue using Clerk. The Share Extension only copies files into the local
+  inbox; it receives no device-session credential. Signing out clears the local
+  credential, and account deletion clears it with local account data.
+- **Token Sync** — The existing Clerk token sync remains for the staged rollout.
 
 ### UX
 - **Onboarding** — 4-page walkthrough on first launch

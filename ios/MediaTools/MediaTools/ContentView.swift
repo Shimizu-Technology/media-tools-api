@@ -9,6 +9,8 @@ struct ContentView: View {
     @Environment(DeviceSessionController.self) private var deviceSession
     @State private var showAuth = false
     @State private var isResolvingAccount = Configuration.firstPartyIOSAuthEnabled
+    @State private var migrationFailed = false
+    @State private var migrationRetry = 0
     private let forceSignedOutForUITesting: Bool
     private let tokenSync = TokenSyncService.shared
 
@@ -31,6 +33,17 @@ struct ContentView: View {
         Group {
             if isResolvingAccount && Configuration.firstPartyIOSAuthEnabled {
                 ProgressView("Restoring your workspace…")
+            } else if migrationFailed {
+                VStack(spacing: 16) {
+                    Text("Your local recordings could not be connected to this account.")
+                        .multilineTextAlignment(.center)
+                    Button("Try again") { migrationRetry += 1 }
+                        .frame(minHeight: 44)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .foregroundStyle(Theme.textPrimary)
+                .background(Theme.surface)
             } else if activeUserID != nil {
                 MainTabView()
                     .onAppear {
@@ -46,10 +59,11 @@ struct ContentView: View {
                     }
             }
         }
-        .task(id: "\(clerk.user?.id ?? "signed-out")|\(deviceSession.needsSignIn)") {
+        .task(id: "\(clerk.user?.id ?? "signed-out")|\(deviceSession.needsSignIn)|\(migrationRetry)") {
             let clerkID = forceSignedOutForUITesting ? nil : clerk.user?.id
             if Configuration.firstPartyIOSAuthEnabled && !forceSignedOutForUITesting {
                 isResolvingAccount = true
+                migrationFailed = false
                 let ownerID = await deviceSession.activate(clerkID: clerkID)
                 guard !Task.isCancelled else { return }
                 if let migration = deviceSession.verifiedMigration {
@@ -63,17 +77,25 @@ struct ContentView: View {
                             to: migration.userID
                         )
                     } catch {
-                        // Keep the local queue intact and retry on activation.
-                        RecordingCoordinator.shared.errorMessage =
-                            "Local recordings could not be connected to this account. Reopen Media Tools to retry."
+                        guard !Task.isCancelled else { return }
+                        // A partial migration is repeatable, but exposing the
+                        // workspace here could hide Clerk-owned recordings.
+                        await uploadCoordinator.setActiveOwnerID(nil)
+                        aiProcessingConsent.setActiveOwnerID(nil)
+                        migrationFailed = true
+                        isResolvingAccount = false
+                        return
                     }
                 }
+                guard !Task.isCancelled else { return }
                 aiProcessingConsent.setActiveOwnerID(ownerID)
                 await uploadCoordinator.setActiveOwnerID(ownerID)
                 isResolvingAccount = false
             } else {
                 await uploadCoordinator.setActiveOwnerID(clerkID)
+                guard !Task.isCancelled else { return }
                 aiProcessingConsent.setActiveOwnerID(clerkID)
+                isResolvingAccount = false
             }
         }
         .sheet(isPresented: $showAuth) {
