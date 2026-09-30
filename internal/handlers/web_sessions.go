@@ -92,6 +92,7 @@ func (h *WebSessionHandler) Bootstrap(c *gin.Context) {
 		return
 	}
 	if err := h.db.EnsureAuthIdentity(c.Request.Context(), user.ID, "clerk", *user.ClerkID); err != nil {
+		log.Printf("link browser session identity: %v", err)
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not link your account", Code: http.StatusServiceUnavailable})
 		return
 	}
@@ -117,8 +118,13 @@ func (h *WebSessionHandler) Status(c *gin.Context) {
 		return
 	}
 	user, _, err := h.db.GetUserByFirstPartyAccessToken(c.Request.Context(), credential)
-	if err != nil {
+	if errors.Is(err, database.ErrSessionInvalid) {
 		c.JSON(http.StatusUnauthorized, gin.H{"authenticated": false})
+		return
+	}
+	if err != nil {
+		log.Printf("load browser session status: %v", err)
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not check your session; retry", Code: http.StatusServiceUnavailable})
 		return
 	}
 	c.Header("Cache-Control", "no-store")
@@ -172,6 +178,7 @@ func (h *WebSessionHandler) Refresh(c *gin.Context) {
 		h.clear(c)
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{Error: "invalid_session", Message: "Sign in again to continue", Code: http.StatusUnauthorized})
 	default:
+		log.Printf("refresh browser session: %v", err)
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not renew session; retry", Code: http.StatusServiceUnavailable})
 	}
 }
