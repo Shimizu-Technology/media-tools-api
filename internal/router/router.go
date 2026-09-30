@@ -152,6 +152,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		if cfg.FirstPartyAuthEnabled {
 			jwtProtected.GET("/auth/sessions", h.ListFirstPartySessions)
 			jwtProtected.DELETE("/auth/sessions/:id", h.RevokeFirstPartySession)
+			jwtProtected.GET("/auth/passkeys", h.PasskeyStatus)
 			jwtProtected.POST("/auth/passkeys/register/begin", h.BeginPasskeyRegistration)
 			jwtProtected.POST("/auth/passkeys/register/finish", h.FinishPasskeyRegistration)
 			jwtProtected.GET("/auth/recovery", h.RecoveryCodeStatus)

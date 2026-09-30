@@ -45,26 +45,29 @@ func (h *Handler) ReplaceRecoveryCodes(c *gin.Context) {
 }
 
 type redeemRecoveryCodeRequest struct {
-	Code       string `json:"code" binding:"required"`
-	ClientType string `json:"client_type" binding:"required"`
-	DeviceName string `json:"device_name"`
+	Code             string `json:"code" binding:"required"`
+	ClientType       string `json:"client_type" binding:"required"`
+	DeviceName       string `json:"device_name"`
+	NextRefreshToken string `json:"next_refresh_token" binding:"required"`
 }
 
 func (h *Handler) RedeemRecoveryCode(c *gin.Context) {
 	var req redeemRecoveryCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil ||
-		(req.ClientType != "web" && req.ClientType != "ios" && req.ClientType != "android") ||
+		(req.ClientType != "ios" && req.ClientType != "android") ||
 		len(strings.TrimSpace(req.DeviceName)) > 80 {
-		passkeyError(c, http.StatusBadRequest, "invalid_request", "Recovery code and valid client type are required")
+		passkeyError(c, http.StatusBadRequest, "invalid_request", "Recovery code, saved refresh token, and valid native client type are required")
 		return
 	}
-	pair, err := h.DB.RedeemRecoveryCode(c.Request.Context(), req.Code, req.ClientType, req.DeviceName)
+	pair, err := h.DB.RedeemRecoveryCode(c.Request.Context(), req.Code, req.ClientType, req.DeviceName, req.NextRefreshToken)
 	switch {
 	case err == nil:
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusCreated, pair)
 	case errors.Is(err, database.ErrRecoveryCodeInvalid):
 		passkeyError(c, http.StatusUnauthorized, "invalid_recovery_code", "Recovery code is invalid or already used")
+	case errors.Is(err, database.ErrInvalidSuccessorToken):
+		passkeyError(c, http.StatusBadRequest, "invalid_request", "A valid saved refresh token is required")
 	default:
 		log.Printf("redeem recovery code: %v", err)
 		passkeyError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Could not complete recovery sign-in")

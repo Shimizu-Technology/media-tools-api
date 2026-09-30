@@ -971,6 +971,85 @@ paths:
       tags: [Authentication]
       summary: Get the signed-in user
       responses: {"200": {description: Current user}}
+  /auth/invitations:
+    post:
+      tags: [Authentication]
+      summary: Create a one-time account invitation
+      description: Requires the configured X-Admin-Key. The token is returned once for manual sharing.
+      security: []
+      responses: {"201": {description: Invitation created}, "409": {description: Email already belongs to an account}}
+  /auth/invitations/redeem:
+    post:
+      tags: [Authentication]
+      summary: Redeem an invitation from a native client
+      security: []
+      description: |
+        iOS and Android clients must generate and durably save next_refresh_token
+        before this request. An exact token and successor retry can recover the
+        same session for 24 hours after a lost response. Raw web redemption is
+        rejected; browser clients use the cookie endpoint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, client_type, next_refresh_token]
+              properties:
+                token: {type: string}
+                client_type: {type: string, enum: [ios, android]}
+                device_name: {type: string, maxLength: 80}
+                next_refresh_token: {type: string, description: Client-generated mta_rt_ credential saved before sending}
+      responses: {"201": {description: First-party session credentials}, "401": {description: Invalid, expired, or mismatched invitation retry}}
+  /auth/recovery:
+    get:
+      tags: [Authentication]
+      summary: Count unused recovery codes
+      security: [{BearerAuth: []}]
+      responses: {"200": {description: Remaining recovery code count}}
+    post:
+      tags: [Authentication]
+      summary: Replace every recovery code
+      security: [{BearerAuth: []}]
+      responses: {"201": {description: New one-time recovery codes}}
+  /auth/recovery/redeem:
+    post:
+      tags: [Authentication]
+      summary: Redeem a recovery code from a native client
+      security: []
+      description: |
+        iOS and Android clients must generate and durably save next_refresh_token
+        before this request. An exact code and successor retry can recover the
+        same session for 24 hours after a lost response. Rotating recovery codes
+        invalidates any retry record. Raw web redemption is rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, client_type, next_refresh_token]
+              properties:
+                code: {type: string}
+                client_type: {type: string, enum: [ios, android]}
+                device_name: {type: string, maxLength: 80}
+                next_refresh_token: {type: string, description: Client-generated mta_rt_ credential saved before sending}
+      responses: {"201": {description: First-party session credentials}, "401": {description: Invalid, used, expired, or mismatched recovery retry}}
+  /auth/passkeys:
+    get:
+      tags: [Authentication]
+      summary: Count registered passkeys for the signed-in account
+      security: [{BearerAuth: []}]
+      responses:
+        "200":
+          description: Registered passkey count
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count]
+                properties:
+                  count: {type: integer, minimum: 0}
   /auth/passkeys/register/begin:
     post:
       tags: [Authentication]
@@ -1041,19 +1120,26 @@ paths:
       tags: [Authentication]
       summary: Verify a passkey and create a revocable first-party device session
       security: []
-      description: The ceremony is consumed once even when verification fails. Rate limited by network peer.
+      description: |
+        The ceremony is consumed once even when verification fails. iOS and
+        Android clients must generate and durably save next_refresh_token before
+        the first request. After successful verification, an exact ceremony and
+        successor retry can recover the same session for 24 hours; credential
+        may be omitted on that retry. Raw web token responses are rejected.
+        Rate limited by network peer.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [ceremony_id, credential, client_type]
+              required: [ceremony_id, client_type, next_refresh_token]
               properties:
                 ceremony_id: {type: string, format: uuid}
                 credential: {type: object, description: WebAuthn PublicKeyCredential assertion JSON with unpadded base64url binary fields}
-                client_type: {type: string, enum: [web, ios, android]}
+                client_type: {type: string, enum: [ios, android]}
                 device_name: {type: string, maxLength: 80}
+                next_refresh_token: {type: string, description: Client-generated mta_rt_ credential saved before sending}
       responses:
         "201": {description: First-party access token, refresh token, and session metadata; store securely}
         "401": {description: Challenge or passkey verification failed}

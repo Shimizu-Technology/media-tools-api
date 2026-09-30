@@ -12,6 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jmoiron/sqlx"
+
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
 
@@ -19,6 +22,10 @@ const (
 	accessTokenLifetime   = 15 * time.Minute
 	deviceInactivityLimit = 365 * 24 * time.Hour
 	duplicateRefreshGrace = 15 * time.Second
+	// credentialIssuanceRetryWindow lets a mobile client recover after an app
+	// crash or a long background interval, while still bounding how long a
+	// spent invitation or recovery code can be paired with its saved successor.
+	credentialIssuanceRetryWindow = 24 * time.Hour
 )
 
 var (
@@ -27,6 +34,7 @@ var (
 	ErrSessionReplay         = errors.New("consumed session credential was replayed")
 	ErrInvalidSuccessorToken = errors.New("next refresh credential is invalid")
 	ErrIdentityOwnedByOther  = errors.New("identity is linked to another user")
+	errSuccessorUnavailable  = errors.New("next refresh credential is unavailable")
 )
 
 // EnsureAuthIdentity records a verified provider subject without ever moving
@@ -86,6 +94,13 @@ func RandomFirstPartyRefreshToken() (string, error) {
 	return randomAuthToken("mta_rt_")
 }
 
+// ValidFirstPartyRefreshToken checks the canonical shape before a one-use
+// ceremony is consumed. It does not query token ownership or session state.
+func ValidFirstPartyRefreshToken(token string) bool {
+	_, ok := authTokenHash(token, "mta_rt_")
+	return ok
+}
+
 func authTokenHash(token, prefix string) (string, bool) {
 	if !strings.HasPrefix(token, prefix) {
 		return "", false
@@ -133,6 +148,100 @@ func newAuthTokenPairWithRefresh(now time.Time, refresh string) (AuthTokenPair, 
 		RefreshToken:      refresh,
 		InactiveExpiresAt: now.Add(deviceInactivityLimit),
 	}, accessHash, refreshHash, nil
+}
+
+func refreshSuccessorHash(successor string) (string, error) {
+	hash, ok := authTokenHash(successor, "mta_rt_")
+	if !ok {
+		return "", ErrInvalidSuccessorToken
+	}
+	return hash, nil
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// createFirstPartySessionWithRefreshTx creates a session using a refresh
+// credential that the client has already saved. The caller owns the
+// transaction so account creation, one-time credential consumption, and
+// session issuance can commit together.
+func createFirstPartySessionWithRefreshTx(ctx context.Context, tx *sqlx.Tx, userID, clientType, deviceName, refresh string, now time.Time) (*AuthTokenPair, error) {
+	pair, accessHash, refreshHash, err := newAuthTokenPairWithRefresh(now, refresh)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.QueryRowContext(ctx, `
+		INSERT INTO auth_sessions (user_id, client_type, device_name, last_used_at, inactive_expires_at)
+		VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+		userID, clientType, deviceName, now, pair.InactiveExpiresAt).Scan(&pair.SessionID); err != nil {
+		return nil, fmt.Errorf("create session: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO auth_access_tokens (token_hash, session_id, expires_at) VALUES ($1, $2, $3)`,
+		accessHash, pair.SessionID, pair.AccessExpiresAt); err != nil {
+		return nil, fmt.Errorf("save access credential: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO auth_refresh_tokens (token_hash, session_id, expires_at) VALUES ($1, $2, $3)`,
+		refreshHash, pair.SessionID, pair.InactiveExpiresAt); err != nil {
+		if isUniqueViolation(err) {
+			return nil, errSuccessorUnavailable
+		}
+		return nil, fmt.Errorf("save refresh credential: %w", err)
+	}
+	pair.UserID = userID
+	return &pair, nil
+}
+
+// recoverCredentialIssuanceTx mints only a fresh short-lived access token for
+// an exact, recent retry. The persisted client refresh credential and session
+// stay unchanged, so callers can safely retry after losing the first response.
+func recoverCredentialIssuanceTx(ctx context.Context, tx *sqlx.Tx, sessionID, userID, successor string, consumedAt, now time.Time) (*AuthTokenPair, error) {
+	successorHash, err := refreshSuccessorHash(successor)
+	if err != nil || consumedAt.IsZero() || !now.Before(consumedAt.Add(credentialIssuanceRetryWindow)) {
+		return nil, ErrSessionInvalid
+	}
+	var row struct {
+		InactiveExpiresAt time.Time    `db:"inactive_expires_at"`
+		RevokedAt         sql.NullTime `db:"revoked_at"`
+		RefreshExpiresAt  time.Time    `db:"refresh_expires_at"`
+		RefreshConsumedAt sql.NullTime `db:"refresh_consumed_at"`
+	}
+	err = tx.GetContext(ctx, &row, `
+		SELECT s.inactive_expires_at, s.revoked_at,
+		       r.expires_at AS refresh_expires_at, r.consumed_at AS refresh_consumed_at
+		FROM auth_sessions s
+		JOIN auth_refresh_tokens r ON r.session_id = s.id AND r.token_hash = $3
+		WHERE s.id = $1 AND s.user_id = $2
+		FOR UPDATE OF s, r`, sessionID, userID, successorHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrSessionInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load redeemed session: %w", err)
+	}
+	if row.RevokedAt.Valid || row.RefreshConsumedAt.Valid ||
+		!now.Before(row.InactiveExpiresAt) || !now.Before(row.RefreshExpiresAt) {
+		return nil, ErrSessionInvalid
+	}
+	pair, accessHash, _, err := newAuthTokenPairWithRefresh(now, successor)
+	if err != nil {
+		return nil, err
+	}
+	pair.SessionID = sessionID
+	pair.UserID = userID
+	pair.InactiveExpiresAt = row.InactiveExpiresAt
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO auth_access_tokens (token_hash, session_id, expires_at) VALUES ($1, $2, $3)`,
+		accessHash, sessionID, pair.AccessExpiresAt); err != nil {
+		return nil, fmt.Errorf("save recovered access credential: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE auth_sessions SET last_used_at = $2 WHERE id = $1`, sessionID, now); err != nil {
+		return nil, fmt.Errorf("touch recovered session: %w", err)
+	}
+	return &pair, nil
 }
 
 // CreateFirstPartySession issues one revocable session for a verified user.

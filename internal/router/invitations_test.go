@@ -55,17 +55,38 @@ func TestInvitationCreateAndRedeemHTTP(t *testing.T) {
 	if token == body.InviteURL || token != body.Token {
 		t.Fatalf("invitation token/link mismatch: %#v", body)
 	}
-	redeem := postPasskeyJSON(t, engine, redeemPath, map[string]any{"token": token, "client_type": "web", "device_name": "Browser"}, "")
+	next, err := database.RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	web := postPasskeyJSON(t, engine, redeemPath, map[string]any{"token": token, "client_type": "web", "device_name": "Browser", "next_refresh_token": next}, "")
+	if web.Code != http.StatusBadRequest || strings.Contains(web.Body.String(), "access_token") || strings.Contains(web.Body.String(), "refresh_token") {
+		t.Fatalf("raw web redemption leaked credentials = %d: %s", web.Code, web.Body.String())
+	}
+	if missing := postPasskeyJSON(t, engine, redeemPath, map[string]any{"token": token, "client_type": "ios"}, ""); missing.Code != http.StatusBadRequest {
+		t.Fatalf("redemption without saved successor = %d: %s", missing.Code, missing.Body.String())
+	}
+	redeem := postPasskeyJSON(t, engine, redeemPath, map[string]any{"token": token, "client_type": "ios", "device_name": "iPhone", "next_refresh_token": next}, "")
 	if redeem.Code != http.StatusCreated || redeem.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("redeem invitation status = %d: %s", redeem.Code, redeem.Body.String())
 	}
 	var pair database.AuthTokenPair
-	if err := json.Unmarshal(redeem.Body.Bytes(), &pair); err != nil || pair.UserID == "" || pair.RefreshToken == "" {
+	if err := json.Unmarshal(redeem.Body.Bytes(), &pair); err != nil || pair.UserID == "" || pair.RefreshToken != next {
 		t.Fatalf("redeem pair = %#v, %v", pair, err)
 	}
 	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, pair.UserID) })
-	if replay := postPasskeyJSON(t, engine, redeemPath, map[string]any{"token": token, "client_type": "web"}, ""); replay.Code != http.StatusUnauthorized {
-		t.Fatalf("replayed invitation status = %d", replay.Code)
+	retry := postPasskeyJSON(t, engine, redeemPath, map[string]any{"token": token, "client_type": "ios", "device_name": "iPhone", "next_refresh_token": next}, "")
+	var retried database.AuthTokenPair
+	if retry.Code != http.StatusCreated || json.Unmarshal(retry.Body.Bytes(), &retried) != nil ||
+		retried.SessionID != pair.SessionID || retried.RefreshToken != next || retried.AccessToken == pair.AccessToken {
+		t.Fatalf("exact retry = %d %#v: %s", retry.Code, retried, retry.Body.String())
+	}
+	wrong, err := database.RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay := postPasskeyJSON(t, engine, redeemPath, map[string]any{"token": token, "client_type": "ios", "next_refresh_token": wrong}, ""); replay.Code != http.StatusUnauthorized || strings.Contains(replay.Body.String(), "token") {
+		t.Fatalf("wrong successor status = %d: %s", replay.Code, replay.Body.String())
 	}
 	if conflict := postInvitationJSON(t, engine, createPath, map[string]any{"email": email, "name": "Duplicate"}, "test-admin-key-that-is-at-least-32-chars"); conflict.Code != http.StatusConflict {
 		t.Fatalf("existing email invitation status = %d", conflict.Code)

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -23,30 +24,37 @@ func TestInvitationRedeemCreatesNativeUserSessionOnce(t *testing.T) {
 		_, _ = db.ExecContext(context.Background(), `DELETE FROM auth_invitations WHERE id = $1`, invitation.ID)
 	})
 
-	results := make(chan error, 2)
+	next, err := RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		pair *AuthTokenPair
+		err  error
+	}
+	results := make(chan result, 2)
 	var workers sync.WaitGroup
 	for i := 0; i < 2; i++ {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			_, err := db.RedeemInvitation(ctx, token, "web", "Browser")
-			results <- err
+			pair, err := db.RedeemInvitation(ctx, token, "web", "Browser", next)
+			results <- result{pair: pair, err: err}
 		}()
 	}
 	workers.Wait()
 	close(results)
-	var successes, rejections int
-	for err := range results {
-		if err == nil {
-			successes++
-		} else if errors.Is(err, ErrInvitationInvalid) {
-			rejections++
-		} else {
-			t.Fatal(err)
+	var pairs []*AuthTokenPair
+	for result := range results {
+		if result.err != nil {
+			t.Fatal(result.err)
 		}
+		pairs = append(pairs, result.pair)
 	}
-	if successes != 1 || rejections != 1 {
-		t.Fatalf("concurrent redemptions: success=%d rejected=%d", successes, rejections)
+	if len(pairs) != 2 || pairs[0].SessionID != pairs[1].SessionID ||
+		pairs[0].RefreshToken != next || pairs[1].RefreshToken != next ||
+		pairs[0].AccessToken == pairs[1].AccessToken {
+		t.Fatalf("concurrent exact retry did not recover one session: %#v", pairs)
 	}
 
 	var user struct {
@@ -63,6 +71,21 @@ func TestInvitationRedeemCreatesNativeUserSessionOnce(t *testing.T) {
 	var sessions int
 	if err := db.GetContext(ctx, &sessions, `SELECT COUNT(*) FROM auth_sessions WHERE user_id = $1`, user.ID); err != nil || sessions != 1 {
 		t.Fatalf("session count = %d, %v", sessions, err)
+	}
+	wrong, err := RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var accessBefore int
+	if err := db.GetContext(ctx, &accessBefore, `SELECT COUNT(*) FROM auth_access_tokens WHERE session_id = $1`, pairs[0].SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RedeemInvitation(ctx, token, "web", "Browser", wrong); !errors.Is(err, ErrInvitationInvalid) {
+		t.Fatalf("wrong successor retry = %v", err)
+	}
+	var accessAfter int
+	if err := db.GetContext(ctx, &accessAfter, `SELECT COUNT(*) FROM auth_access_tokens WHERE session_id = $1`, pairs[0].SessionID); err != nil || accessAfter != accessBefore {
+		t.Fatalf("wrong successor minted access: before=%d after=%d err=%v", accessBefore, accessAfter, err)
 	}
 }
 
@@ -88,8 +111,91 @@ func TestInvitationRejectsExpiredAndExistingEmail(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE auth_invitations SET expires_at = NOW() - INTERVAL '1 second' WHERE id = $1`, invitation.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.RedeemInvitation(ctx, token, "ios", "Phone"); !errors.Is(err, ErrInvitationInvalid) {
+	next, err := RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RedeemInvitation(ctx, token, "ios", "Phone", next); !errors.Is(err, ErrInvitationInvalid) {
 		t.Fatalf("expired invitation error = %v", err)
+	}
+}
+
+func TestInvitationExactRetryExpiresAndHonorsSessionRevocation(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	for _, test := range []struct {
+		name   string
+		mutate func(*AuthTokenPair, *AuthInvitation)
+	}{
+		{
+			name: "retry window expired",
+			mutate: func(_ *AuthTokenPair, invitation *AuthInvitation) {
+				_, err := db.ExecContext(ctx, `UPDATE auth_invitations SET consumed_at = $2 WHERE id = $1`, invitation.ID, time.Now().UTC().Add(-credentialIssuanceRetryWindow-time.Second))
+				if err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "session revoked",
+			mutate: func(pair *AuthTokenPair, _ *AuthInvitation) {
+				if revoked, err := db.RevokeFirstPartySession(ctx, pair.UserID, pair.SessionID); err != nil || !revoked {
+					t.Fatalf("revoke session = %v, %v", revoked, err)
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			email := uuid.NewString() + "@example.com"
+			invitation, token, err := db.CreateInvitation(ctx, email, "Retry User")
+			if err != nil {
+				t.Fatal(err)
+			}
+			next, err := RandomFirstPartyRefreshToken()
+			if err != nil {
+				t.Fatal(err)
+			}
+			pair, err := db.RedeemInvitation(ctx, token, "ios", "Phone", next)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, pair.UserID) })
+			test.mutate(pair, invitation)
+			if _, err := db.RedeemInvitation(ctx, token, "ios", "Phone", next); !errors.Is(err, ErrInvitationInvalid) {
+				t.Fatalf("retry after boundary = %v", err)
+			}
+		})
+	}
+}
+
+func TestInvitationReplayedSuccessorCreatesNothing(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	ownerID := insertPasskeyTestUser(t, db)
+	existing, err := db.CreateFirstPartySession(ctx, ownerID, "ios", "Existing phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	email := uuid.NewString() + "@example.com"
+	invitation, token, err := db.CreateInvitation(ctx, email, "No Account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM auth_invitations WHERE id = $1`, invitation.ID)
+	})
+	if _, err := db.RedeemInvitation(ctx, token, "android", "Phone", existing.RefreshToken); !errors.Is(err, ErrInvitationInvalid) {
+		t.Fatalf("replayed successor = %v", err)
+	}
+	var users, consumed int
+	if err := db.GetContext(ctx, &users, `SELECT COUNT(*) FROM users WHERE email = $1`, email); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.GetContext(ctx, &consumed, `SELECT COUNT(*) FROM auth_invitations WHERE id = $1 AND consumed_at IS NOT NULL`, invitation.ID); err != nil {
+		t.Fatal(err)
+	}
+	if users != 0 || consumed != 0 {
+		t.Fatalf("replayed successor changed state: users=%d consumed=%d", users, consumed)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-webauthn/webauthn/webauthn"
@@ -43,6 +44,16 @@ func (db *DB) ListPasskeysForUser(ctx context.Context, userID string) ([]StoredP
 		credentials = append(credentials, StoredPasskey{Credential: credential, Revision: row.Revision})
 	}
 	return credentials, nil
+}
+
+// CountPasskeysForUser lets clients resume security setup after a registration
+// response is lost without exposing credential IDs or authenticator metadata.
+func (db *DB) CountPasskeysForUser(ctx context.Context, userID string) (int, error) {
+	var count int
+	if err := db.GetContext(ctx, &count, `SELECT COUNT(*) FROM auth_passkey_credentials WHERE user_id = $1`, userID); err != nil {
+		return 0, fmt.Errorf("count passkeys: %w", err)
+	}
+	return count, nil
 }
 
 func (db *DB) GetPasskeyCredentialOwner(ctx context.Context, credentialID []byte) (string, error) {
@@ -99,6 +110,133 @@ func (db *DB) UpdatePasskeyCredential(ctx context.Context, userID string, creden
 		return ErrPasskeyCredentialChanged
 	}
 	return nil
+}
+
+// CompletePasskeyLogin persists the assertion's updated authenticator state,
+// creates the device session with the client's already-saved refresh token,
+// and links the consumed ceremony in one transaction. A response can then be
+// recovered without verifying the assertion or creating another session.
+func (db *DB) CompletePasskeyLogin(ctx context.Context, ceremonyID, userID string, credential *webauthn.Credential, revision int64, clientType, deviceName, nextRefreshToken string) (*AuthTokenPair, error) {
+	if credential == nil || len(credential.ID) == 0 {
+		return nil, fmt.Errorf("passkey credential ID is required")
+	}
+	if clientType != "web" && clientType != "ios" && clientType != "android" {
+		return nil, fmt.Errorf("unsupported client type")
+	}
+	deviceName = strings.TrimSpace(deviceName)
+	if len(deviceName) > 80 {
+		return nil, fmt.Errorf("device name is too long")
+	}
+	successorHash, err := refreshSuccessorHash(nextRefreshToken)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(credential)
+	if err != nil {
+		return nil, fmt.Errorf("encode updated passkey credential: %w", err)
+	}
+	now := time.Now().UTC()
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin passkey session issuance: %w", err)
+	}
+	defer tx.Rollback()
+	var lockedID string
+	err = tx.GetContext(ctx, &lockedID, `
+		SELECT id FROM auth_passkey_ceremonies
+		WHERE id = $1 AND kind = 'login' AND consumed_at IS NOT NULL AND completed_at IS NULL
+		FOR UPDATE`, ceremonyID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrPasskeyCeremonyInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock consumed passkey ceremony: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE auth_passkey_credentials
+		SET credential = $3, revision = revision + 1, last_used_at = $5
+		WHERE credential_id = $1 AND user_id = $2 AND revision = $4`, credential.ID, userID, string(encoded), revision, now)
+	if err != nil {
+		return nil, fmt.Errorf("update passkey credential: %w", err)
+	}
+	if count, err := result.RowsAffected(); err != nil {
+		return nil, fmt.Errorf("confirm passkey update: %w", err)
+	} else if count != 1 {
+		return nil, ErrPasskeyCredentialChanged
+	}
+	pair, err := createFirstPartySessionWithRefreshTx(ctx, tx, userID, clientType, deviceName, nextRefreshToken, now)
+	if errors.Is(err, errSuccessorUnavailable) {
+		return nil, ErrPasskeyCeremonyInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create passkey session: %w", err)
+	}
+	result, err = tx.ExecContext(ctx, `
+		UPDATE auth_passkey_ceremonies
+		SET verified_user_id = $2, issued_session_id = $3,
+		    successor_hash = $4, completed_at = $5
+		WHERE id = $1 AND completed_at IS NULL`, ceremonyID, userID, pair.SessionID, successorHash, now)
+	if err != nil {
+		return nil, fmt.Errorf("link passkey session: %w", err)
+	}
+	if count, err := result.RowsAffected(); err != nil {
+		return nil, fmt.Errorf("confirm passkey session link: %w", err)
+	} else if count != 1 {
+		return nil, ErrPasskeyCeremonyInvalid
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit passkey session issuance: %w", err)
+	}
+	return pair, nil
+}
+
+// RecoverPasskeyLogin returns the session from a successful, recent ceremony
+// only when the caller presents the exact client-generated refresh token.
+func (db *DB) RecoverPasskeyLogin(ctx context.Context, ceremonyID, nextRefreshToken string) (*AuthTokenPair, error) {
+	successorHash, err := refreshSuccessorHash(nextRefreshToken)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin passkey session recovery: %w", err)
+	}
+	defer tx.Rollback()
+	var row struct {
+		UserID        sql.NullString `db:"verified_user_id"`
+		SessionID     sql.NullString `db:"issued_session_id"`
+		SuccessorHash sql.NullString `db:"successor_hash"`
+		CompletedAt   sql.NullTime   `db:"completed_at"`
+	}
+	err = tx.GetContext(ctx, &row, `
+		SELECT verified_user_id, issued_session_id, successor_hash, completed_at
+		FROM auth_passkey_ceremonies
+		WHERE id = $1 AND kind = 'login'
+		FOR UPDATE`, ceremonyID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrPasskeyCeremonyInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load completed passkey ceremony: %w", err)
+	}
+	if !row.UserID.Valid || !row.SessionID.Valid || !row.SuccessorHash.Valid ||
+		!row.CompletedAt.Valid || row.SuccessorHash.String != successorHash {
+		return nil, ErrPasskeyCeremonyInvalid
+	}
+	pair, err := recoverCredentialIssuanceTx(
+		ctx, tx, row.SessionID.String, row.UserID.String,
+		nextRefreshToken, row.CompletedAt.Time, time.Now().UTC(),
+	)
+	if errors.Is(err, ErrSessionInvalid) {
+		return nil, ErrPasskeyCeremonyInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("recover passkey session: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit recovered passkey session: %w", err)
+	}
+	return pair, nil
 }
 
 // CreatePasskeyCeremony stores the library's session data atomically. The
