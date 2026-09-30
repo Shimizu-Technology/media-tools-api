@@ -1003,7 +1003,7 @@ paths:
     post:
       tags: [Authentication]
       summary: Create a one-time account invitation
-      description: Requires the configured X-Admin-Key. The token is returned once for manual sharing.
+      description: Requires the configured X-Admin-Key. The token is returned once for manual sharing. Creating another invitation for the same email revokes every older unused link.
       security: []
       responses: {"201": {description: Invitation created}, "409": {description: Email already belongs to an account}}
   /auth/invitations/redeem:
@@ -1029,6 +1029,56 @@ paths:
                 device_name: {type: string, maxLength: 80}
                 next_refresh_token: {type: string, description: Client-generated mta_rt_ credential saved before sending}
       responses: {"201": {description: First-party session credentials}, "401": {description: Invalid, expired, or mismatched invitation retry}}
+  /auth/onboarding/reissues:
+    post:
+      tags: [Authentication]
+      summary: Reissue onboarding access for a stranded account
+      description: |
+        Requires the configured X-Admin-Key and an immutable users.id. The
+        account must have no passkey and no active unused recovery code. A new
+        link revokes older unused rescue links for the same account. The token
+        and fragment URL are returned once for manual secure sharing.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: {type: string, format: uuid}
+      responses:
+        "201": {description: One-time onboarding rescue created}
+        "404": {description: Account not found}
+        "409": {description: Account already has a sign-in recovery method}
+  /auth/onboarding/reissues/redeem:
+    post:
+      tags: [Authentication]
+      summary: Redeem onboarding rescue from a native client
+      security: []
+      description: |
+        iOS and Android clients save next_refresh_token before sending this
+        request. Redemption creates one session and atomically revokes every
+        older device session for the account. An exact token and successor
+        retry can recover a lost successful response for 24 hours. Raw web
+        redemption is rejected; browsers use the cookie onboarding adapter.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, client_type, next_refresh_token]
+              properties:
+                token: {type: string}
+                client_type: {type: string, enum: [ios, android]}
+                device_name: {type: string, maxLength: 80}
+                next_refresh_token: {type: string, description: Client-generated mta_rt_ credential saved before sending}
+      responses:
+        "201": {description: First-party session credentials}
+        "401": {description: Invalid, expired, revoked, or mismatched rescue retry}
+        "409": {description: Account gained a sign-in recovery method before redemption}
   /auth/recovery:
     get:
       tags: [Authentication]
