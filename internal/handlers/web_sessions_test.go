@@ -56,6 +56,7 @@ func TestWebSessionMutationsRejectInvalidCSRF(t *testing.T) {
 		{"logout", h.Logout},
 		{"bootstrap", h.Bootstrap},
 		{"passkey-finish", h.FinishPasskeyLogin},
+		{"recovery-finish", h.FinishRecoveryCodeLogin},
 	} {
 		t.Run(handler.name, func(t *testing.T) {
 			response := httptest.NewRecorder()
@@ -108,7 +109,7 @@ func TestPrepareWebBootstrapSetsOnlyHostCookies(t *testing.T) {
 func TestSignedOutWebAuthBeginsRejectWrongOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := NewWebSessionHandler(nil, nil, true, []string{"https://media.example.com"})
-	for _, call := range []func(*gin.Context){h.PrepareBootstrap, h.BeginPasskeyLogin} {
+	for _, call := range []func(*gin.Context){h.PrepareBootstrap, h.BeginPasskeyLogin, h.PrepareRecoveryCodeLogin} {
 		response := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(response)
 		c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/web/session/start", nil)
@@ -170,8 +171,8 @@ func TestWebSessionLogoutClearsAllCookies(t *testing.T) {
 		t.Fatalf("logout status = %d, want 204", response.Code)
 	}
 	cookies := response.Result().Cookies()
-	if len(cookies) != 4 {
-		t.Fatalf("cleared %d cookies, want 4", len(cookies))
+	if len(cookies) != 5 {
+		t.Fatalf("cleared %d cookies, want 5", len(cookies))
 	}
 	for _, cookie := range cookies {
 		if cookie.MaxAge != -1 || cookie.Value != "" {

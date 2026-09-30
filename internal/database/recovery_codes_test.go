@@ -161,6 +161,208 @@ func TestRecoveryCodeExactRetryRejectsSpentOrExpiredSuccessor(t *testing.T) {
 	}
 }
 
+func TestWebRecoveryCodeAccountSwitchIsAtomicAndRecoversLostResponse(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	oldUserID := insertPasskeyTestUser(t, db)
+	targetUserID := insertPasskeyTestUser(t, db)
+	oldSession, err := db.CreateFirstPartySession(ctx, oldUserID, "web", "Old browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes := activateRecoveryCodes(t, db, targetUserID)
+	successor, _ := RandomFirstPartyRefreshToken()
+	pair, err := db.RedeemWebRecoveryCode(ctx, codes[0], successor, []string{oldSession.RefreshToken})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pair.UserID != targetUserID || pair.RefreshToken != successor {
+		t.Fatalf("recovered wrong account: %#v", pair)
+	}
+	if _, _, err := db.GetUserByFirstPartyAccessToken(ctx, oldSession.AccessToken); !errors.Is(err, ErrSessionInvalid) {
+		t.Fatalf("old browser session remained active: %v", err)
+	}
+	retried, err := db.RedeemWebRecoveryCode(ctx, "", successor, []string{oldSession.RefreshToken})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.SessionID != pair.SessionID || retried.RefreshToken != successor || retried.AccessToken == pair.AccessToken {
+		t.Fatalf("lost-response retry did not recover exact session: first=%#v retry=%#v", pair, retried)
+	}
+	var sessions int
+	if err := db.GetContext(ctx, &sessions, `SELECT COUNT(*) FROM auth_sessions WHERE user_id = $1 AND client_type = 'web'`, targetUserID); err != nil || sessions != 1 {
+		t.Fatalf("target web sessions = %d, %v", sessions, err)
+	}
+
+	stillActive, err := db.CreateFirstPartySession(ctx, oldUserID, "web", "Preserved browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongSuccessor, _ := RandomFirstPartyRefreshToken()
+	if _, err := db.RedeemWebRecoveryCode(ctx, codes[0], wrongSuccessor, []string{stillActive.RefreshToken}); !errors.Is(err, ErrRecoveryCodeInvalid) {
+		t.Fatalf("used code with another successor = %v", err)
+	}
+	if user, _, err := db.GetUserByFirstPartyAccessToken(ctx, stillActive.AccessToken); err != nil || user.ID != oldUserID {
+		t.Fatalf("failed redemption revoked old browser: user=%#v err=%v", user, err)
+	}
+}
+
+func TestWebRecoveryCodeRevocationFailureRollsBackRedemption(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	oldUserID := insertPasskeyTestUser(t, db)
+	targetUserID := insertPasskeyTestUser(t, db)
+	oldSession, err := db.CreateFirstPartySession(ctx, oldUserID, "web", "Old browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes := activateRecoveryCodes(t, db, targetUserID)
+	successor, _ := RandomFirstPartyRefreshToken()
+	functionName := "fail_web_recovery_revoke_fn"
+	triggerName := "fail_web_recovery_revoke"
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DROP TRIGGER IF EXISTS fail_web_recovery_revoke ON auth_sessions`)
+		_, _ = db.ExecContext(context.Background(), `DROP FUNCTION IF EXISTS fail_web_recovery_revoke_fn()`)
+	})
+	if _, err := db.ExecContext(ctx, `
+		CREATE FUNCTION fail_web_recovery_revoke_fn() RETURNS trigger AS $$
+		BEGIN
+			IF OLD.revoked_at IS NULL AND NEW.revoked_at IS NOT NULL THEN RAISE EXCEPTION 'injected revoke failure'; END IF;
+			RETURN NEW;
+		END; $$ LANGUAGE plpgsql`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER `+triggerName+` BEFORE UPDATE ON auth_sessions FOR EACH ROW EXECUTE FUNCTION `+functionName+`()`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RedeemWebRecoveryCode(ctx, codes[0], successor, []string{oldSession.RefreshToken}); err == nil || errors.Is(err, ErrRecoveryCodeInvalid) {
+		t.Fatalf("injected revoke failure = %v", err)
+	}
+	if user, _, err := db.GetUserByFirstPartyAccessToken(ctx, oldSession.AccessToken); err != nil || user.ID != oldUserID {
+		t.Fatalf("rollback revoked old session: user=%#v err=%v", user, err)
+	}
+	if remaining, err := db.RemainingRecoveryCodes(ctx, targetUserID); err != nil || remaining != recoveryCodeCount {
+		t.Fatalf("rollback consumed code: remaining=%d err=%v", remaining, err)
+	}
+	var targetSessions int
+	if err := db.GetContext(ctx, &targetSessions, `SELECT COUNT(*) FROM auth_sessions WHERE user_id = $1`, targetUserID); err != nil || targetSessions != 0 {
+		t.Fatalf("rollback left target session: count=%d err=%v", targetSessions, err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TRIGGER `+triggerName+` ON auth_sessions`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP FUNCTION `+functionName+`()`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RedeemWebRecoveryCode(ctx, codes[0], successor, []string{oldSession.RefreshToken}); err != nil {
+		t.Fatalf("redemption after rollback = %v", err)
+	}
+}
+
+func TestWebRecoveryCodeConcurrentExactRetryCreatesOneSession(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := insertPasskeyTestUser(t, db)
+	codes := activateRecoveryCodes(t, db, userID)
+	successor, _ := RandomFirstPartyRefreshToken()
+	type result struct {
+		pair *AuthTokenPair
+		err  error
+	}
+	results := make(chan result, 2)
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			pair, err := db.RedeemWebRecoveryCode(ctx, codes[0], successor, nil)
+			results <- result{pair, err}
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	var first *AuthTokenPair
+	for result := range results {
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if first == nil {
+			first = result.pair
+			continue
+		}
+		if result.pair.SessionID != first.SessionID || result.pair.AccessToken == first.AccessToken {
+			t.Fatalf("concurrent results = %#v %#v", first, result.pair)
+		}
+	}
+	var sessions int
+	if err := db.GetContext(ctx, &sessions, `SELECT COUNT(*) FROM auth_sessions WHERE user_id = $1 AND client_type = 'web'`, userID); err != nil || sessions != 1 {
+		t.Fatalf("concurrent web sessions = %d, %v", sessions, err)
+	}
+}
+
+func TestWebRecoveryCodeStaleSuccessorCanBeReplacedWithoutBurningAnotherCode(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := insertPasskeyTestUser(t, db)
+	codes := activateRecoveryCodes(t, db, userID)
+	stale, _ := RandomFirstPartyRefreshToken()
+	if _, err := db.RedeemWebRecoveryCode(ctx, codes[0], stale, nil); err != nil {
+		t.Fatal(err)
+	}
+	staleHash, _ := parseRecoveryCode(codes[0])
+	if _, err := db.ExecContext(ctx, `UPDATE auth_recovery_codes SET consumed_at = $2 WHERE code_hash = $1`, staleHash, time.Now().UTC().Add(-credentialIssuanceRetryWindow-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RedeemWebRecoveryCode(ctx, "", stale, nil); !errors.Is(err, ErrInvalidSuccessorToken) {
+		t.Fatalf("stale successor recovery = %v", err)
+	}
+	fresh, _ := RandomFirstPartyRefreshToken()
+	if _, err := db.RedeemWebRecoveryCode(ctx, codes[1], fresh, nil); err != nil {
+		t.Fatalf("fresh successor could not redeem unused code: %v", err)
+	}
+}
+
+func TestWebRecoveryCodeWrongCodeKeepsSuccessorUsable(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := insertPasskeyTestUser(t, db)
+	codes := activateRecoveryCodes(t, db, userID)
+	successor, _ := RandomFirstPartyRefreshToken()
+	if _, err := db.RedeemWebRecoveryCode(ctx, "MTR-INVALID", successor, nil); !errors.Is(err, ErrRecoveryCodeInvalid) {
+		t.Fatalf("wrong code = %v", err)
+	}
+	if _, err := db.RedeemWebRecoveryCode(ctx, codes[0], successor, nil); err != nil {
+		t.Fatalf("wrong code poisoned prepared successor: %v", err)
+	}
+}
+
+func TestWebRecoveryCodeUnavailableSuccessorDoesNotConsumeCode(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := insertPasskeyTestUser(t, db)
+	codes := activateRecoveryCodes(t, db, userID)
+	occupied, err := db.CreateFirstPartySession(ctx, userID, "web", "Occupied successor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RedeemWebRecoveryCode(ctx, "", occupied.RefreshToken, nil); !errors.Is(err, ErrInvalidSuccessorToken) {
+		t.Fatalf("occupied empty recovery successor = %v", err)
+	}
+	if _, err := db.RedeemWebRecoveryCode(ctx, codes[0], occupied.RefreshToken, nil); !errors.Is(err, ErrInvalidSuccessorToken) {
+		t.Fatalf("occupied successor = %v", err)
+	}
+	if remaining, err := db.RemainingRecoveryCodes(ctx, userID); err != nil || remaining != recoveryCodeCount {
+		t.Fatalf("occupied successor consumed code: remaining=%d err=%v", remaining, err)
+	}
+	fresh, _ := RandomFirstPartyRefreshToken()
+	if _, err := db.RedeemWebRecoveryCode(ctx, codes[0], fresh, []string{occupied.RefreshToken}); err != nil {
+		t.Fatalf("same code failed with fresh successor: %v", err)
+	}
+}
+
 func TestRecoveryCodeReplayedSuccessorDoesNotConsumeCode(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
 	ctx := context.Background()

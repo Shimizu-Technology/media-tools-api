@@ -11,11 +11,12 @@ import (
 )
 
 const (
-	WebAccessCookie  = "mta_web_access"
-	WebRefreshCookie = "mta_web_refresh"
-	WebPendingCookie = "mta_web_pending"
-	WebCSRFCookie    = "mta_web_csrf"
-	WebCSRFHeader    = "X-CSRF-Token"
+	WebAccessCookie          = "mta_web_access"
+	WebRefreshCookie         = "mta_web_refresh"
+	WebPendingCookie         = "mta_web_pending"
+	WebRecoveryPendingCookie = "mta_web_recovery_pending"
+	WebCSRFCookie            = "mta_web_csrf"
+	WebCSRFHeader            = "X-CSRF-Token"
 )
 
 // ValidWebCookieMutation requires both an allowed page origin and a CSRF

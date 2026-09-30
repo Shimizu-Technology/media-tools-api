@@ -1339,6 +1339,48 @@ paths:
         "401": {description: Challenge or passkey verification failed}
         "403": {description: Origin or CSRF validation failed}
         "429": {description: Too many attempts}
+  /auth/web/session/recovery/prepare:
+    post:
+      tags: [Authentication]
+      summary: Prepare recovery-code sign-in for an HttpOnly browser session
+      security: []
+      description: |
+        Requires an exact allowed Origin. Installs a dedicated host-only
+        HttpOnly refresh successor and a readable CSRF cookie without changing
+        any current browser session. Repeating prepare reuses a valid pending
+        successor. No credential is returned to JavaScript.
+      responses:
+        "204": {description: Recovery successor and CSRF cookies installed}
+        "403": {description: Origin is not allowed}
+        "429": {description: Too many attempts}
+  /auth/web/session/recovery/finish:
+    post:
+      tags: [Authentication]
+      summary: Redeem a recovery code and install HttpOnly browser cookies
+      security: []
+      parameters:
+        - {name: X-CSRF-Token, in: header, required: true, schema: {type: string}}
+      description: |
+        Consumes the code, creates or recovers the replacement session, and
+        revokes any session previously stored in this browser in one database
+        transaction. The response contains metadata only. Omit code only for
+        an exact response-loss retry using the prepared successor. An
+        unavailable successor clears only its pending cookie so the same
+        unconsumed code can be retried after prepare.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code: {type: string, description: Required for first redemption; omitted for exact response-loss recovery}
+      responses:
+        "201": {description: Browser cookies installed; body contains metadata only}
+        "400": {description: Browser sign-in needs a fresh prepare}
+        "401": {description: Recovery code is invalid or already used}
+        "403": {description: Origin or CSRF validation failed}
+        "429": {description: Too many attempts}
   /account:
     delete:
       tags: [Authentication]

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 )
 
 const (
@@ -221,8 +222,24 @@ func (db *DB) RemainingRecoveryCodes(ctx context.Context, userID string) (int, e
 // RedeemRecoveryCode consumes the code and creates its device session in one
 // transaction. A failed session write therefore cannot burn the only code.
 func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceName, nextRefreshToken string) (*AuthTokenPair, error) {
+	return db.redeemRecoveryCode(ctx, code, clientType, deviceName, nextRefreshToken, nil, false)
+}
+
+// RedeemWebRecoveryCode atomically consumes or recovers a recovery code,
+// creates the cookie-backed browser session, and revokes sessions whose
+// refresh credentials were already stored in this browser. If any step fails,
+// the existing browser session and the recovery code remain unchanged.
+//
+// An empty code is accepted only for exact response-loss recovery: the saved
+// HttpOnly successor identifies a previously committed redemption without
+// exposing either credential to JavaScript.
+func (db *DB) RedeemWebRecoveryCode(ctx context.Context, code, nextRefreshToken string, existingRefreshTokens []string) (*AuthTokenPair, error) {
+	return db.redeemRecoveryCode(ctx, code, "web", "Browser", nextRefreshToken, existingRefreshTokens, true)
+}
+
+func (db *DB) redeemRecoveryCode(ctx context.Context, code, clientType, deviceName, nextRefreshToken string, existingRefreshTokens []string, allowSuccessorRecovery bool) (*AuthTokenPair, error) {
 	hash, valid := parseRecoveryCode(code)
-	if !valid {
+	if !valid && !(allowSuccessorRecovery && strings.TrimSpace(code) == "") {
 		return nil, ErrRecoveryCodeInvalid
 	}
 	if clientType != "web" && clientType != "ios" && clientType != "android" {
@@ -245,8 +262,23 @@ func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 	var userID string
 	// Match replacement's lock order (account, then code). A concurrent rotate
 	// can invalidate this candidate while we wait, so consumption is rechecked.
-	err = tx.GetContext(ctx, &userID, `SELECT user_id FROM auth_recovery_codes WHERE code_hash = $1 AND active`, hash)
+	if valid {
+		err = tx.GetContext(ctx, &userID, `SELECT user_id FROM auth_recovery_codes WHERE code_hash = $1 AND active`, hash)
+	} else {
+		err = tx.GetContext(ctx, &userID, `
+			SELECT user_id FROM auth_recovery_codes
+			WHERE successor_hash = $1 AND active AND consumed_at IS NOT NULL`, successorHash)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
+		if allowSuccessorRecovery && !valid {
+			var occupied bool
+			if lookupErr := tx.GetContext(ctx, &occupied, `SELECT EXISTS (SELECT 1 FROM auth_refresh_tokens WHERE token_hash = $1)`, successorHash); lookupErr != nil {
+				return nil, fmt.Errorf("check recovery successor availability: %w", lookupErr)
+			}
+			if occupied {
+				return nil, ErrInvalidSuccessorToken
+			}
+		}
 		return nil, ErrRecoveryCodeInvalid
 	}
 	if err != nil {
@@ -266,11 +298,19 @@ func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 		SessionID  sql.NullString `db:"consumed_session_id"`
 		Successor  sql.NullString `db:"successor_hash"`
 	}
-	err = tx.GetContext(ctx, &recovery, `
-		SELECT user_id, consumed_at, consumed_session_id, successor_hash
-		FROM auth_recovery_codes
-		WHERE code_hash = $1 AND user_id = $2 AND active
-		FOR UPDATE`, hash, lockedID)
+	if valid {
+		err = tx.GetContext(ctx, &recovery, `
+			SELECT user_id, consumed_at, consumed_session_id, successor_hash
+			FROM auth_recovery_codes
+			WHERE code_hash = $1 AND user_id = $2 AND active
+			FOR UPDATE`, hash, lockedID)
+	} else {
+		err = tx.GetContext(ctx, &recovery, `
+			SELECT user_id, consumed_at, consumed_session_id, successor_hash
+			FROM auth_recovery_codes
+			WHERE successor_hash = $1 AND user_id = $2 AND active AND consumed_at IS NOT NULL
+			FOR UPDATE`, successorHash, lockedID)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrRecoveryCodeInvalid
 	}
@@ -286,10 +326,16 @@ func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 			nextRefreshToken, recovery.ConsumedAt.Time, now,
 		)
 		if errors.Is(err, ErrSessionInvalid) {
+			if allowSuccessorRecovery && !valid {
+				return nil, ErrInvalidSuccessorToken
+			}
 			return nil, ErrRecoveryCodeInvalid
 		}
 		if err != nil {
 			return nil, fmt.Errorf("recover recovery-code sign-in: %w", err)
+		}
+		if err := revokeBrowserSessionsByRefreshTx(ctx, tx, existingRefreshTokens, pair.SessionID, now); err != nil {
+			return nil, err
 		}
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("commit recovered recovery-code sign-in: %w", err)
@@ -298,6 +344,9 @@ func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 	}
 	pair, err := createFirstPartySessionWithRefreshTx(ctx, tx, recovery.UserID, clientType, deviceName, nextRefreshToken, now)
 	if errors.Is(err, errSuccessorUnavailable) {
+		if allowSuccessorRecovery {
+			return nil, ErrInvalidSuccessorToken
+		}
 		return nil, ErrRecoveryCodeInvalid
 	}
 	if err != nil {
@@ -316,8 +365,33 @@ func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 	} else if affected != 1 {
 		return nil, ErrRecoveryCodeInvalid
 	}
+	if err := revokeBrowserSessionsByRefreshTx(ctx, tx, existingRefreshTokens, pair.SessionID, now); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit recovery sign-in: %w", err)
 	}
 	return pair, nil
+}
+
+func revokeBrowserSessionsByRefreshTx(ctx context.Context, tx *sqlx.Tx, credentials []string, keepSessionID string, now time.Time) error {
+	seen := make(map[string]struct{}, len(credentials))
+	for _, credential := range credentials {
+		hash, ok := authTokenHash(credential, "mta_rt_")
+		if !ok {
+			continue
+		}
+		if _, duplicate := seen[hash]; duplicate {
+			continue
+		}
+		seen[hash] = struct{}{}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE auth_sessions s SET revoked_at = COALESCE(s.revoked_at, $3)
+			FROM auth_refresh_tokens t
+			WHERE t.session_id = s.id AND t.token_hash = $1 AND s.id <> $2`,
+			hash, keepSessionID, now); err != nil {
+			return fmt.Errorf("revoke replaced browser session: %w", err)
+		}
+	}
+	return nil
 }
