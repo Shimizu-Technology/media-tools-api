@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -168,4 +169,125 @@ func TestDetachClerkIdentityCannotRaceLegacyIdentityBackfill(t *testing.T) {
 	if err := db.GetContext(ctx, &storedClerkID, `SELECT clerk_id FROM users WHERE id = $1`, userID); err != nil || storedClerkID != nil {
 		t.Fatalf("legacy Clerk ID survived detach = %#v, %v", storedClerkID, err)
 	}
+}
+
+func waitForClerkLockWaiter(t *testing.T, db *DB, marker string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiting int
+		if err := db.GetContext(context.Background(), &waiting, `
+			SELECT COUNT(*) FROM pg_stat_activity
+			WHERE datname = current_database()
+			  AND query LIKE '%' || $1 || '%'
+			  AND wait_event_type = 'Lock'`, marker); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s query to block on the account lock", marker)
+}
+
+func TestClerkBootstrapAndDetachmentHaveDeterministicLinearization(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+
+	t.Run("detach first rejects the stale bootstrap", func(t *testing.T) {
+		userID, clerkID := createClerkDetachmentFixture(t, db)
+		makeClerkDetachmentReady(t, db, userID)
+		next, err := RandomFirstPartyRefreshToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		blocker, err := db.BeginTxx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer blocker.Rollback()
+		if _, err := blocker.ExecContext(ctx, `SELECT id FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
+			t.Fatal(err)
+		}
+		detachResult := make(chan error, 1)
+		go func() {
+			_, err := db.DetachClerkIdentity(context.Background(), userID)
+			detachResult <- err
+		}()
+		waitForClerkLockWaiter(t, db, "clerk-detachment-lock")
+		bootstrapResult := make(chan error, 1)
+		go func() {
+			_, err := db.CreateOrRecoverClerkMigrationSession(context.Background(), userID, clerkID, "ios", "Race iPhone", next)
+			bootstrapResult <- err
+		}()
+		waitForClerkLockWaiter(t, db, "clerk-bootstrap-lock")
+		if err := blocker.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-detachResult; err != nil {
+			t.Fatalf("detach-first detachment failed: %v", err)
+		}
+		if err := <-bootstrapResult; !errors.Is(err, ErrClerkIdentityUnknown) {
+			t.Fatalf("stale bootstrap error = %v, want ErrClerkIdentityUnknown", err)
+		}
+		var links, sessions int
+		if err := db.GetContext(ctx, &links, `SELECT COUNT(*) FROM auth_identities WHERE user_id = $1 AND provider = 'clerk'`, userID); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.GetContext(ctx, &sessions, `SELECT COUNT(*) FROM auth_sessions WHERE user_id = $1`, userID); err != nil {
+			t.Fatal(err)
+		}
+		if links != 0 || sessions != 0 {
+			t.Fatalf("detach-first state links=%d sessions=%d", links, sessions)
+		}
+	})
+
+	t.Run("bootstrap first preserves the issued session before detach", func(t *testing.T) {
+		userID, clerkID := createClerkDetachmentFixture(t, db)
+		makeClerkDetachmentReady(t, db, userID)
+		next, err := RandomFirstPartyRefreshToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		blocker, err := db.BeginTxx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer blocker.Rollback()
+		if _, err := blocker.ExecContext(ctx, `SELECT id FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
+			t.Fatal(err)
+		}
+		bootstrapResult := make(chan error, 1)
+		go func() {
+			_, err := db.CreateOrRecoverClerkMigrationSession(context.Background(), userID, clerkID, "web", "Browser", next)
+			bootstrapResult <- err
+		}()
+		waitForClerkLockWaiter(t, db, "clerk-bootstrap-lock")
+		detachResult := make(chan error, 1)
+		go func() {
+			_, err := db.DetachClerkIdentity(context.Background(), userID)
+			detachResult <- err
+		}()
+		waitForClerkLockWaiter(t, db, "clerk-detachment-lock")
+		if err := blocker.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-bootstrapResult; err != nil {
+			t.Fatalf("bootstrap-first issuance failed: %v", err)
+		}
+		if err := <-detachResult; err != nil {
+			t.Fatalf("bootstrap-first detachment failed: %v", err)
+		}
+		var links, sessions int
+		if err := db.GetContext(ctx, &links, `SELECT COUNT(*) FROM auth_identities WHERE user_id = $1 AND provider = 'clerk'`, userID); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.GetContext(ctx, &sessions, `SELECT COUNT(*) FROM auth_sessions WHERE user_id = $1`, userID); err != nil {
+			t.Fatal(err)
+		}
+		if links != 0 || sessions != 1 {
+			t.Fatalf("bootstrap-first state links=%d sessions=%d", links, sessions)
+		}
+	})
 }

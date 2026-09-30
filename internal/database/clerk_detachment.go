@@ -21,7 +21,7 @@ type ClerkDetachmentReadiness struct {
 func clerkDetachmentReadinessTx(ctx context.Context, tx *sql.Tx, userID string) (*ClerkDetachmentReadiness, error) {
 	var status ClerkDetachmentReadiness
 	var clerkID sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT clerk_id FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&clerkID); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT clerk_id FROM users WHERE id = $1 FOR UPDATE /* clerk-detachment-lock */`, userID).Scan(&clerkID); err != nil {
 		return nil, fmt.Errorf("lock account for Clerk detachment: %w", err)
 	}
 	if err := tx.QueryRowContext(ctx, `
