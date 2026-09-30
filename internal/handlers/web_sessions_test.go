@@ -86,6 +86,25 @@ func TestWebSessionRefreshRequiresPreparation(t *testing.T) {
 	}
 }
 
+func TestWebSessionClearPendingCookie(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewWebSessionHandler(nil, true, nil)
+	response := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(response)
+	h.clearPending(c)
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("cleared %d cookies, want pending cookie only", len(cookies))
+	}
+	cookie := cookies[0]
+	if cookie.Name != middleware.WebPendingCookie || cookie.Path != "/api/v1/auth/web/session" {
+		t.Fatalf("cleared wrong cookie: %+v", cookie)
+	}
+	if cookie.MaxAge != -1 || cookie.Value != "" || !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("pending cookie was not cleared safely: %+v", cookie)
+	}
+}
+
 func TestWebSessionLogoutClearsAllCookies(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := NewWebSessionHandler(nil, true, []string{"https://media.example.com"})

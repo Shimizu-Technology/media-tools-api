@@ -46,14 +46,18 @@ func (h *WebSessionHandler) setCookie(c *gin.Context, name, value string, maxAge
 func (h *WebSessionHandler) clear(c *gin.Context) {
 	h.setCookie(c, middleware.WebAccessCookie, "", -1, true, "/api/v1")
 	h.setCookie(c, middleware.WebRefreshCookie, "", -1, true, "/api/v1/auth/web/session")
-	h.setCookie(c, middleware.WebPendingCookie, "", -1, true, "/api/v1/auth/web/session")
+	h.clearPending(c)
 	h.setCookie(c, middleware.WebCSRFCookie, "", -1, false, "/")
+}
+
+func (h *WebSessionHandler) clearPending(c *gin.Context) {
+	h.setCookie(c, middleware.WebPendingCookie, "", -1, true, "/api/v1/auth/web/session")
 }
 
 func (h *WebSessionHandler) setPair(c *gin.Context, pair *database.AuthTokenPair) {
 	h.setCookie(c, middleware.WebAccessCookie, pair.AccessToken, int(time.Until(pair.AccessExpiresAt).Seconds()), true, "/api/v1")
 	h.setCookie(c, middleware.WebRefreshCookie, pair.RefreshToken, webRefreshMaxAge, true, "/api/v1/auth/web/session")
-	h.setCookie(c, middleware.WebPendingCookie, "", -1, true, "/api/v1/auth/web/session")
+	h.clearPending(c)
 	c.Header("Cache-Control", "no-store")
 }
 
@@ -162,6 +166,7 @@ func (h *WebSessionHandler) Refresh(c *gin.Context) {
 		h.setPair(c, pair)
 		c.JSON(http.StatusOK, gin.H{"user_id": pair.UserID, "access_expires_at": pair.AccessExpiresAt})
 	case errors.Is(err, database.ErrInvalidSuccessorToken):
+		h.clearPending(c)
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Prepare session renewal again", Code: http.StatusBadRequest})
 	case errors.Is(err, database.ErrSessionInvalid), errors.Is(err, database.ErrSessionReplay):
 		h.clear(c)
