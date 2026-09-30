@@ -12,6 +12,7 @@ import { setAuthTokenGetter } from './lib/apiAuth'
 import { bootstrapWebSession, isWebSessionActive, logoutWebSession, reconcileWebSessionWithClerk, restoreWebSession, setWebOnboardingRequired, setWebSessionActive, webSessionEnabled, webSessionStateChanged } from './lib/webSession'
 import { clearPasskeySignInJournal, recoverPendingPasskeySignIn } from './lib/passkeys'
 import { migrateAIConsentToStableUser } from './lib/aiConsentStorage'
+import { isJoinSetupPath } from './lib/onboarding'
 
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 const isClerkEnabled = Boolean(CLERK_PUBLISHABLE_KEY && CLERK_PUBLISHABLE_KEY !== 'YOUR_PUBLISHABLE_KEY')
@@ -238,6 +239,10 @@ function AccountAppContent({ clerk }: { clerk?: ClerkBridge }) {
     if (!clerkReady) return
     let cancelled = false
     const restore = async () => {
+      // `/join` owns account switching. Its transferred bearer credential is
+      // held in a narrow HttpOnly cookie, so ordinary Clerk reconciliation or
+      // bootstrap must not clear it before the guided flow can commit it.
+      const joiningAccount = isJoinSetupPath(window.location.pathname)
       setIsUserLoading(true)
       setAuthBlocked(false)
       setHasWebSession(false)
@@ -248,7 +253,9 @@ function AccountAppContent({ clerk }: { clerk?: ClerkBridge }) {
           setWebSessionActive(false)
           let status = await restoreWebSession()
           if (cancelled) return
-          try { status = await reconcileWebSessionWithClerk(status, clerkUserId) } catch (error) { setAuthBlocked(true); throw error }
+          if (!joiningAccount) {
+            try { status = await reconcileWebSessionWithClerk(status, clerkUserId) } catch (error) { setAuthBlocked(true); throw error }
+          }
           if (cancelled) return
           if (status === null) setWebSessionActive(false)
           if (status !== null) {
@@ -256,7 +263,7 @@ function AccountAppContent({ clerk }: { clerk?: ClerkBridge }) {
             setWebOnboardingRequired(status.onboarding_required === true)
             setWebSessionActive(true)
           }
-          if (!isWebSessionActive()) {
+          if (!isWebSessionActive() && !joiningAccount) {
             const recovered = await recoverPendingPasskeySignIn()
             if (cancelled) return
             if (recovered) status = await restoreWebSession()
@@ -268,7 +275,7 @@ function AccountAppContent({ clerk }: { clerk?: ClerkBridge }) {
               setWebSessionActive(true)
             }
           }
-          if (!isWebSessionActive() && clerkUserId && clerk) {
+          if (!isWebSessionActive() && !joiningAccount && clerkUserId && clerk) {
             const token = await clerk.getToken()
             if (cancelled) return
             if (token && await bootstrapWebSession(token, clerkUserId)) setWebSessionActive(true)

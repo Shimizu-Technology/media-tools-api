@@ -26,7 +26,7 @@ let commitRequest: Promise<WebOnboardingStatus> | null = null;
  * installed in the narrow HttpOnly onboarding cookie.
  */
 export async function transferJoinFragmentBeforeApp(): Promise<JoinTransferResult> {
-  if (window.location.pathname !== '/join' || !window.location.hash) return { state: 'none' };
+  if (!isJoinSetupPath(window.location.pathname) || !window.location.hash) return { state: 'none' };
   const parsed = parseJoinFragment(window.location.hash);
   if (!parsed) return { state: 'failed', message: 'This setup link is invalid or incomplete.' };
   let response: Response;
@@ -46,6 +46,10 @@ export async function transferJoinFragmentBeforeApp(): Promise<JoinTransferResul
   }
   window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
   return { state: 'transferred', kind: parsed.kind };
+}
+
+export function isJoinSetupPath(pathname: string): boolean {
+  return pathname === '/join' || pathname === '/join/';
 }
 
 export function parseJoinFragment(hash: string): { kind: JoinKind; token: string } | null {

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { commitWebOnboarding, completeWebOnboarding, getWebOnboardingStatus, parseJoinFragment, transferJoinFragmentBeforeApp } from './onboarding';
+import { commitWebOnboarding, completeWebOnboarding, getWebOnboardingStatus, isJoinSetupPath, parseJoinFragment, transferJoinFragmentBeforeApp } from './onboarding';
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -31,6 +31,9 @@ beforeEach(() => {
 
 describe('join fragment transfer', () => {
   it('accepts exactly one canonical invitation or rescue fragment', () => {
+    expect(isJoinSetupPath('/join')).toBe(true);
+    expect(isJoinSetupPath('/join/')).toBe(true);
+    expect(isJoinSetupPath('/app')).toBe(false);
     expect(parseJoinFragment(`#invite=${inviteToken}`)).toEqual({ kind: 'invite', token: inviteToken });
     expect(parseJoinFragment(`#onboarding=mta_onb_${'z'.repeat(43)}`)).toEqual({ kind: 'onboarding', token: `mta_onb_${'z'.repeat(43)}` });
     expect(parseJoinFragment(`#invite=${inviteToken}&extra=value`)).toBeNull();
