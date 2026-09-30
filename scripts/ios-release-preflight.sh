@@ -45,10 +45,11 @@ privacy_manifest="ios/MediaTools/MediaTools/PrivacyInfo.xcprivacy"
 entitlements_path="ios/MediaTools/MediaTools/MediaTools.entitlements"
 metadata_path="ios/app-store/en-US"
 native_auth_release_path="ios/app-store/native-auth-release.json"
+export_options_path="ios/app-store/ExportOptions.plist"
 native_auth_validator_path="scripts/validate-ios-native-auth-release.rb"
 native_auth_validator_test_path="scripts/validate-ios-native-auth-release_test.rb"
 
-for required_path in "$project_path" "$info_plist" "$privacy_manifest" "$entitlements_path" "$metadata_path" "$native_auth_release_path" "$native_auth_validator_path" "$native_auth_validator_test_path"; do
+for required_path in "$project_path" "$info_plist" "$privacy_manifest" "$entitlements_path" "$metadata_path" "$native_auth_release_path" "$export_options_path" "$native_auth_validator_path" "$native_auth_validator_test_path"; do
   if [[ ! -e "$required_path" ]]; then
     echo "Missing release input: $required_path"
     exit 1
@@ -166,7 +167,13 @@ background_mode="$(/usr/libexec/PlistBuddy -c 'Print :UIBackgroundModes:0' "$inf
 [[ -n "$microphone_copy" ]] || { echo "Microphone usage description is empty"; exit 1; }
 [[ "$background_mode" == "audio" ]] || { echo "The recording app must declare the audio background mode"; exit 1; }
 
-plutil -lint "$info_plist" "$privacy_manifest" "$entitlements_path" >/dev/null
+plutil -lint "$info_plist" "$privacy_manifest" "$entitlements_path" "$export_options_path" >/dev/null
+
+[[ "$(plutil -extract destination raw "$export_options_path")" == "export" ]] || { echo "Export options must create a local artifact for preflight"; exit 1; }
+[[ "$(plutil -extract manageAppVersionAndBuildNumber raw "$export_options_path")" == "false" ]] || { echo "Export options must preserve the reviewed build number"; exit 1; }
+[[ "$(plutil -extract method raw "$export_options_path")" == "app-store-connect" ]] || { echo "Export options must target App Store Connect"; exit 1; }
+[[ "$(plutil -extract signingStyle raw "$export_options_path")" == "automatic" ]] || { echo "Export options must use automatic signing"; exit 1; }
+[[ "$(plutil -extract teamID raw "$export_options_path")" == "$team_id" ]] || { echo "Export options use the wrong Apple team"; exit 1; }
 
 plutil -convert json -o - "$privacy_manifest" | ruby -rjson -e '
   manifest = JSON.parse(STDIN.read)

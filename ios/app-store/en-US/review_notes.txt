@@ -1,6 +1,6 @@
 Media Tools requires an account because recordings, transcripts, PDFs, chats, and collections are private, account-scoped workspace data.
 
-Sign in: Tap Sign in or create account. The authentication sheet presents the Apple logo as an equivalent option alongside Google and email/password; wider layouts label it Continue with Apple. The native Apple flow requests only name and email and supports Hide My Email. You may instead use the non-expiring review account supplied in App Review Information.
+Sign in: Returning accounts can use Continue with passkey or a saved recovery code. During the migration, an existing linked account can instead tap Use Apple, Google, or email; the authentication sheet presents Apple as an equivalent option alongside Google and email/password. The native Apple flow requests only name and email and supports Hide My Email. App Review may use the non-expiring review account supplied in App Review Information.
 
 Resolved from the September 2 review: The microphone education screen now uses the neutral Continue label before iOS presents its system permission dialog. Notification education uses the same neutral wording. The prior Allow microphone and Enable completion alerts labels have been removed.
 
