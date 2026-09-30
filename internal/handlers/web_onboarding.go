@@ -16,6 +16,7 @@ import (
 
 const (
 	webOnboardingCookiePath   = "/api/v1/auth/web/session/onboarding"
+	webOnboardingPendingPath  = "/api/v1/auth/web/session"
 	webOnboardingCookieMaxAge = 15 * 60
 	webOnboardingRequiredAge  = 24 * 60 * 60
 )
@@ -110,7 +111,7 @@ func (h *WebSessionHandler) TransferOnboardingFragment(c *gin.Context) {
 	}
 	h.setCookie(c, secretName, req.Token, webOnboardingCookieMaxAge, true, webOnboardingCookiePath)
 	h.setCookie(c, otherName, "", -1, true, webOnboardingCookiePath)
-	h.setCookie(c, middleware.WebOnboardingPendingCookie, successor, webOnboardingCookieMaxAge, true, webOnboardingCookiePath)
+	h.setCookie(c, middleware.WebOnboardingPendingCookie, successor, webOnboardingCookieMaxAge, true, webOnboardingPendingPath)
 	h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
 	c.Header("Cache-Control", "no-store")
 	c.Status(http.StatusNoContent)
@@ -143,7 +144,7 @@ func (h *WebSessionHandler) PrepareOnboardingCommit(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "onboarding_unavailable", Message: "Could not prepare account setup; retry", Code: http.StatusServiceUnavailable})
 		return
 	}
-	h.setCookie(c, middleware.WebOnboardingPendingCookie, successor, webOnboardingCookieMaxAge, true, webOnboardingCookiePath)
+	h.setCookie(c, middleware.WebOnboardingPendingCookie, successor, webOnboardingCookieMaxAge, true, webOnboardingPendingPath)
 	h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
 	c.Header("Cache-Control", "no-store")
 	c.Status(http.StatusNoContent)
@@ -343,7 +344,7 @@ func (h *WebSessionHandler) cookieCredentials(c *gin.Context, names ...string) [
 }
 
 func (h *WebSessionHandler) clearOnboardingPending(c *gin.Context) {
-	h.setCookie(c, middleware.WebOnboardingPendingCookie, "", -1, true, webOnboardingCookiePath)
+	h.setCookie(c, middleware.WebOnboardingPendingCookie, "", -1, true, webOnboardingPendingPath)
 }
 
 func (h *WebSessionHandler) clearOnboardingTransfer(c *gin.Context) {

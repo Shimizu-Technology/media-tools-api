@@ -9,7 +9,7 @@ export function JoinTransferFailure({ initial }: { initial: Extract<JoinTransfer
   const retry = async () => {
     setRetrying(true);
     const result = await transferJoinFragmentBeforeApp();
-    if (result.state === 'transferred') {
+    if (result.state === 'transferred' || result.state === 'none') {
       window.location.reload();
       return;
     }
@@ -28,4 +28,3 @@ export function JoinTransferFailure({ initial }: { initial: Extract<JoinTransfer
     </main>
   );
 }
-

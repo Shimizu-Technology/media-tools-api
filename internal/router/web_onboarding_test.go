@@ -69,10 +69,11 @@ func TestWebInvitationOnboardingCookieProtocolAndDurableCompletion(t *testing.T)
 	inviteCookie := cookieByName(transfer.Result().Cookies(), middleware.WebInvitationCookie)
 	pending := cookieByName(transfer.Result().Cookies(), middleware.WebOnboardingPendingCookie)
 	csrf := cookieByName(transfer.Result().Cookies(), middleware.WebCSRFCookie)
-	for _, cookie := range []*http.Cookie{inviteCookie, pending} {
-		if cookie == nil || cookie.Domain != "" || !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != base || cookie.MaxAge != 15*60 {
-			t.Fatalf("unsafe onboarding cookie: %+v", cookie)
-		}
+	if inviteCookie == nil || inviteCookie.Domain != "" || !inviteCookie.Secure || !inviteCookie.HttpOnly || inviteCookie.SameSite != http.SameSiteStrictMode || inviteCookie.Path != base || inviteCookie.MaxAge != 15*60 {
+		t.Fatalf("unsafe onboarding link cookie: %+v", inviteCookie)
+	}
+	if pending == nil || pending.Domain != "" || !pending.Secure || !pending.HttpOnly || pending.SameSite != http.SameSiteStrictMode || pending.Path != "/api/v1/auth/web/session" || pending.MaxAge != 15*60 {
+		t.Fatalf("unsafe onboarding successor cookie: %+v", pending)
 	}
 	if inviteCookie.Value != token || csrf == nil || csrf.HttpOnly || csrf.Path != "/" {
 		t.Fatalf("transfer cookies = %#v", transfer.Result().Cookies())
@@ -327,6 +328,47 @@ func TestWebOnboardingRealCookiePathsRevokePreviousSession(t *testing.T) {
 	}
 	if _, _, err := db.GetUserByFirstPartyAccessToken(ctx, oldSession.AccessToken); !errors.Is(err, database.ErrSessionInvalid) {
 		t.Fatalf("real cookie paths left previous session active: %v", err)
+	}
+}
+
+func TestNativeRescueClearsWebOnlyGateForProtectedAPI(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	db, err := database.NewWithSimpleProtocol(databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.RunMigrations("../../migrations"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	var userID string
+	if err := db.QueryRowContext(ctx, `INSERT INTO users (email, password_hash, name, onboarding_required) VALUES ($1, '', 'Native rescue', TRUE) RETURNING id`, uuid.NewString()+"@example.com").Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, userID) })
+	_, token, err := db.CreateOnboardingReissue(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successor, err := database.RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := db.RedeemOnboardingReissue(ctx, token, "ios", "iPhone", successor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := Setup(RouterConfig{DB: db, FirstPartyAuthEnabled: true})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/transcripts", nil)
+	req.Header.Set("Authorization", "Bearer "+pair.AccessToken)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, req)
+	if response.Code == http.StatusPreconditionRequired || response.Code == http.StatusUnauthorized {
+		t.Fatalf("native rescue remained product-blocked = %d: %s", response.Code, response.Body.String())
 	}
 }
 

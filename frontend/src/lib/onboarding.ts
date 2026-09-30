@@ -132,6 +132,8 @@ async function finishCommit(): Promise<void> {
 async function committedSessionExists(): Promise<boolean> {
   const restored = await restoreWebSession().catch(() => null);
   if (!restored?.authenticated || !restored.onboarding_required) return false;
+  const status = await fetchOnboardingStatus().catch(() => null);
+  if (!status || status.pending) return false;
   setWebSessionActive(true);
   setWebOnboardingRequired(true);
   return true;

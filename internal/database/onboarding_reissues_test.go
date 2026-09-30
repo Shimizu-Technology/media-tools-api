@@ -264,6 +264,9 @@ func TestNativeOnboardingRescueDoesNotRequireWebOnlyCompletion(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
 	ctx := context.Background()
 	userID := insertOnboardingRescueTestUser(t, db)
+	if _, err := db.ExecContext(ctx, `UPDATE users SET onboarding_required = TRUE WHERE id = $1`, userID); err != nil {
+		t.Fatal(err)
+	}
 	_, token, err := db.CreateOnboardingReissue(ctx, userID)
 	if err != nil {
 		t.Fatal(err)

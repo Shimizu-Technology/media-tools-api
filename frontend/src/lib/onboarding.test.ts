@@ -106,6 +106,23 @@ describe('web onboarding commit', () => {
     expect(sessionSet).not.toHaveBeenCalled();
   });
 
+  it('does not mistake a previous required account for a committed link', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('response lost'))
+      .mockRejectedValueOnce(new TypeError('response lost again'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: true, onboarding_required: true, user_id: 'old-user' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ pending: true, session_ready: true, onboarding_required: true, passkeys: 0, recovery_codes: 0, complete: false }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(commitWebOnboarding()).rejects.toMatchObject({ code: 'network_error' });
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      '/api/v1/auth/web/session/onboarding/commit',
+      '/api/v1/auth/web/session/onboarding/commit',
+      '/api/v1/auth/web/session/status',
+      '/api/v1/auth/web/session/onboarding/status',
+    ]);
+  });
+
   it('rejects token-bearing success JSON', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ authenticated: true, access_token: 'secret' }), { status: 201, headers: { 'Content-Type': 'application/json' } })));
     await expect(commitWebOnboarding()).rejects.toMatchObject({ code: 'unsafe_response' });

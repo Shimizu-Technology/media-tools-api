@@ -190,10 +190,10 @@ func (db *DB) redeemOnboardingReissue(ctx context.Context, token, clientType, de
 	} else if !allowed {
 		return nil, ErrOnboardingReissueNotAllowed
 	}
-	if requireOnboarding {
-		if _, err := tx.ExecContext(ctx, `UPDATE users SET onboarding_required = TRUE WHERE id = $1`, lockedID); err != nil {
-			return nil, fmt.Errorf("require rescued account onboarding: %w", err)
-		}
+	// Native clients cannot call the cookie-only web completion endpoint. The
+	// latest redemption therefore decides whether the web-only gate applies.
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET onboarding_required = $2 WHERE id = $1`, lockedID, requireOnboarding); err != nil {
+		return nil, fmt.Errorf("set rescued account onboarding requirement: %w", err)
 	}
 	pair, err := createFirstPartySessionWithRefreshTx(ctx, tx, lockedID, clientType, deviceName, nextRefreshToken, now)
 	if errors.Is(err, errSuccessorUnavailable) {

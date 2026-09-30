@@ -19,6 +19,7 @@ export function JoinPage() {
   const [startingCodes, setStartingCodes] = useState(false);
   const [saved, setSaved] = useState(false);
   const [confirmingCodes, setConfirmingCodes] = useState(false);
+  const [codesConfirmed, setCodesConfirmed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [error, setError] = useState('');
@@ -90,6 +91,7 @@ export function JoinPage() {
     setError('');
     try {
       setRotation(await beginRecoveryCodeRotation());
+      setCodesConfirmed(false);
       setSaved(false);
       setCopied(false);
     } catch (caught) {
@@ -104,11 +106,15 @@ export function JoinPage() {
     setConfirmingCodes(true);
     setError('');
     try {
-      await confirmRecoveryCodeRotation(rotation.rotation_id);
+      if (!codesConfirmed) {
+        await confirmRecoveryCodeRotation(rotation.rotation_id);
+        setCodesConfirmed(true);
+      }
       const current = await getWebOnboardingStatus();
       if (!current.complete) throw new OnboardingError('Account recovery is not complete yet.', 'onboarding_incomplete');
       await completeWebOnboarding();
       setRotation(null);
+      setCodesConfirmed(false);
       setStatus(current);
       setCompleted(true);
     } catch (caught) {
@@ -210,7 +216,7 @@ export function JoinPage() {
                   <input type="checkbox" checked={saved} onChange={(event) => setSaved(event.target.checked)} className="mt-1 h-5 w-5 accent-[var(--color-brand-500)]" />
                   <span><span className="block text-sm font-semibold">I saved every code somewhere private</span><span className="mt-1 block text-xs leading-5" style={{ color: 'var(--color-text-secondary)' }}>Confirmation activates this set and completes account recovery setup.</span></span>
                 </label>
-                <button type="button" onClick={() => void activateRecoveryCodes()} disabled={!saved || confirmingCodes} className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white disabled:opacity-50" style={{ backgroundColor: 'var(--color-brand-500)' }}>{confirmingCodes && <Loader2 className="h-4 w-4 animate-spin" />}{confirmingCodes ? 'Activating…' : 'Activate codes and finish'}</button>
+                <button type="button" onClick={() => void activateRecoveryCodes()} disabled={!saved || confirmingCodes} className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white disabled:opacity-50" style={{ backgroundColor: 'var(--color-brand-500)' }}>{confirmingCodes && <Loader2 className="h-4 w-4 animate-spin" />}{confirmingCodes ? 'Finishing…' : codesConfirmed ? 'Finish account setup' : 'Activate codes and finish'}</button>
               </div>
             )}
 
