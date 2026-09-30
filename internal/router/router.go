@@ -123,6 +123,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		}
 		r.POST("/api/v1/auth/invitations", h.CreateInvitation)
 		r.POST("/api/v1/auth/invitations/redeem", rateLimiter.RateLimitUnauthenticated("invitation", 20), h.RedeemInvitation)
+		r.POST("/api/v1/auth/onboarding/reissues", h.CreateOnboardingReissue)
+		r.POST("/api/v1/auth/onboarding/reissues/redeem", rateLimiter.RateLimitUnauthenticated("onboarding-rescue", 20), h.RedeemOnboardingReissue)
 		r.POST("/api/v1/auth/session/refresh", h.RefreshFirstPartySession)
 		passkeyLogin := r.Group("/api/v1/auth/passkeys/login")
 		passkeyLogin.Use(rateLimiter.RateLimitUnauthenticated("passkey", 300))

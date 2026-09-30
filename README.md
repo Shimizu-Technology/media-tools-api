@@ -129,6 +129,11 @@ curl -H "Authorization: Bearer eyJ..." http://localhost:8080/api/v1/transcripts
 
 When using the React frontend, Clerk protects `/app/*` routes automatically. Public docs stay at `/docs`; legacy web URLs such as `/audio`, `/pdf`, `/library`, and `/collections` redirect into the signed-in app shell.
 
+The first-party rollout uses durable device sessions, passkeys, rotating
+recovery codes, and invite-only accounts. See [invite onboarding and
+rescue](docs/INVITE_ONBOARDING.md) for operator issuance, replacement, and
+incomplete-account recovery rules.
+
 ### Create an API Key
 
 Browser users can create account-scoped developer keys from **App → Developer**. Production operators can still bootstrap keys with the admin endpoint:
