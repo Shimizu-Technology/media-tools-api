@@ -208,6 +208,60 @@ protocol DeviceSessionTransport {
 
 extension URLSession: DeviceSessionTransport {}
 
+@MainActor
+protocol DeletedClerkIdentityStoring: AnyObject {
+    func contains(_ clerkID: String) -> Bool
+    func insert(_ clerkID: String)
+    func remove(_ clerkID: String)
+    func removeAll(except clerkID: String?)
+}
+
+@MainActor
+final class DeletedClerkIdentityStore: DeletedClerkIdentityStoring {
+    static let shared = DeletedClerkIdentityStore()
+
+    private let defaults: UserDefaults
+    private let key = "locallyDeletedClerkIdentityIDs.v1"
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func contains(_ clerkID: String) -> Bool { values.contains(clerkID) }
+
+    func insert(_ clerkID: String) {
+        var updated = values
+        updated.insert(clerkID)
+        defaults.set(updated.sorted(), forKey: key)
+    }
+
+    func remove(_ clerkID: String) {
+        var updated = values
+        updated.remove(clerkID)
+        persist(updated)
+    }
+
+    func removeAll(except clerkID: String?) {
+        guard let clerkID else {
+            defaults.removeObject(forKey: key)
+            return
+        }
+        persist(values.contains(clerkID) ? [clerkID] : [])
+    }
+
+    private var values: Set<String> {
+        Set(defaults.stringArray(forKey: key) ?? [])
+    }
+
+    private func persist(_ values: Set<String>) {
+        if values.isEmpty {
+            defaults.removeObject(forKey: key)
+        } else {
+            defaults.set(values.sorted(), forKey: key)
+        }
+    }
+}
+
 private struct KeychainFailure: LocalizedError {
     let status: OSStatus
     var errorDescription: String? { "Could not secure this device session (\(status))." }
@@ -222,6 +276,7 @@ final class DeviceSessionController {
     private let transport: any DeviceSessionTransport
     private let baseURL: URL
     private let enabled: Bool
+    private let deletedClerkIdentities: any DeletedClerkIdentityStoring
     private var stored: StoredDeviceSession?
     private var refreshTask: Task<DeviceSessionPair, Error>?
     private var generation = 0
@@ -233,10 +288,12 @@ final class DeviceSessionController {
     init(transport: any DeviceSessionTransport = URLSession.shared,
          baseURL: URL = URL(string: Configuration.apiBaseURL + "/api/v1")!,
          store: (any DeviceSessionStoring)? = nil,
+         deletedClerkIdentities: (any DeletedClerkIdentityStoring)? = nil,
          enabled: Bool = Configuration.firstPartyIOSAuthEnabled) {
         self.transport = transport
         self.baseURL = baseURL
         self.store = store ?? DeviceSessionKeychainStore()
+        self.deletedClerkIdentities = deletedClerkIdentities ?? DeletedClerkIdentityStore.shared
         self.enabled = enabled
         // Keep the verified local-owner mapping available during an iOS flag
         // rollback without ever using its first-party bearer credential.
@@ -265,6 +322,14 @@ final class DeviceSessionController {
         return store.clerkID(forLocalOwnerID: ownerID)
     }
 
+    func markLocallyDeletedClerkIdentity(_ clerkID: String) {
+        deletedClerkIdentities.insert(clerkID)
+    }
+
+    func clearLocallyDeletedClerkIdentity(_ clerkID: String) {
+        deletedClerkIdentities.remove(clerkID)
+    }
+
     func fallbackOwnerID(for clerkID: String?) -> String? {
         guard let clerkID else { return nil }
         return store.localOwnerID(for: clerkID) ?? clerkID
@@ -282,6 +347,20 @@ final class DeviceSessionController {
     /// Called before exposing an account workspace. A different Clerk account
     /// suspends the old device credential rather than borrowing its local data.
     func activate(clerkID: String?) async -> String? {
+        // An irreversibly deleted account may remain cached in Clerk during a
+        // network outage. Block that exact provider identity before any local
+        // fallback can expose a new workspace under its obsolete subject.
+        deletedClerkIdentities.removeAll(except: clerkID)
+        if let clerkID, deletedClerkIdentities.contains(clerkID) {
+            activeUserID = nil
+            if Clerk.shared.user?.id == clerkID {
+                try? await Clerk.shared.auth.signOut()
+                if Clerk.shared.user?.id != clerkID {
+                    deletedClerkIdentities.remove(clerkID)
+                }
+            }
+            return nil
+        }
         guard enabled else {
             activeUserID = fallbackOwnerID(for: clerkID)
             return activeUserID

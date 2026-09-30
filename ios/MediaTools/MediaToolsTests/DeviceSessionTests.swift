@@ -23,6 +23,21 @@ private final class MemoryDeviceSessionStore: DeviceSessionStoring {
     func removeLocalOwnerID(for clerkID: String) { ownerMappings.removeValue(forKey: clerkID) }
 }
 
+@MainActor
+private final class MemoryDeletedClerkIdentityStore: DeletedClerkIdentityStoring {
+    private(set) var values: Set<String> = []
+    func contains(_ clerkID: String) -> Bool { values.contains(clerkID) }
+    func insert(_ clerkID: String) { values.insert(clerkID) }
+    func remove(_ clerkID: String) { values.remove(clerkID) }
+    func removeAll(except clerkID: String?) {
+        guard let clerkID else {
+            values.removeAll()
+            return
+        }
+        values = values.contains(clerkID) ? [clerkID] : []
+    }
+}
+
 private actor RecoveringDeviceSessionTransport: DeviceSessionTransport {
     private var requestBodies: [[String: String]] = []
     private var failFirstResponse = true
@@ -485,6 +500,39 @@ final class DeviceSessionTests: XCTestCase {
         XCTAssertEqual(token, "mta_at_native")
         XCTAssertNil(store.value?.pendingRevocation)
         XCTAssertNil(controller.verifiedMigration)
+    }
+
+    @MainActor
+    func testRetiredClerkIdentityCannotReopenWorkspaceDuringOutage() async {
+        let store = MemoryDeviceSessionStore(nil)
+        let deletedIdentities = MemoryDeletedClerkIdentityStore()
+        deletedIdentities.insert("clerk-a")
+        let controller = DeviceSessionController(
+            transport: DisabledSessionTransport(),
+            baseURL: URL(string: "https://example.test/api/v1")!,
+            store: store,
+            deletedClerkIdentities: deletedIdentities,
+            enabled: true
+        )
+
+        let deletedOwner = await controller.activate(clerkID: "clerk-a")
+
+        XCTAssertNil(deletedOwner)
+        XCTAssertNil(controller.activeUserID)
+        XCTAssertTrue(deletedIdentities.contains("clerk-a"))
+
+        let rollbackController = DeviceSessionController(
+            transport: DisabledSessionTransport(),
+            baseURL: URL(string: "https://example.test/api/v1")!,
+            store: store,
+            deletedClerkIdentities: deletedIdentities,
+            enabled: false
+        )
+        let otherOwner = await rollbackController.activate(clerkID: "clerk-b")
+
+        XCTAssertEqual(otherOwner, "clerk-b")
+        XCTAssertEqual(rollbackController.activeUserID, "clerk-b")
+        XCTAssertFalse(deletedIdentities.contains("clerk-a"))
     }
 
 

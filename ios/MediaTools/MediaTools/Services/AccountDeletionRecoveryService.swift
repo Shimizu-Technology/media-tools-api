@@ -195,6 +195,12 @@ final class AccountDeletionRecoveryService {
         if let migrationClerkID {
             consent.removeConsent(ownerID: migrationClerkID)
         }
+        if let deletedClerkID {
+            // Keep the deleted provider blocked across relaunch until Clerk is
+            // actually gone locally. A failed sign-out must never reopen a
+            // fallback workspace under the deleted provider subject.
+            deviceSession.markLocallyDeletedClerkIdentity(deletedClerkID)
+        }
         deviceSession.removeLocalOwnerMappings(ownerID: ownerID)
         journal.delete()
 
@@ -213,6 +219,9 @@ final class AccountDeletionRecoveryService {
         tokenSync.clearToken()
         if shouldSignOutClerk {
             try? await clerk.auth.signOut()
+        }
+        if let deletedClerkID, clerk.user?.id != deletedClerkID {
+            deviceSession.clearLocallyDeletedClerkIdentity(deletedClerkID)
         }
     }
 

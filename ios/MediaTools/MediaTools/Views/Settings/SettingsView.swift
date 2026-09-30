@@ -908,7 +908,11 @@ struct SettingsView: View {
     private func finishLocalClerkDetachment(expectedOwnerID: String) async throws {
         // Validate and commit against the initiating stable account before
         // touching Share Extension auth for whichever account is now active.
+        let detachedClerkID = deviceSession.clerkIDForFallbackOwner(expectedOwnerID)
         try deviceSession.markClerkDetached(expectedOwnerID: expectedOwnerID)
+        if let detachedClerkID {
+            deviceSession.markLocallyDeletedClerkIdentity(detachedClerkID)
+        }
         tokenSync.stopSyncing()
         tokenSync.clearToken()
         if clerk.user != nil {
@@ -917,6 +921,9 @@ struct SettingsView: View {
             } catch {
                 securityMessage = "Clerk is disconnected. Media Tools will finish clearing the old local sign-in automatically."
             }
+        }
+        if let detachedClerkID, clerk.user?.id != detachedClerkID {
+            deviceSession.clearLocallyDeletedClerkIdentity(detachedClerkID)
         }
     }
 
@@ -986,6 +993,14 @@ struct SettingsView: View {
         signOutError = nil
         defer { isSigningOut = false }
 
+        let signingOutClerkID = clerk.user?.id
+        if let signingOutClerkID {
+            // Preserve the local sign-out intent if Clerk cannot remove its
+            // cached session while offline. Activation blocks only this exact
+            // provider subject until Clerk confirms it is gone locally.
+            deviceSession.markLocallyDeletedClerkIdentity(signingOutClerkID)
+        }
+
         do {
             try await deviceSession.revokeOrSuspend()
             FirstPartyAuthService.shared.clearSessionScopedJournals()
@@ -993,6 +1008,9 @@ struct SettingsView: View {
                 try await clerk.auth.signOut()
             }
             await uploadCoordinator.setActiveOwnerID(nil)
+            if let signingOutClerkID, clerk.user?.id != signingOutClerkID {
+                deviceSession.clearLocallyDeletedClerkIdentity(signingOutClerkID)
+            }
         } catch {
             signOutError = "Couldn’t sign out. Please try again."
         }
