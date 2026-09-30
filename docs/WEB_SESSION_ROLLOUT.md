@@ -28,21 +28,27 @@ recovery codes.
 
 ## Deployment order
 
-1. Deploy all auth migrations and API code with `FIRST_PARTY_AUTH_ENABLED=false`
-   and `WEB_COOKIE_AUTH_ENABLED=false`.
+1. Deploy all auth migrations and API code with `FIRST_PARTY_AUTH_ENABLED=false`,
+   `WEB_COOKIE_AUTH_ENABLED=false`, and `CLERK_MIGRATION_ONLY=false`.
 2. Configure the exact canonical `CORS_ORIGIN` as
    `https://media.shimizu-technology.com`. Add a preview origin only when it is
    intentionally trusted for auth. Keep `WEB_COOKIE_SECURE=true` in production.
 3. Verify Netlify sends `/api/*` to the Render API through the same-origin proxy
    and that the old Netlify hostname redirects to the canonical domain.
-4. Enable `FIRST_PARTY_AUTH_ENABLED`, then `WEB_COOKIE_AUTH_ENABLED` on Render.
+4. Confirm the existing owner has an exact Clerk identity in
+   `auth_identities` (or an exact legacy `users.clerk_id`), then enable
+   `CLERK_MIGRATION_ONLY`. Verify the owner can still authenticate and an
+   unknown Clerk subject receives a generic 401 without creating a user. In
+   release mode the server refuses to start with Clerk plus first-party auth
+   unless this guard is enabled.
+5. Enable `FIRST_PARTY_AUTH_ENABLED`, then `WEB_COOKIE_AUTH_ENABLED` on Render.
    Verify readiness, cookie attributes, passkey begin/finish, response-loss
    retry, logout revocation, and account switching before enabling the frontend.
-5. Build the frontend with `VITE_WEB_COOKIE_AUTH_ENABLED=true` and no
+6. Build the frontend with `VITE_WEB_COOKIE_AUTH_ENABLED=true` and no
    `VITE_API_URL`. `VITE_CLERK_PUBLISHABLE_KEY` may remain during migration, but
    also test a build without it: passkey restore, passkey sign-in, Settings
    enrollment, account deletion, and sign-out must still work.
-6. On the existing owner account, confirm the same stable user and media appear,
+7. On the existing owner account, confirm the same stable user and media appear,
    enroll a passkey, save recovery codes, sign out, sign in with the passkey,
    reload after access expiry, simulate a lost finish response, and verify the
    previous Clerk sign-in can still bridge only the same account.
@@ -59,3 +65,7 @@ drained. Keep `FIRST_PARTY_AUTH_ENABLED` while native clients use first-party
 sessions. Do not remove migrations or delete session rows during rollback.
 Clerk remains the temporary fallback until passkey and recovery sign-in have
 been verified on the owner account and future-user onboarding is available.
+If first-party auth must be rolled back temporarily, leave
+`CLERK_MIGRATION_ONLY=true`; reopening Clerk account creation would bypass
+invite-only onboarding. Disable the migration guard only as a deliberate policy
+change after reviewing that impact.

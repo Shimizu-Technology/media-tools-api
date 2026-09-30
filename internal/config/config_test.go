@@ -169,6 +169,45 @@ func TestLoadAllowsPasskeyCookieAuthWithoutClerk(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultsClerkMigrationOnlyOff(t *testing.T) {
+	t.Setenv("YT_DLP_PATH", "/bin/true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.ClerkMigrationOnly {
+		t.Fatal("ClerkMigrationOnly = true, want explicit opt-in")
+	}
+}
+
+func TestLoadRequiresClerkMigrationOnlyBeforeProductionFirstPartyAuth(t *testing.T) {
+	setRequiredReleaseEnv(t)
+	t.Setenv("CORS_ORIGIN", "https://media.shimizu-technology.com")
+	t.Setenv("FIRST_PARTY_AUTH_ENABLED", "true")
+	t.Setenv("CLERK_MIGRATION_ONLY", "false")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "CLERK_MIGRATION_ONLY must be enabled") {
+		t.Fatalf("Load error = %v, want Clerk migration guard error", err)
+	}
+}
+
+func TestLoadAllowsProductionFirstPartyAuthWithMigrationOnlyClerk(t *testing.T) {
+	setRequiredReleaseEnv(t)
+	t.Setenv("CORS_ORIGIN", "https://media.shimizu-technology.com")
+	t.Setenv("FIRST_PARTY_AUTH_ENABLED", "true")
+	t.Setenv("CLERK_MIGRATION_ONLY", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if !cfg.FirstPartyAuthEnabled || !cfg.ClerkMigrationOnly {
+		t.Fatalf("migration config = first-party %v, Clerk migration %v", cfg.FirstPartyAuthEnabled, cfg.ClerkMigrationOnly)
+	}
+}
+
 func TestLoadRequiresClerkAudienceAuthorizedPartyOrCORSOriginInRelease(t *testing.T) {
 	setRequiredReleaseEnv(t)
 	t.Setenv("CORS_ORIGIN", "")

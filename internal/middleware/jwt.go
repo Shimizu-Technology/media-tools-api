@@ -110,8 +110,8 @@ func JWTAuth(db *database.DB, jwtSecret string) gin.HandlerFunc {
 // DualAuth returns middleware that accepts API key, Clerk JWT, OR legacy JWT.
 // Priority: 1) API key, 2) Clerk JWT (RS256 via JWKS), 3) Legacy JWT (HS256).
 // This ensures backward compatibility while enabling Clerk authentication.
-func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string, firstPartyEnabled ...bool) gin.HandlerFunc {
-	acceptFirstParty := len(firstPartyEnabled) > 0 && firstPartyEnabled[0]
+func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string, firstPartyEnabled, clerkMigrationOnly bool) gin.HandlerFunc {
+	acceptFirstParty := firstPartyEnabled
 	return func(c *gin.Context) {
 		// Try API key first
 		rawKey := c.GetHeader("X-API-Key")
@@ -162,8 +162,18 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 						if rejectAccountDeletionTombstone(c, db, claims.Subject) {
 							return
 						}
-						user, err := db.GetUserByClerkID(c.Request.Context(), claims.Subject)
-						if err != nil {
+						var user *models.User
+						if clerkMigrationOnly {
+							user, err = db.ResolveMigrationClerkUser(c.Request.Context(), claims.Subject)
+							if errors.Is(err, database.ErrClerkIdentityUnknown) {
+								c.JSON(http.StatusUnauthorized, models.ErrorResponse{Error: "unauthorized", Message: "Failed to verify user identity", Code: http.StatusUnauthorized})
+								c.Abort()
+								return
+							}
+						} else {
+							user, err = db.GetUserByClerkID(c.Request.Context(), claims.Subject)
+						}
+						if err != nil && !clerkMigrationOnly {
 							// Find or create via email migration flow
 							clerkUser, fetchErr := fetchClerkUser(claims.Subject, clerkSecretKey)
 							if fetchErr != nil {
@@ -176,10 +186,9 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 								c.Abort()
 								return
 							} else {
-								var createErr error
-								user, createErr = db.FindOrCreateClerkUser(c.Request.Context(), claims.Subject, clerkUser.Email, clerkUser.Name)
-								if createErr != nil {
-									if errors.Is(createErr, database.ErrClerkEmailConflict) {
+								user, err = db.FindOrCreateClerkUser(c.Request.Context(), claims.Subject, clerkUser.Email, clerkUser.Name)
+								if err != nil {
+									if errors.Is(err, database.ErrClerkEmailConflict) {
 										c.JSON(http.StatusConflict, models.ErrorResponse{
 											Error:   "identity_conflict",
 											Message: "An account with this email already exists. Sign in with its original method.",
@@ -188,7 +197,7 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 										c.Abort()
 										return
 									}
-									log.Printf("❌ DualAuth: failed to find/create Clerk user %s: %v", claims.Subject, createErr)
+									log.Printf("❌ DualAuth: failed to find/create Clerk user %s: %v", claims.Subject, err)
 									// Clerk token is valid but DB failed — return 500, don't fall through to legacy JWT
 									c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 										Error:   "server_error",
@@ -199,6 +208,12 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 									return
 								}
 							}
+						}
+						if err != nil {
+							log.Printf("❌ DualAuth: failed to resolve Clerk user %s: %v", claims.Subject, err)
+							c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Failed to authenticate user", Code: http.StatusServiceUnavailable})
+							c.Abort()
+							return
 						}
 						if user != nil {
 							c.Set(userContextKey, user)
@@ -291,9 +306,9 @@ func AuthSessionBinding(c *gin.Context) string {
 // BearerOnlyAuth accepts Clerk JWT (RS256) or legacy JWT (HS256) Bearer tokens,
 // but NOT API keys. Used for user-scoped routes like /auth/me and /workspace
 // where an API key should not grant access.
-func BearerOnlyAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string, firstPartyEnabled ...bool) gin.HandlerFunc {
+func BearerOnlyAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string, firstPartyEnabled, clerkMigrationOnly bool) gin.HandlerFunc {
 	// Create DualAuth handler once at init, not per-request
-	dualAuth := DualAuth(db, jwtSecret, jwksCache, clerkSecretKey, firstPartyEnabled...)
+	dualAuth := DualAuth(db, jwtSecret, jwksCache, clerkSecretKey, firstPartyEnabled, clerkMigrationOnly)
 
 	return func(c *gin.Context) {
 		// Reject any request with API key, even if Authorization is also present

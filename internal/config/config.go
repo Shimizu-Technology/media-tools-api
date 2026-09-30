@@ -74,6 +74,10 @@ type Config struct {
 	ClerkIssuer          string
 	ClerkAudience        string
 	ClerkAuthorizedParty string
+	// ClerkMigrationOnly limits Clerk to exact identities linked before the
+	// invite-only first-party rollout. It disables account creation and email
+	// matching from Clerk tokens.
+	ClerkMigrationOnly bool
 
 	// Admin API key for bootstrap operations (creating first API keys)
 	// This protects the API key creation endpoint in production.
@@ -160,6 +164,7 @@ func Load() (*Config, error) {
 		ClerkIssuer:          getEnv("CLERK_ISSUER", ""),
 		ClerkAudience:        getEnv("CLERK_AUDIENCE", ""),
 		ClerkAuthorizedParty: getEnv("CLERK_AUTHORIZED_PARTY", ""),
+		ClerkMigrationOnly:   getEnvBool("CLERK_MIGRATION_ONLY", false),
 
 		// Admin API key for bootstrap — optional in dev, required in production
 		AdminAPIKey: getEnv("ADMIN_API_KEY", ""),
@@ -192,6 +197,12 @@ func Load() (*Config, error) {
 	}
 	if cfg.WebCookieAuthEnabled && !cfg.FirstPartyAuthEnabled {
 		return nil, fmt.Errorf("WEB_COOKIE_AUTH_ENABLED requires FIRST_PARTY_AUTH_ENABLED")
+	}
+	// Once first-party auth is public, Clerk must be a bridge for accounts that
+	// were linked already. Otherwise a valid Clerk signup could bypass the
+	// application's invite-only onboarding policy.
+	if cfg.GinMode == "release" && cfg.FirstPartyAuthEnabled && cfg.ClerkJWKSURL != "" && !cfg.ClerkMigrationOnly {
+		return nil, fmt.Errorf("CLERK_MIGRATION_ONLY must be enabled before FIRST_PARTY_AUTH_ENABLED when Clerk auth is configured in production")
 	}
 
 	// Validate required configuration
