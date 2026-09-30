@@ -433,12 +433,13 @@ type UpdateWebhookRequest struct {
 // --- User Auth Models (MTA-20) ---
 
 type User struct {
-	ID           string    `json:"id" db:"id"`
-	Email        string    `json:"email" db:"email"`
-	PasswordHash string    `json:"-" db:"password_hash"`
-	Name         string    `json:"name" db:"name"`
-	ClerkID      *string   `json:"clerk_id,omitempty" db:"clerk_id"`
-	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	ID                 string    `json:"id" db:"id"`
+	Email              string    `json:"email" db:"email"`
+	PasswordHash       string    `json:"-" db:"password_hash"`
+	Name               string    `json:"name" db:"name"`
+	ClerkID            *string   `json:"clerk_id,omitempty" db:"clerk_id"`
+	OnboardingRequired bool      `json:"onboarding_required" db:"onboarding_required"`
+	CreatedAt          time.Time `json:"created_at" db:"created_at"`
 }
 
 // AccountDeletionRequest is the durable coordination record for deleting an

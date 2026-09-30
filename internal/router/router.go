@@ -141,6 +141,13 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			webRecovery.Use(rateLimiter.RateLimitUnauthenticated("web-recovery", 20))
 			webRecovery.POST("/prepare", web.PrepareRecoveryCodeLogin)
 			webRecovery.POST("/finish", web.FinishRecoveryCodeLogin)
+			webOnboarding := r.Group("/api/v1/auth/web/onboarding")
+			webOnboarding.Use(rateLimiter.RateLimitUnauthenticated("web-onboarding", 30))
+			webOnboarding.POST("/transfer", web.TransferOnboardingFragment)
+			webOnboarding.POST("/prepare", web.PrepareOnboardingCommit)
+			webOnboarding.POST("/commit", web.CommitWebOnboarding)
+			webOnboarding.GET("/status", web.WebOnboardingStatus)
+			webOnboarding.POST("/complete", web.CompleteWebOnboarding)
 			webPasskeyLogin := r.Group("/api/v1/auth/web/session/passkeys/login")
 			webPasskeyLogin.Use(rateLimiter.RateLimitUnauthenticated("web-passkey", 300))
 			webPasskeyLogin.POST("/begin", web.BeginPasskeyLogin)
@@ -181,14 +188,17 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		if cfg.LegacyAuthEnabled {
 			jwtProtected.POST("/auth/refresh", h.RefreshToken)
 		}
-		jwtProtected.GET("/workspace", h.GetWorkspace)
-		jwtProtected.POST("/workspace", h.SaveToWorkspace)
-		jwtProtected.DELETE("/workspace/:type/:id", h.RemoveFromWorkspace)
+		workspace := jwtProtected.Group("/workspace")
+		workspace.Use(middleware.RequireCompletedOnboarding())
+		workspace.GET("", h.GetWorkspace)
+		workspace.POST("", h.SaveToWorkspace)
+		workspace.DELETE("/:type/:id", h.RemoveFromWorkspace)
 	}
 
 	// --- Protected Routes (API key or an explicitly enabled bearer provider) ---
 	protected := r.Group("/api/v1")
 	protected.Use(middleware.DualAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey, cfg.FirstPartyAuthEnabled, cfg.LegacyAuthEnabled, cfg.ClerkMigrationOnly))
+	protected.Use(middleware.RequireCompletedOnboarding())
 	protected.Use(rateLimiter.RateLimit())
 	{
 		// Transcript endpoints

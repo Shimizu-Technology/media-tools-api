@@ -222,3 +222,117 @@ func TestFindOrCreateClerkUserDoesNotLinkByEmail(t *testing.T) {
 		t.Fatalf("native account was linked to Clerk ID %#v", linked.String)
 	}
 }
+
+func TestWebInvitationSwitchIsAtomicRecoverableAndRequiresOnboarding(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	oldUserID := insertPasskeyTestUser(t, db)
+	oldSession, err := db.CreateFirstPartySession(ctx, oldUserID, "web", "Previous browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	invitation, token, err := db.CreateInvitation(ctx, uuid.NewString()+"@example.com", "New browser user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM auth_invitations WHERE id = $1`, invitation.ID)
+	})
+	successor, _ := RandomFirstPartyRefreshToken()
+	pair, err := db.RedeemWebInvitation(ctx, token, successor, []string{oldSession.RefreshToken})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, pair.UserID) })
+	if _, _, err := db.GetUserByFirstPartyAccessToken(ctx, oldSession.AccessToken); !errors.Is(err, ErrSessionInvalid) {
+		t.Fatalf("previous session remained active: %v", err)
+	}
+	user, _, err := db.GetUserByFirstPartyAccessToken(ctx, pair.AccessToken)
+	if err != nil || !user.OnboardingRequired {
+		t.Fatalf("invited web user requirement = %#v, %v", user, err)
+	}
+	retried, err := db.RedeemWebInvitation(ctx, token, successor, []string{oldSession.RefreshToken})
+	if err != nil || retried.SessionID != pair.SessionID || retried.AccessToken == pair.AccessToken {
+		t.Fatalf("lost response retry = %#v, %v", retried, err)
+	}
+}
+
+func TestNativeInvitationDoesNotRequireWebOnlyCompletion(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	invitation, token, err := db.CreateInvitation(ctx, uuid.NewString()+"@example.com", "Native invited user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM auth_invitations WHERE id = $1`, invitation.ID)
+	})
+	successor, _ := RandomFirstPartyRefreshToken()
+	pair, err := db.RedeemInvitation(ctx, token, "ios", "iPhone", successor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, pair.UserID) })
+	user, _, err := db.GetUserByFirstPartyAccessToken(ctx, pair.AccessToken)
+	if err != nil || user.OnboardingRequired {
+		t.Fatalf("native invitation inherited web completion requirement: %#v, %v", user, err)
+	}
+}
+
+func TestWebInvitationRevocationFailureRollsBackAccountAndLink(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	oldUserID := insertPasskeyTestUser(t, db)
+	oldSession, err := db.CreateFirstPartySession(ctx, oldUserID, "web", "Previous browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	email := uuid.NewString() + "@example.com"
+	invitation, token, err := db.CreateInvitation(ctx, email, "Rollback user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DROP TRIGGER IF EXISTS fail_web_invite_revoke ON auth_sessions`)
+		_, _ = db.ExecContext(context.Background(), `DROP FUNCTION IF EXISTS fail_web_invite_revoke_fn()`)
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE email = $1`, email)
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM auth_invitations WHERE id = $1`, invitation.ID)
+	})
+	if _, err := db.ExecContext(ctx, `
+		CREATE FUNCTION fail_web_invite_revoke_fn() RETURNS trigger AS $$
+		BEGIN
+			IF OLD.revoked_at IS NULL AND NEW.revoked_at IS NOT NULL THEN RAISE EXCEPTION 'injected revoke failure'; END IF;
+			RETURN NEW;
+		END; $$ LANGUAGE plpgsql`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_web_invite_revoke BEFORE UPDATE ON auth_sessions FOR EACH ROW EXECUTE FUNCTION fail_web_invite_revoke_fn()`); err != nil {
+		t.Fatal(err)
+	}
+	successor, _ := RandomFirstPartyRefreshToken()
+	if _, err := db.RedeemWebInvitation(ctx, token, successor, []string{oldSession.RefreshToken}); err == nil {
+		t.Fatal("injected account-switch failure succeeded")
+	}
+	if user, _, err := db.GetUserByFirstPartyAccessToken(ctx, oldSession.AccessToken); err != nil || user.ID != oldUserID {
+		t.Fatalf("rollback stranded previous account: %#v, %v", user, err)
+	}
+	var created, consumed int
+	if err := db.GetContext(ctx, &created, `SELECT COUNT(*) FROM users WHERE email = $1`, email); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.GetContext(ctx, &consumed, `SELECT COUNT(*) FROM auth_invitations WHERE id = $1 AND consumed_at IS NOT NULL`, invitation.ID); err != nil {
+		t.Fatal(err)
+	}
+	if created != 0 || consumed != 0 {
+		t.Fatalf("rollback left new account=%d or consumed link=%d", created, consumed)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TRIGGER fail_web_invite_revoke ON auth_sessions`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP FUNCTION fail_web_invite_revoke_fn()`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RedeemWebInvitation(ctx, token, successor, []string{oldSession.RefreshToken}); err != nil {
+		t.Fatalf("link not recoverable after rollback: %v", err)
+	}
+}

@@ -9,7 +9,7 @@ import { AuthProvider } from './contexts/AuthContext'
 import { AIProcessingConsentProvider } from './contexts/AIProcessingConsentContext'
 import { getCurrentUser, type User } from './lib/api'
 import { setAuthTokenGetter } from './lib/apiAuth'
-import { bootstrapWebSession, isWebSessionActive, logoutWebSession, reconcileWebSessionWithClerk, restoreWebSession, setWebSessionActive, webSessionEnabled, webSessionStateChanged } from './lib/webSession'
+import { bootstrapWebSession, isWebSessionActive, logoutWebSession, reconcileWebSessionWithClerk, restoreWebSession, setWebOnboardingRequired, setWebSessionActive, webSessionEnabled, webSessionStateChanged } from './lib/webSession'
 import { clearPasskeySignInJournal, recoverPendingPasskeySignIn } from './lib/passkeys'
 import { migrateAIConsentToStableUser } from './lib/aiConsentStorage'
 
@@ -35,6 +35,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then((module) => 
 const ProcessingPage = lazy(() => import('./pages/ProcessingPage').then((module) => ({ default: module.ProcessingPage })))
 const ItemDetailPage = lazy(() => import('./pages/ItemDetailPage').then((module) => ({ default: module.ItemDetailPage })))
 const CreatePage = lazy(() => import('./pages/CreatePage').then((module) => ({ default: module.CreatePage })))
+const JoinPage = lazy(() => import('./pages/JoinPage').then((module) => ({ default: module.JoinPage })))
 
 if (!isClerkEnabled && !webSessionEnabled) {
   console.warn('Account auth is not configured — using local API-key development mode.')
@@ -47,6 +48,7 @@ function AppRoutes() {
       <Suspense fallback={<RouteLoading />}>
         <Routes>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/join" element={<JoinPage />} />
 
       <Route element={<PublicLayout />}>
         <Route path="/docs" element={<DocsPage />} />
@@ -85,7 +87,7 @@ function AppRoutes() {
         <Route path="collections/:collectionId" element={<CollectionsPage />} />
         <Route path="developer" element={<DeveloperPage />} />
         <Route path="developer/webhooks" element={<WebhooksPage />} />
-		<Route path="admin/ops" element={<ProtectedRoute requireOwner><OpsPage /></ProtectedRoute>} />
+        <Route path="admin/ops" element={<ProtectedRoute requireOwner><OpsPage /></ProtectedRoute>} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
 
@@ -164,13 +166,15 @@ function ClerkAppContent() {
   const { getToken, isLoaded, isSignedIn, userId } = useAuth()
   const clerk = useClerk()
   const signOut = useCallback(() => clerk.signOut({ redirectUrl: '/' }), [clerk])
+  const leaveForOnboarding = useCallback(() => clerk.signOut({ redirectUrl: '/join' }), [clerk])
   const bridge = useMemo<ClerkBridge>(() => ({
     isLoaded,
     isSignedIn: isSignedIn ?? false,
     userId,
     getToken,
     signOut,
-  }), [getToken, isLoaded, isSignedIn, signOut, userId])
+    leaveForOnboarding,
+  }), [getToken, isLoaded, isSignedIn, leaveForOnboarding, signOut, userId])
   return (
     <AccountAppContent clerk={bridge} />
   )
@@ -182,6 +186,7 @@ type ClerkBridge = {
   userId: string | null | undefined
   getToken: (options?: { skipCache?: boolean }) => Promise<string | null>
   signOut: () => Promise<void>
+  leaveForOnboarding: () => Promise<void>
 }
 
 function AccountAppContent({ clerk }: { clerk?: ClerkBridge }) {
@@ -248,6 +253,7 @@ function AccountAppContent({ clerk }: { clerk?: ClerkBridge }) {
           if (status === null) setWebSessionActive(false)
           if (status !== null) {
             clearPasskeySignInJournal()
+            setWebOnboardingRequired(status.onboarding_required === true)
             setWebSessionActive(true)
           }
           if (!isWebSessionActive()) {
@@ -257,7 +263,10 @@ function AccountAppContent({ clerk }: { clerk?: ClerkBridge }) {
             try { status = await reconcileWebSessionWithClerk(status, clerkUserId) } catch (error) { setAuthBlocked(true); throw error }
             if (cancelled) return
             if (status === null) setWebSessionActive(false)
-            if (status !== null) setWebSessionActive(true)
+            if (status !== null) {
+              setWebOnboardingRequired(status.onboarding_required === true)
+              setWebSessionActive(true)
+            }
           }
           if (!isWebSessionActive() && clerkUserId && clerk) {
             const token = await clerk.getToken()
@@ -300,12 +309,14 @@ function AccountAppContent({ clerk }: { clerk?: ClerkBridge }) {
       isClerkEnabled={Boolean(clerk)}
       accountAuthEnabled={true}
       isFirstPartySession={!authBlocked && hasWebSession}
+      isPreviousProviderSignedIn={clerkSignedIn}
       isAuthenticated={!authBlocked && (hasWebSession || clerkSignedIn)}
       isLoading={!clerkReady || isUserLoading}
       canUseWorkspace={!authBlocked}
       user={user}
       refreshUser={refreshUser}
       signOut={signOut}
+      leavePreviousProviderForOnboarding={clerk?.leaveForOnboarding}
     >
       <AIProcessingConsentProvider ownerID={!authBlocked && hasWebSession ? user?.id ?? null : user?.clerk_id ?? clerkUserId}>
         <AppRoutes />

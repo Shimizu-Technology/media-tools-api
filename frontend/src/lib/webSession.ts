@@ -1,18 +1,29 @@
 /** Same-origin browser session. The refresh credential never enters JavaScript. */
 export const webSessionEnabled = import.meta.env.VITE_WEB_COOKIE_AUTH_ENABLED === 'true';
 let active = false;
+let onboardingRequired = false;
 export const webSessionStateChanged = 'mta:web-session-state-changed';
 export function isWebSessionActive(): boolean { return webSessionEnabled && active; }
+export function isWebOnboardingRequired(): boolean { return webSessionEnabled && onboardingRequired; }
 export function setWebSessionActive(value: boolean): void {
+  if (!value) onboardingRequired = false;
   if (active === value) return;
   active = value;
   window.dispatchEvent(new CustomEvent(webSessionStateChanged, { detail: { active: isWebSessionActive() } }));
 }
 
+export function setWebOnboardingRequired(value: boolean): void {
+  if (onboardingRequired === value) return;
+  onboardingRequired = value;
+  window.dispatchEvent(new CustomEvent(webSessionStateChanged, {
+    detail: { active: isWebSessionActive(), onboardingRequired: isWebOnboardingRequired() },
+  }));
+}
+
 const base = '/api/v1/auth/web/session';
 export type WebSessionRenewal = 'renewed' | 'invalid' | 'retry';
 let renewal: Promise<WebSessionRenewal> | null = null;
-export type WebSessionStatus = { authenticated: true; user_id: string; clerk_id?: string | null };
+export type WebSessionStatus = { authenticated: true; user_id: string; clerk_id?: string | null; onboarding_required?: boolean };
 
 export function webSessionConflictsWithClerk(status: WebSessionStatus, clerkUserID: string | null): boolean {
   return Boolean(clerkUserID && status.clerk_id !== clerkUserID);
@@ -54,7 +65,10 @@ export async function bootstrapWebSession(clerkToken: string, expectedClerkID: s
     if (!response.ok && response.status >= 500) response = await commit();
     if (response.ok) {
       const result = await response.json().catch(() => null) as WebSessionStatus | null;
-      if (result?.clerk_id === expectedClerkID) return true;
+      if (result?.clerk_id === expectedClerkID) {
+        setWebOnboardingRequired(result.onboarding_required === true);
+        return true;
+      }
       await logoutWebSession().catch(() => undefined);
       return false;
     }
@@ -69,7 +83,10 @@ async function statusMatchesClerk(expectedClerkID: string): Promise<boolean> {
     const status = await fetch(`${base}/status`, { credentials: 'same-origin' });
     if (!status.ok) return false;
     const restored = (await status.json()) as WebSessionStatus;
-    if (restored.clerk_id === expectedClerkID) return true;
+    if (restored.clerk_id === expectedClerkID) {
+      setWebOnboardingRequired(restored.onboarding_required === true);
+      return true;
+    }
     // A response-loss probe must never leave another account's cookie active
     // beside the currently verified Clerk subject.
     await logoutWebSession().catch(() => undefined);

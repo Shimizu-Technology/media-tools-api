@@ -49,6 +49,7 @@ func (h *WebSessionHandler) clear(c *gin.Context) {
 	h.setCookie(c, middleware.WebRefreshCookie, "", -1, true, "/api/v1/auth/web/session")
 	h.clearPending(c)
 	h.clearRecoveryPending(c)
+	h.clearOnboardingAll(c)
 	h.setCookie(c, middleware.WebCSRFCookie, "", -1, false, "/")
 }
 
@@ -124,8 +125,9 @@ func (h *WebSessionHandler) Bootstrap(c *gin.Context) {
 		return
 	}
 	h.setPair(c, pair)
+	h.clearOnboardingAll(c)
 	h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
-	c.JSON(http.StatusCreated, gin.H{"authenticated": true, "user_id": user.ID, "clerk_id": *user.ClerkID, "access_expires_at": pair.AccessExpiresAt})
+	c.JSON(http.StatusCreated, gin.H{"authenticated": true, "user_id": user.ID, "clerk_id": *user.ClerkID, "onboarding_required": user.OnboardingRequired, "access_expires_at": pair.AccessExpiresAt})
 }
 
 // PrepareBootstrap writes the refresh successor and CSRF secret before Clerk
@@ -142,18 +144,19 @@ func (h *WebSessionHandler) PrepareBootstrap(c *gin.Context) {
 		return
 	}
 	if pending, err := c.Cookie(middleware.WebPendingCookie); err == nil && database.ValidFirstPartyRefreshToken(pending) {
-		if err := h.revokeCookieSessions(c, middleware.WebRecoveryPendingCookie); err != nil {
+		if err := h.revokeCookieSessions(c, middleware.WebRecoveryPendingCookie, middleware.WebOnboardingPendingCookie); err != nil {
 			log.Printf("revoke interrupted recovery before Clerk bootstrap retry: %v", err)
 			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not prepare this browser for sign-in; retry", Code: http.StatusServiceUnavailable})
 			return
 		}
 		h.clearRecoveryPending(c)
+		h.clearOnboardingAll(c)
 		h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
 		c.Header("Cache-Control", "no-store")
 		c.Status(http.StatusNoContent)
 		return
 	}
-	if err := h.revokeCookieSessions(c, middleware.WebRefreshCookie, middleware.WebRecoveryPendingCookie); err != nil {
+	if err := h.revokeCookieSessions(c, middleware.WebRefreshCookie, middleware.WebRecoveryPendingCookie, middleware.WebOnboardingPendingCookie); err != nil {
 		log.Printf("revoke browser session before Clerk bootstrap: %v", err)
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not prepare this browser for sign-in; retry", Code: http.StatusServiceUnavailable})
 		return
@@ -167,6 +170,7 @@ func (h *WebSessionHandler) PrepareBootstrap(c *gin.Context) {
 	h.setCookie(c, middleware.WebRefreshCookie, "", -1, true, "/api/v1/auth/web/session")
 	h.setCookie(c, middleware.WebPendingCookie, successor, 24*60*60, true, "/api/v1/auth/web/session")
 	h.clearRecoveryPending(c)
+	h.clearOnboardingAll(c)
 	h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
 	c.Header("Cache-Control", "no-store")
 	c.Status(http.StatusNoContent)
@@ -189,7 +193,7 @@ func (h *WebSessionHandler) Status(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, gin.H{"authenticated": true, "user_id": user.ID, "clerk_id": user.ClerkID})
+	c.JSON(http.StatusOK, gin.H{"authenticated": true, "user_id": user.ID, "clerk_id": user.ClerkID, "onboarding_required": user.OnboardingRequired})
 }
 
 // Prepare journals the successor credential in an HttpOnly cookie before the
@@ -257,7 +261,7 @@ func (h *WebSessionHandler) Logout(c *gin.Context) {
 	}
 	// Lost refresh or recovery responses can leave the active credential in a
 	// pending HttpOnly cookie. Revoke every exact credential before clearing.
-	if err := h.revokeCookieSessions(c, middleware.WebPendingCookie, middleware.WebRecoveryPendingCookie); err != nil {
+	if err := h.revokeCookieSessions(c, middleware.WebPendingCookie, middleware.WebRecoveryPendingCookie, middleware.WebOnboardingPendingCookie); err != nil {
 		log.Printf("revoke pending browser session on logout: %v", err)
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not sign out; please try again", Code: http.StatusServiceUnavailable})
 		return

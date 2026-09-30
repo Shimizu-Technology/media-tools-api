@@ -72,8 +72,8 @@ func (h *WebSessionHandler) FinishRecoveryCodeLogin(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "sign_in_not_prepared", Message: "Start recovery sign-in again", Code: http.StatusBadRequest})
 		return
 	}
-	existing := make([]string, 0, 2)
-	for _, name := range []string{middleware.WebRefreshCookie, middleware.WebPendingCookie} {
+	existing := make([]string, 0, 3)
+	for _, name := range []string{middleware.WebRefreshCookie, middleware.WebPendingCookie, middleware.WebOnboardingPendingCookie} {
 		if credential, err := c.Cookie(name); err == nil && credential != "" {
 			existing = append(existing, credential)
 		}
@@ -89,6 +89,7 @@ func (h *WebSessionHandler) FinishRecoveryCodeLogin(c *gin.Context) {
 		}
 		h.setPair(c, pair)
 		h.clearRecoveryPending(c)
+		h.clearOnboardingAll(c)
 		h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusCreated, gin.H{
