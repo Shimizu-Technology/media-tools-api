@@ -971,6 +971,34 @@ paths:
       tags: [Authentication]
       summary: Get the signed-in user
       responses: {"200": {description: Current user}}
+  /auth/session/bootstrap:
+    post:
+      tags: [Authentication]
+      summary: Bootstrap a recoverable native first-party session
+      description: |
+        Requires a current Clerk bearer identity for an existing account. iOS
+        and Android clients must generate and durably save next_refresh_token
+        before sending this request. An exact retry recovers the same session
+        with a fresh access token while that session and refresh credential
+        remain active, including after a lost HTTP response or delayed app
+        relaunch. Raw web clients are rejected; browsers use the HttpOnly
+        same-origin cookie session endpoints.
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_type, next_refresh_token]
+              properties:
+                client_type: {type: string, enum: [ios, android]}
+                device_name: {type: string, maxLength: 80}
+                next_refresh_token: {type: string, description: Client-generated mta_rt_ credential saved before sending}
+      responses:
+        "201": {description: New or exactly recovered first-party session credentials}
+        "400": {description: Invalid, unavailable, or browser successor credential}
+        "401": {description: Current Clerk identity required}
   /auth/invitations:
     post:
       tags: [Authentication]
