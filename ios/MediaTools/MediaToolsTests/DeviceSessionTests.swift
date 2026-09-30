@@ -101,6 +101,54 @@ private actor DelayedUnauthorizedTransport: DeviceSessionTransport {
 
 final class DeviceSessionTests: XCTestCase {
     @MainActor
+    func testClerkWorkspaceFallbackAllowsRolloutAndOutageButRejectsDetachedIdentity() {
+        XCTAssertTrue(
+            DeviceSessionController.allowsClerkWorkspaceFallback(
+                after: APIError.httpError(statusCode: 404, message: "route disabled")
+            )
+        )
+        XCTAssertTrue(
+            DeviceSessionController.allowsClerkWorkspaceFallback(
+                after: APIError.httpError(statusCode: 503, message: "unavailable")
+            )
+        )
+        XCTAssertTrue(
+            DeviceSessionController.allowsClerkWorkspaceFallback(after: URLError(.notConnectedToInternet))
+        )
+        XCTAssertFalse(
+            DeviceSessionController.allowsClerkWorkspaceFallback(
+                after: APIError.httpError(statusCode: 401, code: "clerk_identity_not_linked", message: "not linked")
+            )
+        )
+        XCTAssertFalse(
+            DeviceSessionController.allowsClerkWorkspaceFallback(
+                after: APIError.authenticationRequired(message: "not linked")
+            )
+        )
+        XCTAssertFalse(
+            DeviceSessionController.allowsClerkWorkspaceFallback(after: CancellationError())
+        )
+        XCTAssertTrue(
+            DeviceSessionController.allowsClerkWorkspaceFallback(
+                after: APIError.authenticationTemporarilyUnavailable(message: "Clerk unavailable")
+            )
+        )
+        XCTAssertTrue(
+            DeviceSessionController.shouldClearRejectedClerkSession(
+                after: APIError.authenticationRequired(message: "not linked")
+            )
+        )
+        XCTAssertFalse(
+            DeviceSessionController.shouldClearRejectedClerkSession(after: CancellationError())
+        )
+        XCTAssertFalse(
+            DeviceSessionController.shouldClearRejectedClerkSession(
+                after: APIError.authenticationTemporarilyUnavailable(message: "Clerk unavailable")
+            )
+        )
+    }
+
+    @MainActor
     func testSuccessfulSignOutKeepsOwnerMappingForFlagRollbackAndRelaunch() async throws {
         let pair = DeviceSessionPair(
             sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
@@ -620,5 +668,99 @@ final class DeviceSessionTests: XCTestCase {
         XCTAssertTrue(controller.canFallbackToClerk(clerkID: "clerk-a", expectedOwnerID: "server-a"))
         XCTAssertFalse(controller.canFallbackToClerk(clerkID: "clerk-b", expectedOwnerID: nil))
         XCTAssertFalse(controller.canFallbackToClerk(clerkID: "clerk-a", expectedOwnerID: "server-b"))
+    }
+
+    @MainActor
+    func testConfirmedClerkDetachmentPreservesSessionAndRemovesFallback() throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(nil)
+        store.saveLocalOwnerID("server-a", for: "clerk-a")
+        store.value = StoredDeviceSession(
+            pair: pair,
+            source: .clerk,
+            verifiedClerkID: "clerk-a"
+        )
+        let controller = DeviceSessionController(store: store, enabled: true)
+
+        try controller.markClerkDetached(expectedOwnerID: "server-a")
+
+        XCTAssertEqual(store.value?.pair, pair)
+        XCTAssertEqual(store.value?.source, .passkey)
+        XCTAssertNil(store.value?.verifiedClerkID)
+        XCTAssertNil(store.localOwnerID(for: "clerk-a"))
+        XCTAssertTrue(controller.hasNativeFirstPartySession)
+        XCTAssertNil(controller.verifiedMigration)
+    }
+
+    @MainActor
+    func testDetachedSessionUsesPreviousBuildCompatibleSourceValue() throws {
+        enum PreviousSource: String, Codable { case clerk, passkey, recoveryCode }
+        struct PreviousStoredSession: Codable {
+            let pair: DeviceSessionPair
+            let source: PreviousSource
+            let verifiedClerkID: String?
+            let pendingNextRefreshToken: String?
+            let pendingRevocation: Bool?
+        }
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: pair, source: .clerk, verifiedClerkID: "clerk-a")
+        )
+        let controller = DeviceSessionController(store: store, enabled: true)
+        try controller.markClerkDetached(expectedOwnerID: "server-a")
+
+        let encoded = try JSONEncoder().encode(try XCTUnwrap(store.value))
+        let previous = try JSONDecoder().decode(PreviousStoredSession.self, from: encoded)
+
+        XCTAssertEqual(previous.source, .passkey)
+        XCTAssertEqual(previous.pair, pair)
+        XCTAssertNil(previous.verifiedClerkID)
+    }
+
+    @MainActor
+    func testConfirmedClerkDetachmentKeepsNativeSessionSource() throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-native", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: pair, source: .passkey)
+        )
+        store.saveLocalOwnerID("server-a", for: "clerk-a")
+        let controller = DeviceSessionController(store: store, enabled: true)
+
+        try controller.markClerkDetached(expectedOwnerID: "server-a")
+
+        XCTAssertEqual(store.value?.source, .passkey)
+        XCTAssertEqual(store.value?.pair, pair)
+        XCTAssertNil(store.localOwnerID(for: "clerk-a"))
+        XCTAssertEqual(controller.fallbackOwnerID(for: "clerk-a"), "clerk-a")
+        XCTAssertTrue(controller.hasNativeFirstPartySession)
+    }
+
+    @MainActor
+    func testClerkDetachmentRejectsAChangedLocalAccount() throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: pair, source: .clerk, verifiedClerkID: "clerk-a")
+        )
+        let controller = DeviceSessionController(store: store, enabled: true)
+
+        XCTAssertThrowsError(try controller.markClerkDetached(expectedOwnerID: "server-b"))
+        XCTAssertEqual(store.value?.source, .clerk)
+        XCTAssertEqual(store.value?.verifiedClerkID, "clerk-a")
     }
 }

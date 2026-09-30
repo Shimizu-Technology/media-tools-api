@@ -689,6 +689,33 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     @MainActor
+    func testDeletingPreviousOwnerKeepsCurrentRecordingWorkspaceActive() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try RecordingStore(rootDirectory: directory)
+        var oldRecording = store.makeRecording(contentType: "voice_memo", ownerID: "owner-a")
+        oldRecording.state = .ready
+        var currentRecording = store.makeRecording(contentType: "meeting", ownerID: "owner-b")
+        currentRecording.state = .ready
+        try Data("old".utf8).write(to: store.fileURL(for: oldRecording))
+        try Data("current".utf8).write(to: store.fileURL(for: currentRecording))
+        try store.saveRecordings([oldRecording, currentRecording])
+        let recorder = RecordingCoordinator(store: store)
+        recorder.setActiveOwnerID("owner-b")
+        let uploader = RecordingUploadCoordinator(
+            recorder: recorder,
+            watchStore: try TranscriptionWatchStore(rootDirectory: directory)
+        )
+
+        await uploader.removeLocalAccountData(ownerID: "owner-a")
+
+        XCTAssertEqual(recorder.activeOwnerID, "owner-b")
+        XCTAssertNil(recorder.recording(withID: oldRecording.id))
+        XCTAssertNotNil(recorder.recording(withID: currentRecording.id))
+    }
+
+    @MainActor
     func testDelayedFinalizationCannotCrossAnAccountSwitch() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

@@ -308,12 +308,19 @@ actor APIClient {
         try validateResponse(response, data: data)
     }
 
-    func delete<B: Encodable>(_ path: String, body: B) async throws {
+    func delete<B: Encodable>(
+        _ path: String,
+        body: B,
+        expectedOwnerID: String? = nil
+    ) async throws {
         let url = URL(string: baseURL + path)!
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         request.httpBody = try encoder.encode(body)
-        let (data, response) = try await data(for: request)
+        let (data, response) = try await data(
+            for: request,
+            expectedOwnerID: expectedOwnerID
+        )
         try validateResponse(response, data: data)
     }
 

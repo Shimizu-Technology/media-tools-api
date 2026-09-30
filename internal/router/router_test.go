@@ -67,6 +67,21 @@ func TestFirstPartyBearerAndRefreshHTTP(t *testing.T) {
 	}
 	engine := Setup(RouterConfig{DB: db, FirstPartyAuthEnabled: true})
 
+	invalidReceipt := httptest.NewRequest(http.MethodPost, "/api/v1/account/deletion-status", strings.NewReader(`{"deletion_receipt_token":"bad"}`))
+	invalidReceipt.Header.Set("Content-Type", "application/json")
+	invalidReceiptResponse := httptest.NewRecorder()
+	engine.ServeHTTP(invalidReceiptResponse, invalidReceipt)
+	if invalidReceiptResponse.Code != http.StatusBadRequest || invalidReceiptResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("invalid deletion receipt status = %d, cache = %q: %s", invalidReceiptResponse.Code, invalidReceiptResponse.Header().Get("Cache-Control"), invalidReceiptResponse.Body.String())
+	}
+	unknownReceipt := httptest.NewRequest(http.MethodPost, "/api/v1/account/deletion-status", strings.NewReader(`{"deletion_receipt_token":"mta_del_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`))
+	unknownReceipt.Header.Set("Content-Type", "application/json")
+	unknownReceiptResponse := httptest.NewRecorder()
+	engine.ServeHTTP(unknownReceiptResponse, unknownReceipt)
+	if unknownReceiptResponse.Code != http.StatusOK || unknownReceiptResponse.Header().Get("Cache-Control") != "no-store" || !strings.Contains(unknownReceiptResponse.Body.String(), `"confirmed":false`) {
+		t.Fatalf("unknown deletion receipt status = %d, cache = %q: %s", unknownReceiptResponse.Code, unknownReceiptResponse.Header().Get("Cache-Control"), unknownReceiptResponse.Body.String())
+	}
+
 	me := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
 	me.Header.Set("Authorization", "Bearer "+pair.AccessToken)
 	result := httptest.NewRecorder()

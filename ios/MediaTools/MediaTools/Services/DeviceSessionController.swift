@@ -252,9 +252,11 @@ final class DeviceSessionController {
         return (clerkID, stored.pair.userID)
     }
 
+    var storedUserID: String? { stored?.pair.userID }
+
     var hasNativeFirstPartySession: Bool {
         guard let stored, stored.pendingRevocation != true else { return false }
-        return stored.source == .passkey || stored.source == .recoveryCode
+        return stored.source != .clerk
     }
 
     func clerkIDForFallbackOwner(_ ownerID: String) -> String? {
@@ -315,9 +317,18 @@ final class DeviceSessionController {
             do {
                 try await bootstrap(verifiedClerkID: clerkID)
             } catch {
-                // The server rollout may be disabled. Clerk remains the safe
-                // fallback for this already signed-in account.
-                activeUserID = fallbackOwnerID(for: clerkID)
+                // A missing route or temporary outage can use the verified
+                // migration fallback. Explicit identity rejection must fail
+                // closed because it also means the Clerk link was detached.
+                if Self.allowsClerkWorkspaceFallback(after: error) {
+                    activeUserID = fallbackOwnerID(for: clerkID)
+                } else {
+                    activeUserID = nil
+                    if Self.shouldClearRejectedClerkSession(after: error),
+                       Clerk.shared.user?.id == clerkID {
+                        try? await Clerk.shared.auth.signOut()
+                    }
+                }
                 return activeUserID
             }
         }
@@ -445,6 +456,50 @@ final class DeviceSessionController {
         store.removeLocalOwnerID(for: clerkID)
     }
 
+    func removeLocalOwnerMappings(ownerID: String) {
+        while let clerkID = store.clerkID(forLocalOwnerID: ownerID) {
+            store.removeLocalOwnerID(for: clerkID)
+        }
+    }
+
+    /// Preserve the device session while removing every local dependency on
+    /// Clerk after the server confirms its one-way provider detachment.
+    func markClerkDetached(expectedOwnerID: String) throws {
+        guard var value = stored, value.pendingRevocation != true else {
+            throw APIError.authenticationRequired(message: "Sign in again before disconnecting the old sign-in.")
+        }
+        guard value.pair.userID == expectedOwnerID else {
+            throw APIError.authenticationRequired(message: "The signed-in account changed. Switch back and try again.")
+        }
+        var changed = false
+        while let clerkID = store.clerkID(forLocalOwnerID: expectedOwnerID) {
+            store.removeLocalOwnerID(for: clerkID)
+            changed = true
+        }
+        if let clerkID = value.verifiedClerkID {
+            store.removeLocalOwnerID(for: clerkID)
+            changed = true
+        }
+        if value.source == .clerk {
+            // Detachment is permitted only after a passkey exists. Reuse the
+            // already-shipped passkey source value so a rollback build can
+            // still decode and use this durable device session.
+            value.source = .passkey
+            changed = true
+        }
+        if value.verifiedClerkID != nil {
+            value.verifiedClerkID = nil
+            changed = true
+        }
+        guard changed else { return }
+        if stored != value {
+            try store.save(value)
+            stored = value
+        }
+        generation += 1
+        sessionRevision += 1
+    }
+
     func revokeAndClear() async throws {
         guard let sessionID = stored?.pair.sessionID else {
             clear()
@@ -522,8 +577,26 @@ final class DeviceSessionController {
 
     private func bootstrap(verifiedClerkID: String) async throws {
         guard let session = Clerk.shared.session,
-              session.user?.id == verifiedClerkID,
-              let clerkToken = try await session.getToken() else {
+              session.user?.id == verifiedClerkID else {
+            throw APIError.authenticationRequired(message: "Sign in to connect this device.")
+        }
+        let clerkToken: String?
+        do {
+            clerkToken = try await session.getToken()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            if Clerk.shared.session?.id == session.id,
+               Clerk.shared.session?.user?.id == verifiedClerkID {
+                throw APIError.authenticationTemporarilyUnavailable(
+                    message: "The sign-in service is temporarily unavailable. Media Tools will retry."
+                )
+            }
+            throw APIError.authenticationRequired(message: "Sign in to connect this device.")
+        }
+        guard let clerkToken, !clerkToken.isEmpty,
+              Clerk.shared.session?.id == session.id,
+              Clerk.shared.session?.user?.id == verifiedClerkID else {
             throw APIError.authenticationRequired(message: "Sign in to connect this device.")
         }
         try await bootstrap(
@@ -571,7 +644,7 @@ final class DeviceSessionController {
         let pair: DeviceSessionPair
         do {
             pair = try await sendPairRequest(request)
-        } catch APIError.httpError(let status, _, _) where [400, 401, 404].contains(status) {
+        } catch APIError.httpError(let status, _, _) where status == 400 || status == 401 {
             store.deletePendingBootstrap()
             throw APIError.authenticationRequired(message: "Sign in to connect this device.")
         }
@@ -584,6 +657,30 @@ final class DeviceSessionController {
         }
         try saveSession(pair: pair, source: .clerk, verifiedClerkID: verifiedClerkID)
         store.deletePendingBootstrap()
+    }
+
+    static func allowsClerkWorkspaceFallback(after error: Error) -> Bool {
+        switch error {
+        case APIError.httpError(let status, _, _):
+            return status == 404 || status >= 500
+        case APIError.authenticationTemporarilyUnavailable:
+            return true
+        case is URLError:
+            return true
+        default:
+            return false
+        }
+    }
+
+    static func shouldClearRejectedClerkSession(after error: Error) -> Bool {
+        switch error {
+        case APIError.authenticationRequired:
+            return true
+        case APIError.httpError(let status, _, _):
+            return status == 400 || status == 401 || status == 403 || status == 409
+        default:
+            return false
+        }
     }
 
     private func refresh() async throws -> DeviceSessionPair {

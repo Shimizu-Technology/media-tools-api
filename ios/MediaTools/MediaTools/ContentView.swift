@@ -83,6 +83,22 @@ struct ContentView: View {
             if Configuration.firstPartyIOSAuthEnabled && !forceSignedOutForUITesting {
                 isResolvingAccount = true
                 migrationFailed = false
+                let retryDeletionOwnerID = deviceSession.storedUserID
+                    ?? deviceSession.fallbackOwnerID(for: clerk.user?.id)
+                if let pending = try? await AccountDeletionRecoveryService.shared.confirmedPendingDeletion(
+                    retryOwnerID: retryDeletionOwnerID
+                ) {
+                    try? await AccountDeletionRecoveryService.shared.finishLocalDeletion(
+                        pending,
+                        uploadCoordinator: uploadCoordinator,
+                        consent: aiProcessingConsent,
+                        deviceSession: deviceSession,
+                        tokenSync: tokenSync,
+                        clerk: clerk
+                    )
+                }
+                guard !Task.isCancelled else { return }
+                let clerkID = clerk.user?.id
                 let ownerID = await deviceSession.activate(clerkID: clerkID)
                 guard !Task.isCancelled else { return }
                 if let migration = deviceSession.verifiedMigration {

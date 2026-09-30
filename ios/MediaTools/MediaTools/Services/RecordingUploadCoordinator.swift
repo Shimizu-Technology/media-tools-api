@@ -198,6 +198,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         _ = await cleanLocalAccountData(ownerID: ownerID)
     }
 
+
     func hasPendingLocalAccountDeletion(ownerID: String) -> Bool {
         pendingLocalAccountDeletionOwnerIDs.contains(ownerID)
     }
@@ -207,6 +208,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             _ = await cleanLocalAccountData(ownerID: ownerID)
         }
     }
+
 
     private func cleanLocalAccountData(ownerID: String) async -> Bool {
         let recordingIDs = recorder.recordingIDsOwned(by: ownerID)
@@ -233,9 +235,12 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             $0.ownerID == ownerID || $0.recordingID.map(recordingIDs.contains) == true
         }
         let watchesPersisted = persistWatches()
-        recorder.setActiveOwnerID(nil)
+        if recorder.activeOwnerID == ownerID {
+            recorder.setActiveOwnerID(nil)
+        }
         do {
             try recorder.deleteRecordingsOwned(by: ownerID)
+            aiProcessingConsent.removeConsent(ownerID: ownerID)
             guard watchesPersisted else {
                 statusMessage = "Device cleanup will retry automatically."
                 return false
@@ -255,6 +260,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             ) ?? []
         )
     }
+
 
     private func markLocalAccountDeletionPending(_ ownerID: String) {
         var ownerIDs = pendingLocalAccountDeletionOwnerIDs

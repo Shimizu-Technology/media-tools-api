@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 )
 
 const accountDeletionConfirmation = "DELETE"
+
+var accountDeletionReceiptPattern = regexp.MustCompile(`^mta_del_[A-Za-z0-9_-]{43}$`)
 
 // DeleteAccount begins a durable, cross-system deletion. The database purge
 // commits before the response; object storage and Clerk finish asynchronously.
@@ -59,13 +62,19 @@ func (h *Handler) DeleteAccount(c *gin.Context) {
 		})
 		return
 	}
+	if body.DeletionReceiptToken != "" && !accountDeletionReceiptPattern.MatchString(body.DeletionReceiptToken) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: "invalid_deletion_receipt", Message: "The account deletion receipt is invalid.", Code: http.StatusBadRequest,
+		})
+		return
+	}
 
 	cleanupAfter := time.Now().UTC()
 	if h.AudioStorage != nil && h.AudioStorage.IsConfigured() {
 		cleanupAfter = cleanupAfter.Add(h.AudioStorage.PresignedURLExpiry() + 5*time.Minute)
 	}
-	request, err := h.DB.RequestAccountDeletion(
-		c.Request.Context(), user.ID, clerkUserID, cleanupAfter,
+	request, err := h.DB.RequestAccountDeletionWithReceipt(
+		c.Request.Context(), user.ID, clerkUserID, cleanupAfter, body.DeletionReceiptToken,
 	)
 	if err != nil {
 		if errors.Is(err, database.ErrAccountDeletionAlreadyRequested) {
@@ -92,4 +101,28 @@ func (h *Handler) DeleteAccount(c *gin.Context) {
 		RequestedAt:  request.RequestedAt,
 		CleanupAfter: request.CleanupAfter,
 	})
+}
+
+// AccountDeletionReceiptStatus reveals only whether an unguessable client
+// receipt reached the committed deletion transaction. It returns no account,
+// provider, or cleanup metadata and remains usable after sessions are purged.
+func (h *Handler) AccountDeletionReceiptStatus(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	var body models.AccountDeletionReceiptRequest
+	if err := c.ShouldBindJSON(&body); err != nil ||
+		!accountDeletionReceiptPattern.MatchString(body.DeletionReceiptToken) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: "invalid_deletion_receipt", Message: "The account deletion receipt is invalid.", Code: http.StatusBadRequest,
+		})
+		return
+	}
+	confirmed, err := h.DB.HasAccountDeletionReceipt(c.Request.Context(), body.DeletionReceiptToken)
+	if err != nil {
+		log.Printf("check account deletion receipt: %v", err)
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
+			Error: "account_deletion_status_unavailable", Message: "Could not confirm account deletion.", Code: http.StatusServiceUnavailable,
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"confirmed": confirmed})
 }

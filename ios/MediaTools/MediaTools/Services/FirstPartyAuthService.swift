@@ -14,6 +14,13 @@ struct PasskeyStatus: Decodable, Equatable {
     let count: Int
 }
 
+struct ClerkDetachmentStatus: Decodable, Equatable {
+    let linked: Bool
+    let ready: Bool
+    let passkeyCount: Int
+    let unusedRecoveryCodes: Int
+}
+
 struct RecoveryCodeResponse: Decodable, Equatable {
     let codes: [String]
 }
@@ -384,6 +391,29 @@ final class FirstPartyAuthService {
 
     func recoveryStatus() async throws -> RecoveryCodeStatus {
         try await api.get("/auth/recovery", expectedOwnerID: nil)
+    }
+
+    func clerkDetachmentStatus(expectedOwnerID: String) async throws -> ClerkDetachmentStatus {
+        try await api.get("/auth/clerk-detachment", expectedOwnerID: expectedOwnerID)
+    }
+
+    /// Clerk detachment is idempotent on the server. If the POST response is
+    /// lost, a status read proves whether the provider link was removed before
+    /// the app changes any local authentication state.
+    func detachClerk(expectedOwnerID: String) async throws -> ClerkDetachmentStatus {
+        do {
+            return try await api.post(
+                "/auth/clerk-detachment",
+                body: EmptyRequest(),
+                expectedOwnerID: expectedOwnerID
+            )
+        } catch {
+            if let status = try? await clerkDetachmentStatus(expectedOwnerID: expectedOwnerID),
+               !status.linked {
+                return status
+            }
+            throw error
+        }
     }
 
     func beginRecoveryCodeRotation() async throws -> [String] {

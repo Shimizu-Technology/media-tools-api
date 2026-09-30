@@ -42,6 +42,11 @@ struct SettingsView: View {
     @State private var showReplaceRecoveryCodesConfirmation = false
     @State private var showRecoveryCodesSheet = false
     @State private var oneTimeRecoveryCodes: [String] = []
+    @State private var clerkDetachmentStatus: ClerkDetachmentStatus?
+    @State private var clerkDetachmentError: String?
+    @State private var isLoadingClerkDetachment = false
+    @State private var isDisconnectingClerk = false
+    @State private var showDisconnectClerkConfirmation = false
 
     var body: some View {
         ScrollView {
@@ -80,7 +85,9 @@ struct SettingsView: View {
             isLoadingDeviceAccount = false
         }
         .task(id: "security|\(deviceSession.activeUserID ?? "")|\(clerk.user?.id ?? "")") {
-            await loadRecoveryStatus()
+            async let security: Void = loadRecoveryStatus()
+            async let migration: Void = loadClerkDetachmentStatus()
+            _ = await (security, migration)
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
@@ -118,6 +125,18 @@ struct SettingsView: View {
             } else {
                 Text("Save these codes somewhere private. They are shown once and each code can be used one time.")
             }
+        }
+        .confirmationDialog(
+            "Finish moving off Clerk?",
+            isPresented: $showDisconnectClerkConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Disconnect Clerk", role: .destructive) {
+                Task { await disconnectClerk() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your recordings and current device session stay in Media Tools. Future sign-ins will use your passkey or a recovery code.")
         }
     }
 
@@ -448,6 +467,24 @@ struct SettingsView: View {
                             .font(Theme.caption(12))
                             .foregroundStyle(Theme.error)
                             .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if let status = clerkDetachmentStatus {
+                        Divider().overlay(Theme.borderSubtle)
+                        ClerkMigrationCard(
+                            status: status,
+                            isDisconnecting: isDisconnectingClerk,
+                            errorMessage: clerkDetachmentError,
+                            onDisconnect: { showDisconnectClerkConfirmation = true },
+                            onRetry: { Task { await loadClerkDetachmentStatus() } }
+                        )
+                    } else if let clerkDetachmentError {
+                        SecurityStatusRetryBanner(
+                            message: clerkDetachmentError,
+                            isRetrying: isLoadingClerkDetachment
+                        ) {
+                            Task { await loadClerkDetachmentStatus() }
+                        }
                     }
                 }
                 .cardStyle(padding: 14)
@@ -820,6 +857,69 @@ struct SettingsView: View {
         }
     }
 
+    private func loadClerkDetachmentStatus() async {
+        guard Configuration.firstPartyIOSAuthEnabled,
+              let ownerID = deviceSession.activeUserID else {
+            clerkDetachmentStatus = nil
+            clerkDetachmentError = nil
+            return
+        }
+        isLoadingClerkDetachment = true
+        defer { isLoadingClerkDetachment = false }
+        do {
+            let status = try await FirstPartyAuthService.shared.clerkDetachmentStatus(
+                expectedOwnerID: ownerID
+            )
+            if !status.linked {
+                try await finishLocalClerkDetachment(expectedOwnerID: ownerID)
+            }
+            clerkDetachmentStatus = status
+            clerkDetachmentError = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            clerkDetachmentError = "Could not check the Clerk migration status."
+        }
+    }
+
+    private func disconnectClerk() async {
+        guard !isDisconnectingClerk,
+              let ownerID = deviceSession.activeUserID else { return }
+        isDisconnectingClerk = true
+        clerkDetachmentError = nil
+        securityMessage = nil
+        defer { isDisconnectingClerk = false }
+
+        do {
+            let status = try await FirstPartyAuthService.shared.detachClerk(
+                expectedOwnerID: ownerID
+            )
+            guard !status.linked else { throw APIError.invalidResponse }
+            securityMessage = "Media Tools sign-in is ready. Clerk is disconnected."
+            try await finishLocalClerkDetachment(expectedOwnerID: ownerID)
+            clerkDetachmentStatus = status
+        } catch {
+            clerkDetachmentError = error.localizedDescription.isEmpty
+                ? "Could not disconnect Clerk. Please try again."
+                : error.localizedDescription
+            await loadClerkDetachmentStatus()
+        }
+    }
+
+    private func finishLocalClerkDetachment(expectedOwnerID: String) async throws {
+        // Validate and commit against the initiating stable account before
+        // touching Share Extension auth for whichever account is now active.
+        try deviceSession.markClerkDetached(expectedOwnerID: expectedOwnerID)
+        tokenSync.stopSyncing()
+        tokenSync.clearToken()
+        if clerk.user != nil {
+            do {
+                try await clerk.auth.signOut()
+            } catch {
+                securityMessage = "Clerk is disconnected. Media Tools will finish clearing the old local sign-in automatically."
+            }
+        }
+    }
+
     private func enrollPasskey() async {
         isEnrollingPasskey = true
         securityMessage = nil
@@ -828,6 +928,7 @@ struct SettingsView: View {
         do {
             try await FirstPartyAuthService.shared.enrollPasskey()
             passkeyStatus = try? await FirstPartyAuthService.shared.passkeyStatus()
+            await loadClerkDetachmentStatus()
             securityStatusError = nil
             securityMessage = "Passkey added. You can use it the next time you sign in."
         } catch {
@@ -863,6 +964,7 @@ struct SettingsView: View {
         do {
             let status = try await FirstPartyAuthService.shared.confirmRecoveryCodeRotation()
             recoveryStatus = status
+            await loadClerkDetachmentStatus()
             securityMessage = "Recovery codes saved. The old set no longer works."
             securityStatusError = nil
             showRecoveryCodesSheet = false
@@ -904,38 +1006,106 @@ struct SettingsView: View {
         defer { isDeletingAccount = false }
 
         do {
-            try await APIClient.shared.delete(
-                "/account",
-                body: DeleteAccountRequest(confirmation: deletionConfirmation)
+            let pending = try await AccountDeletionRecoveryService.shared.requestDeletion(
+                ownerID: ownerID
+            )
+            try await AccountDeletionRecoveryService.shared.finishLocalDeletion(
+                pending,
+                uploadCoordinator: uploadCoordinator,
+                consent: aiProcessingConsent,
+                deviceSession: deviceSession,
+                tokenSync: tokenSync,
+                clerk: clerk
             )
         } catch {
             deleteAccountError = error.localizedDescription
             return
         }
+        showDeleteAccount = false
+    }
 
-        await uploadCoordinator.removeLocalAccountData(ownerID: ownerID)
-        aiProcessingConsent.removeConsent(ownerID: ownerID)
-        if let migration = deviceSession.verifiedMigration,
-           migration.userID == ownerID {
-            aiProcessingConsent.removeConsent(ownerID: migration.clerkID)
-        }
-        if let clerkID = deviceSession.clerkIDForFallbackOwner(ownerID) {
-            deviceSession.removeLocalOwnerMapping(clerkID: clerkID)
-        }
-        FirstPartyAuthService.shared.clearSessionScopedJournals()
-        deviceSession.clear()
-        // The server has accepted an irreversible deletion request. Stop the
-        // share-extension sync before clearing its token so a still-present
-        // Clerk session cannot write the credential back if sign-out fails.
-        tokenSync.stopSyncing()
-        tokenSync.clearToken()
-        do {
-            if clerk.user != nil {
-                try await clerk.auth.signOut()
+}
+
+private struct ClerkMigrationCard: View {
+    let status: ClerkDetachmentStatus
+    let isDisconnecting: Bool
+    let errorMessage: String?
+    let onDisconnect: () -> Void
+    let onRetry: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(
+                status.linked ? "Finish moving off Clerk" : "Media Tools sign-in active",
+                systemImage: status.linked ? "arrow.right.circle.fill" : "checkmark.shield.fill"
+            )
+            .font(Theme.body(14, weight: .semibold))
+            .foregroundStyle(status.linked ? Theme.textPrimary : Theme.success)
+
+            if status.linked {
+                Text("Disconnect Clerk after both backup sign-in methods are ready. Your account, recordings, and this device session stay in Media Tools.")
+                    .font(Theme.caption(12))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                readinessRow(
+                    title: "Passkey",
+                    isReady: status.passkeyCount > 0,
+                    detail: status.passkeyCount > 0 ? "Ready" : "Add one above"
+                )
+                readinessRow(
+                    title: "Recovery codes",
+                    isReady: status.unusedRecoveryCodes > 0,
+                    detail: status.unusedRecoveryCodes > 0
+                        ? "\(status.unusedRecoveryCodes) available"
+                        : "Create and save them above"
+                )
+
+                if status.ready {
+                    Button(role: .destructive, action: onDisconnect) {
+                        HStack(spacing: 8) {
+                            if isDisconnecting { ProgressView().tint(.white) }
+                            Text(isDisconnecting ? "Disconnecting…" : "Disconnect Clerk")
+                        }
+                        .font(Theme.body(14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(Theme.error, in: RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                    }
+                    .disabled(isDisconnecting)
+                    .accessibilityIdentifier("clerk-migration.disconnect")
+                }
+            } else {
+                Text("Use your passkey or a recovery code whenever you need to sign in again.")
+                    .font(Theme.caption(12))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            showDeleteAccount = false
-        } catch {
-            deleteAccountError = "Your account deletion is underway, but this device could not finish signing out. Close and reopen Media Tools."
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(Theme.caption(12))
+                    .foregroundStyle(Theme.error)
+                Button("Check again", action: onRetry)
+                    .font(Theme.body(14, weight: .semibold))
+                    .foregroundStyle(Theme.brand400)
+                    .frame(minHeight: 44)
+            }
+        }
+        .accessibilityIdentifier("clerk-migration.card")
+    }
+
+    private func readinessRow(title: String, isReady: Bool, detail: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: isReady ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(isReady ? Theme.success : Theme.textMuted)
+            Text(title)
+                .font(Theme.caption(12, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            Text(detail)
+                .font(Theme.caption(12))
+                .foregroundStyle(Theme.textSecondary)
         }
     }
 }
@@ -1133,8 +1303,49 @@ struct RecoveryCodesOneTimePreviewHost: View {
     }
 }
 
-private struct DeleteAccountRequest: Encodable {
-    let confirmation: String
+struct ClerkMigrationPreviewHost: View {
+    @State private var status = ClerkDetachmentStatus(
+        linked: true,
+        ready: true,
+        passkeyCount: 1,
+        unusedRecoveryCodes: 8
+    )
+    @State private var showConfirmation = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                ClerkMigrationCard(
+                    status: status,
+                    isDisconnecting: false,
+                    errorMessage: nil,
+                    onDisconnect: { showConfirmation = true },
+                    onRetry: {}
+                )
+                .cardStyle(padding: 14)
+                .padding(16)
+            }
+            .background(Theme.surface)
+            .navigationTitle("Sign-in security")
+        }
+        .confirmationDialog(
+            "Finish moving off Clerk?",
+            isPresented: $showConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Disconnect Clerk", role: .destructive) {
+                status = ClerkDetachmentStatus(
+                    linked: false,
+                    ready: true,
+                    passkeyCount: 1,
+                    unusedRecoveryCodes: 8
+                )
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your recordings and current device session stay in Media Tools. Future sign-ins will use your passkey or a recovery code.")
+        }
+    }
 }
 
 private struct DeviceAccount: Decodable {

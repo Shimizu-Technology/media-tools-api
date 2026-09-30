@@ -1509,6 +1509,9 @@ paths:
                 confirmation:
                   type: string
                   enum: [DELETE]
+                deletion_receipt_token:
+                  type: string
+                  description: Optional unguessable client receipt used to confirm a committed deletion after a lost response
       responses:
         "202":
           description: Account deletion accepted
@@ -1522,6 +1525,41 @@ paths:
                   cleanup_after: {type: string, format: date-time}
         "400": {description: Confirmation missing or account is not Clerk-managed}
         "503": {description: Account deletion is temporarily unavailable}
+  /account/deletion-status:
+    post:
+      tags: [Authentication]
+      summary: Confirm whether an account deletion transaction committed
+      description: |
+        Checks an unguessable client receipt after the authenticated deletion
+        response was lost. Returns no account or cleanup metadata and is
+        available after the account and its sessions have been removed.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deletion_receipt_token]
+              properties:
+                deletion_receipt_token:
+                  type: string
+                  pattern: '^mta_del_[A-Za-z0-9_-]{43}$'
+      responses:
+        "200":
+          description: Receipt lookup completed
+          headers:
+            Cache-Control: {schema: {type: string}, description: Always no-store}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [confirmed]
+                properties:
+                  confirmed: {type: boolean}
+        "400": {description: Receipt is malformed}
+        "429": {description: Too many attempts}
+        "503": {description: Receipt status is temporarily unavailable}
   /auth/refresh:
     post:
       tags: [Authentication]

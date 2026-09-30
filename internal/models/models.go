@@ -445,22 +445,28 @@ type User struct {
 // AccountDeletionRequest is the durable coordination record for deleting an
 // account across PostgreSQL, object storage, and Clerk.
 type AccountDeletionRequest struct {
-	ID             string          `json:"id" db:"id"`
-	AppUserID      string          `json:"-" db:"app_user_id"`
-	ClerkUserID    *string         `json:"-" db:"clerk_user_id"`
-	ClerkUserHash  string          `json:"-" db:"clerk_user_hash"`
-	ObjectKeys     json.RawMessage `json:"-" db:"object_keys"`
-	Status         string          `json:"status" db:"status"`
-	CleanupAfter   time.Time       `json:"cleanup_after" db:"cleanup_after"`
-	ClerkDeletedAt *time.Time      `json:"-" db:"clerk_deleted_at"`
-	CompletedAt    *time.Time      `json:"completed_at,omitempty" db:"completed_at"`
-	LastError      string          `json:"-" db:"last_error"`
-	RequestedAt    time.Time       `json:"requested_at" db:"requested_at"`
-	UpdatedAt      time.Time       `json:"updated_at" db:"updated_at"`
+	ID                  string          `json:"id" db:"id"`
+	AppUserID           string          `json:"-" db:"app_user_id"`
+	ClerkUserID         *string         `json:"-" db:"clerk_user_id"`
+	ClerkUserHash       string          `json:"-" db:"clerk_user_hash"`
+	ObjectKeys          json.RawMessage `json:"-" db:"object_keys"`
+	Status              string          `json:"status" db:"status"`
+	CleanupAfter        time.Time       `json:"cleanup_after" db:"cleanup_after"`
+	ClerkDeletedAt      *time.Time      `json:"-" db:"clerk_deleted_at"`
+	CompletedAt         *time.Time      `json:"completed_at,omitempty" db:"completed_at"`
+	LastError           string          `json:"-" db:"last_error"`
+	RequestedAt         time.Time       `json:"requested_at" db:"requested_at"`
+	UpdatedAt           time.Time       `json:"updated_at" db:"updated_at"`
+	DeletionReceiptHash string          `json:"-" db:"deletion_receipt_hash"`
 }
 
 type DeleteAccountRequest struct {
-	Confirmation string `json:"confirmation" binding:"required"`
+	Confirmation         string `json:"confirmation" binding:"required"`
+	DeletionReceiptToken string `json:"deletion_receipt_token,omitempty"`
+}
+
+type AccountDeletionReceiptRequest struct {
+	DeletionReceiptToken string `json:"deletion_receipt_token" binding:"required"`
 }
 
 type DeleteAccountResponse struct {
