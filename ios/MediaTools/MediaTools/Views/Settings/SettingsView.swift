@@ -1000,6 +1000,13 @@ struct SettingsView: View {
             // provider subject until Clerk confirms it is gone locally.
             deviceSession.markLocallyDeletedClerkIdentity(signingOutClerkID)
         }
+        // Stop every local workspace and background-upload path as soon as the
+        // sign-out intent is durable. Server or Clerk cleanup can safely retry
+        // without letting the old account continue work in the meantime.
+        await uploadCoordinator.setActiveOwnerID(nil)
+        aiProcessingConsent.setActiveOwnerID(nil)
+        tokenSync.stopSyncing()
+        tokenSync.clearToken()
 
         do {
             try await deviceSession.revokeOrSuspend()
@@ -1007,7 +1014,6 @@ struct SettingsView: View {
             if clerk.user != nil {
                 try await clerk.auth.signOut()
             }
-            await uploadCoordinator.setActiveOwnerID(nil)
             if let signingOutClerkID, clerk.user?.id != signingOutClerkID {
                 deviceSession.clearLocallyDeletedClerkIdentity(signingOutClerkID)
             }

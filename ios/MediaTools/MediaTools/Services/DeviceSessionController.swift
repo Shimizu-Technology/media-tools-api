@@ -338,6 +338,7 @@ final class DeviceSessionController {
     /// A 401 may retry through Clerk only when that Clerk account resolves to
     /// the same stable owner as the rejected device credential or request.
     func canFallbackToClerk(clerkID: String, expectedOwnerID: String?) -> Bool {
+        guard !deletedClerkIdentities.contains(clerkID) else { return false }
         let requestOwnerID = expectedOwnerID ?? activeUserID ?? stored?.pair.userID
         guard let requestOwnerID else { return true }
         let clerkOwnerID = fallbackOwnerID(for: clerkID)
@@ -371,16 +372,8 @@ final class DeviceSessionController {
         // never bootstrap or reopen a fallback workspace. A durable native
         // session remains authoritative after Clerk detachment, even while
         // clearing that stale provider cache is temporarily unavailable.
-        if let clerkID,
-           deletedClerkIdentities.contains(clerkID),
-           !hasUsableNativeSession {
-            activeUserID = nil
-            if Clerk.shared.user?.id == clerkID {
-                try? await Clerk.shared.auth.signOut()
-                if Clerk.shared.user?.id != clerkID {
-                    deletedClerkIdentities.remove(clerkID)
-                }
-            }
+        if !hasUsableNativeSession,
+           await rejectRetiredClerkIdentity(clerkID) {
             return nil
         }
         guard enabled else {
@@ -404,6 +397,7 @@ final class DeviceSessionController {
                 return nil
             }
             clear()
+            if await rejectRetiredClerkIdentity(clerkID) { return nil }
         }
         if let clerkID, let stored, stored.source == .clerk, !stored.belongs(to: clerkID) {
             do {
@@ -446,6 +440,7 @@ final class DeviceSessionController {
                 if needsSignIn {
                     if let clerkID {
                         clear()
+                        if await rejectRetiredClerkIdentity(clerkID) { return nil }
                         try? await bootstrap(verifiedClerkID: clerkID)
                     } else {
                         activeUserID = nil
@@ -454,8 +449,30 @@ final class DeviceSessionController {
                 }
             }
         }
+        if self.stored == nil,
+           await rejectRetiredClerkIdentity(clerkID) {
+            return nil
+        }
         activeUserID = self.stored?.pair.userID ?? fallbackOwnerID(for: clerkID)
         return activeUserID
+    }
+
+    /// Prevent a locally retired provider identity from authenticating through
+    /// any Clerk bootstrap or fallback path. A successful local Clerk sign-out
+    /// releases ordinary sign-out blocks; deletion and detachment remain safe
+    /// because the server has already removed that provider link.
+    private func rejectRetiredClerkIdentity(_ clerkID: String?) async -> Bool {
+        guard let clerkID, deletedClerkIdentities.contains(clerkID) else {
+            return false
+        }
+        activeUserID = nil
+        if Clerk.shared.user?.id == clerkID {
+            try? await Clerk.shared.auth.signOut()
+            if Clerk.shared.user?.id != clerkID {
+                deletedClerkIdentities.remove(clerkID)
+            }
+        }
+        return true
     }
 
     /// Returns nil only when the staged client has no first-party credential.

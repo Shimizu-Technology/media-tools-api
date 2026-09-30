@@ -87,6 +87,13 @@ private actor DisabledSessionTransport: DeviceSessionTransport {
     }
 }
 
+private actor UnauthorizedDeviceSessionTransport: DeviceSessionTransport {
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        return (Data(), HTTPURLResponse(url: request.url!, statusCode: 401,
+                                        httpVersion: nil, headerFields: nil)!)
+    }
+}
+
 private actor DelayedUnauthorizedTransport: DeviceSessionTransport {
     private var pending: CheckedContinuation<(Data, URLResponse), Error>?
     private var requestWaiter: CheckedContinuation<Void, Never>?
@@ -652,6 +659,40 @@ final class DeviceSessionTests: XCTestCase {
         XCTAssertTrue(deletedIdentities.contains("clerk-a"))
     }
 
+    @MainActor
+    func testRejectedNativeSessionCannotFallBackToBlockedClerk() async {
+        for nativeOwnerID in ["server-a", "server-b"] {
+            let pair = DeviceSessionPair(
+                sessionID: "session-\(nativeOwnerID)", userID: nativeOwnerID,
+                accessToken: "mta_at_expired", accessExpiresAt: .distantPast,
+                refreshToken: "mta_rt_valid", inactiveExpiresAt: .distantFuture
+            )
+            let store = MemoryDeviceSessionStore(
+                StoredDeviceSession(pair: pair, source: .passkey,
+                                    pendingNextRefreshToken: nil)
+            )
+            let deletedIdentities = MemoryDeletedClerkIdentityStore()
+            deletedIdentities.insert("clerk-a")
+            let controller = DeviceSessionController(
+                transport: UnauthorizedDeviceSessionTransport(),
+                baseURL: URL(string: "https://example.test/api/v1")!,
+                store: store,
+                deletedClerkIdentities: deletedIdentities,
+                enabled: true
+            )
+
+            let owner = await controller.activate(
+                clerkID: "clerk-a",
+                clerkIsLoaded: true
+            )
+
+            XCTAssertNil(owner)
+            XCTAssertNil(controller.activeUserID)
+            XCTAssertNil(store.value)
+            XCTAssertTrue(deletedIdentities.contains("clerk-a"))
+        }
+    }
+
 
     @MainActor
     func testPrepareForNewNativeSessionRequiresRevocationBeforeContinuing() async throws {
@@ -818,6 +859,7 @@ final class DeviceSessionTests: XCTestCase {
             accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
             inactiveExpiresAt: .distantFuture
         )
+        let deletedIdentities = MemoryDeletedClerkIdentityStore()
         let controller = DeviceSessionController(
             store: MemoryDeviceSessionStore(
                 StoredDeviceSession(
@@ -826,6 +868,7 @@ final class DeviceSessionTests: XCTestCase {
                     verifiedClerkID: "clerk-a"
                 )
             ),
+            deletedClerkIdentities: deletedIdentities,
             enabled: true
         )
 
@@ -833,6 +876,9 @@ final class DeviceSessionTests: XCTestCase {
         XCTAssertTrue(controller.canFallbackToClerk(clerkID: "clerk-a", expectedOwnerID: "server-a"))
         XCTAssertFalse(controller.canFallbackToClerk(clerkID: "clerk-b", expectedOwnerID: nil))
         XCTAssertFalse(controller.canFallbackToClerk(clerkID: "clerk-a", expectedOwnerID: "server-b"))
+        deletedIdentities.insert("clerk-a")
+        XCTAssertFalse(controller.canFallbackToClerk(clerkID: "clerk-a", expectedOwnerID: nil))
+        XCTAssertFalse(controller.canFallbackToClerk(clerkID: "clerk-a", expectedOwnerID: "server-a"))
     }
 
     @MainActor

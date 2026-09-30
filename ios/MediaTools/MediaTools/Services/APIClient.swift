@@ -71,6 +71,13 @@ actor APIClient {
         guard let session = await Clerk.shared.session else {
             throw APIError.authenticationRequired(message: "Sign in to continue.")
         }
+        guard let clerkID = session.user?.id,
+              await DeviceSessionController.shared.canFallbackToClerk(
+                clerkID: clerkID,
+                expectedOwnerID: expectedOwnerID
+              ) else {
+            throw APIError.authenticationRequired(message: "Sign in to continue.")
+        }
         let expectedClerkID: String?
         if let expectedOwnerID {
             expectedClerkID = await DeviceSessionController.shared
