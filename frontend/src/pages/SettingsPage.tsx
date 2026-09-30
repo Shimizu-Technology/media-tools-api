@@ -1,15 +1,16 @@
-import { lazy, Suspense, useState } from 'react';
-import { BrainCircuit, Check, ExternalLink, KeyRound, Moon, Settings, Sun, UserRound } from 'lucide-react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { BrainCircuit, Check, ExternalLink, KeyRound, Loader2, Moon, Settings, Sun, UserRound } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuthContext } from '../contexts/useAuthContext';
 import { useTheme } from '../hooks/useTheme';
 import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
 import { isWebSessionActive } from '../lib/webSession';
+import { getPasskeyStatus, passkeysSupported, PasskeyError, registerPasskey } from '../lib/passkeys';
 
 const DeleteAccountSection = lazy(() => import('../components/DeleteAccountSection').then((module) => ({ default: module.DeleteAccountSection })));
 
 export function SettingsPage() {
-  const { user, isClerkEnabled } = useAuthContext();
+  const { user, accountAuthEnabled, isFirstPartySession } = useAuthContext();
   const { isDark, toggle } = useTheme();
   const [cleared, setCleared] = useState(false);
   const { hasConsent: hasAIConsent, requestConsent: requestAIConsent, revokeConsent: revokeAIConsent } = useAIProcessingConsent();
@@ -29,9 +30,11 @@ export function SettingsPage() {
         </div>
         <h1 className="mt-5 text-3xl font-semibold tracking-tight sm:text-4xl" style={{ color: 'var(--color-text-primary)' }}>Workspace preferences</h1>
         <p className="mt-3 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
-          {isClerkEnabled ? 'Manage your account context and workspace appearance.' : 'Manage account context, appearance, and local development credentials.'}
+          {accountAuthEnabled ? 'Manage your sign-in security, account, and workspace appearance.' : 'Manage account context, appearance, and local development credentials.'}
         </p>
       </section>
+
+      {isFirstPartySession && <PasskeySecuritySection />}
 
       <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -83,11 +86,11 @@ export function SettingsPage() {
           <div className="min-w-0 flex-1">
             <h2 className="text-xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>Account</h2>
             <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-              {isClerkEnabled ? (isWebSessionActive() ? 'Signed in with a Media Tools browser session.' : 'Signed in through Clerk.') : 'Running in local API-key mode.'}
+              {accountAuthEnabled ? (isWebSessionActive() ? 'Signed in with a durable Media Tools browser session.' : 'Signed in through the previous account provider.') : 'Running in local API-key mode.'}
             </p>
             <div className="mt-4 rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}>
               <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{user?.name || 'Workspace user'}</p>
-              <p className="mt-1 break-all text-sm" style={{ color: 'var(--color-text-secondary)' }}>{user?.email || 'No Clerk account loaded in this environment'}</p>
+              <p className="mt-1 break-all text-sm" style={{ color: 'var(--color-text-secondary)' }}>{user?.email || 'No account loaded in this environment'}</p>
             </div>
           </div>
         </div>
@@ -110,7 +113,7 @@ export function SettingsPage() {
         </div>
       </section>
 
-      {!isClerkEnabled && <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+      {!accountAuthEnabled && <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-4">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-surface-subtle)', color: 'var(--color-brand-500)' }}>
@@ -128,11 +131,74 @@ export function SettingsPage() {
         </div>
       </section>}
 
-      {isClerkEnabled && (
+      {accountAuthEnabled && (
         <Suspense fallback={null}>
           <DeleteAccountSection />
         </Suspense>
       )}
     </div>
+  );
+}
+
+function PasskeySecuritySection() {
+  const [count, setCount] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState('');
+  const supported = passkeysSupported();
+
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      setCount((await getPasskeyStatus()).count);
+    } catch (caught) {
+      setError(caught instanceof PasskeyError ? caught.message : 'Could not check your passkeys.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  const add = async () => {
+    setAdding(true);
+    setError('');
+    try {
+      setCount(await registerPasskey());
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === 'NotAllowedError') setError('Passkey setup was canceled.');
+      else setError(caught instanceof PasskeyError ? caught.message : 'Could not add this passkey.');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  return (
+    <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}><KeyRound className="h-5 w-5" /></div>
+          <div>
+            <h2 className="text-xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>Passkeys</h2>
+            <p className="mt-2 max-w-xl text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
+              Use Face ID, Touch ID, or your device screen lock to sign in without a password.
+            </p>
+            <p className="mt-2 text-sm font-semibold" style={{ color: count && count > 0 ? 'var(--color-success)' : 'var(--color-text-secondary)' }}>
+              {loading ? 'Checking passkeys…' : count === null ? 'Passkey status unavailable' : `${count} ${count === 1 ? 'passkey' : 'passkeys'} ready`}
+            </p>
+            {!supported && <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>Open this page in a current browser on a secure connection to add one.</p>}
+            {error && <p className="mt-2 text-sm" role="alert" style={{ color: 'var(--color-danger)' }}>{error}</p>}
+          </div>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          {error && <button type="button" onClick={() => void load()} className="min-h-11 rounded-xl border px-4 text-sm font-semibold" style={{ borderColor: 'var(--color-border)' }}>Retry</button>}
+          <button type="button" onClick={() => void add()} disabled={!supported || loading || adding} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+            {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+            {adding ? 'Adding…' : count ? 'Add another passkey' : 'Add a passkey'}
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }

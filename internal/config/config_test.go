@@ -154,6 +154,21 @@ func TestLoadParsesMultipleCORSOrigins(t *testing.T) {
 	}
 }
 
+func TestLoadAllowsPasskeyCookieAuthWithoutClerk(t *testing.T) {
+	t.Setenv("YT_DLP_PATH", "/bin/true")
+	t.Setenv("FIRST_PARTY_AUTH_ENABLED", "true")
+	t.Setenv("WEB_COOKIE_AUTH_ENABLED", "true")
+	t.Setenv("CLERK_JWKS_URL", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if !cfg.WebCookieAuthEnabled || !cfg.FirstPartyAuthEnabled {
+		t.Fatalf("first-party web auth was not enabled: %#v", cfg)
+	}
+}
+
 func TestLoadRequiresClerkAudienceAuthorizedPartyOrCORSOriginInRelease(t *testing.T) {
 	setRequiredReleaseEnv(t)
 	t.Setenv("CORS_ORIGIN", "")

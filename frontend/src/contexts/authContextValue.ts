@@ -4,6 +4,8 @@ import type { User } from '../lib/api';
 
 interface AuthContextType {
   isClerkEnabled: boolean;
+  accountAuthEnabled: boolean;
+  isFirstPartySession: boolean;
   isAuthenticated: boolean;
   isLoading: boolean;
   canUseWorkspace: boolean;
@@ -14,6 +16,8 @@ interface AuthContextType {
 
 export const AuthContext = createContext<AuthContextType>({
   isClerkEnabled: false,
+  accountAuthEnabled: false,
+  isFirstPartySession: false,
   isAuthenticated: false,
   isLoading: true,
   canUseWorkspace: false,

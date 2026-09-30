@@ -20,12 +20,13 @@ const webRefreshMaxAge = 365 * 24 * 60 * 60
 
 type WebSessionHandler struct {
 	db             *database.DB
+	auth           *Handler
 	secure         bool
 	allowedOrigins []string
 }
 
-func NewWebSessionHandler(db *database.DB, secure bool, allowedOrigins []string) *WebSessionHandler {
-	return &WebSessionHandler{db: db, secure: secure, allowedOrigins: allowedOrigins}
+func NewWebSessionHandler(db *database.DB, auth *Handler, secure bool, allowedOrigins []string) *WebSessionHandler {
+	return &WebSessionHandler{db: db, auth: auth, secure: secure, allowedOrigins: allowedOrigins}
 }
 
 func webRandomToken(prefix string) (string, error) {
@@ -80,10 +81,11 @@ func (h *WebSessionHandler) rejectCSRF(c *gin.Context) bool {
 }
 
 // Bootstrap exchanges an already verified Clerk identity for a same-origin
-// browser session. The existing user ID is retained for all owned media.
+// browser session. PrepareBootstrap has already stored the exact refresh
+// successor outside JavaScript, so an identical retry recovers the same
+// session instead of creating an orphan after a lost response.
 func (h *WebSessionHandler) Bootstrap(c *gin.Context) {
-	if !h.validOrigin(c) {
-		c.JSON(http.StatusForbidden, models.ErrorResponse{Error: "origin_invalid", Message: "Use the Media Tools app to sign in", Code: http.StatusForbidden})
+	if h.rejectCSRF(c) {
 		return
 	}
 	user := middleware.GetUser(c)
@@ -96,19 +98,63 @@ func (h *WebSessionHandler) Bootstrap(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not link your account", Code: http.StatusServiceUnavailable})
 		return
 	}
+	successor, err := c.Cookie(middleware.WebPendingCookie)
+	if err != nil || !database.ValidFirstPartyRefreshToken(successor) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "session_not_prepared", Message: "Prepare browser sign-in first", Code: http.StatusBadRequest})
+		return
+	}
 	csrf, err := webRandomToken("mta_csrf_")
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "session_creation_failed", Message: "Could not create browser session", Code: http.StatusServiceUnavailable})
 		return
 	}
-	pair, err := h.db.CreateFirstPartySession(c.Request.Context(), user.ID, "web", "Browser")
+	pair, err := h.db.CreateOrRecoverFirstPartySession(c.Request.Context(), user.ID, "web", "Browser", successor)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "session_creation_failed", Message: "Could not create browser session", Code: http.StatusServiceUnavailable})
 		return
 	}
 	h.setPair(c, pair)
 	h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
-	c.JSON(http.StatusCreated, gin.H{"user_id": user.ID, "access_expires_at": pair.AccessExpiresAt})
+	c.JSON(http.StatusCreated, gin.H{"authenticated": true, "user_id": user.ID, "clerk_id": *user.ClerkID, "access_expires_at": pair.AccessExpiresAt})
+}
+
+// PrepareBootstrap writes the refresh successor and CSRF secret before Clerk
+// session exchange. Exact Origin is the signed-out request's CSRF boundary;
+// the commit then requires the double-submit token too.
+func (h *WebSessionHandler) PrepareBootstrap(c *gin.Context) {
+	if !h.validOrigin(c) {
+		c.JSON(http.StatusForbidden, models.ErrorResponse{Error: "origin_invalid", Message: "Use the Media Tools app to sign in", Code: http.StatusForbidden})
+		return
+	}
+	csrf, err := webRandomToken("mta_csrf_")
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not prepare browser sign-in", Code: http.StatusServiceUnavailable})
+		return
+	}
+	if pending, err := c.Cookie(middleware.WebPendingCookie); err == nil && database.ValidFirstPartyRefreshToken(pending) {
+		h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
+		c.Header("Cache-Control", "no-store")
+		c.Status(http.StatusNoContent)
+		return
+	}
+	if refresh, err := c.Cookie(middleware.WebRefreshCookie); err == nil && refresh != "" {
+		if err := h.db.RevokeFirstPartySessionByRefreshToken(c.Request.Context(), refresh); err != nil && !errors.Is(err, database.ErrSessionInvalid) {
+			log.Printf("revoke browser session before Clerk bootstrap: %v", err)
+			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not prepare this browser for sign-in; retry", Code: http.StatusServiceUnavailable})
+			return
+		}
+	}
+	successor, err := webRandomToken("mta_rt_")
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not prepare browser sign-in", Code: http.StatusServiceUnavailable})
+		return
+	}
+	h.setCookie(c, middleware.WebAccessCookie, "", -1, true, "/api/v1")
+	h.setCookie(c, middleware.WebRefreshCookie, "", -1, true, "/api/v1/auth/web/session")
+	h.setCookie(c, middleware.WebPendingCookie, successor, 24*60*60, true, "/api/v1/auth/web/session")
+	h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
+	c.Header("Cache-Control", "no-store")
+	c.Status(http.StatusNoContent)
 }
 
 func (h *WebSessionHandler) Status(c *gin.Context) {

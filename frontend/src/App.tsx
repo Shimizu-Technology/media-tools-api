@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { ClerkProvider, useAuth, useClerk } from '@clerk/clerk-react'
 import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { FileText } from 'lucide-react'
@@ -9,7 +9,9 @@ import { AuthProvider } from './contexts/AuthContext'
 import { AIProcessingConsentProvider } from './contexts/AIProcessingConsentContext'
 import { getCurrentUser, type User } from './lib/api'
 import { setAuthTokenGetter } from './lib/apiAuth'
-import { bootstrapWebSession, isWebSessionActive, logoutWebSession, restoreWebSession, setWebSessionActive, webSessionEnabled, webSessionStateChanged } from './lib/webSession'
+import { bootstrapWebSession, isWebSessionActive, logoutWebSession, reconcileWebSessionWithClerk, restoreWebSession, setWebSessionActive, webSessionEnabled, webSessionStateChanged } from './lib/webSession'
+import { clearPasskeySignInJournal, recoverPendingPasskeySignIn } from './lib/passkeys'
+import { migrateAIConsentToStableUser } from './lib/aiConsentStorage'
 
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 const isClerkEnabled = Boolean(CLERK_PUBLISHABLE_KEY && CLERK_PUBLISHABLE_KEY !== 'YOUR_PUBLISHABLE_KEY')
@@ -34,8 +36,8 @@ const ProcessingPage = lazy(() => import('./pages/ProcessingPage').then((module)
 const ItemDetailPage = lazy(() => import('./pages/ItemDetailPage').then((module) => ({ default: module.ItemDetailPage })))
 const CreatePage = lazy(() => import('./pages/CreatePage').then((module) => ({ default: module.CreatePage })))
 
-if (!isClerkEnabled) {
-  console.warn('Clerk not configured — using local API-key development mode. Add VITE_CLERK_PUBLISHABLE_KEY to .env.local for browser auth.')
+if (!isClerkEnabled && !webSessionEnabled) {
+  console.warn('Account auth is not configured — using local API-key development mode.')
 }
 
 function AppRoutes() {
@@ -161,22 +163,49 @@ function AppFooter() {
 function ClerkAppContent() {
   const { getToken, isLoaded, isSignedIn, userId } = useAuth()
   const clerk = useClerk()
+  const signOut = useCallback(() => clerk.signOut({ redirectUrl: '/' }), [clerk])
+  const bridge = useMemo<ClerkBridge>(() => ({
+    isLoaded,
+    isSignedIn: isSignedIn ?? false,
+    userId,
+    getToken,
+    signOut,
+  }), [getToken, isLoaded, isSignedIn, signOut, userId])
+  return (
+    <AccountAppContent clerk={bridge} />
+  )
+}
+
+type ClerkBridge = {
+  isLoaded: boolean
+  isSignedIn: boolean
+  userId: string | null | undefined
+  getToken: (options?: { skipCache?: boolean }) => Promise<string | null>
+  signOut: () => Promise<void>
+}
+
+function AccountAppContent({ clerk }: { clerk?: ClerkBridge }) {
   const [user, setUser] = useState<User | null>(null)
   const [isUserLoading, setIsUserLoading] = useState(true)
   const [hasWebSession, setHasWebSession] = useState(false)
+  const [authBlocked, setAuthBlocked] = useState(false)
+  const clerkReady = clerk?.isLoaded ?? true
+  const clerkSignedIn = clerk?.isSignedIn ?? false
+  const clerkUserId = clerk?.userId ?? null
 
   useEffect(() => {
     setAuthTokenGetter(async (forceRefresh) => {
+      if (!clerk) return null
       try {
-        return await getToken(forceRefresh ? { skipCache: true } : undefined)
+        return await clerk.getToken(forceRefresh ? { skipCache: true } : undefined)
       } catch {
         return null
       }
     })
-  }, [getToken])
+  }, [clerk])
 
   const refreshUser = useCallback(async () => {
-    if (!isWebSessionActive() && !isSignedIn) {
+    if (!isWebSessionActive() && !clerkSignedIn) {
       setUser(null)
       return
     }
@@ -188,43 +217,57 @@ function ClerkAppContent() {
     } finally {
       setIsUserLoading(false)
     }
-  }, [isSignedIn])
+  }, [clerkSignedIn])
 
   useEffect(() => {
-    const syncWebSessionState = () => setHasWebSession(isWebSessionActive())
+    const syncWebSessionState = () => {
+      const active = isWebSessionActive()
+      setHasWebSession(active)
+      if (active) void refreshUser()
+    }
     window.addEventListener(webSessionStateChanged, syncWebSessionState)
     return () => window.removeEventListener(webSessionStateChanged, syncWebSessionState)
-  }, [])
+  }, [refreshUser])
 
   useEffect(() => {
-    if (!isLoaded) return
+    if (!clerkReady) return
     let cancelled = false
     const restore = async () => {
       setIsUserLoading(true)
+      setAuthBlocked(false)
       setHasWebSession(false)
       setUser(null)
-      if (!isSignedIn) localStorage.removeItem('mta_jwt_token')
+      if (!clerkSignedIn) localStorage.removeItem('mta_jwt_token')
       try {
         if (webSessionEnabled) {
           setWebSessionActive(false)
-          const existingClerkID = await restoreWebSession()
+          let status = await restoreWebSession()
           if (cancelled) return
-          if (existingClerkID !== null && userId && existingClerkID !== userId) {
-            await logoutWebSession()
-            if (cancelled) return
-            setWebSessionActive(false)
-          } else if (existingClerkID !== null) {
+          try { status = await reconcileWebSessionWithClerk(status, clerkUserId) } catch (error) { setAuthBlocked(true); throw error }
+          if (cancelled) return
+          if (status === null) setWebSessionActive(false)
+          if (status !== null) {
+            clearPasskeySignInJournal()
             setWebSessionActive(true)
           }
-          if (!isWebSessionActive() && userId) {
-            const token = await getToken()
+          if (!isWebSessionActive()) {
+            const recovered = await recoverPendingPasskeySignIn()
             if (cancelled) return
-            if (token && await bootstrapWebSession(token)) setWebSessionActive(true)
+            if (recovered) status = await restoreWebSession()
+            try { status = await reconcileWebSessionWithClerk(status, clerkUserId) } catch (error) { setAuthBlocked(true); throw error }
+            if (cancelled) return
+            if (status === null) setWebSessionActive(false)
+            if (status !== null) setWebSessionActive(true)
+          }
+          if (!isWebSessionActive() && clerkUserId && clerk) {
+            const token = await clerk.getToken()
+            if (cancelled) return
+            if (token && await bootstrapWebSession(token, clerkUserId)) setWebSessionActive(true)
           }
         }
         if (cancelled) return
         setHasWebSession(isWebSessionActive())
-        if (isWebSessionActive() || isSignedIn) {
+        if (isWebSessionActive() || clerkSignedIn) {
           setUser(await getCurrentUser())
         } else {
           setUser(null)
@@ -237,27 +280,34 @@ function ClerkAppContent() {
     }
     void restore()
     return () => { cancelled = true }
-  }, [getToken, isLoaded, isSignedIn, userId])
+  }, [clerk, clerkReady, clerkSignedIn, clerkUserId])
 
   const signOut = useCallback(async () => {
     if (isWebSessionActive()) await logoutWebSession()
     setWebSessionActive(false)
     setHasWebSession(false)
     setUser(null)
-    await clerk.signOut({ redirectUrl: '/' })
+    if (clerk) await clerk.signOut()
   }, [clerk])
+
+  useEffect(() => {
+    if (!hasWebSession || !user?.id || !user.clerk_id) return
+    migrateAIConsentToStableUser({ stableUserID: user.id, linkedClerkID: user.clerk_id, activeClerkID: clerkUserId })
+  }, [clerkUserId, hasWebSession, user])
 
   return (
     <AuthProvider
-      isClerkEnabled={true}
-      isAuthenticated={hasWebSession || (isSignedIn ?? false)}
-      isLoading={!isLoaded || isUserLoading}
-      canUseWorkspace={true}
+      isClerkEnabled={Boolean(clerk)}
+      accountAuthEnabled={true}
+      isFirstPartySession={!authBlocked && hasWebSession}
+      isAuthenticated={!authBlocked && (hasWebSession || clerkSignedIn)}
+      isLoading={!clerkReady || isUserLoading}
+      canUseWorkspace={!authBlocked}
       user={user}
       refreshUser={refreshUser}
       signOut={signOut}
     >
-      <AIProcessingConsentProvider ownerID={user?.clerk_id ?? userId ?? null}>
+      <AIProcessingConsentProvider ownerID={!authBlocked && hasWebSession ? user?.id ?? null : user?.clerk_id ?? clerkUserId}>
         <AppRoutes />
       </AIProcessingConsentProvider>
     </AuthProvider>
@@ -280,6 +330,8 @@ function NoClerkAppContent() {
   return (
     <AuthProvider
       isClerkEnabled={false}
+      accountAuthEnabled={false}
+      isFirstPartySession={false}
       isAuthenticated={Boolean(apiKey)}
       isLoading={false}
       canUseWorkspace={false}
@@ -328,7 +380,7 @@ function App() {
   if (!isClerkEnabled) {
     return (
       <BrowserRouter>
-        <NoClerkAppContent />
+        {webSessionEnabled ? <AccountAppContent /> : <NoClerkAppContent />}
       </BrowserRouter>
     )
   }
