@@ -87,6 +87,7 @@ marketing_version="$(build_setting MARKETING_VERSION)"
 build_number="$(build_setting CURRENT_PROJECT_VERSION)"
 configured_entitlements="$(build_setting CODE_SIGN_ENTITLEMENTS)"
 clerk_key="$(build_setting CLERK_PUBLISHABLE_KEY)"
+first_party_ios_auth_enabled="$(build_setting FIRST_PARTY_IOS_AUTH_ENABLED)"
 
 [[ "$bundle_id" == "com.ShimizuTechnology.MediaTools" ]] || { echo "Unexpected bundle ID: $bundle_id"; exit 1; }
 [[ "$team_id" == "4T358A5S74" ]] || { echo "Unexpected Apple team: $team_id"; exit 1; }
@@ -95,6 +96,10 @@ clerk_key="$(build_setting CLERK_PUBLISHABLE_KEY)"
 (( build_number >= 10 )) || { echo "Build number must be 10 or later; found $build_number"; exit 1; }
 [[ "$configured_entitlements" == "MediaTools/MediaTools.entitlements" ]] || { echo "Unexpected entitlements setting: $configured_entitlements"; exit 1; }
 [[ -n "$clerk_key" ]] || { echo "Release build is missing CLERK_PUBLISHABLE_KEY"; exit 1; }
+[[ "$first_party_ios_auth_enabled" == "YES" ]] || {
+  echo "Release build must enable FIRST_PARTY_IOS_AUTH_ENABLED=YES while Clerk remains the migration fallback"
+  exit 1
+}
 
 if [[ "$clerk_key" == pk_test_* ]]; then
   echo "Notice: the Release target uses the owner-approved Clerk development instance"
@@ -233,6 +238,7 @@ if [[ -n "$archive_path" ]]; then
   [[ "$(plutil -extract CFBundleIdentifier raw "$app_info")" == "$bundle_id" ]] || { echo "Archived bundle ID does not match"; exit 1; }
   [[ "$(plutil -extract CFBundleShortVersionString raw "$app_info")" == "$marketing_version" ]] || { echo "Archived marketing version does not match"; exit 1; }
   [[ "$(plutil -extract CFBundleVersion raw "$app_info")" == "$build_number" ]] || { echo "Archived build number does not match"; exit 1; }
+  [[ "$(plutil -extract FIRST_PARTY_IOS_AUTH_ENABLED raw "$app_info")" == "YES" ]] || { echo "Archive has FIRST_PARTY_IOS_AUTH_ENABLED disabled"; exit 1; }
   archived_sdk="$(plutil -extract DTSDKName raw "$app_info")"
   [[ "$archived_sdk" == iphoneos26.* ]] || { echo "Archive was not built with the iOS 26 SDK: $archived_sdk"; exit 1; }
   [[ -f "$app_path/PrivacyInfo.xcprivacy" ]] || { echo "Archive is missing PrivacyInfo.xcprivacy"; exit 1; }

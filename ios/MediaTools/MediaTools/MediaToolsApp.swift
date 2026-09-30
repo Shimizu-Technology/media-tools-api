@@ -83,6 +83,15 @@ struct MediaToolsApp: App {
                 RecordView()
             }
             .preferredColorScheme(.dark)
+        } else if ProcessInfo.processInfo.arguments.contains("-ui-test-recovery-codes-sheet") {
+            RecoveryCodesOneTimePreviewHost()
+                .preferredColorScheme(.dark)
+        } else if ProcessInfo.processInfo.arguments.contains("-ui-test-recovery-sign-in-sheet") {
+            RecoveryCodeSignInPreviewHost()
+                .preferredColorScheme(.dark)
+        } else if ProcessInfo.processInfo.arguments.contains("-ui-test-security-status-error") {
+            SignInSecurityStatusFailurePreviewHost()
+                .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-quick-capture") {
             NavigationStack {
                 RecordView()

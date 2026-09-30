@@ -40,13 +40,13 @@ before public release.
 2. Enable **Native API**
 3. Add bundle ID `com.ShimizuTechnology.MediaTools`
 
-The checked-in Xcode build setting supplies the public Clerk publishable key to
-both Debug and Release archives, and `Configuration.swift` keeps the same public
-client value as a defensive runtime fallback. A Clerk publishable key is client
-configuration; never place `CLERK_SECRET_KEY`, AI keys, database credentials,
-or the Media Tools admin key in the iOS target. Before uploading a release,
-inspect the archived app's `Info.plist` and confirm `CLERK_PUBLISHABLE_KEY` is
-non-empty.
+The checked-in Xcode build settings supply the public Clerk publishable key to
+both Debug and Release archives so Clerk remains available as the temporary
+migration fallback. `Configuration.swift` keeps the same public client value as
+a defensive runtime fallback. A Clerk publishable key is client configuration;
+never place `CLERK_SECRET_KEY`, AI keys, database credentials, or the Media
+Tools admin key in the iOS target. Before uploading a release, inspect the
+archived app's `Info.plist` and confirm `CLERK_PUBLISHABLE_KEY` is non-empty.
 
 ### 4. Enable Sign in with Apple
 
@@ -248,22 +248,24 @@ Live Activity provides a visible Stop action.
 
 ### Auth
 - **Clerk iOS SDK v1** — Native sign-in/sign-up with prebuilt `AuthView`
-- **Staged device session** — Set `FIRST_PARTY_AUTH_ENABLED=true` on the API and
-  `FIRST_PARTY_IOS_AUTH_ENABLED=YES` in the iOS build to enable it. A current
-  Clerk sign-in bootstraps a session for the same server user. The app stores
-  its rotating refresh credential in the device-only Keychain and uses short
-  access credentials for API calls. If an upload was waiting when Clerk expired,
-  the app can finish it with the device session.
-- **Safe rollout** — The iOS flag defaults off. With the flag off, API requests
+- **Staged device session** — Debug and Release set
+  `FIRST_PARTY_IOS_AUTH_ENABLED=YES` so simulator QA and archives exercise the
+  native path intentionally. The API still controls rollout with
+  `FIRST_PARTY_AUTH_ENABLED`; Clerk remains configured as the temporary
+  migration fallback. A current Clerk sign-in bootstraps a session for the same
+  server user. The app stores its rotating refresh credential in the device-only
+  Keychain and uses short access credentials for API calls. If an upload was
+  waiting when Clerk expired, the app can finish it with the device session.
+- **Safe rollout** — If the server disables the first-party path, API requests
   continue using Clerk while a previously verified local owner ID remains
   available for recordings, including after sign-out and relaunch. This local
   mapping contains no credentials and is removed on account deletion. Migrated
   AI consent moves to that owner so later activation cannot restore a revoked
-  grant. The Share Extension only copies files into the local
-  inbox; it receives no device-session credential. Signing out revokes and
-  clears the credential. If the API cannot confirm revocation, the app suspends
-  device-session access, signs out locally, and retains the Keychain item only
-  to retry revocation later. Account deletion clears it with local account data.
+  grant. The Share Extension only copies files into the local inbox; it receives
+  no device-session credential. Signing out revokes and clears the credential.
+  If the API cannot confirm revocation, the app suspends device-session access,
+  signs out locally, and retains the Keychain item only to retry revocation
+  later. Account deletion clears it with local account data.
 - **Token Sync** — The existing Clerk token sync remains for the staged rollout.
 
 ### UX

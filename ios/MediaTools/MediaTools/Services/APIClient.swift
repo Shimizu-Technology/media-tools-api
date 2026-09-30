@@ -216,6 +216,42 @@ actor APIClient {
         return try decoder.decode(T.self, from: data)
     }
 
+    func postPublic<T: Decodable, B: Encodable>(
+        _ path: String,
+        body: B
+    ) async throws -> T {
+        let url = URL(string: baseURL + path)!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try encoder.encode(body)
+        let (data, response) = try await session.data(for: request)
+        try validateResponse(response, data: data)
+        return try decoder.decode(T.self, from: data)
+    }
+
+    func postJSON<T: Decodable>(
+        _ path: String,
+        bodyData: Data,
+        authenticated: Bool = true
+    ) async throws -> T {
+        let url = URL(string: baseURL + path)!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = bodyData
+        let response: (Data, URLResponse)
+        if authenticated {
+            response = try await data(for: request)
+        } else {
+            response = try await session.data(for: request)
+        }
+        try validateResponse(response.1, data: response.0)
+        return try decoder.decode(T.self, from: response.0)
+    }
+
     func post<B: Encodable>(_ path: String, body: B) async throws {
         let url = URL(string: baseURL + path)!
         var request = URLRequest(url: url)

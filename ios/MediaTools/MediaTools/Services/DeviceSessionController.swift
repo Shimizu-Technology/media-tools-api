@@ -3,7 +3,7 @@ import Observation
 import Security
 import ClerkKit
 
-/// Credentials issued by the Media Tools API after a verified Clerk bootstrap.
+/// Credentials issued by the Media Tools API after a verified first-party sign-in.
 /// These are opaque server values, not JWTs to decode on the device.
 struct DeviceSessionPair: Codable, Equatable {
     let sessionID: String
@@ -23,13 +23,72 @@ struct DeviceSessionPair: Codable, Equatable {
     }
 }
 
+enum DeviceSessionSource: String, Codable, Equatable {
+    case clerk
+    case passkey
+    case recoveryCode
+}
+
 struct StoredDeviceSession: Codable, Equatable {
     var pair: DeviceSessionPair
-    let verifiedClerkID: String
+    var source: DeviceSessionSource
+    var verifiedClerkID: String?
     /// Written before refresh so a lost response can retry the same rotation.
     var pendingNextRefreshToken: String?
     /// A signed-out credential retained only to retry server revocation.
-    var pendingRevocation: Bool? = nil
+    var pendingRevocation: Bool?
+
+    init(pair: DeviceSessionPair,
+         source: DeviceSessionSource = .clerk,
+         verifiedClerkID: String? = nil,
+         pendingNextRefreshToken: String? = nil,
+         pendingRevocation: Bool? = nil) {
+        self.pair = pair
+        self.source = source
+        self.verifiedClerkID = verifiedClerkID
+        self.pendingNextRefreshToken = pendingNextRefreshToken
+        self.pendingRevocation = pendingRevocation
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case pair
+        case source
+        case verifiedClerkID
+        case pendingNextRefreshToken
+        case pendingRevocation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pair = try container.decode(DeviceSessionPair.self, forKey: .pair)
+        verifiedClerkID = try container.decodeIfPresent(String.self, forKey: .verifiedClerkID)
+        source = try container.decodeIfPresent(DeviceSessionSource.self, forKey: .source)
+            ?? (verifiedClerkID == nil ? .passkey : .clerk)
+        pendingNextRefreshToken = try container.decodeIfPresent(String.self, forKey: .pendingNextRefreshToken)
+        pendingRevocation = try container.decodeIfPresent(Bool.self, forKey: .pendingRevocation)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pair, forKey: .pair)
+        try container.encode(source, forKey: .source)
+        try container.encodeIfPresent(verifiedClerkID, forKey: .verifiedClerkID)
+        try container.encodeIfPresent(pendingNextRefreshToken, forKey: .pendingNextRefreshToken)
+        try container.encodeIfPresent(pendingRevocation, forKey: .pendingRevocation)
+    }
+
+    var isClerkBacked: Bool {
+        source == .clerk && verifiedClerkID != nil
+    }
+
+    func belongs(to clerkID: String) -> Bool {
+        source == .clerk && verifiedClerkID == clerkID
+    }
+}
+
+struct PendingDeviceSessionBootstrap: Codable, Equatable {
+    let verifiedClerkID: String
+    let nextRefreshToken: String
 }
 
 /// App-only Keychain item. The future Share Extension must not receive this
@@ -39,6 +98,9 @@ protocol DeviceSessionStoring {
     func load() -> StoredDeviceSession?
     func save(_ value: StoredDeviceSession) throws
     func delete()
+    func loadPendingBootstrap() throws -> PendingDeviceSessionBootstrap?
+    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws
+    func deletePendingBootstrap()
     func localOwnerID(for clerkID: String) -> String?
     func clerkID(forLocalOwnerID ownerID: String) -> String?
     func saveLocalOwnerID(_ ownerID: String, for clerkID: String)
@@ -48,6 +110,7 @@ protocol DeviceSessionStoring {
 struct DeviceSessionKeychainStore: DeviceSessionStoring {
     private let service = "com.shimizu-technology.media-tools.device-session"
     private let account = "first-party-ios-v1"
+    private let pendingBootstrapAccount = "first-party-ios-bootstrap-v1"
     private let ownerMappingsKey = "verifiedLocalOwnerMappings.v1"
 
     // This metadata grants no API access. Keep it separate from credentials:
@@ -75,7 +138,7 @@ struct DeviceSessionKeychainStore: DeviceSessionStoring {
     }
 
     func load() -> StoredDeviceSession? {
-        var query = baseQuery
+        var query = baseQuery(account: account)
         query[kSecReturnData as String] = true
         var result: AnyObject?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
@@ -85,10 +148,10 @@ struct DeviceSessionKeychainStore: DeviceSessionStoring {
 
     func save(_ value: StoredDeviceSession) throws {
         let data = try JSONEncoder().encode(value)
-        let status = SecItemUpdate(baseQuery as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        let status = SecItemUpdate(baseQuery(account: account) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecSuccess { return }
         guard status == errSecItemNotFound else { throw KeychainFailure(status: status) }
-        var attributes = baseQuery
+        var attributes = baseQuery(account: account)
         attributes[kSecValueData as String] = data
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let addStatus = SecItemAdd(attributes as CFDictionary, nil)
@@ -96,10 +159,41 @@ struct DeviceSessionKeychainStore: DeviceSessionStoring {
     }
 
     func delete() {
-        SecItemDelete(baseQuery as CFDictionary)
+        SecItemDelete(baseQuery(account: account) as CFDictionary)
     }
 
-    private var baseQuery: [String: Any] {
+    func loadPendingBootstrap() throws -> PendingDeviceSessionBootstrap? {
+        var query = baseQuery(account: pendingBootstrapAccount)
+        query[kSecReturnData as String] = true
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw KeychainFailure(status: status)
+        }
+        return try JSONDecoder().decode(PendingDeviceSessionBootstrap.self, from: data)
+    }
+
+    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws {
+        let data = try JSONEncoder().encode(value)
+        let status = SecItemUpdate(
+            baseQuery(account: pendingBootstrapAccount) as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary
+        )
+        if status == errSecSuccess { return }
+        guard status == errSecItemNotFound else { throw KeychainFailure(status: status) }
+        var attributes = baseQuery(account: pendingBootstrapAccount)
+        attributes[kSecValueData as String] = data
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let addStatus = SecItemAdd(attributes as CFDictionary, nil)
+        guard addStatus == errSecSuccess else { throw KeychainFailure(status: addStatus) }
+    }
+
+    func deletePendingBootstrap() {
+        SecItemDelete(baseQuery(account: pendingBootstrapAccount) as CFDictionary)
+    }
+
+    private func baseQuery(account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -134,6 +228,7 @@ final class DeviceSessionController {
 
     private(set) var activeUserID: String?
     private(set) var needsSignIn = false
+    private(set) var sessionRevision = 0
 
     init(transport: any DeviceSessionTransport = URLSession.shared,
          baseURL: URL = URL(string: Configuration.apiBaseURL + "/api/v1")!,
@@ -146,14 +241,20 @@ final class DeviceSessionController {
         // Keep the verified local-owner mapping available during an iOS flag
         // rollback without ever using its first-party bearer credential.
         self.stored = self.store.load()
-        if let stored {
-            self.store.saveLocalOwnerID(stored.pair.userID, for: stored.verifiedClerkID)
+        if let stored, stored.source == .clerk, let clerkID = stored.verifiedClerkID {
+            self.store.saveLocalOwnerID(stored.pair.userID, for: clerkID)
         }
     }
 
     var verifiedMigration: (clerkID: String, userID: String)? {
-        guard let stored, stored.pendingRevocation != true else { return nil }
-        return (stored.verifiedClerkID, stored.pair.userID)
+        guard let stored, stored.source == .clerk, let clerkID = stored.verifiedClerkID,
+              stored.pendingRevocation != true else { return nil }
+        return (clerkID, stored.pair.userID)
+    }
+
+    var hasNativeFirstPartySession: Bool {
+        guard let stored, stored.pendingRevocation != true else { return false }
+        return stored.source == .passkey || stored.source == .recoveryCode
     }
 
     func clerkIDForFallbackOwner(_ ownerID: String) -> String? {
@@ -180,8 +281,7 @@ final class DeviceSessionController {
             } catch {
                 // A suspended credential is never used for the workspace.
                 // Clerk can still serve a currently signed-in account.
-                let ownerID = clerkID == stored.verifiedClerkID
-                    ? stored.pair.userID : clerkID
+                let ownerID = clerkID.flatMap { stored.belongs(to: $0) ? stored.pair.userID : fallbackOwnerID(for: $0) }
                 activeUserID = ownerID
                 return ownerID
             }
@@ -193,7 +293,7 @@ final class DeviceSessionController {
             }
             clear()
         }
-        if let clerkID, let stored, stored.verifiedClerkID != clerkID {
+        if let clerkID, let stored, stored.source == .clerk, !stored.belongs(to: clerkID) {
             do {
                 try suspendForRevocation(stored)
             } catch {
@@ -242,8 +342,10 @@ final class DeviceSessionController {
                      forRevocation: Bool = false) async throws -> String? {
         guard enabled, let stored else { return nil }
         if stored.pendingRevocation == true && !forRevocation { return nil }
-        if let currentClerkID = Clerk.shared.user?.id,
-           currentClerkID != stored.verifiedClerkID,
+        if stored.source == .clerk,
+           let verifiedClerkID = stored.verifiedClerkID,
+           let currentClerkID = Clerk.shared.user?.id,
+           currentClerkID != verifiedClerkID,
            !(forRevocation && stored.pendingRevocation == true) {
             throw APIError.authenticationRequired(
                 message: "The signed-in account changed. Switch back to continue this upload."
@@ -266,6 +368,68 @@ final class DeviceSessionController {
         activeUserID = nil
         needsSignIn = false
         store.delete()
+        store.deletePendingBootstrap()
+        sessionRevision += 1
+    }
+
+    func prepareForNewNativeSession() async throws {
+        guard enabled, stored != nil else { return }
+        guard stored?.pendingRevocation != true else {
+            throw APIError.authenticationRequired(message: "Finish signing out before switching accounts.")
+        }
+        try await revokeAndClear()
+        guard stored == nil else {
+            throw APIError.authenticationRequired(message: "Sign out before switching accounts.")
+        }
+    }
+
+    func replaceSession(pair: DeviceSessionPair,
+                        source: DeviceSessionSource,
+                        verifiedClerkID: String? = nil) async throws {
+        if let stored, stored.pair.sessionID != pair.sessionID {
+            guard stored.pendingRevocation != true else {
+                throw APIError.authenticationRequired(message: "Finish signing out before switching accounts.")
+            }
+            try await revokeAndClear()
+        }
+        try saveSession(pair: pair, source: source, verifiedClerkID: verifiedClerkID)
+    }
+
+    func saveSession(pair: DeviceSessionPair,
+                     source: DeviceSessionSource,
+                     verifiedClerkID: String? = nil) throws {
+        guard enabled else { return }
+        guard stored == nil || stored?.pair.sessionID == pair.sessionID else {
+            throw APIError.authenticationRequired(message: "Sign out before switching accounts.")
+        }
+        guard stored?.pendingRevocation != true else {
+            throw APIError.authenticationRequired(message: "Finish signing out before switching accounts.")
+        }
+        guard !pair.userID.isEmpty, !pair.sessionID.isEmpty,
+              !pair.accessToken.isEmpty, !pair.refreshToken.isEmpty else {
+            throw APIError.invalidResponse
+        }
+        guard source != .clerk || verifiedClerkID != nil else {
+            throw APIError.invalidResponse
+        }
+        let value = StoredDeviceSession(
+            pair: pair,
+            source: source,
+            verifiedClerkID: verifiedClerkID,
+            pendingNextRefreshToken: nil,
+            pendingRevocation: nil
+        )
+        try store.save(value)
+        if source == .clerk, let verifiedClerkID {
+            store.saveLocalOwnerID(pair.userID, for: verifiedClerkID)
+        }
+        stored = value
+        activeUserID = pair.userID
+        needsSignIn = false
+        generation += 1
+        sessionRevision += 1
+        refreshTask?.cancel()
+        refreshTask = nil
     }
 
     func removeLocalOwnerMapping(clerkID: String) {
@@ -348,12 +512,44 @@ final class DeviceSessionController {
     }
 
     private func bootstrap(verifiedClerkID: String) async throws {
-        let startingGeneration = generation
         guard let session = Clerk.shared.session,
               session.user?.id == verifiedClerkID,
               let clerkToken = try await session.getToken() else {
             throw APIError.authenticationRequired(message: "Sign in to connect this device.")
         }
+        try await bootstrap(
+            verifiedClerkID: verifiedClerkID,
+            clerkToken: clerkToken,
+            currentClerkID: { Clerk.shared.session?.user?.id }
+        )
+    }
+
+    func bootstrapForTesting(verifiedClerkID: String, clerkToken: String) async throws {
+        try await bootstrap(
+            verifiedClerkID: verifiedClerkID,
+            clerkToken: clerkToken,
+            currentClerkID: { verifiedClerkID }
+        )
+    }
+
+    private func bootstrap(verifiedClerkID: String,
+                           clerkToken: String,
+                           currentClerkID: () -> String?) async throws {
+        let startingGeneration = generation
+        var pending = try store.loadPendingBootstrap()
+        if pending?.verifiedClerkID != verifiedClerkID {
+            store.deletePendingBootstrap()
+            pending = nil
+        }
+        if pending == nil {
+            pending = PendingDeviceSessionBootstrap(
+                verifiedClerkID: verifiedClerkID,
+                nextRefreshToken: try Self.randomRefreshToken()
+            )
+            try store.savePendingBootstrap(pending!)
+        }
+        guard let pending else { throw APIError.invalidResponse }
+
         var request = URLRequest(url: baseURL.appendingPathComponent("auth/session/bootstrap"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -361,21 +557,24 @@ final class DeviceSessionController {
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "client_type": "ios",
             "device_name": "iPhone",
+            "next_refresh_token": pending.nextRefreshToken,
         ])
-        let pair = try await sendPairRequest(request)
+        let pair: DeviceSessionPair
+        do {
+            pair = try await sendPairRequest(request)
+        } catch APIError.httpError(let status, _, _) where [400, 401, 404].contains(status) {
+            store.deletePendingBootstrap()
+            throw APIError.authenticationRequired(message: "Sign in to connect this device.")
+        }
         guard startingGeneration == generation,
-              Clerk.shared.session?.user?.id == verifiedClerkID,
+              currentClerkID() == verifiedClerkID,
               !Task.isCancelled else { throw CancellationError() }
         guard !pair.userID.isEmpty, !pair.sessionID.isEmpty,
-              !pair.accessToken.isEmpty, !pair.refreshToken.isEmpty else {
+              !pair.accessToken.isEmpty, pair.refreshToken == pending.nextRefreshToken else {
             throw APIError.invalidResponse
         }
-        let value = StoredDeviceSession(pair: pair, verifiedClerkID: verifiedClerkID,
-                                        pendingNextRefreshToken: nil)
-        try store.save(value)
-        store.saveLocalOwnerID(pair.userID, for: verifiedClerkID)
-        stored = value
-        needsSignIn = false
+        try saveSession(pair: pair, source: .clerk, verifiedClerkID: verifiedClerkID)
+        store.deletePendingBootstrap()
     }
 
     private func refresh() async throws -> DeviceSessionPair {
@@ -419,7 +618,9 @@ final class DeviceSessionController {
         guard startingGeneration == generation,
               stored?.pair.sessionID == value.pair.sessionID,
               stored?.pendingNextRefreshToken == next,
-              Clerk.shared.user?.id == nil || Clerk.shared.user?.id == value.verifiedClerkID
+              value.source != .clerk
+                || Clerk.shared.user?.id == nil
+                || Clerk.shared.user?.id == value.verifiedClerkID
                 || value.pendingRevocation == true,
               !Task.isCancelled else { throw CancellationError() }
         guard pair.userID == value.pair.userID,

@@ -11,6 +11,10 @@ struct ContentView: View {
     @State private var isResolvingAccount = Configuration.firstPartyIOSAuthEnabled
     @State private var migrationFailed = false
     @State private var migrationRetry = 0
+    @State private var nativeAuthOperation: NativeAuthOperation?
+    @State private var nativeAuthError: String?
+    @State private var recoveryCode = ""
+    @State private var showRecoveryCode = false
     private let forceSignedOutForUITesting: Bool
     private let tokenSync = TokenSyncService.shared
 
@@ -49,19 +53,32 @@ struct ContentView: View {
             } else if activeUserID != nil {
                 MainTabView()
                     .onAppear {
-                        tokenSync.startSyncing()
+                        if deviceSession.hasNativeFirstPartySession {
+                            tokenSync.stopSyncing()
+                            tokenSync.clearToken()
+                        } else {
+                            tokenSync.startSyncing()
+                        }
                     }
                     .onDisappear {
                         tokenSync.stopSyncing()
                     }
             } else {
-                WelcomeView(showAuth: $showAuth)
-                    .onAppear {
-                        tokenSync.clearToken()
-                    }
+                WelcomeView(
+                    showAuth: $showAuth,
+                    showRecoveryCode: $showRecoveryCode,
+                    recoveryCode: $recoveryCode,
+                    nativeAuthOperation: nativeAuthOperation,
+                    nativeAuthError: nativeAuthError,
+                    onPasskeySignIn: { await completeNativeSignIn(.passkey) },
+                    onRecoveryCodeSignIn: { await completeNativeSignIn(.recoveryCode) }
+                )
+                .onAppear {
+                    tokenSync.clearToken()
+                }
             }
         }
-        .task(id: "\(clerk.user?.id ?? "signed-out")|\(deviceSession.needsSignIn)|\(migrationRetry)") {
+        .task(id: "\(clerk.user?.id ?? "signed-out")|\(deviceSession.needsSignIn)|\(deviceSession.sessionRevision)|\(migrationRetry)") {
             let clerkID = forceSignedOutForUITesting ? nil : clerk.user?.id
             if Configuration.firstPartyIOSAuthEnabled && !forceSignedOutForUITesting {
                 isResolvingAccount = true
@@ -90,6 +107,15 @@ struct ContentView: View {
                     }
                 }
                 guard !Task.isCancelled else { return }
+                if ownerID != nil, deviceSession.hasNativeFirstPartySession, clerk.user != nil {
+                    do {
+                        try await clerk.auth.signOut()
+                        tokenSync.clearToken()
+                    } catch {
+                        // The first-party session remains authoritative; try
+                        // clearing Clerk again on the next foreground task.
+                    }
+                }
                 aiProcessingConsent.setActiveOwnerID(ownerID)
                 await uploadCoordinator.setActiveOwnerID(ownerID)
                 isResolvingAccount = false
@@ -110,12 +136,56 @@ struct ContentView: View {
             AuthView()
         }
     }
+
+    private func completeNativeSignIn(_ operation: NativeAuthOperation) async {
+        nativeAuthOperation = operation
+        nativeAuthError = nil
+        defer { nativeAuthOperation = nil }
+
+        do {
+            switch operation {
+            case .passkey:
+                try await FirstPartyAuthService.shared.signInWithPasskey()
+            case .recoveryCode:
+                try await FirstPartyAuthService.shared.redeemRecoveryCode(recoveryCode)
+                recoveryCode = ""
+                showRecoveryCode = false
+            }
+            tokenSync.stopSyncing()
+            tokenSync.clearToken()
+            if clerk.user != nil {
+                do {
+                    try await clerk.auth.signOut()
+                } catch {
+                    nativeAuthError = "Your passkey session is active. Media Tools will finish clearing the old sign-in when the app refreshes."
+                }
+            }
+            migrationRetry += 1
+        } catch {
+            guard !FirstPartyAuthService.isCancellation(error) else { return }
+            nativeAuthError = error.localizedDescription.isEmpty
+                ? "Could not sign in. Please try again."
+                : error.localizedDescription
+        }
+    }
+
+}
+
+enum NativeAuthOperation {
+    case passkey
+    case recoveryCode
 }
 
 // MARK: - Welcome (unauthenticated)
 
 struct WelcomeView: View {
     @Binding var showAuth: Bool
+    @Binding var showRecoveryCode: Bool
+    @Binding var recoveryCode: String
+    let nativeAuthOperation: NativeAuthOperation?
+    let nativeAuthError: String?
+    let onPasskeySignIn: () async -> Void
+    let onRecoveryCodeSignIn: () async -> Void
     @Environment(RecordingCoordinator.self) private var recorder
 
     var body: some View {
@@ -224,15 +294,71 @@ struct WelcomeView: View {
                         .clipShape(RoundedRectangle(cornerRadius: Theme.radiusLarge))
                     }
 
+                    if Configuration.firstPartyIOSAuthEnabled {
+                        VStack(spacing: 10) {
+                            Button {
+                                Task { await onPasskeySignIn() }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    if nativeAuthOperation == .passkey {
+                                        ProgressView().tint(.white)
+                                    } else {
+                                        Image(systemName: "key.fill")
+                                    }
+                                    Text(nativeAuthOperation == .passkey ? "Checking passkey…" : "Continue with passkey")
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .brandButtonStyle()
+                            .disabled(nativeAuthOperation != nil)
+
+                            Button {
+                                showRecoveryCode = true
+                            } label: {
+                                Label("Use a recovery code", systemImage: "lifepreserver")
+                                    .font(Theme.body(15, weight: .semibold))
+                                    .foregroundStyle(Theme.brand400)
+                                    .frame(maxWidth: .infinity, minHeight: 48)
+                                    .background(Theme.brand50)
+                                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                            }
+                            .disabled(nativeAuthOperation != nil)
+
+                            if let nativeAuthError {
+                                Text(nativeAuthError)
+                                    .font(Theme.caption(12))
+                                    .foregroundStyle(Theme.error)
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+
+                        HStack(spacing: 12) {
+                            Rectangle().fill(Theme.borderSubtle).frame(height: 1)
+                            Text("Existing sign-in")
+                                .font(Theme.caption(12, weight: .semibold))
+                                .foregroundStyle(Theme.textMuted)
+                            Rectangle().fill(Theme.borderSubtle).frame(height: 1)
+                        }
+                    }
+
                     Button {
                         showAuth = true
                     } label: {
-                        Label("Sign in or create account", systemImage: "arrow.right")
-                            .frame(maxWidth: .infinity)
+                        Label(
+                            Configuration.firstPartyIOSAuthEnabled
+                                ? "Use Apple, Google, or email"
+                                : "Sign in or create account",
+                            systemImage: "arrow.right"
+                        )
+                        .frame(maxWidth: .infinity)
                     }
                     .brandButtonStyle()
+                    .disabled(nativeAuthOperation != nil)
 
-                    Text("Continue with Apple, Google, or email. Apple lets you keep your email private.")
+                    Text(Configuration.firstPartyIOSAuthEnabled
+                         ? "Use passkey or recovery code first. Apple, Google, and email remain available for existing accounts during migration."
+                         : "Continue with Apple, Google, or email. Apple lets you keep your email private.")
                         .font(Theme.caption(12))
                         .foregroundStyle(Theme.textMuted)
                         .multilineTextAlignment(.center)
@@ -248,9 +374,110 @@ struct WelcomeView: View {
             }
             .scrollIndicators(.hidden)
         }
+        .sheet(isPresented: $showRecoveryCode) {
+            RecoveryCodeSignInSheet(
+                code: $recoveryCode,
+                isSigningIn: nativeAuthOperation == .recoveryCode,
+                errorMessage: nativeAuthError,
+                onCancel: { showRecoveryCode = false },
+                onContinue: { Task { await onRecoveryCodeSignIn() } }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
     }
 }
 
+private struct RecoveryCodeSignInSheet: View {
+    @Binding var code: String
+    let isSigningIn: Bool
+    let errorMessage: String?
+    let onCancel: () -> Void
+    let onContinue: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Use recovery code")
+                            .font(Theme.heading(24))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("Enter one saved code to restore access on this iPhone. Each code works once.")
+                            .font(Theme.body(14))
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    TextField("Recovery code", text: $code)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(Theme.mono(16))
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 50)
+                        .background(Theme.surfaceCard)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: Theme.radiusMedium)
+                                .stroke(Theme.borderSubtle, lineWidth: 1)
+                        }
+                        .accessibilityIdentifier("recovery-code.sign-in-field")
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(Theme.caption(13))
+                            .foregroundStyle(Theme.error)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Button { onContinue() } label: {
+                        HStack(spacing: 8) {
+                            if isSigningIn { ProgressView().tint(.white) }
+                            Text(isSigningIn ? "Checking code…" : "Continue")
+                        }
+                        .font(Theme.body(15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(Theme.brand500, in: RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                    }
+                    .disabled(isSigningIn || code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("recovery-code.continue")
+
+                    Spacer(minLength: 0)
+                }
+                .padding(20)
+            }
+            .background(Theme.surface)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                        .disabled(isSigningIn)
+                }
+            }
+        }
+    }
+}
+
+struct RecoveryCodeSignInPreviewHost: View {
+    @State private var code = ""
+    @State private var isPresented = true
+
+    var body: some View {
+        Theme.surface
+            .ignoresSafeArea()
+            .sheet(isPresented: $isPresented) {
+                RecoveryCodeSignInSheet(
+                    code: $code,
+                    isSigningIn: false,
+                    errorMessage: "Check the code and try again.",
+                    onCancel: { isPresented = false },
+                    onContinue: {}
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
+    }
+}
 struct FeatureRow: View {
     let icon: String
     let color: Color

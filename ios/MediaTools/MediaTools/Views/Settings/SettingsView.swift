@@ -1,5 +1,7 @@
 import SwiftUI
 import ClerkKit
+import UIKit
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(Clerk.self) private var clerk
@@ -27,11 +29,25 @@ struct SettingsView: View {
     @State private var isLoadingDeviceAccount = false
     @State private var deviceAccountError: String?
     @State private var deviceAccountRetry = 0
+    @State private var passkeyStatus: PasskeyStatus?
+    @State private var recoveryStatus: RecoveryCodeStatus?
+    @State private var isLoadingRecoveryStatus = false
+    @State private var isEnrollingPasskey = false
+    @State private var isGeneratingRecoveryCodes = false
+    @State private var isConfirmingRecoveryCodes = false
+    @State private var recoveryCodesSaveError: String?
+    @State private var securityMessage: String?
+    @State private var securityError: String?
+    @State private var securityStatusError: String?
+    @State private var showReplaceRecoveryCodesConfirmation = false
+    @State private var showRecoveryCodesSheet = false
+    @State private var oneTimeRecoveryCodes: [String] = []
 
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
                 accountSection
+                accountSecuritySection
                 preferencesSection
                 quickCaptureSection
                 aiProcessingSection
@@ -63,6 +79,9 @@ struct SettingsView: View {
             }
             isLoadingDeviceAccount = false
         }
+        .task(id: "security|\(deviceSession.activeUserID ?? "")|\(clerk.user?.id ?? "")") {
+            await loadRecoveryStatus()
+        }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await refreshNotificationState() }
@@ -71,6 +90,34 @@ struct SettingsView: View {
             deleteAccountConfirmationSheet
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showRecoveryCodesSheet) {
+            RecoveryCodesOneTimeSheet(
+                codes: oneTimeRecoveryCodes,
+                isSaving: isConfirmingRecoveryCodes,
+                errorMessage: recoveryCodesSaveError
+            ) {
+                Task { await confirmRecoveryCodesSaved() }
+            }
+            .interactiveDismissDisabled()
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .confirmationDialog(
+            recoveryStatus?.remaining ?? 0 > 0 ? "Replace recovery codes?" : "Create recovery codes?",
+            isPresented: $showReplaceRecoveryCodesConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(recoveryStatus?.remaining ?? 0 > 0 ? "Replace codes" : "Create codes") {
+                Task { await generateRecoveryCodes() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if recoveryStatus?.remaining ?? 0 > 0 {
+                Text("Old recovery codes keep working until you save and confirm the new codes on the next screen.")
+            } else {
+                Text("Save these codes somewhere private. They are shown once and each code can be used one time.")
+            }
         }
     }
 
@@ -303,6 +350,134 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var accountSecuritySection: some View {
+        if Configuration.firstPartyIOSAuthEnabled, (deviceSession.activeUserID != nil || clerk.user != nil) {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionHeader(text: "Sign-in security", icon: "key.fill")
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Button {
+                        Task { await enrollPasskey() }
+                    } label: {
+                        HStack(spacing: 10) {
+                            if isEnrollingPasskey {
+                                ProgressView().tint(Theme.brand400)
+                            } else {
+                                Image(systemName: "person.badge.key.fill")
+                                    .foregroundStyle(Theme.brand400)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(isEnrollingPasskey ? "Opening passkey setup…" : "Add a passkey")
+                                    .font(Theme.body(14, weight: .semibold))
+                                    .foregroundStyle(Theme.textPrimary)
+                                Text(passkeyDetail)
+                                    .font(Theme.caption(12))
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isEnrollingPasskey || isGeneratingRecoveryCodes)
+
+                    Divider().overlay(Theme.borderSubtle)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "lifepreserver")
+                                .foregroundStyle(Theme.brand400)
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Recovery codes")
+                                    .font(Theme.body(14, weight: .semibold))
+                                    .foregroundStyle(Theme.textPrimary)
+                                Text(recoveryDetail)
+                                    .font(Theme.caption(12))
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 8)
+                            if isLoadingRecoveryStatus {
+                                ProgressView().tint(Theme.brand400)
+                            } else if let remaining = recoveryStatus?.remaining {
+                                Text("\(remaining) left")
+                                    .font(Theme.caption(12, weight: .semibold))
+                                    .foregroundStyle(Theme.textMuted)
+                                    .fixedSize()
+                            }
+                        }
+
+                        Button {
+                            showReplaceRecoveryCodesConfirmation = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                if isGeneratingRecoveryCodes { ProgressView().tint(.white) }
+                                Text(recoveryStatus?.remaining ?? 0 > 0 ? "Replace recovery codes" : "Create recovery codes")
+                            }
+                            .font(Theme.body(14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .background(Theme.brand500, in: RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                        }
+                        .disabled(isGeneratingRecoveryCodes || isEnrollingPasskey)
+                    }
+
+                    if let securityStatusError {
+                        SecurityStatusRetryBanner(
+                            message: securityStatusError,
+                            isRetrying: isLoadingRecoveryStatus
+                        ) {
+                            Task { await loadRecoveryStatus() }
+                        }
+                    }
+
+                    if let securityMessage {
+                        Text(securityMessage)
+                            .font(Theme.caption(12))
+                            .foregroundStyle(Theme.success)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if let securityError {
+                        Text(securityError)
+                            .font(Theme.caption(12))
+                            .foregroundStyle(Theme.error)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .cardStyle(padding: 14)
+            }
+        }
+    }
+
+    private var passkeyDetail: String {
+        guard let count = passkeyStatus?.count else {
+            return securityStatusError == nil
+                ? "Use Face ID or your device passcode next time."
+                : "Last passkey count is unavailable."
+        }
+        if count == 0 {
+            return "No passkeys are set up yet."
+        }
+        return count == 1 ? "1 passkey is set up." : "\(count) passkeys are set up."
+    }
+
+    private var recoveryDetail: String {
+        if isLoadingRecoveryStatus { return "Checking saved codes…" }
+        guard let remaining = recoveryStatus?.remaining else {
+            return securityStatusError == nil
+                ? "Create backup codes so you can sign in if your passkey is unavailable."
+                : "Last recovery-code count is unavailable."
+        }
+        if remaining == 0 {
+            return "No saved codes are available. Create a new set and save it now."
+        }
+        return "Each code works once. Replacing codes disables the old set."
     }
 
     private var preferencesSection: some View {
@@ -623,6 +798,87 @@ struct SettingsView: View {
         }
     }
 
+    private func loadRecoveryStatus() async {
+        guard Configuration.firstPartyIOSAuthEnabled,
+              (deviceSession.activeUserID != nil || clerk.user != nil) else {
+            recoveryStatus = nil
+            return
+        }
+        isLoadingRecoveryStatus = true
+        defer { isLoadingRecoveryStatus = false }
+        do {
+            async let loadedPasskeys = FirstPartyAuthService.shared.passkeyStatus()
+            async let loadedRecovery = FirstPartyAuthService.shared.recoveryStatus()
+            let (passkeys, recovery) = try await (loadedPasskeys, loadedRecovery)
+            guard !Task.isCancelled else { return }
+            passkeyStatus = passkeys
+            recoveryStatus = recovery
+            securityStatusError = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            securityStatusError = "Could not check sign-in security."
+        }
+    }
+
+    private func enrollPasskey() async {
+        isEnrollingPasskey = true
+        securityMessage = nil
+        securityError = nil
+        defer { isEnrollingPasskey = false }
+        do {
+            try await FirstPartyAuthService.shared.enrollPasskey()
+            passkeyStatus = try? await FirstPartyAuthService.shared.passkeyStatus()
+            securityStatusError = nil
+            securityMessage = "Passkey added. You can use it the next time you sign in."
+        } catch {
+            guard !FirstPartyAuthService.isCancellation(error) else { return }
+            securityError = error.localizedDescription.isEmpty
+                ? "Could not add a passkey. Please try again."
+                : error.localizedDescription
+        }
+    }
+
+    private func generateRecoveryCodes() async {
+        isGeneratingRecoveryCodes = true
+        securityMessage = nil
+        securityError = nil
+        recoveryCodesSaveError = nil
+        defer { isGeneratingRecoveryCodes = false }
+        do {
+            let codes = try await FirstPartyAuthService.shared.beginRecoveryCodeRotation()
+            oneTimeRecoveryCodes = codes
+            showRecoveryCodesSheet = true
+        } catch {
+            securityError = error.localizedDescription.isEmpty
+                ? "Could not create recovery codes. Please try again."
+                : error.localizedDescription
+        }
+    }
+
+    private func confirmRecoveryCodesSaved() async {
+        guard !isConfirmingRecoveryCodes else { return }
+        isConfirmingRecoveryCodes = true
+        recoveryCodesSaveError = nil
+        defer { isConfirmingRecoveryCodes = false }
+        do {
+            let status = try await FirstPartyAuthService.shared.confirmRecoveryCodeRotation()
+            recoveryStatus = status
+            securityMessage = "Recovery codes saved. The old set no longer works."
+            securityStatusError = nil
+            showRecoveryCodesSheet = false
+            oneTimeRecoveryCodes = []
+        } catch APIError.authenticationRequired(let message) {
+            showRecoveryCodesSheet = false
+            oneTimeRecoveryCodes = []
+            securityError = message
+            await loadRecoveryStatus()
+        } catch {
+            recoveryCodesSaveError = error.localizedDescription.isEmpty
+                ? "Could not confirm these codes. Keep this screen open and try again."
+                : error.localizedDescription
+        }
+    }
+
     private func signOut() async {
         isSigningOut = true
         signOutError = nil
@@ -679,6 +935,199 @@ struct SettingsView: View {
         } catch {
             deleteAccountError = "Your account deletion is underway, but this device could not finish signing out. Close and reopen Media Tools."
         }
+    }
+}
+
+private struct SecurityStatusRetryBanner: View {
+    let message: String
+    let isRetrying: Bool
+    let onRetry: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(message)
+                .font(Theme.caption(12))
+                .foregroundStyle(Theme.error)
+                .fixedSize(horizontal: false, vertical: true)
+            Button { onRetry() } label: {
+                HStack(spacing: 8) {
+                    if isRetrying { ProgressView().tint(Theme.brand400) }
+                    Text(isRetrying ? "Checking…" : "Retry")
+                }
+                .font(Theme.body(14, weight: .semibold))
+                .foregroundStyle(Theme.brand400)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(Theme.brand50)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+            }
+            .disabled(isRetrying)
+            .accessibilityIdentifier("sign-in-security.retry")
+        }
+    }
+}
+
+enum RecoveryCodeClipboard {
+    static let expirationSeconds: TimeInterval = 60
+
+    static func payload(for text: String, now: Date = Date()) -> ([[String: Any]], [UIPasteboard.OptionsKey: Any]) {
+        (
+            [[UTType.utf8PlainText.identifier: text]],
+            [
+                .localOnly: true,
+                .expirationDate: now.addingTimeInterval(expirationSeconds),
+            ]
+        )
+    }
+
+    @MainActor
+    static func copy(_ text: String, pasteboard: UIPasteboard = .general, now: Date = Date()) {
+        let (items, options) = payload(for: text, now: now)
+        pasteboard.setItems(items, options: options)
+    }
+}
+
+struct SignInSecurityStatusFailurePreviewHost: View {
+    @State private var message: String? = "Could not check sign-in security."
+    @State private var didRetry = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Sign-in security")
+                .font(Theme.heading(24))
+                .foregroundStyle(Theme.textPrimary)
+            Text("1 passkey is set up.")
+                .font(Theme.body(14))
+                .foregroundStyle(Theme.textSecondary)
+            Text("2 recovery codes left")
+                .font(Theme.body(14))
+                .foregroundStyle(Theme.textSecondary)
+            if let message {
+                SecurityStatusRetryBanner(message: message, isRetrying: false) {
+                    didRetry = true
+                    self.message = nil
+                }
+            }
+            if didRetry {
+                Text("Security status refreshed")
+                    .font(Theme.caption(12))
+                    .foregroundStyle(Theme.success)
+            }
+            Spacer()
+        }
+        .padding(20)
+        .background(Theme.surface)
+    }
+}
+
+private struct RecoveryCodesOneTimeSheet: View {
+    let codes: [String]
+    let isSaving: Bool
+    let errorMessage: String?
+    let onDone: () -> Void
+    @State private var didCopy = false
+
+    private var joinedCodes: String {
+        codes.joined(separator: "\n")
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Save recovery codes")
+                            .font(Theme.heading(24))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("These codes are shown once. Copy or share them now, then keep them somewhere private.")
+                            .font(Theme.body(14))
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(codes, id: \.self) { code in
+                            Text(code)
+                                .font(Theme.mono(15))
+                                .foregroundStyle(Theme.textPrimary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 10)
+                                .background(Theme.surfaceCard)
+                                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall))
+                        }
+                    }
+
+                    HStack(spacing: 10) {
+                        Button {
+                            RecoveryCodeClipboard.copy(joinedCodes)
+                            didCopy = true
+                        } label: {
+                            Label(didCopy ? "Copied" : "Copy for 60 seconds", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+                                .font(Theme.body(14, weight: .semibold))
+                                .foregroundStyle(Theme.brand400)
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                                .background(Theme.brand50)
+                                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                        }
+                        .accessibilityIdentifier("recovery-codes.copy-all")
+
+                        ShareLink(item: joinedCodes) {
+                            Label("Share", systemImage: "square.and.arrow.up")
+                                .font(Theme.body(14, weight: .semibold))
+                                .foregroundStyle(Theme.brand400)
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                                .background(Theme.brand50)
+                                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                        }
+                    }
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(Theme.caption(13))
+                            .foregroundStyle(Theme.error)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Button { onDone() } label: {
+                        HStack(spacing: 8) {
+                            if isSaving { ProgressView().tint(.white) }
+                            Text(isSaving ? "Saving…" : "I saved these codes")
+                        }
+                        .font(Theme.body(15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(Theme.brand500, in: RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                    }
+                    .disabled(isSaving)
+                    .accessibilityIdentifier("recovery-codes.saved")
+                }
+                .padding(20)
+            }
+            .background(Theme.surface)
+            .navigationTitle("Recovery codes")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+struct RecoveryCodesOneTimePreviewHost: View {
+    @State private var isPresented = true
+
+    var body: some View {
+        Theme.surface
+            .ignoresSafeArea()
+            .sheet(isPresented: $isPresented) {
+                RecoveryCodesOneTimeSheet(
+                    codes: ["mta-1111-2222", "mta-3333-4444", "mta-5555-6666"],
+                    isSaving: false,
+                    errorMessage: nil
+                ) {
+                    isPresented = false
+                }
+                .interactiveDismissDisabled()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
     }
 }
 
