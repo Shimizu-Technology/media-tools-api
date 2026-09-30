@@ -11,12 +11,16 @@ import (
 )
 
 const (
-	WebAccessCookie          = "mta_web_access"
-	WebRefreshCookie         = "mta_web_refresh"
-	WebPendingCookie         = "mta_web_pending"
-	WebRecoveryPendingCookie = "mta_web_recovery_pending"
-	WebCSRFCookie            = "mta_web_csrf"
-	WebCSRFHeader            = "X-CSRF-Token"
+	WebAccessCookie             = "mta_web_access"
+	WebRefreshCookie            = "mta_web_refresh"
+	WebPendingCookie            = "mta_web_pending"
+	WebRecoveryPendingCookie    = "mta_web_recovery_pending"
+	WebInvitationCookie         = "mta_web_invitation"
+	WebOnboardingRescueCookie   = "mta_web_onboarding_rescue"
+	WebOnboardingPendingCookie  = "mta_web_onboarding_pending"
+	WebOnboardingRequiredCookie = "mta_web_onboarding_required"
+	WebCSRFCookie               = "mta_web_csrf"
+	WebCSRFHeader               = "X-CSRF-Token"
 )
 
 // ValidWebCookieMutation requires both an allowed page origin and a CSRF
@@ -44,7 +48,9 @@ func ValidWebCookieMutation(c *gin.Context, allowedOrigins []string) bool {
 // left alone, so native clients and agents retain their existing behavior.
 func WebCookieAuth(allowedOrigins []string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !strings.HasPrefix(c.Request.URL.Path, "/api/v1/") || strings.HasPrefix(c.Request.URL.Path, "/api/v1/auth/web/session/") || c.GetHeader("Authorization") != "" || c.GetHeader("X-API-Key") != "" {
+		if !strings.HasPrefix(c.Request.URL.Path, "/api/v1/") ||
+			strings.HasPrefix(c.Request.URL.Path, "/api/v1/auth/web/session/") ||
+			c.GetHeader("Authorization") != "" || c.GetHeader("X-API-Key") != "" {
 			c.Next()
 			return
 		}

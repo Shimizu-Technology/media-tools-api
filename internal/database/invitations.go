@@ -32,6 +32,13 @@ func invitationTokenHash(token string) (string, bool) {
 	return authTokenHash(strings.TrimSpace(token), "mta_inv_")
 }
 
+// ValidInvitationToken lets the same-origin web adapter reject malformed
+// fragment values before placing a bearer credential in an HttpOnly cookie.
+func ValidInvitationToken(token string) bool {
+	_, ok := invitationTokenHash(token)
+	return ok
+}
+
 func (db *DB) CreateInvitation(ctx context.Context, email, name string) (*AuthInvitation, string, error) {
 	email = normalizeInvitationEmail(email)
 	name = strings.TrimSpace(name)
@@ -80,6 +87,17 @@ func (db *DB) CreateInvitation(ctx context.Context, email, name string) (*AuthIn
 }
 
 func (db *DB) RedeemInvitation(ctx context.Context, token, clientType, deviceName, nextRefreshToken string) (*AuthTokenPair, error) {
+	return db.redeemInvitation(ctx, token, clientType, deviceName, nextRefreshToken, nil, false, false)
+}
+
+// RedeemWebInvitation creates the invited browser account and revokes any
+// sessions already stored in that browser in the same transaction. A failed
+// redemption therefore leaves both the invitation and prior account intact.
+func (db *DB) RedeemWebInvitation(ctx context.Context, token, nextRefreshToken string, existingCredentials []string) (*AuthTokenPair, error) {
+	return db.redeemInvitation(ctx, token, "web", "Browser", nextRefreshToken, existingCredentials, true, true)
+}
+
+func (db *DB) redeemInvitation(ctx context.Context, token, clientType, deviceName, nextRefreshToken string, existingCredentials []string, distinguishUnavailableSuccessor, requireOnboarding bool) (*AuthTokenPair, error) {
 	hash, ok := invitationTokenHash(token)
 	if !ok {
 		return nil, ErrInvitationInvalid
@@ -155,6 +173,9 @@ func (db *DB) RedeemInvitation(ctx context.Context, token, clientType, deviceNam
 		if err != nil {
 			return nil, fmt.Errorf("recover invitation redemption: %w", err)
 		}
+		if err := revokeBrowserSessionsByCredentialTx(ctx, tx, existingCredentials, pair.SessionID, now); err != nil {
+			return nil, err
+		}
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("commit recovered invitation redemption: %w", err)
 		}
@@ -176,13 +197,16 @@ func (db *DB) RedeemInvitation(ctx context.Context, token, clientType, deviceNam
 
 	var userID string
 	if err := tx.QueryRowContext(ctx, `
-		INSERT INTO users (email, password_hash, name)
-		VALUES ($1, '', $2)
-		RETURNING id`, normalizeInvitationEmail(invitation.Email), invitation.Name).Scan(&userID); err != nil {
+		INSERT INTO users (email, password_hash, name, onboarding_required)
+		VALUES ($1, '', $2, $3)
+		RETURNING id`, normalizeInvitationEmail(invitation.Email), invitation.Name, requireOnboarding).Scan(&userID); err != nil {
 		return nil, fmt.Errorf("create invited user: %w", err)
 	}
 	pair, err := createFirstPartySessionWithRefreshTx(ctx, tx, userID, clientType, deviceName, nextRefreshToken, now)
 	if errors.Is(err, errSuccessorUnavailable) {
+		if distinguishUnavailableSuccessor {
+			return nil, ErrInvalidSuccessorToken
+		}
 		return nil, ErrInvitationInvalid
 	}
 	if err != nil {
@@ -194,6 +218,9 @@ func (db *DB) RedeemInvitation(ctx context.Context, token, clientType, deviceNam
 		    consumed_session_id = $4, successor_hash = $5
 		WHERE id = $1`, invitation.ID, now, userID, pair.SessionID, successorHash); err != nil {
 		return nil, fmt.Errorf("consume invitation: %w", err)
+	}
+	if err := revokeBrowserSessionsByCredentialTx(ctx, tx, existingCredentials, pair.SessionID, now); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit invitation redemption: %w", err)

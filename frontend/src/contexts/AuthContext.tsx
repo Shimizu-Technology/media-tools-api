@@ -15,12 +15,14 @@ interface AuthProviderProps {
   isClerkEnabled: boolean;
   accountAuthEnabled: boolean;
   isFirstPartySession: boolean;
+  isPreviousProviderSignedIn?: boolean;
   isAuthenticated: boolean;
   isLoading: boolean;
   canUseWorkspace: boolean;
   user?: User | null;
   refreshUser?: () => Promise<void>;
   signOut?: () => Promise<void>;
+  leavePreviousProviderForOnboarding?: () => Promise<void>;
 }
 
 /**
@@ -32,15 +34,17 @@ export function AuthProvider({
   isClerkEnabled,
   accountAuthEnabled,
   isFirstPartySession,
+  isPreviousProviderSignedIn = false,
   isAuthenticated,
   isLoading,
   canUseWorkspace,
   user = null,
   refreshUser = async () => undefined,
   signOut = async () => undefined,
+  leavePreviousProviderForOnboarding = async () => undefined,
 }: AuthProviderProps) {
   return (
-    <AuthContext.Provider value={{ isClerkEnabled, accountAuthEnabled, isFirstPartySession, isAuthenticated, isLoading, canUseWorkspace, user, refreshUser, signOut }}>
+    <AuthContext.Provider value={{ isClerkEnabled, accountAuthEnabled, isFirstPartySession, isPreviousProviderSignedIn, isAuthenticated, isLoading, canUseWorkspace, user, refreshUser, signOut, leavePreviousProviderForOnboarding }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { bootstrapWebSession, reconcileWebSessionWithClerk, webSessionConflictsWithClerk } from './webSession';
+import { bootstrapWebSession, reconcileWebSessionWithClerk, setWebOnboardingRequired, webSessionConflictsWithClerk } from './webSession';
 
 beforeEach(() => {
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: 'mta_web_csrf=csrf-token' } });
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { dispatchEvent: vi.fn() } });
+  setWebOnboardingRequired(false);
   vi.restoreAllMocks();
 });
 
@@ -29,7 +31,7 @@ describe('web session safety', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockRejectedValueOnce(new TypeError('response lost'))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: true, user_id: 'user-1', clerk_id: 'clerk_alice' }), { status: 201, headers: { 'Content-Type': 'application/json' } }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: true, user_id: 'user-1', clerk_id: 'clerk_alice', onboarding_required: true }), { status: 201, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
     await expect(bootstrapWebSession('clerk-jwt', 'clerk_alice')).resolves.toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -37,6 +39,7 @@ describe('web session safety', () => {
     expect(fetchMock.mock.calls[1][0]).toContain('/bootstrap');
     expect(fetchMock.mock.calls[2][0]).toContain('/bootstrap');
     expect(fetchMock.mock.calls[1][1]).toEqual(fetchMock.mock.calls[2][1]);
+    expect(window.dispatchEvent).toHaveBeenCalled();
   });
 
   it('rejects a bootstrap result for a different Clerk subject', async () => {

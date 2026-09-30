@@ -226,3 +226,94 @@ func TestInvitationReplacementAndRedemptionSerialize(t *testing.T) {
 		}
 	}
 }
+
+func TestWebOnboardingRescueSwitchPersistsRequirementAndRecoversResponse(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	targetUserID := insertOnboardingRescueTestUser(t, db)
+	oldUserID := insertPasskeyTestUser(t, db)
+	oldSession, err := db.CreateFirstPartySession(ctx, oldUserID, "web", "Previous browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := db.CreateOnboardingReissue(ctx, targetUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successor, _ := RandomFirstPartyRefreshToken()
+	// Account switching uses the access cookie visible at the onboarding path;
+	// the refresh cookie remains deliberately narrower.
+	pair, err := db.RedeemWebOnboardingReissue(ctx, token, successor, []string{oldSession.AccessToken})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.GetUserByFirstPartyAccessToken(ctx, oldSession.AccessToken); !errors.Is(err, ErrSessionInvalid) {
+		t.Fatalf("previous account remained active: %v", err)
+	}
+	user, _, err := db.GetUserByFirstPartyAccessToken(ctx, pair.AccessToken)
+	if err != nil || user.ID != targetUserID || !user.OnboardingRequired {
+		t.Fatalf("rescued web account = %#v, %v", user, err)
+	}
+	retried, err := db.RedeemWebOnboardingReissue(ctx, token, successor, []string{oldSession.AccessToken})
+	if err != nil || retried.SessionID != pair.SessionID || retried.AccessToken == pair.AccessToken {
+		t.Fatalf("lost response retry = %#v, %v", retried, err)
+	}
+}
+
+func TestNativeOnboardingRescueDoesNotRequireWebOnlyCompletion(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := insertOnboardingRescueTestUser(t, db)
+	if _, err := db.ExecContext(ctx, `UPDATE users SET onboarding_required = TRUE WHERE id = $1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := db.CreateOnboardingReissue(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successor, _ := RandomFirstPartyRefreshToken()
+	pair, err := db.RedeemOnboardingReissue(ctx, token, "android", "Phone", successor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, _, err := db.GetUserByFirstPartyAccessToken(ctx, pair.AccessToken)
+	if err != nil || user.OnboardingRequired {
+		t.Fatalf("native rescue inherited web completion requirement: %#v, %v", user, err)
+	}
+}
+
+func TestCompleteOnboardingRequiresCommittedFactorsAndIsIdempotent(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := insertOnboardingRescueTestUser(t, db)
+	if _, err := db.ExecContext(ctx, `UPDATE users SET onboarding_required = TRUE WHERE id = $1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if completed, err := db.CompleteOnboarding(ctx, userID); err != nil || completed {
+		t.Fatalf("completed without factors = %v, %v", completed, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO auth_passkey_credentials (credential_id, user_id, credential)
+		VALUES ($1, $2, '{}')`, []byte("completion-passkey-"+uuid.NewString()), userID); err != nil {
+		t.Fatal(err)
+	}
+	if completed, err := db.CompleteOnboarding(ctx, userID); err != nil || completed {
+		t.Fatalf("completed without active recovery codes = %v, %v", completed, err)
+	}
+	rotation, err := db.BeginRecoveryCodeRotation(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ConfirmRecoveryCodeRotation(ctx, userID, rotation.ID); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if completed, err := db.CompleteOnboarding(ctx, userID); err != nil || !completed {
+			t.Fatalf("completion %d = %v, %v", i, completed, err)
+		}
+	}
+	var required bool
+	if err := db.GetContext(ctx, &required, `SELECT onboarding_required FROM users WHERE id = $1`, userID); err != nil || required {
+		t.Fatalf("durable requirement remained = %v, %v", required, err)
+	}
+}

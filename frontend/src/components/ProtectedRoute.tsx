@@ -6,7 +6,7 @@ import { ApiKeySetup } from './ApiKeySetup';
 import { PasskeySignInButton } from './PasskeySignInButton';
 import { RecoveryCodeSignIn } from './RecoveryCodeSignIn';
 import { useAuthContext } from '../contexts/useAuthContext';
-import { webSessionEnabled } from '../lib/webSession';
+import { isWebOnboardingRequired, webSessionEnabled } from '../lib/webSession';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -39,6 +39,10 @@ export function ProtectedRoute({ children, requireOwner = false }: ProtectedRout
 
   if (!accountAuthEnabled && !hasLocalApiKey) {
     return <ApiKeyGate onKeySet={() => setHasLocalApiKey(true)} />;
+  }
+
+  if (accountAuthEnabled && isAuthenticated && isWebOnboardingRequired()) {
+    return <Navigate to="/join" replace />;
   }
 
   // Placeholder for future owner/admin roles. Until backend roles exist, keep ops

@@ -1,4 +1,4 @@
-import { renewWebSession, setWebSessionActive, webCSRFHeaders, type WebSessionStatus } from './webSession';
+import { renewWebSession, setWebOnboardingRequired, setWebSessionActive, webCSRFHeaders, type WebSessionStatus } from './webSession';
 
 type JSONRecord = Record<string, unknown>;
 type PasskeyBegin = { ceremony_id: string; options: JSONRecord };
@@ -68,7 +68,8 @@ async function finishPasskeySignIn(ceremonyID: string, credential?: JSONRecord):
     headers: { 'Content-Type': 'application/json', ...webCSRFHeaders() },
     body: JSON.stringify({ ceremony_id: ceremonyID, ...(credential ? { credential } : {}) }),
   });
-  await requestJSON<WebSessionStatus>('/api/v1/auth/web/session/status', { credentials: 'same-origin' });
+  const status = await requestJSON<WebSessionStatus>('/api/v1/auth/web/session/status', { credentials: 'same-origin' });
+  setWebOnboardingRequired(status.onboarding_required === true);
   setWebSessionActive(true);
   clearPasskeySignInJournal();
 }

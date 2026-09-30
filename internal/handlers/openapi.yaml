@@ -1410,6 +1410,83 @@ paths:
         "401": {description: Recovery code is invalid or already used}
         "403": {description: Origin or CSRF validation failed}
         "429": {description: Too many attempts}
+  /auth/web/session/onboarding/transfer:
+    post:
+      tags: [Authentication]
+      summary: Protect an invitation or rescue URL fragment in an HttpOnly cookie
+      security: []
+      description: |
+        Runs before the browser application starts. Requires the exact allowed
+        Origin and accepts one canonical invitation or onboarding-rescue token.
+        Installs the secret and a response-loss successor in host-only Secure
+        HttpOnly SameSite=Strict cookies scoped to the onboarding endpoints for
+        15 minutes. A server-persisted incomplete onboarding account cannot be
+        replaced by another link. No secret is returned in the response body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, token]
+              properties:
+                kind: {type: string, enum: [invite, onboarding]}
+                token: {type: string}
+      responses:
+        "204": {description: Fragment secret and successor protected in cookies}
+        "400": {description: Invalid link shape}
+        "403": {description: Origin is not allowed}
+        "409": {description: Another account setup is in progress}
+  /auth/web/session/onboarding/prepare:
+    post:
+      tags: [Authentication]
+      summary: Replace a missing or unavailable onboarding successor
+      security: []
+      description: Requires an exact allowed Origin and a transferred invitation or rescue cookie. The protected bearer link remains unchanged.
+      responses:
+        "204": {description: Successor and readable CSRF cookie installed}
+        "400": {description: No protected onboarding link}
+        "403": {description: Origin is not allowed}
+  /auth/web/session/onboarding/commit:
+    post:
+      tags: [Authentication]
+      summary: Atomically redeem a protected link and switch browser account
+      security: []
+      parameters:
+        - {name: X-CSRF-Token, in: header, required: true, schema: {type: string}}
+      description: |
+        Creates or rescues the account, installs cookie credentials, persists
+        the server-side onboarding requirement, and revokes sessions previously
+        stored in this browser in one transaction. An exact secret and successor
+        retry recovers a lost successful response. The body contains metadata
+        only and never access or refresh credentials.
+      responses:
+        "201": {description: Browser cookies installed; guided setup required}
+        "400": {description: A fresh successor must be prepared}
+        "401": {description: Link is invalid, expired, or already used}
+        "403": {description: Origin or CSRF validation failed}
+        "409": {description: Invitation or rescue no longer applies}
+  /auth/web/session/onboarding/status:
+    get:
+      tags: [Authentication]
+      summary: Resume server-authoritative guided account setup
+      security: []
+      description: Reports only whether a protected link exists, whether the cookie session is ready, and committed passkey/recovery-code counts. Secrets and credential identifiers are never returned.
+      responses:
+        "200": {description: Non-secret onboarding progress}
+  /auth/web/session/onboarding/complete:
+    post:
+      tags: [Authentication]
+      summary: Complete guided setup after durable recovery factors exist
+      security: []
+      parameters:
+        - {name: X-CSRF-Token, in: header, required: true, schema: {type: string}}
+      description: Locks the account row, verifies at least one passkey and one active unused recovery code, and clears the server-persisted requirement transactionally. Repeating a completed request is safe.
+      responses:
+        "204": {description: Guided setup completed}
+        "401": {description: Browser session is missing or expired}
+        "403": {description: Origin or CSRF validation failed}
+        "409": {description: Required factors are incomplete}
   /account:
     delete:
       tags: [Authentication]

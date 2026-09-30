@@ -66,13 +66,14 @@ func (h *WebSessionHandler) BeginPasskeyLogin(c *gin.Context) {
 	h.setCookie(c, middleware.WebRefreshCookie, "", -1, true, "/api/v1/auth/web/session")
 	h.setCookie(c, middleware.WebPendingCookie, successor, 24*60*60, true, "/api/v1/auth/web/session")
 	h.clearRecoveryPending(c)
+	h.clearOnboardingAll(c)
 	h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{"ceremony_id": ceremonyID, "options": assertion.Response})
 }
 
 func (h *WebSessionHandler) revokeStoredSessions(c *gin.Context) error {
-	return h.revokeCookieSessions(c, middleware.WebRefreshCookie, middleware.WebPendingCookie, middleware.WebRecoveryPendingCookie)
+	return h.revokeCookieSessions(c, middleware.WebRefreshCookie, middleware.WebPendingCookie, middleware.WebRecoveryPendingCookie, middleware.WebOnboardingPendingCookie)
 }
 
 func (h *WebSessionHandler) revokeCookieSessions(c *gin.Context, names ...string) error {
@@ -194,6 +195,7 @@ func (h *WebSessionHandler) FinishPasskeyLogin(c *gin.Context) {
 
 func (h *WebSessionHandler) finishWebPasskeySession(c *gin.Context, pair *database.AuthTokenPair, csrf string) {
 	h.setPair(c, pair)
+	h.clearOnboardingAll(c)
 	h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusCreated, gin.H{

@@ -334,7 +334,7 @@ func (db *DB) redeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 		if err != nil {
 			return nil, fmt.Errorf("recover recovery-code sign-in: %w", err)
 		}
-		if err := revokeBrowserSessionsByRefreshTx(ctx, tx, existingRefreshTokens, pair.SessionID, now); err != nil {
+		if err := revokeBrowserSessionsByCredentialTx(ctx, tx, existingRefreshTokens, pair.SessionID, now); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -365,7 +365,7 @@ func (db *DB) redeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 	} else if affected != 1 {
 		return nil, ErrRecoveryCodeInvalid
 	}
-	if err := revokeBrowserSessionsByRefreshTx(ctx, tx, existingRefreshTokens, pair.SessionID, now); err != nil {
+	if err := revokeBrowserSessionsByCredentialTx(ctx, tx, existingRefreshTokens, pair.SessionID, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -374,22 +374,32 @@ func (db *DB) redeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 	return pair, nil
 }
 
-func revokeBrowserSessionsByRefreshTx(ctx context.Context, tx *sqlx.Tx, credentials []string, keepSessionID string, now time.Time) error {
+func revokeBrowserSessionsByCredentialTx(ctx context.Context, tx *sqlx.Tx, credentials []string, keepSessionID string, now time.Time) error {
 	seen := make(map[string]struct{}, len(credentials))
 	for _, credential := range credentials {
-		hash, ok := authTokenHash(credential, "mta_rt_")
-		if !ok {
+		hash, refresh := authTokenHash(credential, "mta_rt_")
+		accessHash, access := authTokenHash(credential, "mta_at_")
+		if !refresh && !access {
 			continue
+		}
+		if access {
+			hash = accessHash
 		}
 		if _, duplicate := seen[hash]; duplicate {
 			continue
 		}
 		seen[hash] = struct{}{}
-		if _, err := tx.ExecContext(ctx, `
+		query := `
 			UPDATE auth_sessions s SET revoked_at = COALESCE(s.revoked_at, $3)
 			FROM auth_refresh_tokens t
-			WHERE t.session_id = s.id AND t.token_hash = $1 AND s.id <> $2`,
-			hash, keepSessionID, now); err != nil {
+			WHERE t.session_id = s.id AND t.token_hash = $1 AND s.id <> $2`
+		if access {
+			query = `
+				UPDATE auth_sessions s SET revoked_at = COALESCE(s.revoked_at, $3)
+				FROM auth_access_tokens t
+				WHERE t.session_id = s.id AND t.token_hash = $1 AND s.id <> $2`
+		}
+		if _, err := tx.ExecContext(ctx, query, hash, keepSessionID, now); err != nil {
 			return fmt.Errorf("revoke replaced browser session: %w", err)
 		}
 	}

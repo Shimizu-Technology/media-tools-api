@@ -171,8 +171,8 @@ func TestWebSessionLogoutClearsAllCookies(t *testing.T) {
 		t.Fatalf("logout status = %d, want 204", response.Code)
 	}
 	cookies := response.Result().Cookies()
-	if len(cookies) != 5 {
-		t.Fatalf("cleared %d cookies, want 5", len(cookies))
+	if len(cookies) != 9 {
+		t.Fatalf("cleared %d cookies, want 9", len(cookies))
 	}
 	for _, cookie := range cookies {
 		if cookie.MaxAge != -1 || cookie.Value != "" {

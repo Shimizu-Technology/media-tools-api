@@ -1,4 +1,4 @@
-import { renewWebSession, setWebSessionActive, webCSRFHeaders, type WebSessionStatus } from './webSession';
+import { renewWebSession, setWebOnboardingRequired, setWebSessionActive, webCSRFHeaders, type WebSessionStatus } from './webSession';
 
 type RecoveryStatus = { remaining: number };
 export type RecoveryRotation = { rotation_id: string; codes: string[] };
@@ -87,6 +87,7 @@ async function finishRecoveryCodeSignIn(body: { code?: string }): Promise<void> 
   }
   const status = await requestJSON<WebSessionStatus>('/api/v1/auth/web/session/status', { credentials: 'same-origin' });
   if (!status.authenticated) throw new RecoveryCodeError('Could not verify the recovered session.', 'authentication_unavailable');
+  setWebOnboardingRequired(status.onboarding_required === true);
   setWebSessionActive(true);
 }
 

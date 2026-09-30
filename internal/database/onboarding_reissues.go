@@ -32,6 +32,13 @@ func onboardingReissueTokenHash(token string) (string, bool) {
 	return authTokenHash(strings.TrimSpace(token), "mta_onb_")
 }
 
+// ValidOnboardingReissueToken validates the bearer-token shape before the web
+// adapter moves a URL fragment into its protected cookie.
+func ValidOnboardingReissueToken(token string) bool {
+	_, ok := onboardingReissueTokenHash(token)
+	return ok
+}
+
 func (db *DB) CreateOnboardingReissue(ctx context.Context, userID string) (*AuthOnboardingReissue, string, error) {
 	userID = strings.TrimSpace(userID)
 	if uuid.Validate(userID) != nil {
@@ -87,6 +94,17 @@ func (db *DB) CreateOnboardingReissue(ctx context.Context, userID string) (*Auth
 }
 
 func (db *DB) RedeemOnboardingReissue(ctx context.Context, token, clientType, deviceName, nextRefreshToken string) (*AuthTokenPair, error) {
+	return db.redeemOnboardingReissue(ctx, token, clientType, deviceName, nextRefreshToken, nil, false, false)
+}
+
+// RedeemWebOnboardingReissue performs the rescue and any browser-account
+// switch atomically. Existing sessions for the rescued account are also
+// revoked by the shared redemption transaction below.
+func (db *DB) RedeemWebOnboardingReissue(ctx context.Context, token, nextRefreshToken string, existingCredentials []string) (*AuthTokenPair, error) {
+	return db.redeemOnboardingReissue(ctx, token, "web", "Browser", nextRefreshToken, existingCredentials, true, true)
+}
+
+func (db *DB) redeemOnboardingReissue(ctx context.Context, token, clientType, deviceName, nextRefreshToken string, existingCredentials []string, distinguishUnavailableSuccessor, requireOnboarding bool) (*AuthTokenPair, error) {
 	hash, ok := onboardingReissueTokenHash(token)
 	if !ok {
 		return nil, ErrOnboardingReissueInvalid
@@ -156,6 +174,9 @@ func (db *DB) RedeemOnboardingReissue(ctx context.Context, token, clientType, de
 		if err != nil {
 			return nil, fmt.Errorf("recover onboarding rescue: %w", err)
 		}
+		if err := revokeBrowserSessionsByCredentialTx(ctx, tx, existingCredentials, pair.SessionID, now); err != nil {
+			return nil, err
+		}
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("commit recovered onboarding rescue: %w", err)
 		}
@@ -169,8 +190,16 @@ func (db *DB) RedeemOnboardingReissue(ctx context.Context, token, clientType, de
 	} else if !allowed {
 		return nil, ErrOnboardingReissueNotAllowed
 	}
+	// Native clients cannot call the cookie-only web completion endpoint. The
+	// latest redemption therefore decides whether the web-only gate applies.
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET onboarding_required = $2 WHERE id = $1`, lockedID, requireOnboarding); err != nil {
+		return nil, fmt.Errorf("set rescued account onboarding requirement: %w", err)
+	}
 	pair, err := createFirstPartySessionWithRefreshTx(ctx, tx, lockedID, clientType, deviceName, nextRefreshToken, now)
 	if errors.Is(err, errSuccessorUnavailable) {
+		if distinguishUnavailableSuccessor {
+			return nil, ErrInvalidSuccessorToken
+		}
 		return nil, ErrOnboardingReissueInvalid
 	}
 	if err != nil {
@@ -193,10 +222,66 @@ func (db *DB) RedeemOnboardingReissue(ctx context.Context, token, clientType, de
 		WHERE user_id = $1 AND id <> $2`, lockedID, pair.SessionID, now); err != nil {
 		return nil, fmt.Errorf("revoke stranded onboarding sessions: %w", err)
 	}
+	if err := revokeBrowserSessionsByCredentialTx(ctx, tx, existingCredentials, pair.SessionID, now); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit onboarding rescue redemption: %w", err)
 	}
 	return pair, nil
+}
+
+// OnboardingSecurityStatus reports the durable factors required before a web
+// onboarding session can leave the guided setup route.
+func (db *DB) OnboardingSecurityStatus(ctx context.Context, userID string) (passkeys, recoveryCodes int, err error) {
+	err = db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM auth_passkey_credentials WHERE user_id = $1),
+			(SELECT COUNT(*) FROM auth_recovery_codes WHERE user_id = $1 AND active AND consumed_at IS NULL)`,
+		userID).Scan(&passkeys, &recoveryCodes)
+	if err != nil {
+		return 0, 0, fmt.Errorf("load onboarding security status: %w", err)
+	}
+	return passkeys, recoveryCodes, nil
+}
+
+// CompleteOnboarding serializes with recovery rotation and rescue redemption
+// on the user row, then clears the durable requirement only when both factors
+// are committed and usable. Repeating a successful completion is safe.
+func (db *DB) CompleteOnboarding(ctx context.Context, userID string) (bool, error) {
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin onboarding completion: %w", err)
+	}
+	defer tx.Rollback()
+	var lockedID string
+	if err := tx.GetContext(ctx, &lockedID, `SELECT id FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("lock onboarding account: %w", err)
+	}
+	var status struct {
+		Passkeys      int `db:"passkeys"`
+		RecoveryCodes int `db:"recovery_codes"`
+	}
+	if err := tx.GetContext(ctx, &status, `
+		SELECT
+			(SELECT COUNT(*) FROM auth_passkey_credentials WHERE user_id = $1) AS passkeys,
+			(SELECT COUNT(*) FROM auth_recovery_codes
+			 WHERE user_id = $1 AND active AND consumed_at IS NULL) AS recovery_codes`, lockedID); err != nil {
+		return false, fmt.Errorf("verify onboarding security factors: %w", err)
+	}
+	if status.Passkeys == 0 || status.RecoveryCodes == 0 {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET onboarding_required = FALSE WHERE id = $1`, lockedID); err != nil {
+		return false, fmt.Errorf("complete onboarding: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit onboarding completion: %w", err)
+	}
+	return true, nil
 }
 
 func onboardingRescueAllowedTx(ctx context.Context, tx interface {

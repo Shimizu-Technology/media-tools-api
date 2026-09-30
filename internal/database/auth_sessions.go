@@ -666,6 +666,34 @@ func (db *DB) GetUserByFirstPartyAccessToken(ctx context.Context, credential str
 	return &row.User, row.SessionID, nil
 }
 
+// GetUserByFirstPartyRefreshToken identifies the durable browser session even
+// after its short access cookie expires. Consumed refresh rows remain valid
+// identifiers during response-loss recovery; this lookup never rotates or
+// authenticates with the credential.
+func (db *DB) GetUserByFirstPartyRefreshToken(ctx context.Context, credential string) (*models.User, string, error) {
+	hash, ok := authTokenHash(credential, "mta_rt_")
+	if !ok {
+		return nil, "", ErrSessionInvalid
+	}
+	var row struct {
+		models.User
+		SessionID string `db:"session_id"`
+	}
+	err := db.GetContext(ctx, &row, `
+		SELECT u.*, s.id AS session_id FROM auth_refresh_tokens t
+		JOIN auth_sessions s ON s.id = t.session_id
+		JOIN users u ON u.id = s.user_id
+		WHERE t.token_hash = $1 AND t.expires_at > NOW()
+		  AND s.inactive_expires_at > NOW() AND s.revoked_at IS NULL`, hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, "", ErrSessionInvalid
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("load refresh credential owner: %w", err)
+	}
+	return &row.User, row.SessionID, nil
+}
+
 func (db *DB) ListFirstPartySessions(ctx context.Context, userID string) ([]AuthSession, error) {
 	var sessions []AuthSession
 	err := db.SelectContext(ctx, &sessions, `
