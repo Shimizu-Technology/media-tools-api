@@ -6,7 +6,10 @@ info:
     PDF extraction, collections, chat, webhooks, and AI summaries.
 
     ## Authentication
-    Protected endpoints accept either an `X-API-Key` header or a Clerk/legacy bearer token.
+    Protected endpoints accept an `X-API-Key` header or an enabled bearer
+    provider. First-party access tokens are the durable account credential.
+    Clerk is an optional migration bridge. Legacy HS256 bearer tokens are
+    accepted only while `LEGACY_AUTH_ENABLED=true`.
 
     ## Rate Limiting
     Each API key has a per-hour rate limit (default: 100 requests/hour).
@@ -41,7 +44,7 @@ components:
     BearerAuth:
       type: http
       scheme: bearer
-      description: Clerk session JWT or first-party access token for user-account routes.
+      description: First-party access token, optional migration-only Clerk session JWT, or explicitly enabled legacy token.
 
   schemas:
     Transcript:
@@ -1167,6 +1170,32 @@ paths:
                 device_name: {type: string, maxLength: 80}
                 next_refresh_token: {type: string, description: Client-generated mta_rt_ credential saved before sending}
       responses: {"201": {description: First-party session credentials}, "401": {description: Invalid, used, expired, or mismatched recovery retry}}
+  /auth/clerk-detachment:
+    get:
+      tags: [Authentication]
+      summary: Check whether an account can disconnect Clerk
+      description: |
+        Requires a valid first-party device session. Reports only factor counts
+        and link state. A linked account is ready after it has at least one
+        passkey and one active unused recovery code.
+      security: [{BearerAuth: []}]
+      responses:
+        "200": {description: Clerk link and first-party recovery readiness}
+        "401": {description: A first-party device session is required}
+    post:
+      tags: [Authentication]
+      summary: Disconnect the legacy Clerk identity
+      description: |
+        Requires a valid first-party device session. Atomically clears the
+        legacy users.clerk_id and removes Clerk auth-identity rows only after a
+        passkey and an active unused recovery code exist. User data, API keys,
+        and device sessions are preserved. Repeating a successful request is
+        idempotent.
+      security: [{BearerAuth: []}]
+      responses:
+        "200": {description: Clerk is disconnected or was already disconnected}
+        "401": {description: A first-party device session is required}
+        "409": {description: A passkey and unused recovery code are required}
   /auth/passkeys:
     get:
       tags: [Authentication]
@@ -1387,8 +1416,9 @@ paths:
       summary: Permanently delete the signed-in account and its data
       description: |
         Immediately purges account-owned database content and queues durable
-        cleanup of raw audio objects and the Clerk identity. A second object
-        cleanup runs after issued upload URLs expire.
+        cleanup of raw audio objects and any still-linked Clerk identity. A
+        detached first-party account does not require Clerk configuration.
+        A second object cleanup runs after issued upload URLs expire.
       security:
         - BearerAuth: []
       requestBody:

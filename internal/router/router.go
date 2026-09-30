@@ -148,15 +148,19 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		}
 	}
 
-	// --- JWT-protected routes (MTA-20) — accepts Clerk or legacy JWT ---
+	// --- User-scoped routes — accepts only explicitly enabled bearer auth ---
 	jwtProtected := r.Group("/api/v1")
 	if jwksCache != nil {
-		jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey, cfg.FirstPartyAuthEnabled, cfg.ClerkMigrationOnly))
+		jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey, cfg.FirstPartyAuthEnabled, cfg.LegacyAuthEnabled, cfg.ClerkMigrationOnly))
 	} else {
 		if cfg.FirstPartyAuthEnabled {
-			jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, nil, "", true, false))
-		} else {
+			jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, nil, "", true, cfg.LegacyAuthEnabled, false))
+		} else if cfg.LegacyAuthEnabled {
 			jwtProtected.Use(middleware.JWTAuth(cfg.DB, cfg.JWTSecret))
+		} else {
+			// Keep the routes registered for a stable API surface, but fail
+			// closed when no bearer authentication provider is configured.
+			jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, nil, "", false, false, false))
 		}
 	}
 	{
@@ -170,6 +174,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			jwtProtected.GET("/auth/recovery", h.RecoveryCodeStatus)
 			jwtProtected.POST("/auth/recovery/rotation/begin", h.BeginRecoveryCodeRotation)
 			jwtProtected.POST("/auth/recovery/rotation/confirm", h.ConfirmRecoveryCodeRotation)
+			jwtProtected.GET("/auth/clerk-detachment", h.ClerkDetachmentStatus)
+			jwtProtected.POST("/auth/clerk-detachment", h.DetachClerk)
 		}
 		jwtProtected.DELETE("/account", h.DeleteAccount)
 		if cfg.LegacyAuthEnabled {
@@ -180,9 +186,9 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		jwtProtected.DELETE("/workspace/:type/:id", h.RemoveFromWorkspace)
 	}
 
-	// --- Protected Routes (API key OR Clerk JWT OR legacy JWT — backward compatible) ---
+	// --- Protected Routes (API key or an explicitly enabled bearer provider) ---
 	protected := r.Group("/api/v1")
-	protected.Use(middleware.DualAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey, cfg.FirstPartyAuthEnabled, cfg.ClerkMigrationOnly))
+	protected.Use(middleware.DualAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey, cfg.FirstPartyAuthEnabled, cfg.LegacyAuthEnabled, cfg.ClerkMigrationOnly))
 	protected.Use(rateLimiter.RateLimit())
 	{
 		// Transcript endpoints

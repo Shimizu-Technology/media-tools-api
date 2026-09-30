@@ -81,13 +81,23 @@ func (db *DB) ResolveMigrationClerkUser(ctx context.Context, clerkID string) (*m
 		return nil, ErrClerkIdentityUnknown
 	}
 
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin Clerk identity resolution: %w", err)
+	}
+	defer tx.Rollback()
+
 	var user models.User
-	err := db.GetContext(ctx, &user, `
+	err = tx.GetContext(ctx, &user, `
 		SELECT u.*
 		FROM auth_identities ai
 		JOIN users u ON u.id = ai.user_id
-		WHERE ai.provider = 'clerk' AND ai.subject = $1`, clerkID)
+		WHERE ai.provider = 'clerk' AND ai.subject = $1
+		FOR UPDATE OF u`, clerkID)
 	if err == nil {
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit Clerk identity resolution: %w", err)
+		}
 		// Older handlers still read ClerkID when bootstrapping a first-party
 		// session. The verified identity subject is safe to expose in-memory
 		// even when a newer account no longer mirrors it into users.clerk_id.
@@ -98,17 +108,24 @@ func (db *DB) ResolveMigrationClerkUser(ctx context.Context, clerkID string) (*m
 		return nil, fmt.Errorf("find Clerk auth identity: %w", err)
 	}
 
-	legacy, err := db.GetUserByClerkID(ctx, clerkID)
+	var legacy models.User
+	err = tx.GetContext(ctx, &legacy, `SELECT * FROM users WHERE clerk_id = $1 FOR UPDATE`, clerkID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrClerkIdentityUnknown
 	}
 	if err != nil {
 		return nil, fmt.Errorf("find legacy Clerk user: %w", err)
 	}
-	if err := db.EnsureAuthIdentity(ctx, legacy.ID, "clerk", clerkID); err != nil {
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO auth_identities (user_id, provider, subject)
+		VALUES ($1, 'clerk', $2)
+		ON CONFLICT (provider, subject) DO NOTHING`, legacy.ID, clerkID); err != nil {
 		return nil, fmt.Errorf("backfill legacy Clerk identity: %w", err)
 	}
-	return legacy, nil
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit legacy Clerk identity backfill: %w", err)
+	}
+	return &legacy, nil
 }
 
 // CreateUserFromClerk creates a new user from Clerk authentication.

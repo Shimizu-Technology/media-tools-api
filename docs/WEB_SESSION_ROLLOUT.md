@@ -75,3 +75,17 @@ If first-party auth must be rolled back temporarily, leave
 `CLERK_MIGRATION_ONLY=true`; reopening Clerk account creation would bypass
 invite-only onboarding. Disable the migration guard only as a deliberate policy
 change after reviewing that impact.
+
+## Clerk retirement
+
+After the owner has enrolled a passkey and confirmed a recovery-code set, use
+`GET /api/v1/auth/clerk-detachment` from a first-party session to verify the
+factor counts. `POST /api/v1/auth/clerk-detachment` then removes only the Clerk
+link; the stable user, media, API keys, and device sessions remain. The detach
+request is idempotent and refuses a linked account that lacks either recovery
+factor.
+
+Keep `LEGACY_AUTH_ENABLED=false` in production. That setting controls both the
+old email/password routes and acceptance of old HS256 bearer tokens, including
+when no Clerk JWKS is configured. After detachment, account deletion uses the
+first-party session and does not depend on Clerk configuration.
