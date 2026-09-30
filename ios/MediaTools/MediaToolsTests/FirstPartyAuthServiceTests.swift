@@ -218,6 +218,103 @@ final class FirstPartyAuthServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testDefinitivePasskeyFinishFailuresDeleteJournal() async throws {
+        for statusCode in [400, 401, 404] {
+            let pending = try makePendingPasskeyFinish()
+            let journal = InMemoryPasskeyLoginFinishJournal(pending)
+            let service = FirstPartyAuthService(
+                api: PasskeyFinishFailingAPI(error: .httpError(
+                    statusCode: statusCode,
+                    code: "invalid_challenge",
+                    message: "passkey finish rejected"
+                )),
+                deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil), enabled: true),
+                passkeyLoginJournal: journal
+            )
+
+            do {
+                try await service.signInWithPasskey()
+                XCTFail("Expected passkey finish status \(statusCode) to fail")
+            } catch APIError.authenticationRequired(let message) {
+                XCTAssertTrue(message.contains("expired"))
+                XCTAssertNil(try journal.load())
+            }
+        }
+    }
+
+    @MainActor
+    func testFreshPasskeyFinishDefinitiveFailuresDeleteSavedJournal() async throws {
+        for statusCode in [400, 401, 404] {
+            let pending = try makePendingPasskeyFinish()
+            let journal = InMemoryPasskeyLoginFinishJournal(nil)
+            let service = FirstPartyAuthService(
+                api: PasskeyFinishFailingAPI(error: .httpError(
+                    statusCode: statusCode,
+                    code: "invalid_challenge",
+                    message: "passkey finish rejected"
+                )),
+                deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil), enabled: true),
+                passkeyLoginJournal: journal
+            )
+
+            // This is the exact boundary used by a fresh platform ceremony:
+            // persist the finish body first, then submit that saved request.
+            try journal.save(pending)
+            do {
+                try await service.completeSavedPasskeyLogin(pending)
+                XCTFail("Expected fresh passkey finish status \(statusCode) to fail")
+            } catch APIError.authenticationRequired(let message) {
+                XCTAssertTrue(message.contains("expired"))
+                XCTAssertNil(try journal.load())
+            }
+        }
+    }
+
+    @MainActor
+    func testTransientPasskeyFinishFailuresKeepJournalForRelaunchRetry() async throws {
+        for error in [
+            APIError.httpError(statusCode: 503, code: "unavailable", message: "unavailable"),
+            APIError.authenticationTemporarilyUnavailable(message: "offline"),
+        ] {
+            let pending = try makePendingPasskeyFinish()
+            let journal = InMemoryPasskeyLoginFinishJournal(pending)
+            let service = FirstPartyAuthService(
+                api: PasskeyFinishFailingAPI(error: error),
+                deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil), enabled: true),
+                passkeyLoginJournal: journal
+            )
+
+            do {
+                try await service.signInWithPasskey()
+                XCTFail("Expected transient passkey finish to fail")
+            } catch {
+                XCTAssertEqual(try journal.load(), pending)
+            }
+        }
+    }
+
+    @MainActor
+    private func makePendingPasskeyFinish() throws -> PendingPasskeyLoginFinish {
+        let credential = PasskeyAssertionCredential.make(
+            credentialID: Data([1]),
+            clientDataJSON: Data([2]),
+            authenticatorData: Data([3]),
+            signature: Data([4]),
+            userID: nil
+        )
+        return PendingPasskeyLoginFinish(
+            ceremonyID: "ceremony-a",
+            credentialJSONData: try FirstPartyAuthService.finishBody(
+                ceremonyID: "ceremony-a",
+                credential: credential,
+                clientType: "ios",
+                deviceName: "Test iPhone",
+                nextRefreshToken: "mta_rt_successor"
+            )
+        )
+    }
+
+    @MainActor
     private func failingRevocationController() -> DeviceSessionController {
         let pair = DeviceSessionPair(
             sessionID: "session-old",
@@ -356,6 +453,19 @@ private final class TestDeviceSessionStore: DeviceSessionStoring {
 }
 
 @MainActor
+private final class InMemoryPasskeyLoginFinishJournal: PasskeyLoginFinishJournaling {
+    private var pending: PendingPasskeyLoginFinish?
+
+    init(_ pending: PendingPasskeyLoginFinish?) {
+        self.pending = pending
+    }
+
+    func load() throws -> PendingPasskeyLoginFinish? { pending }
+    func save(_ value: PendingPasskeyLoginFinish) throws { pending = value }
+    func delete() { pending = nil }
+}
+
+@MainActor
 private final class InMemoryRecoveryCodeRotationJournal: RecoveryCodeRotationJournaling {
     private var pending: PendingRecoveryCodeRotation?
 
@@ -428,5 +538,27 @@ private actor StatusFailingFirstPartyAuthAPI: FirstPartyAuthAPI {
 
     func postJSON<T>(_ path: String, bodyData: Data, authenticated: Bool) async throws -> T where T: Decodable {
         throw APIError.invalidResponse
+    }
+}
+
+private actor PasskeyFinishFailingAPI: FirstPartyAuthAPI {
+    let error: APIError
+
+    init(error: APIError) { self.error = error }
+
+    func get<T>(_ path: String, expectedOwnerID: String?) async throws -> T where T: Decodable {
+        throw APIError.invalidResponse
+    }
+
+    func post<T, B>(_ path: String, body: B, expectedOwnerID: String?) async throws -> T where T: Decodable, B: Encodable {
+        throw APIError.invalidResponse
+    }
+
+    func postPublic<T, B>(_ path: String, body: B) async throws -> T where T: Decodable, B: Encodable {
+        throw APIError.invalidResponse
+    }
+
+    func postJSON<T>(_ path: String, bodyData: Data, authenticated: Bool) async throws -> T where T: Decodable {
+        throw error
     }
 }

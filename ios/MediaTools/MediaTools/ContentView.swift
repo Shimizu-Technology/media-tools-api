@@ -135,6 +135,13 @@ struct ContentView: View {
         .sheet(isPresented: $showAuth) {
             AuthView()
         }
+        .onChange(of: showRecoveryCode) { _, isPresented in
+            if isPresented {
+                // A passkey-specific failure should not appear inside the
+                // recovery-code sheet before the user submits a code.
+                nativeAuthError = nil
+            }
+        }
     }
 
     private func completeNativeSignIn(_ operation: NativeAuthOperation) async {

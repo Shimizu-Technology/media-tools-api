@@ -65,12 +65,14 @@ final class MediaToolsUITests: XCTestCase {
         app.launchArguments = ["-ui-test-welcome"]
         app.launch()
 
-        XCTAssertTrue(app.buttons["Sign in or create account"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Continue with passkey"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Use a recovery code"].exists)
+        XCTAssertTrue(app.buttons["Use Apple, Google, or email"].exists)
         let options = app.staticTexts["welcome.authentication.options"]
         XCTAssertTrue(options.exists)
         XCTAssertEqual(
             options.label,
-            "Continue with Apple, Google, or email. Apple lets you keep your email private."
+            "Use passkey or recovery code first. Apple, Google, and email remain available for existing accounts during migration."
         )
     }
 

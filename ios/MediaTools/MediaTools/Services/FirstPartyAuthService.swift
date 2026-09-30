@@ -302,9 +302,7 @@ final class FirstPartyAuthService {
             )
         )
         try passkeyLoginJournal.save(pending)
-        let pair = try await finishPasskeyLogin(pending)
-        try await installFirstPartySession(pair: pair, nextRefreshToken: pending.nextRefreshToken, source: .passkey)
-        passkeyLoginJournal.delete()
+        try await completeSavedPasskeyLogin(pending)
     }
 
     func enrollPasskey() async throws {
@@ -434,10 +432,32 @@ final class FirstPartyAuthService {
 
     private func retryPendingPasskeyLoginFinishIfNeeded() async throws -> Bool {
         guard let pending = try passkeyLoginJournal.load() else { return false }
-        let pair = try await finishPasskeyLogin(pending)
-        try await installFirstPartySession(pair: pair, nextRefreshToken: pending.nextRefreshToken, source: .passkey)
-        passkeyLoginJournal.delete()
+        try await completeSavedPasskeyLogin(pending)
         return true
+    }
+
+    // Both a newly completed platform ceremony and a relaunch retry enter here
+    // after their exact finish body has been saved. Keeping one completion path
+    // ensures neither route can strand a permanently rejected ceremony.
+    func completeSavedPasskeyLogin(_ pending: PendingPasskeyLoginFinish) async throws {
+        do {
+            let pair = try await finishPasskeyLogin(pending)
+            try await installFirstPartySession(
+                pair: pair,
+                nextRefreshToken: pending.nextRefreshToken,
+                source: .passkey
+            )
+            passkeyLoginJournal.delete()
+        } catch APIError.httpError(let statusCode, _, _)
+            where statusCode == 400 || statusCode == 401 || statusCode == 404 {
+            // The ceremony can no longer be recovered. Remove the journal so
+            // the next tap starts a fresh platform passkey ceremony instead of
+            // retrying the same expired response forever.
+            passkeyLoginJournal.delete()
+            throw APIError.authenticationRequired(
+                message: "That passkey sign-in expired. Please try again."
+            )
+        }
     }
 
     private func finishPasskeyLogin(_ pending: PendingPasskeyLoginFinish) async throws -> DeviceSessionPair {
@@ -626,7 +646,14 @@ final class PasskeyLoginFinishJournal: PasskeyLoginFinishJournaling {
         guard status == errSecSuccess, let data = result as? Data else {
             throw RecoveryJournalKeychainFailure(status: status)
         }
-        return try JSONDecoder().decode(PendingPasskeyLoginFinish.self, from: data)
+        do {
+            return try JSONDecoder().decode(PendingPasskeyLoginFinish.self, from: data)
+        } catch {
+            // A partially written or legacy journal cannot be replayed safely.
+            // Remove only this passkey-finish item so a fresh ceremony can begin.
+            delete()
+            return nil
+        }
     }
 
     func save(_ value: PendingPasskeyLoginFinish) throws {
@@ -732,7 +759,9 @@ final class RecoveryCodeRedeemJournal: RecoveryCodeRedeemJournaling {
 
 private struct RecoveryJournalKeychainFailure: LocalizedError {
     let status: OSStatus
-    var errorDescription: String? { "Could not save this recovery sign-in (\(status))." }
+    var errorDescription: String? {
+        "Media Tools couldn’t secure this sign-in. Restart the app and try again."
+    }
 }
 
 final class PasskeyAuthorizationDelegate: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
