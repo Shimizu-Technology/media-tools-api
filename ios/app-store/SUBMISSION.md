@@ -7,18 +7,18 @@ implements it. Run `make ios-release-preflight` before an archive and again with
 ## Current release status
 
 - Version: `1.0`
-- Next TestFlight build: `11`
+- Next TestFlight build: `12`
 - Bundle ID: `com.ShimizuTechnology.MediaTools`
 - Apple team: `4T358A5S74`
 - Minimum OS: iOS 18.5
 - Release compiler: Xcode 26.6 / iOS 26.5 SDK
-- TestFlight/App Store: build 11 retains the Apple sign-in corrections made
-  after the September 2 rejection and adds the signed Share Extension for
-  on-device Voice Memos and Files testing. Build 10 was already uploaded.
-  The checked-in `native-auth-release.json` records the dashboard mapping that
-  release preflight requires. The owner has explicitly chosen to keep the Clerk
-  development instance for this release; re-audit that decision before a future
-  production migration.
+- TestFlight: build 12 adds a durable first-party device session, passkey sign-in
+  and enrollment, recovery codes, device management, and recoverable account
+  deletion. Clerk remains only as a migration bridge for an already-linked
+  account. Build 11 is the prior TestFlight baseline with the Share Extension.
+  Before installing build 12, production must enable `CLERK_MIGRATION_ONLY` and
+  then `FIRST_PARTY_AUTH_ENABLED`; keep browser cookie auth disabled until its
+  separate rollout is tested.
 
 Apple requires iOS uploads to use the iOS 26 SDK or later as of April 28, 2026.
 See [Submitting to the App Store](https://developer.apple.com/app-store/submitting/).
@@ -83,26 +83,31 @@ Set:
 
 Before selecting a build for public review:
 
-1. Confirm the shipping Clerk environment advertises both Apple and Google and
+1. Confirm the production API has the existing account's exact Clerk identity,
+   then enable `CLERK_MIGRATION_ONLY` before `FIRST_PARTY_AUTH_ENABLED`. Keep
+   `WEB_COOKIE_AUTH_ENABLED` off for the iOS-only rollout and verify readiness
+   after each change.
+2. Confirm the Clerk migration bridge still advertises Apple and Google and
    retains the iOS native-app mapping for this bundle ID. Update
    `native-auth-release.json` only after confirming the mapping in Clerk's
-   Native Applications dashboard; the preflight pins its tenant, Apple team,
-   bundle ID, exact dashboard source, and ISO 8601 calendar confirmation date.
-   The accepted source breadcrumb is exactly
+   Native Applications dashboard; the accepted source breadcrumb is exactly
    `Clerk Dashboard > Configure > Native applications`.
-2. Verify native Apple and Google sign-in, Hide My Email, sign-out, and account
-   deletion on a physical device.
-3. Supply a non-expiring reviewer account in App Review Information. Keep its
-   credentials out of this repository.
-4. Complete the Digital Services Act trader declaration for the actual business
+3. On a physical device, migrate the existing account, enroll a passkey, save
+   recovery codes, sign out, sign in with the passkey and one recovery code,
+   refresh after access expiry, share from Voice Memos and Files, and verify
+   account deletion recovery.
+4. Create a dedicated reviewer account through invite-only onboarding, verify
+   its login and recovery factors, and supply its non-expiring credentials in
+   App Review Information. Keep credentials out of this repository.
+5. Complete the Digital Services Act trader declaration for the actual business
    and confirm the support page exposes the contact information required for the
    selected storefronts. Do not publish a private address or phone number from
    repository code without an explicit business decision.
-5. Upload current iPhone and iPad screenshots that show the shipping UI and do
+6. Upload current iPhone and iPad screenshots that show the shipping UI and do
    not include private recordings or transcripts.
-6. Confirm Content Rights, age rating, App Privacy, export compliance, and the
+7. Confirm Content Rights, age rating, App Privacy, export compliance, and the
    app-review contact fields in App Store Connect.
-7. Select the processed build, use the checked-in review notes, and keep the
+8. Select the processed build, use the checked-in review notes, and keep the
    first release manual.
 
 Apple's current field limits and requirements are documented in [Platform

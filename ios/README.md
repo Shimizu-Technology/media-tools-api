@@ -89,7 +89,9 @@ The app is prepared to use passkeys for
 `/.well-known/apple-app-site-association` with the verified app identifier
 `4T358A5S74.com.ShimizuTechnology.MediaTools`. Keep the web passkey relying
 party ID on this domain: changing it would require registering new passkeys.
-This association alone does not change the current Clerk sign-in flow.
+Build 12 uses this association for first-party passkey enrollment and sign-in.
+Clerk remains available only to bridge an already-linked account during the
+migration.
 
 Before distributing a passkey-enabled iOS build, verify that the production
 association URL responds with JSON and no redirect, that the Apple Developer
@@ -119,13 +121,13 @@ make ios-release-preflight \
   EXPORT_PATH=/path/to/AppStoreExport
 ```
 
-The checked-in App Store copy, privacy-label mapping, review notes, and remaining
-launch checks live in `ios/app-store/`. The owner explicitly chose to keep the
-Clerk development instance for the initial App Store release instead of buying
-a custom domain. Release preflight therefore verifies the live development
-instance's required Apple and Google strategies, and App Review receives a
-dedicated non-expiring account. Re-audit this tradeoff before migrating Clerk or
-changing the authentication configuration.
+The checked-in App Store copy, privacy-label mapping, review notes, export
+options, and remaining launch checks live in `ios/app-store/`. Clerk remains in
+the binary as a temporary bridge for accounts already linked to the stable Media
+Tools user. Release preflight verifies that bridge while passkeys and recovery
+codes provide the durable first-party path. Before App Review, create and verify
+a dedicated account through the invite-only onboarding flow and provide its
+non-expiring review credentials outside this repository.
 
 ## Architecture
 
