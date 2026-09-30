@@ -1005,13 +1005,67 @@ paths:
     get:
       tags: [Authentication]
       summary: Count unused recovery codes
+      description: Returns only unused codes in the active confirmed set. Pending replacement sets are excluded.
       security: [{BearerAuth: []}]
       responses: {"200": {description: Remaining recovery code count}}
+  /auth/recovery/rotation/begin:
     post:
       tags: [Authentication]
-      summary: Replace every recovery code
+      summary: Begin a safe recovery-code rotation
+      description: |
+        Requires an authenticated first-party device session. Creates ten new
+        codes in an inactive pending set that expires after 24 hours. The
+        current active codes remain usable until the pending set is confirmed.
+        Starting again replaces any unconfirmed pending set, which lets a client
+        recover from losing the begin response by saving a newly returned set.
+        Plaintext codes are returned only in this response and are never stored.
       security: [{BearerAuth: []}]
-      responses: {"201": {description: New one-time recovery codes}}
+      responses:
+        "201":
+          description: Pending recovery-code rotation
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rotation_id, codes]
+                properties:
+                  rotation_id: {type: string, format: uuid}
+                  codes:
+                    type: array
+                    minItems: 10
+                    maxItems: 10
+                    items: {type: string}
+  /auth/recovery/rotation/confirm:
+    post:
+      tags: [Authentication]
+      summary: Activate a saved recovery-code set
+      description: |
+        Requires the same account's authenticated first-party device session.
+        Atomically activates the pending set and invalidates the old active set.
+        Repeating confirmation for the still-active rotation is idempotent and
+        reports its current unused count. Expired, replaced, foreign, and
+        superseded rotation IDs all return the same generic response.
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rotation_id]
+              properties:
+                rotation_id: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Pending set is active
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [remaining]
+                properties:
+                  remaining: {type: integer, minimum: 0, maximum: 10}
+        "404": {description: Invalid or expired rotation}
   /auth/recovery/redeem:
     post:
       tags: [Authentication]

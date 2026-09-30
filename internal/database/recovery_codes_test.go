@@ -3,6 +3,8 @@ package database
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -24,14 +26,23 @@ func TestRecoveryCodeFormatting(t *testing.T) {
 	}
 }
 
+func activateRecoveryCodes(t *testing.T, db *DB, userID string) []string {
+	t.Helper()
+	rotation, err := db.BeginRecoveryCodeRotation(context.Background(), userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := db.ConfirmRecoveryCodeRotation(context.Background(), userID, rotation.ID); err != nil || count != recoveryCodeCount {
+		t.Fatalf("confirm recovery codes = %d, %v", count, err)
+	}
+	return rotation.Codes
+}
+
 func TestRecoveryCodeConcurrentRedemption(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
 	ctx := context.Background()
 	userID := insertPasskeyTestUser(t, db)
-	codes, err := db.ReplaceRecoveryCodes(ctx, userID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	codes := activateRecoveryCodes(t, db, userID)
 	next, err := RandomFirstPartyRefreshToken()
 	if err != nil {
 		t.Fatal(err)
@@ -82,10 +93,7 @@ func TestRecoveryCodeExactRetryExpiresAndHonorsSessionRevocation(t *testing.T) {
 	for _, mode := range []string{"expired", "revoked"} {
 		t.Run(mode, func(t *testing.T) {
 			userID := insertPasskeyTestUser(t, db)
-			codes, err := db.ReplaceRecoveryCodes(ctx, userID)
-			if err != nil {
-				t.Fatal(err)
-			}
+			codes := activateRecoveryCodes(t, db, userID)
 			next, err := RandomFirstPartyRefreshToken()
 			if err != nil {
 				t.Fatal(err)
@@ -115,10 +123,7 @@ func TestRecoveryCodeExactRetryRejectsSpentOrExpiredSuccessor(t *testing.T) {
 	for _, mode := range []string{"spent", "expired"} {
 		t.Run(mode, func(t *testing.T) {
 			userID := insertPasskeyTestUser(t, db)
-			codes, err := db.ReplaceRecoveryCodes(ctx, userID)
-			if err != nil {
-				t.Fatal(err)
-			}
+			codes := activateRecoveryCodes(t, db, userID)
 			next, err := RandomFirstPartyRefreshToken()
 			if err != nil {
 				t.Fatal(err)
@@ -164,10 +169,7 @@ func TestRecoveryCodeReplayedSuccessorDoesNotConsumeCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	codes, err := db.ReplaceRecoveryCodes(ctx, userID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	codes := activateRecoveryCodes(t, db, userID)
 	if _, err := db.RedeemRecoveryCode(ctx, codes[0], "web", "New browser", existing.RefreshToken); !errors.Is(err, ErrRecoveryCodeInvalid) {
 		t.Fatalf("replayed successor = %v", err)
 	}
@@ -177,5 +179,265 @@ func TestRecoveryCodeReplayedSuccessorDoesNotConsumeCode(t *testing.T) {
 	var sessions int
 	if err := db.GetContext(ctx, &sessions, `SELECT COUNT(*) FROM auth_sessions WHERE user_id = $1`, userID); err != nil || sessions != 1 {
 		t.Fatalf("replayed successor created session: count=%d err=%v", sessions, err)
+	}
+}
+
+func TestRecoveryCodeRotationPreservesOldSetUntilConfirmAndRecoversLostResponses(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := insertPasskeyTestUser(t, db)
+	oldCodes := activateRecoveryCodes(t, db, userID)
+
+	lost, err := db.BeginRecoveryCodeRotation(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := db.BeginRecoveryCodeRotation(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ConfirmRecoveryCodeRotation(ctx, userID, lost.ID); !errors.Is(err, ErrRecoveryRotationInvalid) {
+		t.Fatalf("discarded lost begin remained confirmable: %v", err)
+	}
+	if count, err := db.RemainingRecoveryCodes(ctx, userID); err != nil || count != recoveryCodeCount {
+		t.Fatalf("begin changed active count = %d, %v", count, err)
+	}
+	for _, pendingCode := range []string{lost.Codes[0], replacement.Codes[0]} {
+		next, _ := RandomFirstPartyRefreshToken()
+		if _, err := db.RedeemRecoveryCode(ctx, pendingCode, "ios", "Phone", next); !errors.Is(err, ErrRecoveryCodeInvalid) {
+			t.Fatalf("pending code redeemed before confirmation: %v", err)
+		}
+	}
+	oldNext, _ := RandomFirstPartyRefreshToken()
+	if _, err := db.RedeemRecoveryCode(ctx, oldCodes[0], "ios", "Phone", oldNext); err != nil {
+		t.Fatalf("old code stopped working before confirmation: %v", err)
+	}
+	if count, err := db.ConfirmRecoveryCodeRotation(ctx, userID, replacement.ID); err != nil || count != recoveryCodeCount {
+		t.Fatalf("confirm replacement = %d, %v", count, err)
+	}
+	if count, err := db.ConfirmRecoveryCodeRotation(ctx, userID, replacement.ID); err != nil || count != recoveryCodeCount {
+		t.Fatalf("lost confirm retry = %d, %v", count, err)
+	}
+	oldNext, _ = RandomFirstPartyRefreshToken()
+	if _, err := db.RedeemRecoveryCode(ctx, oldCodes[1], "ios", "Phone", oldNext); !errors.Is(err, ErrRecoveryCodeInvalid) {
+		t.Fatalf("old code remained active after confirmation: %v", err)
+	}
+	newNext, _ := RandomFirstPartyRefreshToken()
+	if _, err := db.RedeemRecoveryCode(ctx, replacement.Codes[0], "ios", "Phone", newNext); err != nil {
+		t.Fatalf("confirmed code did not redeem: %v", err)
+	}
+	if count, err := db.ConfirmRecoveryCodeRotation(ctx, userID, replacement.ID); err != nil || count != recoveryCodeCount-1 {
+		t.Fatalf("idempotent confirm after redemption = %d, %v", count, err)
+	}
+
+	newer, err := db.BeginRecoveryCodeRotation(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ConfirmRecoveryCodeRotation(ctx, userID, newer.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ConfirmRecoveryCodeRotation(ctx, userID, replacement.ID); !errors.Is(err, ErrRecoveryRotationInvalid) {
+		t.Fatalf("superseded confirmed rotation reported success: %v", err)
+	}
+}
+
+func TestRecoveryCodeRotationRejectsForeignAndExpiredPendingSet(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	ownerID := insertPasskeyTestUser(t, db)
+	otherID := insertPasskeyTestUser(t, db)
+	oldCodes := activateRecoveryCodes(t, db, ownerID)
+	pending, err := db.BeginRecoveryCodeRotation(ctx, ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ConfirmRecoveryCodeRotation(ctx, otherID, pending.ID); !errors.Is(err, ErrRecoveryRotationInvalid) {
+		t.Fatalf("other user confirmed rotation: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE auth_recovery_code_rotations SET expires_at = NOW() - INTERVAL '1 second' WHERE id = $1`, pending.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ConfirmRecoveryCodeRotation(ctx, ownerID, pending.ID); !errors.Is(err, ErrRecoveryRotationInvalid) {
+		t.Fatalf("expired rotation confirmed: %v", err)
+	}
+	if count, err := db.RemainingRecoveryCodes(ctx, ownerID); err != nil || count != recoveryCodeCount {
+		t.Fatalf("expired pending set changed active count = %d, %v", count, err)
+	}
+	oldNext, _ := RandomFirstPartyRefreshToken()
+	if _, err := db.RedeemRecoveryCode(ctx, oldCodes[0], "android", "Tablet", oldNext); err != nil {
+		t.Fatalf("expired rotation invalidated old set: %v", err)
+	}
+	pendingNext, _ := RandomFirstPartyRefreshToken()
+	if _, err := db.RedeemRecoveryCode(ctx, pending.Codes[0], "android", "Tablet", pendingNext); !errors.Is(err, ErrRecoveryCodeInvalid) {
+		t.Fatalf("expired pending code became active: %v", err)
+	}
+}
+
+func TestRecoveryCodeRotationConfirmationRollsBackAtomically(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := insertPasskeyTestUser(t, db)
+	oldCodes := activateRecoveryCodes(t, db, userID)
+	pending, err := db.BeginRecoveryCodeRotation(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	triggerName := "fail_recovery_activation"
+	functionName := "fail_recovery_activation_fn"
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DROP TRIGGER IF EXISTS fail_recovery_activation ON auth_recovery_codes`)
+		_, _ = db.ExecContext(context.Background(), `DROP FUNCTION IF EXISTS fail_recovery_activation_fn()`)
+	})
+	if _, err := db.ExecContext(ctx, `
+		CREATE FUNCTION fail_recovery_activation_fn() RETURNS trigger AS $$
+		BEGIN
+			IF NEW.active AND NOT OLD.active THEN RAISE EXCEPTION 'injected activation failure'; END IF;
+			RETURN NEW;
+		END; $$ LANGUAGE plpgsql`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER `+triggerName+` BEFORE UPDATE ON auth_recovery_codes FOR EACH ROW EXECUTE FUNCTION `+functionName+`()`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ConfirmRecoveryCodeRotation(ctx, userID, pending.ID); err == nil || errors.Is(err, ErrRecoveryRotationInvalid) {
+		t.Fatalf("injected confirmation failure = %v", err)
+	}
+	if count, err := db.RemainingRecoveryCodes(ctx, userID); err != nil || count != recoveryCodeCount {
+		t.Fatalf("rollback lost active set = %d, %v", count, err)
+	}
+	oldNext, _ := RandomFirstPartyRefreshToken()
+	if _, err := db.RedeemRecoveryCode(ctx, oldCodes[0], "ios", "Phone", oldNext); err != nil {
+		t.Fatalf("old code failed after rollback: %v", err)
+	}
+	var pendingActive int
+	if err := db.GetContext(ctx, &pendingActive, `SELECT COUNT(*) FROM auth_recovery_codes WHERE rotation_id = $1 AND active`, pending.ID); err != nil || pendingActive != 0 {
+		t.Fatalf("rollback activated pending set = %d, %v", pendingActive, err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TRIGGER `+triggerName+` ON auth_recovery_codes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP FUNCTION `+functionName+`()`); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := db.ConfirmRecoveryCodeRotation(ctx, userID, pending.ID); err != nil || count != recoveryCodeCount {
+		t.Fatalf("confirmation after rollback = %d, %v", count, err)
+	}
+}
+
+func TestRecoveryCodeRotationSerializesConfirmRedeemAndBegin(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := insertPasskeyTestUser(t, db)
+	oldCodes := activateRecoveryCodes(t, db, userID)
+	pending, err := db.BeginRecoveryCodeRotation(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 3)
+	var workers sync.WaitGroup
+	workers.Add(3)
+	go func() {
+		defer workers.Done()
+		<-start
+		_, err := db.ConfirmRecoveryCodeRotation(ctx, userID, pending.ID)
+		if err != nil && !errors.Is(err, ErrRecoveryRotationInvalid) {
+			errs <- err
+			return
+		}
+		errs <- nil
+	}()
+	go func() {
+		defer workers.Done()
+		<-start
+		next, _ := RandomFirstPartyRefreshToken()
+		_, err := db.RedeemRecoveryCode(ctx, oldCodes[0], "ios", "Phone", next)
+		if err != nil && !errors.Is(err, ErrRecoveryCodeInvalid) {
+			errs <- err
+			return
+		}
+		errs <- nil
+	}()
+	go func() {
+		defer workers.Done()
+		<-start
+		_, err := db.BeginRecoveryCodeRotation(ctx, userID)
+		errs <- err
+	}()
+	close(start)
+	workers.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if count, err := db.RemainingRecoveryCodes(ctx, userID); err != nil || (count != recoveryCodeCount && count != recoveryCodeCount-1) {
+		t.Fatalf("serialized active count = %d, %v", count, err)
+	}
+	var pendingRotations, pendingCodes int
+	if err := db.GetContext(ctx, &pendingRotations, `SELECT COUNT(*) FROM auth_recovery_code_rotations WHERE user_id = $1 AND confirmed_at IS NULL`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.GetContext(ctx, &pendingCodes, `SELECT COUNT(*) FROM auth_recovery_codes WHERE user_id = $1 AND NOT active`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if pendingRotations != 1 || pendingCodes != recoveryCodeCount {
+		t.Fatalf("serialized pending state: rotations=%d codes=%d", pendingRotations, pendingCodes)
+	}
+}
+
+func TestRecoveryCodeRotationMigrationDownAndUp(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	readMigration := func(name string) string {
+		t.Helper()
+		contents, err := os.ReadFile(filepath.Join("..", "..", "migrations", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(contents)
+	}
+	objectExists := func(query string, args ...any) bool {
+		t.Helper()
+		var exists bool
+		if err := tx.GetContext(ctx, &exists, query, args...); err != nil {
+			t.Fatal(err)
+		}
+		return exists
+	}
+
+	if _, err := tx.ExecContext(ctx, readMigration("049_two_phase_recovery_code_rotation.down.sql")); err != nil {
+		t.Fatalf("apply migration 049 down: %v", err)
+	}
+	if objectExists(`SELECT to_regclass('auth_recovery_code_rotations') IS NOT NULL`) {
+		t.Fatal("rotation table remained after down migration")
+	}
+	if objectExists(`SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'auth_recovery_codes' AND column_name IN ('rotation_id', 'active'))`) {
+		t.Fatal("rotation columns remained after down migration")
+	}
+	if !objectExists(`SELECT to_regclass('auth_recovery_codes_user_id_idx') IS NOT NULL`) || objectExists(`SELECT to_regclass('auth_recovery_codes_user_active_idx') IS NOT NULL`) {
+		t.Fatal("down migration did not restore the legacy recovery-code index")
+	}
+
+	if _, err := tx.ExecContext(ctx, readMigration("049_two_phase_recovery_code_rotation.up.sql")); err != nil {
+		t.Fatalf("apply migration 049 up: %v", err)
+	}
+	if !objectExists(`SELECT to_regclass('auth_recovery_code_rotations') IS NOT NULL`) {
+		t.Fatal("rotation table missing after up migration")
+	}
+	var columns int
+	if err := tx.GetContext(ctx, &columns, `SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'auth_recovery_codes' AND column_name IN ('rotation_id', 'active')`); err != nil || columns != 2 {
+		t.Fatalf("rotation columns after up = %d, %v", columns, err)
+	}
+	if !objectExists(`SELECT to_regclass('auth_recovery_codes_user_active_idx') IS NOT NULL`) || objectExists(`SELECT to_regclass('auth_recovery_codes_user_id_idx') IS NOT NULL`) {
+		t.Fatal("up migration did not install only the active recovery-code index")
 	}
 }

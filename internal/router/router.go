@@ -156,7 +156,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			jwtProtected.POST("/auth/passkeys/register/begin", h.BeginPasskeyRegistration)
 			jwtProtected.POST("/auth/passkeys/register/finish", h.FinishPasskeyRegistration)
 			jwtProtected.GET("/auth/recovery", h.RecoveryCodeStatus)
-			jwtProtected.POST("/auth/recovery", h.ReplaceRecoveryCodes)
+			jwtProtected.POST("/auth/recovery/rotation/begin", h.BeginRecoveryCodeRotation)
+			jwtProtected.POST("/auth/recovery/rotation/confirm", h.ConfirmRecoveryCodeRotation)
 		}
 		jwtProtected.DELETE("/account", h.DeleteAccount)
 		if cfg.LegacyAuthEnabled {
