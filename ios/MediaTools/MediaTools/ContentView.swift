@@ -6,7 +6,11 @@ struct ContentView: View {
     @Environment(Clerk.self) private var clerk
     @Environment(RecordingUploadCoordinator.self) private var uploadCoordinator
     @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
+    @Environment(DeviceSessionController.self) private var deviceSession
     @State private var showAuth = false
+    @State private var isResolvingAccount = Configuration.firstPartyIOSAuthEnabled
+    @State private var migrationFailed = false
+    @State private var migrationRetry = 0
     private let forceSignedOutForUITesting: Bool
     private let tokenSync = TokenSyncService.shared
 
@@ -15,12 +19,34 @@ struct ContentView: View {
     }
 
     private var activeUserID: String? {
-        forceSignedOutForUITesting ? nil : clerk.user?.id
+        if forceSignedOutForUITesting { return nil }
+        guard Configuration.firstPartyIOSAuthEnabled else {
+            return deviceSession.fallbackOwnerID(for: clerk.user?.id)
+        }
+        if let clerkID = clerk.user?.id,
+           let migration = deviceSession.verifiedMigration,
+           migration.clerkID != clerkID {
+            return nil
+        }
+        return deviceSession.activeUserID
     }
 
     var body: some View {
         Group {
-            if activeUserID != nil {
+            if isResolvingAccount && Configuration.firstPartyIOSAuthEnabled {
+                ProgressView("Restoring your workspace…")
+            } else if migrationFailed {
+                VStack(spacing: 16) {
+                    Text("Your local recordings could not be connected to this account.")
+                        .multilineTextAlignment(.center)
+                    Button("Try again") { migrationRetry += 1 }
+                        .frame(minHeight: 44)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .foregroundStyle(Theme.textPrimary)
+                .background(Theme.surface)
+            } else if activeUserID != nil {
                 MainTabView()
                     .onAppear {
                         tokenSync.startSyncing()
@@ -35,9 +61,50 @@ struct ContentView: View {
                     }
             }
         }
-        .task(id: activeUserID) {
-            await uploadCoordinator.setActiveOwnerID(activeUserID)
-            aiProcessingConsent.setActiveOwnerID(activeUserID)
+        .task(id: "\(clerk.user?.id ?? "signed-out")|\(deviceSession.needsSignIn)|\(migrationRetry)") {
+            let clerkID = forceSignedOutForUITesting ? nil : clerk.user?.id
+            if Configuration.firstPartyIOSAuthEnabled && !forceSignedOutForUITesting {
+                isResolvingAccount = true
+                migrationFailed = false
+                let ownerID = await deviceSession.activate(clerkID: clerkID)
+                guard !Task.isCancelled else { return }
+                if let migration = deviceSession.verifiedMigration {
+                    do {
+                        try await uploadCoordinator.migrateOwnerID(
+                            from: migration.clerkID,
+                            to: migration.userID
+                        )
+                        aiProcessingConsent.migrateConsent(
+                            from: migration.clerkID,
+                            to: migration.userID
+                        )
+                    } catch {
+                        guard !Task.isCancelled else { return }
+                        // A partial migration is repeatable, but exposing the
+                        // workspace here could hide Clerk-owned recordings.
+                        await uploadCoordinator.setActiveOwnerID(nil)
+                        aiProcessingConsent.setActiveOwnerID(nil)
+                        migrationFailed = true
+                        isResolvingAccount = false
+                        return
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                aiProcessingConsent.setActiveOwnerID(ownerID)
+                await uploadCoordinator.setActiveOwnerID(ownerID)
+                isResolvingAccount = false
+            } else {
+                let ownerID: String?
+                if forceSignedOutForUITesting {
+                    ownerID = nil
+                } else {
+                    ownerID = await deviceSession.activate(clerkID: clerkID)
+                }
+                await uploadCoordinator.setActiveOwnerID(ownerID)
+                guard !Task.isCancelled else { return }
+                aiProcessingConsent.setActiveOwnerID(ownerID)
+                isResolvingAccount = false
+            }
         }
         .sheet(isPresented: $showAuth) {
             AuthView()

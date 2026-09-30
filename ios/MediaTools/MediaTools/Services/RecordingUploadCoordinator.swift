@@ -73,6 +73,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     private var watchTasks: [String: Task<Void, Never>] = [:]
     private var retryAttempts: [UUID: Int] = [:]
     private var hasReconciledTransfers = false
+    /// Handles callbacks already queued by iOS while task descriptions change.
+    private var verifiedOwnerAliases: [String: String] = [:]
     private let simulatesUpload: Bool
 
     init(
@@ -150,6 +152,42 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         if ownerID != nil {
             resumePendingWork()
         }
+    }
+
+    /// Called only with a Clerk subject and users.id returned by the verified
+    /// bootstrap for that same account. This is safe to repeat after a crash.
+    func migrateOwnerID(from clerkID: String, to userID: String) async throws {
+        guard clerkID != userID else { return }
+        verifiedOwnerAliases[clerkID] = userID
+        let migratingIDs = recorder.recordingIDsOwned(by: clerkID)
+        for recordingID in migratingIDs {
+            uploadTasks[recordingID]?.cancel()
+            uploadTasks[recordingID] = nil
+            retryTasks[recordingID]?.cancel()
+            retryTasks[recordingID] = nil
+        }
+        try recorder.migrateOwnerID(from: clerkID, to: userID)
+
+        var migratedWatches = watches
+        for index in migratedWatches.indices where migratedWatches[index].ownerID == clerkID {
+            migratedWatches[index].ownerID = userID
+        }
+        try watchStore?.save(migratedWatches)
+        for watch in watches where watch.ownerID == clerkID {
+            watchTasks[watch.id]?.cancel()
+            watchTasks[watch.id] = nil
+        }
+        watches = migratedWatches
+
+        var pendingDeletionOwners = pendingLocalAccountDeletionOwnerIDs
+        if pendingDeletionOwners.remove(clerkID) != nil {
+            pendingDeletionOwners.insert(userID)
+            localAccountDefaults.set(
+                pendingDeletionOwners.sorted(),
+                forKey: Self.pendingLocalAccountDeletionOwnerIDsKey
+            )
+        }
+        await transport.migrateOwnerID(from: clerkID, to: userID)
     }
 
     /// Records the deletion intent before touching files. A transient device
@@ -303,9 +341,12 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         case .progress(let value, _), .completed(let value), .failed(let value, _, _):
             metadata = value
         }
-        guard let ownerID = metadata.ownerID
+        guard let rawOwnerID = metadata.ownerID
                 ?? recorder.recording(withID: metadata.recordingID)?.ownerID,
-              isActiveOwner(recordingID: metadata.recordingID, expectedOwnerID: ownerID)
+              isActiveOwner(
+                recordingID: metadata.recordingID,
+                expectedOwnerID: verifiedOwnerAliases[rawOwnerID] ?? rawOwnerID
+              )
         else { return }
 
         switch event {

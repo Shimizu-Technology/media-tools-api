@@ -2,7 +2,7 @@ import Foundation
 import ClerkKit
 
 /// HTTP client for the Media Tools API.
-/// Uses Clerk session token for authentication.
+/// Uses a staged first-party device session when available, otherwise Clerk.
 actor APIClient {
     static let shared = APIClient()
 
@@ -52,6 +52,14 @@ actor APIClient {
             "Accept": "application/json"
         ]
 
+        if let token = try await DeviceSessionController.shared.accessToken(
+            expectedOwnerID: expectedOwnerID,
+            forceRefresh: forceRefresh
+        ) {
+            headers["Authorization"] = "Bearer \(token)"
+            return headers
+        }
+
         guard !Configuration.clerkPublishableKey.isEmpty else {
             throw APIError.authenticationRequired(
                 message: "Media Tools authentication is not configured in this build."
@@ -60,7 +68,14 @@ actor APIClient {
         guard let session = await Clerk.shared.session else {
             throw APIError.authenticationRequired(message: "Sign in to continue.")
         }
-        if let expectedOwnerID, session.user?.id != expectedOwnerID {
+        let expectedClerkID: String?
+        if let expectedOwnerID {
+            expectedClerkID = await DeviceSessionController.shared
+                .clerkIDForFallbackOwner(expectedOwnerID) ?? expectedOwnerID
+        } else {
+            expectedClerkID = nil
+        }
+        if let expectedClerkID, session.user?.id != expectedClerkID {
             throw APIError.authenticationRequired(
                 message: "The signed-in account changed. Switch back to continue this upload."
             )
@@ -89,7 +104,7 @@ actor APIClient {
         }
         guard let currentSession = await Clerk.shared.session,
               currentSession.id == sessionID,
-              expectedOwnerID == nil || currentSession.user?.id == expectedOwnerID
+              expectedClerkID == nil || currentSession.user?.id == expectedClerkID
         else {
             throw APIError.authenticationRequired(
                 message: "The signed-in account changed. Switch back to continue this upload."
@@ -122,7 +137,7 @@ actor APIClient {
     }
 
     /// Send an authenticated API request and recover once from a rejected
-    /// cached Clerk token. The retry is deliberately limited to one attempt so
+    /// cached credential. The retry is deliberately limited to one attempt so
     /// a revoked session never creates a request loop.
     private func data(
         for originalRequest: URLRequest,

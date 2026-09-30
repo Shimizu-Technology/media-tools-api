@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(Clerk.self) private var clerk
     @Environment(RecordingUploadCoordinator.self) private var uploadCoordinator
     @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
+    @Environment(DeviceSessionController.self) private var deviceSession
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
@@ -22,6 +23,10 @@ struct SettingsView: View {
     @State private var deletionConfirmation = ""
     @State private var isDeletingAccount = false
     @State private var deleteAccountError: String?
+    @State private var deviceAccount: DeviceAccount?
+    @State private var isLoadingDeviceAccount = false
+    @State private var deviceAccountError: String?
+    @State private var deviceAccountRetry = 0
 
     var body: some View {
         ScrollView {
@@ -41,6 +46,23 @@ struct SettingsView: View {
         .background(Theme.surface)
         .navigationTitle("Settings")
         .task { await refreshNotificationState() }
+        .task(id: "\(deviceSession.activeUserID ?? "")|\(clerk.user?.id ?? "")|\(deviceAccountRetry)") {
+            deviceAccount = nil
+            deviceAccountError = nil
+            guard Configuration.firstPartyIOSAuthEnabled,
+                  deviceSession.activeUserID != nil,
+                  clerk.user == nil else { return }
+            isLoadingDeviceAccount = true
+            do {
+                let account: DeviceAccount = try await APIClient.shared.get("/auth/me")
+                guard !Task.isCancelled else { return }
+                deviceAccount = account
+            } catch {
+                guard !Task.isCancelled else { return }
+                deviceAccountError = "Could not load your account details."
+            }
+            isLoadingDeviceAccount = false
+        }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await refreshNotificationState() }
@@ -147,6 +169,31 @@ struct SettingsView: View {
 
                     Spacer()
                 }
+                .cardStyle()
+            }
+        } else if Configuration.firstPartyIOSAuthEnabled,
+                  deviceSession.activeUserID != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionHeader(text: "Account", icon: "person.circle")
+                VStack(alignment: .leading, spacing: 8) {
+                    if let deviceAccount {
+                        Text(deviceAccount.name.isEmpty ? "Media Tools account" : deviceAccount.name)
+                            .font(Theme.body(16, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text(deviceAccount.email)
+                            .font(Theme.caption(13))
+                            .foregroundStyle(Theme.textSecondary)
+                    } else if isLoadingDeviceAccount {
+                        ProgressView("Loading account…")
+                    } else if let deviceAccountError {
+                        Text(deviceAccountError)
+                            .font(Theme.caption(13))
+                            .foregroundStyle(Theme.error)
+                        Button("Try again") { deviceAccountRetry += 1 }
+                            .frame(minHeight: 44)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .cardStyle()
             }
         }
@@ -582,7 +629,10 @@ struct SettingsView: View {
         defer { isSigningOut = false }
 
         do {
-            try await clerk.auth.signOut()
+            try await deviceSession.revokeOrSuspend()
+            if clerk.user != nil {
+                try await clerk.auth.signOut()
+            }
             await uploadCoordinator.setActiveOwnerID(nil)
         } catch {
             signOutError = "Couldn’t sign out. Please try again."
@@ -590,7 +640,8 @@ struct SettingsView: View {
     }
 
     private func deleteAccount() async {
-        guard deletionConfirmation == "DELETE", let ownerID = clerk.user?.id else { return }
+        guard deletionConfirmation == "DELETE",
+              let ownerID = deviceSession.activeUserID ?? clerk.user?.id else { return }
         isDeletingAccount = true
         deleteAccountError = nil
         defer { isDeletingAccount = false }
@@ -607,13 +658,23 @@ struct SettingsView: View {
 
         await uploadCoordinator.removeLocalAccountData(ownerID: ownerID)
         aiProcessingConsent.removeConsent(ownerID: ownerID)
+        if let migration = deviceSession.verifiedMigration,
+           migration.userID == ownerID {
+            aiProcessingConsent.removeConsent(ownerID: migration.clerkID)
+        }
+        if let clerkID = deviceSession.clerkIDForFallbackOwner(ownerID) {
+            deviceSession.removeLocalOwnerMapping(clerkID: clerkID)
+        }
+        deviceSession.clear()
         // The server has accepted an irreversible deletion request. Stop the
         // share-extension sync before clearing its token so a still-present
         // Clerk session cannot write the credential back if sign-out fails.
         tokenSync.stopSyncing()
         tokenSync.clearToken()
         do {
-            try await clerk.auth.signOut()
+            if clerk.user != nil {
+                try await clerk.auth.signOut()
+            }
             showDeleteAccount = false
         } catch {
             deleteAccountError = "Your account deletion is underway, but this device could not finish signing out. Close and reopen Media Tools."
@@ -623,6 +684,12 @@ struct SettingsView: View {
 
 private struct DeleteAccountRequest: Encodable {
     let confirmation: String
+}
+
+private struct DeviceAccount: Decodable {
+    let id: String
+    let email: String
+    let name: String
 }
 
 private struct SettingsActionRow: View {

@@ -114,6 +114,29 @@ final class BackgroundUploadService: NSObject, URLSessionDelegate, URLSessionTas
         }
     }
 
+    /// Update task descriptions after a verified owner-ID migration. S3 PUTs
+    /// continue independently of app authentication, so they need not restart.
+    func migrateOwnerID(from clerkID: String, to userID: String) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            session.getAllTasks { tasks in
+                for task in tasks {
+                    guard let metadata = Self.metadata(for: task), metadata.ownerID == clerkID else { continue }
+                    let updated = BackgroundUploadMetadata(
+                        recordingID: metadata.recordingID,
+                        ownerID: userID,
+                        filename: metadata.filename,
+                        objectKey: metadata.objectKey,
+                        sizeBytes: metadata.sizeBytes,
+                        mimeType: metadata.mimeType,
+                        contentType: metadata.contentType
+                    )
+                    task.taskDescription = try? JSONEncoder().encode(updated).base64EncodedString()
+                }
+                continuation.resume()
+            }
+        }
+    }
+
     func cancel(recordingIDs: Set<UUID>) async {
         guard !recordingIDs.isEmpty else { return }
         await withCheckedContinuation { continuation in

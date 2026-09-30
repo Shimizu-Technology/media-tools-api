@@ -37,6 +37,12 @@ enum Configuration {
     /// App Group identifier for sharing data with extensions.
     static let appGroupIdentifier = "group.com.shimizu-technology.media-tools"
 
+    /// Staged rollout. The server must also enable FIRST_PARTY_AUTH_ENABLED.
+    /// Missing build settings leave the existing Clerk path in place.
+    static let firstPartyIOSAuthEnabled: Bool = {
+        configuredValue("FIRST_PARTY_IOS_AUTH_ENABLED") == "YES"
+    }()
+
     static let privacyURL = URL(string: "\(webAppURL)/privacy")!
     static let termsURL = URL(string: "\(webAppURL)/terms")!
     static let supportURL = URL(string: "\(webAppURL)/support")!
