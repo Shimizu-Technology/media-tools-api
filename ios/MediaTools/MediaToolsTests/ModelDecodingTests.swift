@@ -1288,6 +1288,10 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertFalse(Configuration.clerkPublishableKey.isEmpty)
     }
 
+    func testShippingClientConfigurationEnablesFirstPartyIOSAuthForQA() {
+        XCTAssertTrue(Configuration.firstPartyIOSAuthEnabled)
+    }
+
     @MainActor
     func testSystemQuickCaptureDoesNotRecordWithoutLiveActivities() async throws {
         let directory = FileManager.default.temporaryDirectory

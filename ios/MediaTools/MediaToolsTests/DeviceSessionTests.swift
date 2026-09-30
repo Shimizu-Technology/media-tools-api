@@ -4,11 +4,15 @@ import XCTest
 @MainActor
 private final class MemoryDeviceSessionStore: DeviceSessionStoring {
     var value: StoredDeviceSession?
+    var pendingBootstrap: PendingDeviceSessionBootstrap?
     private var ownerMappings: [String: String] = [:]
     init(_ value: StoredDeviceSession?) { self.value = value }
     func load() -> StoredDeviceSession? { value }
     func save(_ value: StoredDeviceSession) throws { self.value = value }
     func delete() { value = nil }
+    func loadPendingBootstrap() throws -> PendingDeviceSessionBootstrap? { pendingBootstrap }
+    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws { pendingBootstrap = value }
+    func deletePendingBootstrap() { pendingBootstrap = nil }
     func localOwnerID(for clerkID: String) -> String? { ownerMappings[clerkID] }
     func clerkID(forLocalOwnerID ownerID: String) -> String? {
         ownerMappings.first(where: { $0.value == ownerID })?.key
@@ -170,6 +174,41 @@ final class DeviceSessionTests: XCTestCase {
         XCTAssertEqual(bodies.count, 2)
         XCTAssertEqual(bodies[0]["refresh_token"], bodies[1]["refresh_token"])
         XCTAssertEqual(bodies[0]["next_refresh_token"], bodies[1]["next_refresh_token"])
+    }
+
+    @MainActor
+    func testClerkBootstrapRetriesSameJournaledSuccessorAfterLostResponse() async throws {
+        let store = MemoryDeviceSessionStore(nil)
+        let transport = RecoveringDeviceSessionTransport()
+        let controller = DeviceSessionController(
+            transport: transport,
+            baseURL: URL(string: "https://example.test/api/v1")!,
+            store: store,
+            enabled: true
+        )
+
+        do {
+            try await controller.bootstrapForTesting(verifiedClerkID: "clerk-a", clerkToken: "clerk_jwt_a")
+            XCTFail("Expected the simulated lost bootstrap response")
+        } catch is URLError {
+            // The successor refresh token must already be durable.
+        }
+
+        let pending = try XCTUnwrap(store.pendingBootstrap)
+        XCTAssertEqual(pending.verifiedClerkID, "clerk-a")
+        XCTAssertTrue(pending.nextRefreshToken.hasPrefix("mta_rt_"))
+        XCTAssertNil(store.value)
+
+        try await controller.bootstrapForTesting(verifiedClerkID: "clerk-a", clerkToken: "clerk_jwt_a")
+
+        XCTAssertEqual(store.value?.source, .clerk)
+        XCTAssertEqual(store.value?.verifiedClerkID, "clerk-a")
+        XCTAssertEqual(store.value?.pair.refreshToken, pending.nextRefreshToken)
+        XCTAssertNil(store.pendingBootstrap)
+        let bodies = await transport.bodies()
+        XCTAssertEqual(bodies.count, 2)
+        XCTAssertEqual(bodies[0]["next_refresh_token"], pending.nextRefreshToken)
+        XCTAssertEqual(bodies[1]["next_refresh_token"], pending.nextRefreshToken)
     }
 
     @MainActor
@@ -357,6 +396,176 @@ final class DeviceSessionTests: XCTestCase {
         XCTAssertNil(token)
     }
 
+
+    @MainActor
+    func testNativePasskeySessionPersistsWithoutClerk() async throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-passkey", userID: "server-native", accessToken: "mta_at_native",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_native",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(nil)
+        let controller = DeviceSessionController(store: store, enabled: true)
+
+        try controller.saveSession(pair: pair, source: .passkey)
+        let owner = await controller.activate(clerkID: nil)
+        let token = try await controller.accessToken(expectedOwnerID: "server-native", forceRefresh: false)
+
+        XCTAssertEqual(owner, "server-native")
+        XCTAssertEqual(token, "mta_at_native")
+        XCTAssertEqual(store.value?.source, .passkey)
+        XCTAssertTrue(controller.hasNativeFirstPartySession)
+        XCTAssertNil(controller.verifiedMigration)
+    }
+
+    @MainActor
+    func testNativeSessionRemainsAuthoritativeWhenClerkIsLive() async throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-passkey", userID: "server-native", accessToken: "mta_at_native",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_native",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: pair, source: .passkey, pendingNextRefreshToken: nil)
+        )
+        let controller = DeviceSessionController(store: store, enabled: true)
+
+        let owner = await controller.activate(clerkID: "clerk-other")
+        let token = try await controller.accessToken(expectedOwnerID: "server-native", forceRefresh: false)
+
+        XCTAssertEqual(owner, "server-native")
+        XCTAssertEqual(token, "mta_at_native")
+        XCTAssertNil(store.value?.pendingRevocation)
+        XCTAssertNil(controller.verifiedMigration)
+    }
+
+
+    @MainActor
+    func testPrepareForNewNativeSessionRequiresRevocationBeforeContinuing() async throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-old", userID: "server-old", accessToken: "mta_at_old",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_old",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: pair, source: .passkey, pendingNextRefreshToken: nil)
+        )
+        let controller = DeviceSessionController(
+            transport: RevocationDeviceSessionTransport(shouldFail: false),
+            baseURL: URL(string: "https://example.test/api/v1")!,
+            store: store,
+            enabled: true
+        )
+
+        try await controller.prepareForNewNativeSession()
+
+        XCTAssertNil(store.value)
+        XCTAssertNil(controller.activeUserID)
+    }
+
+    @MainActor
+    func testPrepareForNewNativeSessionRejectsPendingRevocation() async throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-old", userID: "server-old", accessToken: "mta_at_old",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_old",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: pair, source: .passkey, pendingNextRefreshToken: nil, pendingRevocation: true)
+        )
+        let controller = DeviceSessionController(store: store, enabled: true)
+
+        do {
+            try await controller.prepareForNewNativeSession()
+            XCTFail("Suspended revocation credentials must block account switching")
+        } catch APIError.authenticationRequired {
+            XCTAssertEqual(store.value?.pendingRevocation, true)
+        }
+    }
+
+    @MainActor
+    func testReplacingSessionRevokesExistingCredentialBeforeSavingRecoverySession() async throws {
+        let oldPair = DeviceSessionPair(
+            sessionID: "session-old", userID: "server-old", accessToken: "mta_at_old",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_old",
+            inactiveExpiresAt: .distantFuture
+        )
+        let newPair = DeviceSessionPair(
+            sessionID: "session-new", userID: "server-new", accessToken: "mta_at_new",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_new",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: oldPair, verifiedClerkID: "clerk-old",
+                                pendingNextRefreshToken: nil)
+        )
+        let controller = DeviceSessionController(
+            transport: RevocationDeviceSessionTransport(shouldFail: false),
+            baseURL: URL(string: "https://example.test/api/v1")!,
+            store: store,
+            enabled: true
+        )
+
+        try await controller.replaceSession(pair: newPair, source: .recoveryCode)
+
+        XCTAssertEqual(store.value?.pair, newPair)
+        XCTAssertEqual(store.value?.source, .recoveryCode)
+        XCTAssertEqual(controller.activeUserID, "server-new")
+    }
+
+    @MainActor
+    func testReplacingSessionRejectsSuspendedRevocationCredential() async throws {
+        let oldPair = DeviceSessionPair(
+            sessionID: "session-old", userID: "server-old", accessToken: "mta_at_old",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_old",
+            inactiveExpiresAt: .distantFuture
+        )
+        let newPair = DeviceSessionPair(
+            sessionID: "session-new", userID: "server-new", accessToken: "mta_at_new",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_new",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: oldPair, verifiedClerkID: "clerk-old",
+                                pendingNextRefreshToken: nil, pendingRevocation: true)
+        )
+        let controller = DeviceSessionController(store: store, enabled: true)
+
+        do {
+            try await controller.replaceSession(pair: newPair, source: .passkey)
+            XCTFail("A suspended credential must not be overwritten")
+        } catch APIError.authenticationRequired {
+            XCTAssertEqual(store.value?.pair, oldPair)
+            XCTAssertEqual(store.value?.pendingRevocation, true)
+        }
+    }
+
+    func testLegacyStoredClerkSessionDecodesWithClerkSource() throws {
+        struct LegacyStoredDeviceSession: Encodable {
+            var pair: DeviceSessionPair
+            let verifiedClerkID: String
+            var pendingNextRefreshToken: String?
+        }
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let data = try JSONEncoder().encode(
+            LegacyStoredDeviceSession(
+                pair: pair,
+                verifiedClerkID: "clerk-a",
+                pendingNextRefreshToken: nil
+            )
+        )
+
+        let decoded = try JSONDecoder().decode(StoredDeviceSession.self, from: data)
+
+        XCTAssertEqual(decoded.source, .clerk)
+        XCTAssertEqual(decoded.verifiedClerkID, "clerk-a")
+        XCTAssertEqual(decoded.pair, pair)
+    }
+
     @MainActor
     func testOldRefreshCannotInvalidateClearedSession() async throws {
         let pair = DeviceSessionPair(
@@ -387,5 +596,29 @@ final class DeviceSessionTests: XCTestCase {
         } catch is CancellationError {
             XCTAssertFalse(controller.needsSignIn)
         }
+    }
+
+    @MainActor
+    func testClerkFallbackRequiresTheSameStableOwner() {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let controller = DeviceSessionController(
+            store: MemoryDeviceSessionStore(
+                StoredDeviceSession(
+                    pair: pair,
+                    source: .clerk,
+                    verifiedClerkID: "clerk-a"
+                )
+            ),
+            enabled: true
+        )
+
+        XCTAssertTrue(controller.canFallbackToClerk(clerkID: "clerk-a", expectedOwnerID: nil))
+        XCTAssertTrue(controller.canFallbackToClerk(clerkID: "clerk-a", expectedOwnerID: "server-a"))
+        XCTAssertFalse(controller.canFallbackToClerk(clerkID: "clerk-b", expectedOwnerID: nil))
+        XCTAssertFalse(controller.canFallbackToClerk(clerkID: "clerk-a", expectedOwnerID: "server-b"))
     }
 }

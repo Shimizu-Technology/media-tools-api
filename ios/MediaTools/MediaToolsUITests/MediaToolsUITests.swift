@@ -65,12 +65,14 @@ final class MediaToolsUITests: XCTestCase {
         app.launchArguments = ["-ui-test-welcome"]
         app.launch()
 
-        XCTAssertTrue(app.buttons["Sign in or create account"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Continue with passkey"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Use a recovery code"].exists)
+        XCTAssertTrue(app.buttons["Use Apple, Google, or email"].exists)
         let options = app.staticTexts["welcome.authentication.options"]
         XCTAssertTrue(options.exists)
         XCTAssertEqual(
             options.label,
-            "Continue with Apple, Google, or email. Apple lets you keep your email private."
+            "Use passkey or recovery code first. Apple, Google, and email remain available for existing accounts during migration."
         )
     }
 
@@ -112,6 +114,75 @@ final class MediaToolsUITests: XCTestCase {
         }
         XCTAssertTrue(openShortcuts.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Review setup"].exists)
+    }
+
+
+
+    func testSignInSecurityStatusFailureShowsRetryAndKeepsPreviousCounts() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-test-security-status-error"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Could not check sign-in security."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["1 passkey is set up."].exists)
+        XCTAssertTrue(app.staticTexts["2 recovery codes left"].exists)
+        let retry = app.buttons["sign-in-security.retry"]
+        XCTAssertTrue(retry.exists)
+        retry.tap()
+        XCTAssertTrue(app.staticTexts["Security status refreshed"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Could not check sign-in security."].exists)
+    }
+
+    func testRecoveryCodeOneTimeDisplayRequiresExplicitSavedConfirmation() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-test-recovery-codes-sheet"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Save recovery codes"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["recovery-codes.copy-all"].exists)
+        XCTAssertTrue(app.buttons["Share"].exists)
+        let saved = app.buttons["recovery-codes.saved"]
+        XCTAssertTrue(saved.exists)
+        saved.tap()
+        XCTAssertFalse(app.staticTexts["Save recovery codes"].waitForExistence(timeout: 2))
+    }
+
+
+
+    func testRecoveryCodeSignInSheetSupportsLargeDynamicType() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-test-recovery-sign-in-sheet",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Use recovery code"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["Recovery code"].exists || app.textFields["recovery-code.sign-in-field"].exists)
+        let continueButton = app.buttons["recovery-code.continue"]
+        if !continueButton.exists || !continueButton.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(continueButton.exists)
+    }
+
+    func testRecoveryCodeSheetSupportsLargeDynamicType() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-test-recovery-codes-sheet",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Save recovery codes"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["recovery-codes.copy-all"].exists)
+        let saved = app.buttons["recovery-codes.saved"]
+        if !saved.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(saved.isHittable)
     }
 
     func testAppLaunches() {
