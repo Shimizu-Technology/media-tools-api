@@ -6,17 +6,22 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -30,6 +35,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -51,6 +58,7 @@ import com.shimizutechnology.mediatools.api.AndroidDeviceSessionStore
 import com.shimizutechnology.mediatools.api.DeviceSessionController
 import com.shimizutechnology.mediatools.api.MediaToolsApi
 import com.shimizutechnology.mediatools.api.OkHttpDeviceSessionTransport
+import com.shimizutechnology.mediatools.api.RecoveryAuthController
 import com.shimizutechnology.mediatools.api.SessionTokenProvider
 import com.shimizutechnology.mediatools.consent.AIProcessingConsentStore
 import com.shimizutechnology.mediatools.consent.AndroidConsentPreferences
@@ -64,16 +72,25 @@ import kotlinx.coroutines.launch
 fun MediaToolsApp() {
     val context = LocalContext.current
     val consentStore = remember { AIProcessingConsentStore(AndroidConsentPreferences(context.applicationContext)) }
-    val deviceSession = remember {
+    val sessionStore = remember { AndroidDeviceSessionStore(context.applicationContext) }
+    val sessionTransport = remember { OkHttpDeviceSessionTransport(BuildConfig.API_BASE_URL) }
+    val deviceSession = remember(sessionStore, sessionTransport) {
         DeviceSessionController(
-            AndroidDeviceSessionStore(context.applicationContext),
-            OkHttpDeviceSessionTransport(BuildConfig.API_BASE_URL),
+            sessionStore,
+            sessionTransport,
             currentExternalIdentity = { Clerk.user?.id },
         )
     }
-    if (!MediaToolsApplication.isClerkConfigured(BuildConfig.CLERK_PUBLISHABLE_KEY) &&
-        (!BuildConfig.FIRST_PARTY_ANDROID_AUTH_ENABLED || deviceSession.availableOwnerId(null) == null)
-    ) {
+    val recoveryAuth = remember(sessionStore, sessionTransport, deviceSession) {
+        RecoveryAuthController(
+            sessionStore,
+            sessionTransport,
+            deviceSession,
+            deviceName = { android.os.Build.MODEL ?: "Android" },
+        )
+    }
+    val clerkConfigured = MediaToolsApplication.isClerkConfigured(BuildConfig.CLERK_PUBLISHABLE_KEY)
+    if (!clerkConfigured && !BuildConfig.FIRST_PARTY_ANDROID_AUTH_ENABLED) {
         SetupRequiredScreen()
         return
     }
@@ -117,6 +134,7 @@ fun MediaToolsApp() {
                 ownerId = durableOwnerId,
                 tokenProvider = deviceSession,
                 consentStore = consentStore,
+                recoveryAuth = recoveryAuth,
                 onSignOut = {
                     if (Clerk.session != null && Clerk.auth.signOut() is ClerkResult.Failure) {
                         throw IllegalStateException("Could not finish signing out of the previous sign-in service.")
@@ -131,16 +149,26 @@ fun MediaToolsApp() {
                 },
             )
         }
-        initializationError != null -> AuthUnavailableScreen()
-        !initialized -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        initializationError != null && !BuildConfig.FIRST_PARTY_ANDROID_AUTH_ENABLED -> AuthUnavailableScreen()
+        clerkConfigured && !initialized && !BuildConfig.FIRST_PARTY_ANDROID_AUTH_ENABLED -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
-        user == null || session == null || session?.pendingTaskKey != null -> AuthView(modifier = Modifier.fillMaxSize())
+        !clerkConfigured || !initialized || user == null || session == null || session?.pendingTaskKey != null -> {
+            if (BuildConfig.FIRST_PARTY_ANDROID_AUTH_ENABLED) {
+                SignInScreen(
+                    recoveryAuth = recoveryAuth,
+                    showClerk = clerkConfigured && initialized && initializationError == null,
+                )
+            } else {
+                AuthView(modifier = Modifier.fillMaxSize())
+            }
+        }
         else -> key("clerk:${user!!.id}") {
             SignedInApp(
                 ownerId = user!!.id,
                 tokenProvider = ClerkSessionTokenProvider(),
                 consentStore = consentStore,
+                recoveryAuth = null,
                 onSignOut = {
                     if (Clerk.auth.signOut() is ClerkResult.Failure) {
                         throw IllegalStateException("Could not sign out.")
@@ -153,6 +181,85 @@ fun MediaToolsApp() {
                 },
             )
         }
+    }
+}
+
+@Composable
+private fun SignInScreen(recoveryAuth: RecoveryAuthController, showClerk: Boolean) {
+    val scope = rememberCoroutineScope()
+    var showRecovery by remember { mutableStateOf(false) }
+    var recoveryCode by remember { mutableStateOf("") }
+    var submitting by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    Column(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Sign in to Media Tools", style = androidx.compose.material3.MaterialTheme.typography.headlineSmall)
+            Text(
+                "Use a recovery code if your usual sign-in is unavailable.",
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Button(onClick = { error = null; showRecovery = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("Use a recovery code")
+            }
+        }
+        if (showClerk) {
+            AuthView(modifier = Modifier.fillMaxWidth().weight(1f).heightIn(min = 320.dp))
+        } else {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    "Sign in securely with a recovery code you saved earlier.",
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+
+    if (showRecovery) {
+        AlertDialog(
+            onDismissRequest = { if (!submitting) showRecovery = false },
+            title = { Text("Use a recovery code") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Enter one of the one-time codes you saved for this account.")
+                    OutlinedTextField(
+                        value = recoveryCode,
+                        onValueChange = { recoveryCode = it.uppercase().take(44); error = null },
+                        label = { Text("Recovery code") },
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    error?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = recoveryCode.isNotBlank() && !submitting,
+                    onClick = {
+                        submitting = true
+                        error = null
+                        scope.launch {
+                            runCatching { recoveryAuth.redeem(recoveryCode) }
+                                .onSuccess {
+                                    recoveryCode = ""
+                                    showRecovery = false
+                                }
+                                .onFailure { error = it.message ?: "Recovery sign-in could not be completed." }
+                            submitting = false
+                        }
+                    },
+                ) { Text(if (submitting) "Signing in…" else "Sign in") }
+            },
+            dismissButton = {
+                TextButton(enabled = !submitting, onClick = { showRecovery = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 
@@ -220,6 +327,7 @@ private fun SignedInApp(
     ownerId: String,
     tokenProvider: SessionTokenProvider,
     consentStore: AIProcessingConsentStore,
+    recoveryAuth: RecoveryAuthController?,
     onSignOut: suspend () -> Unit,
     onDeleted: suspend () -> Unit,
 ) {
@@ -287,6 +395,7 @@ private fun SignedInApp(
                     api = api,
                     consentStore = consentStore,
                     ownerId = ownerId,
+                    recoveryAuth = recoveryAuth,
                     onSignOut = onSignOut,
                     onDeleted = onDeleted,
                 )

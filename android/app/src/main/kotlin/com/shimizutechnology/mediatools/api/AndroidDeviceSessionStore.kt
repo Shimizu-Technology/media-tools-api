@@ -55,6 +55,8 @@ class AndroidDeviceSessionStore(context: Context) : DeviceSessionStore {
             preferences.edit()
                 .putString(SESSION_KEY, encrypt(json.encodeToString(session)))
                 .remove(PENDING_BOOTSTRAP_KEY)
+                .remove(PENDING_RECOVERY_REDEEM_KEY)
+                .remove(PENDING_RECOVERY_ROTATION_KEY)
                 .commit()
         ) { "Could not save this device's sign-in credentials." }
     }
@@ -65,10 +67,64 @@ class AndroidDeviceSessionStore(context: Context) : DeviceSessionStore {
         }
     }
 
+    override fun loadPendingRecoveryRedeem(): PendingRecoveryCodeRedeem? =
+        loadEncrypted(PENDING_RECOVERY_REDEEM_KEY)
+
+    override fun savePendingRecoveryRedeem(pending: PendingRecoveryCodeRedeem) {
+        saveEncrypted(PENDING_RECOVERY_REDEEM_KEY, pending, "Could not save the pending recovery sign-in.")
+    }
+
+    override fun clearPendingRecoveryRedeem() {
+        remove(PENDING_RECOVERY_REDEEM_KEY, "Could not remove the pending recovery sign-in.")
+    }
+
+    override fun loadPendingRecoveryRotation(): PendingRecoveryCodeRotation? =
+        loadEncrypted(PENDING_RECOVERY_ROTATION_KEY)
+
+    override fun savePendingRecoveryRotation(pending: PendingRecoveryCodeRotation) {
+        saveEncrypted(PENDING_RECOVERY_ROTATION_KEY, pending, "Could not save the pending recovery codes.")
+    }
+
+    override fun clearPendingRecoveryRotation() {
+        remove(PENDING_RECOVERY_ROTATION_KEY, "Could not remove the pending recovery codes.")
+    }
+
+    /** Installs the recovered session and removes its one-time secret in one preferences commit. */
+    override fun promoteRecovery(session: StoredDeviceSession) {
+        check(
+            preferences.edit()
+                .putString(SESSION_KEY, encrypt(json.encodeToString(session)))
+                .remove(PENDING_BOOTSTRAP_KEY)
+                .remove(PENDING_RECOVERY_REDEEM_KEY)
+                .remove(PENDING_RECOVERY_ROTATION_KEY)
+                .commit()
+        ) { "Could not save this device's recovered sign-in." }
+    }
+
     override fun clear() {
-        check(preferences.edit().remove(SESSION_KEY).remove(PENDING_BOOTSTRAP_KEY).commit()) {
+        check(
+            preferences.edit()
+                .remove(SESSION_KEY)
+                .remove(PENDING_BOOTSTRAP_KEY)
+                .remove(PENDING_RECOVERY_REDEEM_KEY)
+                .remove(PENDING_RECOVERY_ROTATION_KEY)
+                .commit()
+        ) {
             "Could not remove this device's sign-in credentials."
         }
+    }
+
+    private inline fun <reified T> loadEncrypted(key: String): T? {
+        val encoded = preferences.getString(key, null) ?: return null
+        return runCatching { json.decodeFromString<T>(decrypt(encoded)) }.getOrNull()
+    }
+
+    private inline fun <reified T> saveEncrypted(key: String, value: T, failure: String) {
+        check(preferences.edit().putString(key, encrypt(json.encodeToString(value))).commit()) { failure }
+    }
+
+    private fun remove(key: String, failure: String) {
+        check(preferences.edit().remove(key).commit()) { failure }
     }
 
     private fun encrypt(value: String): String {
@@ -105,6 +161,8 @@ class AndroidDeviceSessionStore(context: Context) : DeviceSessionStore {
     private companion object {
         const val SESSION_KEY = "encrypted_session"
         const val PENDING_BOOTSTRAP_KEY = "encrypted_pending_bootstrap"
+        const val PENDING_RECOVERY_REDEEM_KEY = "encrypted_pending_recovery_redeem"
+        const val PENDING_RECOVERY_ROTATION_KEY = "encrypted_pending_recovery_rotation"
         const val KEY_ALIAS = "com.shimizu-technology.media-tools.device-session.v1"
         const val CIPHER = "AES/GCM/NoPadding"
         const val IV_SIZE = 12

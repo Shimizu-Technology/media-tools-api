@@ -2,6 +2,11 @@ package com.shimizutechnology.mediatools.ui.settings
 
 import android.content.Intent
 import android.net.Uri
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.os.Build
+import android.os.PersistableBundle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -9,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -21,6 +27,8 @@ import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -28,6 +36,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +50,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.shimizutechnology.mediatools.AppLinks
 import com.shimizutechnology.mediatools.api.MediaToolsApi
+import com.shimizutechnology.mediatools.api.RecoveryAuthController
+import com.shimizutechnology.mediatools.api.RecoveryCodeStatus
 import com.shimizutechnology.mediatools.consent.AIProcessingConsentStore
 import kotlinx.coroutines.launch
 
@@ -49,6 +60,7 @@ fun SettingsScreen(
     api: MediaToolsApi,
     consentStore: AIProcessingConsentStore,
     ownerId: String,
+    recoveryAuth: RecoveryAuthController?,
     onSignOut: suspend () -> Unit,
     onDeleted: suspend () -> Unit,
 ) {
@@ -59,6 +71,40 @@ fun SettingsScreen(
     var showDelete by remember { mutableStateOf(false) }
     var accountMessage by remember { mutableStateOf<String?>(null) }
     var deletionMessage by remember { mutableStateOf<String?>(null) }
+    var recoveryStatus by remember(ownerId) { mutableStateOf<RecoveryCodeStatus?>(null) }
+    var recoveryError by remember(ownerId) { mutableStateOf<String?>(null) }
+    var recoveryNotice by remember(ownerId) { mutableStateOf<String?>(null) }
+    var loadingRecovery by remember(ownerId) { mutableStateOf(false) }
+    var startingRecovery by remember(ownerId) { mutableStateOf(false) }
+    var confirmingRecovery by remember(ownerId) { mutableStateOf(false) }
+    var showReplaceRecovery by remember { mutableStateOf(false) }
+    var recoveryCodes by remember(ownerId) { mutableStateOf<List<String>>(emptyList()) }
+
+    suspend fun loadRecoveryStatus() {
+        val controller = recoveryAuth ?: return
+        loadingRecovery = true
+        runCatching { controller.status() }
+            .onSuccess { recoveryStatus = it; recoveryError = null }
+            .onFailure { recoveryError = it.message ?: "Could not check recovery codes." }
+        loadingRecovery = false
+    }
+
+    fun beginRecoveryRotation() {
+        val controller = recoveryAuth ?: return
+        startingRecovery = true
+        recoveryError = null
+        recoveryNotice = null
+        scope.launch {
+            runCatching { controller.beginRotation() }
+                .onSuccess { recoveryCodes = it }
+                .onFailure { recoveryError = it.message ?: "Could not create recovery codes." }
+            startingRecovery = false
+        }
+    }
+
+    LaunchedEffect(recoveryAuth, ownerId) {
+        if (recoveryAuth != null) loadRecoveryStatus()
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
@@ -97,6 +143,38 @@ fun SettingsScreen(
                 "Only record or upload content when you have the rights and permission required where the recording occurs. Recording consent laws vary by location.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+
+        recoveryAuth?.let {
+            SettingsSection("Account recovery") {
+                Text(
+                    when {
+                        loadingRecovery -> "Checking recovery codes…"
+                        recoveryStatus == null -> "Recovery-code status is unavailable."
+                        recoveryStatus!!.remaining == 0 -> "No saved recovery codes"
+                        else -> "${recoveryStatus!!.remaining} one-time recovery codes remaining"
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "Recovery codes let you sign in when your usual sign-in is unavailable. Each code works once.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(
+                    enabled = !startingRecovery && !loadingRecovery,
+                    onClick = {
+                        if ((recoveryStatus?.remaining ?: 0) > 0) showReplaceRecovery = true
+                        else beginRecoveryRotation()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (startingRecovery) CircularProgressIndicator(Modifier.size(18.dp).padding(end = 4.dp))
+                    Text(if ((recoveryStatus?.remaining ?: 0) > 0) "Replace recovery codes" else "Create recovery codes")
+                }
+                recoveryNotice?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+                recoveryError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
         }
 
         SettingsSection("Help and legal") {
@@ -170,6 +248,93 @@ fun SettingsScreen(
             onError = { deletionMessage = it },
         )
     }
+
+
+    if (showReplaceRecovery) {
+        AlertDialog(
+            onDismissRequest = { showReplaceRecovery = false },
+            title = { Text("Replace recovery codes?") },
+            text = { Text("Your current codes keep working until you save and confirm the new set.") },
+            confirmButton = {
+                Button(onClick = { showReplaceRecovery = false; beginRecoveryRotation() }) {
+                    Text("Create new codes")
+                }
+            },
+            dismissButton = { TextButton(onClick = { showReplaceRecovery = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (recoveryCodes.isNotEmpty() && recoveryAuth != null) {
+        RecoveryCodesDialog(
+            codes = recoveryCodes,
+            confirming = confirmingRecovery,
+            error = recoveryError,
+            onDismiss = { if (!confirmingRecovery) recoveryCodes = emptyList() },
+            onConfirm = {
+                confirmingRecovery = true
+                recoveryError = null
+                recoveryNotice = null
+                scope.launch {
+                    runCatching { recoveryAuth.confirmRotation() }
+                        .onSuccess {
+                            recoveryStatus = it
+                            recoveryCodes = emptyList()
+                            recoveryNotice = "Recovery codes saved. Your previous set no longer works."
+                        }
+                        .onFailure { recoveryError = it.message ?: "Could not confirm recovery codes." }
+                    confirmingRecovery = false
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun RecoveryCodesDialog(
+    codes: List<String>,
+    confirming: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val context = LocalContext.current
+    var saved by remember(codes) { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = { if (!confirming) onDismiss() },
+        title = { Text("Save recovery codes") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("Store these somewhere safe. They are shown only until you confirm that you saved them.")
+                codes.forEach { code -> Text(code, style = MaterialTheme.typography.bodyMedium) }
+                OutlinedButton(
+                    onClick = {
+                        val clip = ClipData.newPlainText("Media Tools recovery codes", codes.joinToString("\n"))
+                        if (Build.VERSION.SDK_INT >= 33) {
+                            clip.description.extras = PersistableBundle().apply {
+                                putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+                            }
+                        }
+                        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Copy all codes") }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = saved, onCheckedChange = { saved = it })
+                    Text("I saved these recovery codes")
+                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            Button(enabled = saved && !confirming, onClick = onConfirm) {
+                Text(if (confirming) "Confirming…" else "Confirm saved")
+            }
+        },
+        dismissButton = { TextButton(enabled = !confirming, onClick = onDismiss) { Text("Not yet") } },
+    )
 }
 
 @Composable

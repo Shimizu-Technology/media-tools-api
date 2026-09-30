@@ -8,7 +8,7 @@ Requirements:
 
 - Android Studio with Android 16 / API 36 installed
 - JDK 17
-- a Clerk development publishable key
+- a Clerk development publishable key for migration testing
 
 Keep the publishable key outside source control. Add this line to `~/.gradle/gradle.properties`:
 
@@ -31,14 +31,22 @@ set `MEDIA_TOOLS_FIRST_PARTY_ANDROID_AUTH=true` in Gradle properties or the
 environment. The Go server must also have `FIRST_PARTY_AUTH_ENABLED=true`.
 Sign in with the existing Clerk flow once; Android exchanges that verified
 session for a Media Tools device session. Subsequent launches use the device
-credential even if Clerk's short session has expired. A server-side account
-recovery/sign-in route is required before Clerk can be removed entirely.
+credential even if Clerk's short session has expired. The sign-in screen also
+accepts a saved one-time recovery code and persists its exact retry credentials
+in encrypted storage before sending the request. A lost response can therefore
+recover the same session without consuming another code.
 
 The refresh credential and an in-progress replacement are encrypted with a
 device-only Android Keystore key. The app writes the replacement before
 refreshing so it can recover if the server responds but the phone loses the
 response. Sign out requires server revocation and keeps the user signed in if
 revocation cannot be confirmed. Android backup is disabled for this app.
+
+Settings shows the active recovery-code count and a two-step replacement flow.
+The app encrypts the pending rotation ID and plaintext codes, binds them to the
+stable Media Tools user ID, and activates the new set only after the user checks
+that the codes were saved. Canceling leaves the old set active. Sign-out,
+account deletion, and account switching clear all recovery journals.
 
 ## Privacy and account boundaries
 
@@ -54,4 +62,10 @@ revocation cannot be confirmed. Android backup is disabled for this app.
 
 ## Release status
 
-Source and internal debug builds are ready. A public Play release remains deliberately blocked until Media Tools has a Clerk production instance and Android signing/app-listing configuration. Run `../scripts/android-release-preflight.sh --release` to validate those prerequisites without exposing secret values.
+Source and internal debug builds are ready. Release builds force first-party
+Android auth off. A public first-party release remains blocked until the Play
+production signing certificate is available, its Digital Asset Links entry is
+published for `media.shimizu-technology.com`, and Android passkeys are tested
+end to end. Clerk remains the migration fallback in that release. Run
+`../scripts/android-release-preflight.sh --release` to validate current release
+prerequisites without exposing secret values.

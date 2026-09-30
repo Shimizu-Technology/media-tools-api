@@ -19,7 +19,10 @@ class DeviceSessionControllerTest {
 
     @Test
     fun `verified Clerk bootstrap records stable server owner`() = runTest {
-        val store = MemorySessionStore()
+        val store = MemorySessionStore(
+            pendingRecoveryRedeem = PendingRecoveryCodeRedeem("MTR-OLD", nextToken),
+            pendingRecoveryRotation = PendingRecoveryCodeRotation("other-user", "old-rotation", listOf("MTR-OLD")),
+        )
         val transport = FakeTransport().apply {
             responses += SessionResponse(201, encode(firstPair.copy(refreshToken = nextToken)))
         }
@@ -34,6 +37,8 @@ class DeviceSessionControllerTest {
         assertTrue(transport.calls.single().body!!.contains("\"client_type\":\"android\""))
         assertTrue(transport.calls.single().body!!.contains("\"next_refresh_token\":\"$nextToken\""))
         assertNull(store.pendingBootstrap)
+        assertNull(store.pendingRecoveryRedeem)
+        assertNull(store.pendingRecoveryRotation)
     }
 
     @Test
@@ -316,6 +321,8 @@ class DeviceSessionControllerTest {
 private class MemorySessionStore(
     var value: StoredDeviceSession? = null,
     var pendingBootstrap: PendingDeviceSessionBootstrap? = null,
+    var pendingRecoveryRedeem: PendingRecoveryCodeRedeem? = null,
+    var pendingRecoveryRotation: PendingRecoveryCodeRotation? = null,
 ) : DeviceSessionStore {
     override fun load(): StoredDeviceSession? = value
     override fun save(session: StoredDeviceSession) { value = session }
@@ -324,11 +331,27 @@ private class MemorySessionStore(
     override fun promoteBootstrap(session: StoredDeviceSession) {
         value = session
         pendingBootstrap = null
+        pendingRecoveryRedeem = null
+        pendingRecoveryRotation = null
     }
     override fun clearPendingBootstrap() { pendingBootstrap = null }
+    override fun loadPendingRecoveryRedeem(): PendingRecoveryCodeRedeem? = pendingRecoveryRedeem
+    override fun savePendingRecoveryRedeem(pending: PendingRecoveryCodeRedeem) { pendingRecoveryRedeem = pending }
+    override fun clearPendingRecoveryRedeem() { pendingRecoveryRedeem = null }
+    override fun loadPendingRecoveryRotation(): PendingRecoveryCodeRotation? = pendingRecoveryRotation
+    override fun savePendingRecoveryRotation(pending: PendingRecoveryCodeRotation) { pendingRecoveryRotation = pending }
+    override fun clearPendingRecoveryRotation() { pendingRecoveryRotation = null }
+    override fun promoteRecovery(session: StoredDeviceSession) {
+        value = session
+        pendingBootstrap = null
+        pendingRecoveryRedeem = null
+        pendingRecoveryRotation = null
+    }
     override fun clear() {
         value = null
         pendingBootstrap = null
+        pendingRecoveryRedeem = null
+        pendingRecoveryRotation = null
     }
 }
 
