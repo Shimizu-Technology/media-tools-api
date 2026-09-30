@@ -11,12 +11,28 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
-const recoveryCodeCount = 10
+const (
+	recoveryCodeCount       = 10
+	recoveryRotationPending = 24 * time.Hour
+)
 
-// ErrRecoveryCodeInvalid means a code is malformed, unknown, or already used.
-var ErrRecoveryCodeInvalid = errors.New("recovery code is invalid or already used")
+var (
+	// ErrRecoveryCodeInvalid means a code is malformed, unknown, or already used.
+	ErrRecoveryCodeInvalid = errors.New("recovery code is invalid or already used")
+	// ErrRecoveryRotationInvalid intentionally covers malformed, foreign,
+	// replaced, and expired rotations without revealing another account's state.
+	ErrRecoveryRotationInvalid = errors.New("recovery code rotation is invalid or expired")
+)
+
+type RecoveryCodeRotation struct {
+	ID        string
+	Codes     []string
+	ExpiresAt time.Time
+}
 
 // Recovery codes contain 160 random bits. Their hashes can be stored with
 // SHA-256 because guessing a code is infeasible even if the hashes leak.
@@ -54,42 +70,149 @@ func parseRecoveryCode(code string) (string, bool) {
 	return recoveryCodeHash(encoded), true
 }
 
-// ReplaceRecoveryCodes invalidates every prior code under the user's row lock.
-// Plaintext codes leave the server only in this response and cannot be listed.
-func (db *DB) ReplaceRecoveryCodes(ctx context.Context, userID string) ([]string, error) {
+// BeginRecoveryCodeRotation creates an inactive replacement set while leaving
+// every active code untouched. Starting again discards any unconfirmed hashes;
+// plaintext codes exist only in the successful response.
+func (db *DB) BeginRecoveryCodeRotation(ctx context.Context, userID string) (*RecoveryCodeRotation, error) {
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("begin recovery code replacement: %w", err)
+		return nil, fmt.Errorf("begin recovery code rotation: %w", err)
 	}
 	defer tx.Rollback()
 	var lockedID string
 	if err := tx.GetContext(ctx, &lockedID, `SELECT id FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
-		return nil, fmt.Errorf("lock recovery account: %w", err)
+		return nil, fmt.Errorf("lock recovery rotation account: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM auth_recovery_codes WHERE user_id = $1`, userID); err != nil {
-		return nil, fmt.Errorf("remove previous recovery codes: %w", err)
+	// The account lock serializes this replacement with confirmation and code
+	// redemption. Cascading deletion removes only inactive pending hashes.
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM auth_recovery_code_rotations
+		WHERE user_id = $1 AND confirmed_at IS NULL`, userID); err != nil {
+		return nil, fmt.Errorf("discard unconfirmed recovery rotation: %w", err)
 	}
-	codes := make([]string, 0, recoveryCodeCount)
+	now := time.Now().UTC()
+	rotation := &RecoveryCodeRotation{Codes: make([]string, 0, recoveryCodeCount), ExpiresAt: now.Add(recoveryRotationPending)}
+	if err := tx.QueryRowContext(ctx, `
+		INSERT INTO auth_recovery_code_rotations (user_id, expires_at)
+		VALUES ($1, $2) RETURNING id`, userID, rotation.ExpiresAt).Scan(&rotation.ID); err != nil {
+		return nil, fmt.Errorf("create recovery rotation: %w", err)
+	}
 	for i := 0; i < recoveryCodeCount; i++ {
 		code, hash, err := newRecoveryCode()
 		if err != nil {
 			return nil, err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO auth_recovery_codes (code_hash, user_id) VALUES ($1, $2)`, hash, userID); err != nil {
-			return nil, fmt.Errorf("save recovery code: %w", err)
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO auth_recovery_codes (code_hash, user_id, rotation_id, active)
+			VALUES ($1, $2, $3, FALSE)`, hash, userID, rotation.ID); err != nil {
+			return nil, fmt.Errorf("save pending recovery code: %w", err)
 		}
-		codes = append(codes, code)
+		rotation.Codes = append(rotation.Codes, code)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit recovery code replacement: %w", err)
+		return nil, fmt.Errorf("commit recovery code rotation: %w", err)
 	}
-	return codes, nil
+	return rotation, nil
+}
+
+// ConfirmRecoveryCodeRotation atomically swaps the active set. Repeating a
+// successful confirmation is idempotent and never changes a newer active set.
+func (db *DB) ConfirmRecoveryCodeRotation(ctx context.Context, userID, rotationID string) (int, error) {
+	if uuid.Validate(rotationID) != nil {
+		return 0, ErrRecoveryRotationInvalid
+	}
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin recovery rotation confirmation: %w", err)
+	}
+	defer tx.Rollback()
+	var lockedID string
+	err = tx.GetContext(ctx, &lockedID, `SELECT id FROM users WHERE id = $1 FOR UPDATE`, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrRecoveryRotationInvalid
+	}
+	if err != nil {
+		return 0, fmt.Errorf("lock recovery confirmation account: %w", err)
+	}
+	var rotation struct {
+		ExpiresAt   time.Time    `db:"expires_at"`
+		ConfirmedAt sql.NullTime `db:"confirmed_at"`
+	}
+	err = tx.GetContext(ctx, &rotation, `
+		SELECT expires_at, confirmed_at
+		FROM auth_recovery_code_rotations
+		WHERE id = $1 AND user_id = $2
+		FOR UPDATE`, rotationID, lockedID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrRecoveryRotationInvalid
+	}
+	if err != nil {
+		return 0, fmt.Errorf("load recovery rotation: %w", err)
+	}
+	if rotation.ConfirmedAt.Valid {
+		var counts struct {
+			Total     int `db:"total"`
+			Remaining int `db:"remaining"`
+		}
+		if err := tx.GetContext(ctx, &counts, `
+			SELECT COUNT(*) AS total,
+			       COUNT(*) FILTER (WHERE consumed_at IS NULL) AS remaining
+			FROM auth_recovery_codes
+			WHERE user_id = $1 AND rotation_id = $2 AND active`, userID, rotationID); err != nil {
+			return 0, fmt.Errorf("count confirmed recovery codes: %w", err)
+		}
+		if counts.Total != recoveryCodeCount {
+			return 0, ErrRecoveryRotationInvalid
+		}
+		return counts.Remaining, nil
+	}
+	now := time.Now().UTC()
+	if !now.Before(rotation.ExpiresAt) {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM auth_recovery_code_rotations WHERE id = $1`, rotationID); err != nil {
+			return 0, fmt.Errorf("remove expired recovery rotation: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return 0, fmt.Errorf("commit expired recovery rotation cleanup: %w", err)
+		}
+		return 0, ErrRecoveryRotationInvalid
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM auth_recovery_codes WHERE user_id = $1 AND active`, userID); err != nil {
+		return 0, fmt.Errorf("invalidate previous recovery codes: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE auth_recovery_codes SET active = TRUE
+		WHERE user_id = $1 AND rotation_id = $2 AND NOT active AND consumed_at IS NULL`, userID, rotationID)
+	if err != nil {
+		return 0, fmt.Errorf("activate pending recovery codes: %w", err)
+	}
+	activated, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count activated recovery codes: %w", err)
+	}
+	if activated != recoveryCodeCount {
+		return 0, fmt.Errorf("pending recovery set has %d codes, want %d", activated, recoveryCodeCount)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE auth_recovery_code_rotations SET confirmed_at = $2
+		WHERE id = $1 AND confirmed_at IS NULL`, rotationID, now); err != nil {
+		return 0, fmt.Errorf("mark recovery rotation confirmed: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM auth_recovery_code_rotations r
+		WHERE r.user_id = $1 AND r.id <> $2 AND r.confirmed_at IS NOT NULL
+		  AND NOT EXISTS (SELECT 1 FROM auth_recovery_codes c WHERE c.rotation_id = r.id)`, userID, rotationID); err != nil {
+		return 0, fmt.Errorf("prune superseded recovery rotations: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit recovery rotation confirmation: %w", err)
+	}
+	return int(activated), nil
 }
 
 // RemainingRecoveryCodes returns the number of unused codes for an account.
 func (db *DB) RemainingRecoveryCodes(ctx context.Context, userID string) (int, error) {
 	var count int
-	if err := db.GetContext(ctx, &count, `SELECT COUNT(*) FROM auth_recovery_codes WHERE user_id = $1 AND consumed_at IS NULL`, userID); err != nil {
+	if err := db.GetContext(ctx, &count, `SELECT COUNT(*) FROM auth_recovery_codes WHERE user_id = $1 AND active AND consumed_at IS NULL`, userID); err != nil {
 		return 0, fmt.Errorf("count recovery codes: %w", err)
 	}
 	return count, nil
@@ -122,7 +245,7 @@ func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 	var userID string
 	// Match replacement's lock order (account, then code). A concurrent rotate
 	// can invalidate this candidate while we wait, so consumption is rechecked.
-	err = tx.GetContext(ctx, &userID, `SELECT user_id FROM auth_recovery_codes WHERE code_hash = $1`, hash)
+	err = tx.GetContext(ctx, &userID, `SELECT user_id FROM auth_recovery_codes WHERE code_hash = $1 AND active`, hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrRecoveryCodeInvalid
 	}
@@ -146,7 +269,7 @@ func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 	err = tx.GetContext(ctx, &recovery, `
 		SELECT user_id, consumed_at, consumed_session_id, successor_hash
 		FROM auth_recovery_codes
-		WHERE code_hash = $1 AND user_id = $2
+		WHERE code_hash = $1 AND user_id = $2 AND active
 		FOR UPDATE`, hash, lockedID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrRecoveryCodeInvalid
@@ -183,7 +306,7 @@ func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 	result, err := tx.ExecContext(ctx, `
 		UPDATE auth_recovery_codes
 		SET consumed_at = $2, consumed_session_id = $3, successor_hash = $4
-		WHERE code_hash = $1 AND consumed_at IS NULL AND user_id = $5`,
+		WHERE code_hash = $1 AND consumed_at IS NULL AND user_id = $5 AND active`,
 		hash, now, pair.SessionID, successorHash, recovery.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("consume recovery code: %w", err)

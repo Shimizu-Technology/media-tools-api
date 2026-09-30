@@ -15,7 +15,24 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
 
-func TestRecoveryCodesIssueRotateAndRedeemHTTP(t *testing.T) {
+type recoveryRotationResponse struct {
+	RotationID string   `json:"rotation_id"`
+	Codes      []string `json:"codes"`
+}
+
+func readRecoveryRotation(t *testing.T, responseCode int, responseBody []byte, cacheControl string) recoveryRotationResponse {
+	t.Helper()
+	if responseCode != http.StatusCreated || cacheControl != "no-store" {
+		t.Fatalf("begin response = %d, cache=%q: %s", responseCode, cacheControl, responseBody)
+	}
+	var rotation recoveryRotationResponse
+	if err := json.Unmarshal(responseBody, &rotation); err != nil || uuid.Validate(rotation.RotationID) != nil || len(rotation.Codes) != 10 {
+		t.Fatalf("begin response = %#v, %v", rotation, err)
+	}
+	return rotation
+}
+
+func TestRecoveryCodeRotationAndRedemptionHTTP(t *testing.T) {
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("TEST_DATABASE_URL is not set")
@@ -39,36 +56,49 @@ func TestRecoveryCodesIssueRotateAndRedeemHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := Setup(RouterConfig{DB: db, FirstPartyAuthEnabled: true, JWTSecret: "test-only"})
-	issuePath := "/api/v1/auth/recovery"
+	statusPath := "/api/v1/auth/recovery"
+	beginPath := "/api/v1/auth/recovery/rotation/begin"
+	confirmPath := "/api/v1/auth/recovery/rotation/confirm"
 	redeemPath := "/api/v1/auth/recovery/redeem"
 	legacy, err := middleware.GenerateJWT(&models.User{ID: userID, Email: "legacy@example.com"}, "test-only")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response := postPasskeyJSON(t, engine, issuePath, map[string]any{}, legacy); response.Code != http.StatusUnauthorized {
-		t.Fatalf("legacy JWT issued codes: %d", response.Code)
+
+	for _, path := range []string{beginPath, confirmPath} {
+		if response := postPasskeyJSON(t, engine, path, map[string]any{"rotation_id": uuid.NewString()}, legacy); response.Code != http.StatusUnauthorized {
+			t.Fatalf("legacy JWT used %s: %d", path, response.Code)
+		}
+		if response := postPasskeyJSON(t, engine, path, map[string]any{"rotation_id": uuid.NewString()}, ""); response.Code != http.StatusUnauthorized {
+			t.Fatalf("anonymous request used %s: %d", path, response.Code)
+		}
 	}
-	if response := postPasskeyJSON(t, engine, issuePath, map[string]any{}, ""); response.Code != http.StatusUnauthorized {
-		t.Fatalf("anonymous code issue: %d", response.Code)
+	if response := postPasskeyJSON(t, engine, statusPath, map[string]any{}, session.AccessToken); response.Code != http.StatusNotFound {
+		t.Fatalf("removed destructive issue route = %d: %s", response.Code, response.Body.String())
 	}
-	issued := postPasskeyJSON(t, engine, issuePath, map[string]any{}, session.AccessToken)
-	if issued.Code != http.StatusCreated || issued.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("issue response = %d: %s", issued.Code, issued.Body.String())
+	status := getPasskeyJSON(t, engine, statusPath, session.AccessToken)
+	if status.Code != http.StatusOK || status.Header().Get("Cache-Control") != "no-store" || status.Body.String() != `{"remaining":0}` {
+		t.Fatalf("initial status = %d: %s", status.Code, status.Body.String())
 	}
-	var first struct {
-		Codes []string `json:"codes"`
+
+	begin := postPasskeyJSON(t, engine, beginPath, map[string]any{}, session.AccessToken)
+	first := readRecoveryRotation(t, begin.Code, begin.Body.Bytes(), begin.Header().Get("Cache-Control"))
+	if status := getPasskeyJSON(t, engine, statusPath, session.AccessToken); status.Code != http.StatusOK || status.Body.String() != `{"remaining":0}` {
+		t.Fatalf("pending set changed status = %d: %s", status.Code, status.Body.String())
 	}
-	if err := json.Unmarshal(issued.Body.Bytes(), &first); err != nil || len(first.Codes) != 10 {
-		t.Fatalf("issued codes = %#v, %v", first, err)
+	pendingNext := newTestRefreshToken(t)
+	if response := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": first.Codes[0], "client_type": "ios", "next_refresh_token": pendingNext}, ""); response.Code != http.StatusUnauthorized {
+		t.Fatalf("pending code redeemed = %d: %s", response.Code, response.Body.String())
 	}
-	count, err := db.RemainingRecoveryCodes(ctx, userID)
-	if err != nil || count != 10 {
-		t.Fatalf("remaining codes = %d, %v", count, err)
+	confirm := postPasskeyJSON(t, engine, confirmPath, map[string]any{"rotation_id": first.RotationID}, session.AccessToken)
+	if confirm.Code != http.StatusOK || confirm.Header().Get("Cache-Control") != "no-store" || confirm.Body.String() != `{"remaining":10}` {
+		t.Fatalf("confirm response = %d: %s", confirm.Code, confirm.Body.String())
 	}
-	next, err := database.RandomFirstPartyRefreshToken()
-	if err != nil {
-		t.Fatal(err)
+	if retry := postPasskeyJSON(t, engine, confirmPath, map[string]any{"rotation_id": first.RotationID}, session.AccessToken); retry.Code != http.StatusOK || retry.Body.String() != `{"remaining":10}` {
+		t.Fatalf("lost confirm retry = %d: %s", retry.Code, retry.Body.String())
 	}
+
+	next := newTestRefreshToken(t)
 	invalid := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": "MTR-INVALID", "client_type": "ios", "next_refresh_token": next}, "")
 	if invalid.Code != http.StatusUnauthorized {
 		t.Fatalf("invalid code response = %d", invalid.Code)
@@ -91,24 +121,40 @@ func TestRecoveryCodesIssueRotateAndRedeemHTTP(t *testing.T) {
 		retried.SessionID != recovered.SessionID || retried.RefreshToken != next || retried.AccessToken == recovered.AccessToken {
 		t.Fatalf("exact recovery retry = %d %#v: %s", retry.Code, retried, retry.Body.String())
 	}
-	wrong, err := database.RandomFirstPartyRefreshToken()
-	if err != nil {
-		t.Fatal(err)
-	}
+	wrong := newTestRefreshToken(t)
 	if response := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": first.Codes[0], "client_type": "ios", "next_refresh_token": wrong}, ""); response.Code != http.StatusUnauthorized || strings.Contains(response.Body.String(), "access_token") || strings.Contains(response.Body.String(), "refresh_token") {
 		t.Fatalf("wrong recovery successor = %d: %s", response.Code, response.Body.String())
 	}
-	if count, err := db.RemainingRecoveryCodes(ctx, userID); err != nil || count != 9 {
-		t.Fatalf("remaining after redeem = %d, %v", count, err)
+	if status := getPasskeyJSON(t, engine, statusPath, recovered.AccessToken); status.Code != http.StatusOK || status.Body.String() != `{"remaining":9}` {
+		t.Fatalf("status after redemption = %d: %s", status.Code, status.Body.String())
 	}
-	rotated := postPasskeyJSON(t, engine, issuePath, map[string]any{}, recovered.AccessToken)
-	if rotated.Code != http.StatusCreated {
-		t.Fatalf("rotate response = %d: %s", rotated.Code, rotated.Body.String())
+
+	secondBegin := postPasskeyJSON(t, engine, beginPath, map[string]any{}, recovered.AccessToken)
+	second := readRecoveryRotation(t, secondBegin.Code, secondBegin.Body.Bytes(), secondBegin.Header().Get("Cache-Control"))
+	oldNext := newTestRefreshToken(t)
+	if response := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": first.Codes[1], "client_type": "android", "next_refresh_token": oldNext}, ""); response.Code != http.StatusCreated {
+		t.Fatalf("old code failed before confirmation = %d: %s", response.Code, response.Body.String())
 	}
-	if response := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": first.Codes[1], "client_type": "ios", "next_refresh_token": wrong}, ""); response.Code != http.StatusUnauthorized {
-		t.Fatalf("invalidated old code = %d", response.Code)
+	if response := postPasskeyJSON(t, engine, confirmPath, map[string]any{"rotation_id": second.RotationID}, recovered.AccessToken); response.Code != http.StatusOK || response.Body.String() != `{"remaining":10}` {
+		t.Fatalf("second confirmation = %d: %s", response.Code, response.Body.String())
 	}
-	if response := postPasskeyJSON(t, Setup(RouterConfig{DB: db, JWTSecret: "test-only"}), redeemPath, map[string]any{"code": first.Codes[1], "client_type": "ios", "next_refresh_token": wrong}, ""); response.Code != http.StatusNotFound {
-		t.Fatalf("disabled recovery route = %d", response.Code)
+	if response := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": first.Codes[2], "client_type": "ios", "next_refresh_token": newTestRefreshToken(t)}, ""); response.Code != http.StatusUnauthorized {
+		t.Fatalf("old code remained active = %d", response.Code)
+	}
+	if response := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": second.Codes[0], "client_type": "ios", "next_refresh_token": newTestRefreshToken(t)}, ""); response.Code != http.StatusCreated {
+		t.Fatalf("new code did not activate = %d: %s", response.Code, response.Body.String())
+	}
+
+	disabled := Setup(RouterConfig{DB: db, JWTSecret: "test-only"})
+	for _, path := range []string{statusPath, beginPath, confirmPath, redeemPath} {
+		var responseCode int
+		if path == statusPath {
+			responseCode = getPasskeyJSON(t, disabled, path, session.AccessToken).Code
+		} else {
+			responseCode = postPasskeyJSON(t, disabled, path, map[string]any{}, session.AccessToken).Code
+		}
+		if responseCode != http.StatusNotFound {
+			t.Fatalf("disabled route %s = %d", path, responseCode)
+		}
 	}
 }
