@@ -3,11 +3,15 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
-	"log"
+	"strings"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
+
+var ErrClerkEmailConflict = errors.New("email belongs to an existing non-Clerk account")
 
 // CreateUser inserts a new user record.
 func (db *DB) CreateUser(ctx context.Context, u *models.User) error {
@@ -26,7 +30,16 @@ func (db *DB) GetUserByEmail(ctx context.Context, email string) (*models.User, e
 	var u models.User
 	err := db.GetContext(ctx, &u, `SELECT * FROM users WHERE email = $1`, email)
 	if err != nil {
-		return nil, fmt.Errorf("user not found: %w", err)
+		return nil, fmt.Errorf("get user by email: %w", err)
+	}
+	return &u, nil
+}
+
+func (db *DB) getUserByEmailFold(ctx context.Context, email string) (*models.User, error) {
+	var u models.User
+	err := db.GetContext(ctx, &u, `SELECT * FROM users WHERE lower(email) = lower($1)`, email)
+	if err != nil {
+		return nil, fmt.Errorf("get user by email: %w", err)
 	}
 	return &u, nil
 }
@@ -69,8 +82,7 @@ func (db *DB) CreateUserFromClerk(ctx context.Context, u *models.User) error {
 	).Scan(&u.ID, &u.CreatedAt)
 }
 
-// LinkClerkIDToUser updates an existing user's clerk_id (email migration path).
-// Used when a legacy email/password user signs in via Clerk for the first time.
+// LinkClerkIDToUser updates an existing user's clerk_id.
 func (db *DB) LinkClerkIDToUser(ctx context.Context, userID, clerkID string) error {
 	_, err := db.ExecContext(ctx,
 		`UPDATE users SET clerk_id = $1 WHERE id = $2`,
@@ -78,35 +90,35 @@ func (db *DB) LinkClerkIDToUser(ctx context.Context, userID, clerkID string) err
 	return err
 }
 
-// FindOrCreateClerkUser handles the invite-only / migration flow:
+// FindOrCreateClerkUser handles the Clerk authentication flow:
 // 1. Find by clerk_id (returning Clerk user) → return
-// 2. Find by email (legacy user migrating to Clerk) → link clerk_id, return
-// 3. Not found → create new user
+// 2. Reject matching email owned by a different identity
+// 3. Not found → create new Clerk-backed user
 func (db *DB) FindOrCreateClerkUser(ctx context.Context, clerkID, email, name string) (*models.User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	name = strings.TrimSpace(name)
+
 	// 1. Already linked to Clerk
 	user, err := db.GetUserByClerkID(ctx, clerkID)
 	if err == nil {
 		return user, nil
 	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("find user by clerk_id: %w", err)
+	}
 
-	// 2. Existing user with same email (migration path)
+	// 2. Email is contact information, not an identity key. Do not silently
+	// move an existing native or legacy account onto this Clerk subject.
 	if email != "" {
-		existing, err := db.GetUserByEmail(ctx, email)
+		existing, err := db.getUserByEmailFold(ctx, email)
 		if err == nil {
-			// Link Clerk ID to existing account
-			if linkErr := db.LinkClerkIDToUser(ctx, existing.ID, clerkID); linkErr != nil {
-				return nil, fmt.Errorf("failed to link clerk_id to existing user: %w", linkErr)
+			if existing.ClerkID != nil && *existing.ClerkID == clerkID {
+				return existing, nil
 			}
-			existing.ClerkID = &clerkID
-			// Update name if provided
-			if name != "" {
-				if _, execErr := db.ExecContext(ctx, `UPDATE users SET name = $1 WHERE id = $2`, name, existing.ID); execErr != nil {
-					log.Printf("⚠️ Failed to update name for user %s: %v", existing.ID, execErr)
-				} else {
-					existing.Name = name
-				}
-			}
-			return existing, nil
+			return nil, ErrClerkEmailConflict
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("find user by email: %w", err)
 		}
 	}
 
@@ -121,6 +133,11 @@ func (db *DB) FindOrCreateClerkUser(ctx context.Context, clerkID, email, name st
 		// Retry the clerk_id lookup before giving up.
 		if retryUser, retryErr := db.GetUserByClerkID(ctx, clerkID); retryErr == nil {
 			return retryUser, nil
+		}
+		if email != "" {
+			if existing, lookupErr := db.getUserByEmailFold(ctx, email); lookupErr == nil && (existing.ClerkID == nil || *existing.ClerkID != clerkID) {
+				return nil, ErrClerkEmailConflict
+			}
 		}
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}

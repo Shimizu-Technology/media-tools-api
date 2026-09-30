@@ -17,7 +17,7 @@ import (
 var ErrAccountDeletionAlreadyRequested = errors.New("account deletion already requested")
 
 const accountDeletionColumns = `
-	id, app_user_id, clerk_user_id, clerk_user_hash, object_keys, status,
+	id, app_user_id, clerk_user_id, COALESCE(clerk_user_hash, '') AS clerk_user_hash, object_keys, status,
 	cleanup_after, clerk_deleted_at, completed_at, last_error,
 	requested_at, updated_at
 `
@@ -30,6 +30,9 @@ func clerkUserHash(clerkUserID string) string {
 // HasAccountDeletionTombstone prevents a valid but already-issued Clerk token
 // from recreating an application account after deletion was requested.
 func (db *DB) HasAccountDeletionTombstone(ctx context.Context, clerkUserID string) (bool, error) {
+	if strings.TrimSpace(clerkUserID) == "" {
+		return false, nil
+	}
 	var exists bool
 	if err := db.GetContext(ctx, &exists, `
 		SELECT EXISTS (
@@ -47,7 +50,7 @@ func (db *DB) HasAccountDeletionTombstone(ctx context.Context, clerkUserID strin
 func (db *DB) RequestAccountDeletion(
 	ctx context.Context,
 	userID string,
-	clerkUserID string,
+	clerkUserID *string,
 	cleanupAfter time.Time,
 ) (*models.AccountDeletionRequest, error) {
 	tx, err := db.BeginTxx(ctx, nil)
@@ -59,10 +62,29 @@ func (db *DB) RequestAccountDeletion(
 	var storedClerkID sql.NullString
 	if err := tx.GetContext(ctx, &storedClerkID, `
 		SELECT clerk_id FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			var existing string
+			if lookupErr := tx.GetContext(ctx, &existing, `
+				SELECT id FROM account_deletion_requests WHERE app_user_id = $1`, userID); lookupErr == nil {
+				return nil, ErrAccountDeletionAlreadyRequested
+			}
+		}
 		return nil, fmt.Errorf("lock account for deletion: %w", err)
 	}
-	if !storedClerkID.Valid || storedClerkID.String == "" || storedClerkID.String != clerkUserID {
-		return nil, fmt.Errorf("account is not linked to the authenticated Clerk identity")
+	var providerID any
+	var providerHash any
+	var identityDeletedAt any
+	if storedClerkID.Valid && storedClerkID.String != "" {
+		if clerkUserID == nil || strings.TrimSpace(*clerkUserID) != storedClerkID.String {
+			return nil, fmt.Errorf("account is not linked to the authenticated Clerk identity")
+		}
+		providerID = storedClerkID.String
+		providerHash = clerkUserHash(storedClerkID.String)
+	} else {
+		if clerkUserID != nil && strings.TrimSpace(*clerkUserID) != "" {
+			return nil, fmt.Errorf("account is not linked to the authenticated Clerk identity")
+		}
+		identityDeletedAt = time.Now().UTC()
 	}
 
 	if cleanupAfter.Before(time.Now().UTC()) {
@@ -97,17 +119,21 @@ func (db *DB) RequestAccountDeletion(
 	request := &models.AccountDeletionRequest{}
 	err = tx.GetContext(ctx, request, `
 		INSERT INTO account_deletion_requests (
-			app_user_id, clerk_user_id, clerk_user_hash, object_keys, cleanup_after
+			app_user_id, clerk_user_id, clerk_user_hash, object_keys, cleanup_after, clerk_deleted_at
 		)
-		VALUES ($1, $2, $3, $4::jsonb, $5)
+		VALUES ($1, $2, $3, $4::jsonb, $5, $6)
 		RETURNING `+accountDeletionColumns,
-		userID, clerkUserID, clerkUserHash(clerkUserID), string(encodedKeys), cleanupAfter,
+		userID, providerID, providerHash, string(encodedKeys), cleanupAfter, identityDeletedAt,
 	)
 	if err != nil {
 		var existing string
-		if lookupErr := tx.GetContext(ctx, &existing, `
-			SELECT id FROM account_deletion_requests WHERE clerk_user_hash = $1`,
-			clerkUserHash(clerkUserID)); lookupErr == nil {
+		lookup := `SELECT id FROM account_deletion_requests WHERE app_user_id = $1`
+		args := []any{userID}
+		if providerHash != nil {
+			lookup += ` OR clerk_user_hash = $2`
+			args = append(args, providerHash)
+		}
+		if lookupErr := tx.GetContext(ctx, &existing, lookup, args...); lookupErr == nil {
 			return nil, ErrAccountDeletionAlreadyRequested
 		}
 		return nil, fmt.Errorf("create account deletion request: %w", err)

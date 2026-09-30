@@ -111,6 +111,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			clerkSession.Use(middleware.ClerkAuth(cfg.DB, jwksCache, cfg.ClerkSecretKey))
 			clerkSession.POST("/session/bootstrap", h.BootstrapFirstPartySession)
 		}
+		r.POST("/api/v1/auth/invitations", h.CreateInvitation)
+		r.POST("/api/v1/auth/invitations/redeem", rateLimiter.RateLimitUnauthenticated("invitation", 20), h.RedeemInvitation)
 		r.POST("/api/v1/auth/session/refresh", h.RefreshFirstPartySession)
 		passkeyLogin := r.Group("/api/v1/auth/passkeys/login")
 		passkeyLogin.Use(rateLimiter.RateLimitUnauthenticated("passkey", 300))
