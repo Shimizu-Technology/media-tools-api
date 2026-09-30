@@ -93,7 +93,7 @@ func (db *DB) ResolveMigrationClerkUser(ctx context.Context, clerkID string) (*m
 		FROM auth_identities ai
 		JOIN users u ON u.id = ai.user_id
 		WHERE ai.provider = 'clerk' AND ai.subject = $1
-		FOR UPDATE OF u`, clerkID)
+		FOR SHARE OF u`, clerkID)
 	if err == nil {
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("commit Clerk identity resolution: %w", err)
