@@ -20,13 +20,7 @@ class AndroidDeviceSessionStore(context: Context) : DeviceSessionStore {
     override fun load(): StoredDeviceSession? {
         val encoded = preferences.getString(SESSION_KEY, null) ?: return null
         return runCatching {
-            val bytes = Base64.decode(encoded, Base64.NO_WRAP)
-            require(bytes.size > IV_SIZE)
-            val cipher = Cipher.getInstance(CIPHER)
-            cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, bytes.copyOfRange(0, IV_SIZE)))
-            json.decodeFromString<StoredDeviceSession>(
-                cipher.doFinal(bytes.copyOfRange(IV_SIZE, bytes.size)).decodeToString()
-            )
+            json.decodeFromString<StoredDeviceSession>(decrypt(encoded))
         }.getOrElse {
             // Keystore keys do not survive a restore to a different device.
             // An unreadable credential can never be used to infer account ownership.
@@ -35,19 +29,61 @@ class AndroidDeviceSessionStore(context: Context) : DeviceSessionStore {
     }
 
     override fun save(session: StoredDeviceSession) {
-        val cipher = Cipher.getInstance(CIPHER)
-        cipher.init(Cipher.ENCRYPT_MODE, secretKey())
-        val encrypted = cipher.doFinal(json.encodeToString(session).encodeToByteArray())
-        val encoded = Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)
-        check(preferences.edit().putString(SESSION_KEY, encoded).commit()) {
+        check(preferences.edit().putString(SESSION_KEY, encrypt(json.encodeToString(session))).commit()) {
             "Could not save this device's sign-in credentials."
         }
     }
 
+    override fun loadPendingBootstrap(): PendingDeviceSessionBootstrap? {
+        val encoded = preferences.getString(PENDING_BOOTSTRAP_KEY, null) ?: return null
+        return runCatching {
+            json.decodeFromString<PendingDeviceSessionBootstrap>(decrypt(encoded))
+        }.getOrNull()
+    }
+
+    override fun savePendingBootstrap(pending: PendingDeviceSessionBootstrap) {
+        check(
+            preferences.edit()
+                .putString(PENDING_BOOTSTRAP_KEY, encrypt(json.encodeToString(pending)))
+                .commit()
+        ) { "Could not save this device's pending sign-in credentials." }
+    }
+
+    /** One preferences commit makes session installation and journal removal atomic. */
+    override fun promoteBootstrap(session: StoredDeviceSession) {
+        check(
+            preferences.edit()
+                .putString(SESSION_KEY, encrypt(json.encodeToString(session)))
+                .remove(PENDING_BOOTSTRAP_KEY)
+                .commit()
+        ) { "Could not save this device's sign-in credentials." }
+    }
+
+    override fun clearPendingBootstrap() {
+        check(preferences.edit().remove(PENDING_BOOTSTRAP_KEY).commit()) {
+            "Could not remove this device's pending sign-in credentials."
+        }
+    }
+
     override fun clear() {
-        check(preferences.edit().remove(SESSION_KEY).commit()) {
+        check(preferences.edit().remove(SESSION_KEY).remove(PENDING_BOOTSTRAP_KEY).commit()) {
             "Could not remove this device's sign-in credentials."
         }
+    }
+
+    private fun encrypt(value: String): String {
+        val cipher = Cipher.getInstance(CIPHER)
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey())
+        val encrypted = cipher.doFinal(value.encodeToByteArray())
+        return Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)
+    }
+
+    private fun decrypt(encoded: String): String {
+        val bytes = Base64.decode(encoded, Base64.NO_WRAP)
+        require(bytes.size > IV_SIZE)
+        val cipher = Cipher.getInstance(CIPHER)
+        cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, bytes.copyOfRange(0, IV_SIZE)))
+        return cipher.doFinal(bytes.copyOfRange(IV_SIZE, bytes.size)).decodeToString()
     }
 
     private fun secretKey(): SecretKey {
@@ -68,6 +104,7 @@ class AndroidDeviceSessionStore(context: Context) : DeviceSessionStore {
 
     private companion object {
         const val SESSION_KEY = "encrypted_session"
+        const val PENDING_BOOTSTRAP_KEY = "encrypted_pending_bootstrap"
         const val KEY_ALIAS = "com.shimizu-technology.media-tools.device-session.v1"
         const val CIPHER = "AES/GCM/NoPadding"
         const val IV_SIZE = 12
