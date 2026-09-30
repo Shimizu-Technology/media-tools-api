@@ -44,7 +44,10 @@ jobs:
       - name: Check formatting
         run: test -z "$(gofmt -l $(find cmd internal -name '*.go' -type f))"
       - run: go vet ./...
-      - run: go test -race ./...
+      # Integration packages share TEST_DATABASE_URL and some migration tests
+      # change the schema, so package-level parallelism would make CI racy.
+      - name: Test backend with shared database isolation
+        run: go test -p 1 -race ./...
 
   frontend:
     runs-on: ubuntu-latest

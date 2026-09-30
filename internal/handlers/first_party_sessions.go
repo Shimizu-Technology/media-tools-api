@@ -38,16 +38,15 @@ func (h *Handler) BootstrapFirstPartySession(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Unsupported client type, device name, or refresh credential", Code: http.StatusBadRequest})
 		return
 	}
-	if err := h.DB.EnsureAuthIdentity(c.Request.Context(), user.ID, "clerk", *user.ClerkID); err != nil {
-		log.Printf("bootstrap identity link failed for user %s: %v", user.ID, err)
-		if errors.Is(err, database.ErrIdentityOwnedByOther) {
-			c.JSON(http.StatusConflict, models.ErrorResponse{Error: "identity_conflict", Message: "Could not link this identity to the account", Code: http.StatusConflict})
-		} else {
-			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not link this identity to the account", Code: http.StatusServiceUnavailable})
-		}
+	pair, err := h.DB.CreateOrRecoverClerkMigrationSession(c.Request.Context(), user.ID, *user.ClerkID, req.ClientType, req.DeviceName, req.NextRefreshToken)
+	if errors.Is(err, database.ErrClerkIdentityUnknown) {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{Error: "unauthorized", Message: "This Clerk account is no longer linked", Code: http.StatusUnauthorized})
 		return
 	}
-	pair, err := h.DB.CreateOrRecoverFirstPartySession(c.Request.Context(), user.ID, req.ClientType, req.DeviceName, req.NextRefreshToken)
+	if errors.Is(err, database.ErrIdentityOwnedByOther) {
+		c.JSON(http.StatusConflict, models.ErrorResponse{Error: "identity_conflict", Message: "Could not link this identity to the account", Code: http.StatusConflict})
+		return
+	}
 	if errors.Is(err, database.ErrInvalidSuccessorToken) || errors.Is(err, database.ErrSessionInvalid) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Could not create device session with this credential", Code: http.StatusBadRequest})
 		return

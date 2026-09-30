@@ -107,10 +107,11 @@ func JWTAuth(db *database.DB, jwtSecret string) gin.HandlerFunc {
 	}
 }
 
-// DualAuth returns middleware that accepts API key, Clerk JWT, OR legacy JWT.
-// Priority: 1) API key, 2) Clerk JWT (RS256 via JWKS), 3) Legacy JWT (HS256).
+// DualAuth returns middleware that accepts an API key and the explicitly
+// enabled bearer-token providers.
+// Priority: 1) API key, 2) first-party session, 3) Clerk JWT, 4) legacy JWT.
 // This ensures backward compatibility while enabling Clerk authentication.
-func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string, firstPartyEnabled, clerkMigrationOnly bool) gin.HandlerFunc {
+func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string, firstPartyEnabled, legacyAuthEnabled, clerkMigrationOnly bool) gin.HandlerFunc {
 	acceptFirstParty := firstPartyEnabled
 	return func(c *gin.Context) {
 		// Try API key first
@@ -227,14 +228,18 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 				}
 			}
 
-			// Fall back to legacy JWT (HS256)
-			claims, err := ParseJWT(tokenString, jwtSecret)
-			if err == nil {
-				user, err := db.GetUserByID(c.Request.Context(), claims.UserID)
+			// A production first-party rollout must not keep accepting the old
+			// shared-secret token format merely because JWT_SECRET is configured.
+			// LEGACY_AUTH_ENABLED controls both issuance routes and acceptance.
+			if legacyAuthEnabled {
+				claims, err := ParseJWT(tokenString, jwtSecret)
 				if err == nil {
-					c.Set(userContextKey, user)
-					c.Next()
-					return
+					user, err := db.GetUserByID(c.Request.Context(), claims.UserID)
+					if err == nil {
+						c.Set(userContextKey, user)
+						c.Next()
+						return
+					}
 				}
 			}
 		}
@@ -303,12 +308,12 @@ func AuthSessionBinding(c *gin.Context) string {
 	return ""
 }
 
-// BearerOnlyAuth accepts Clerk JWT (RS256) or legacy JWT (HS256) Bearer tokens,
-// but NOT API keys. Used for user-scoped routes like /auth/me and /workspace
-// where an API key should not grant access.
-func BearerOnlyAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string, firstPartyEnabled, clerkMigrationOnly bool) gin.HandlerFunc {
+// BearerOnlyAuth accepts the enabled bearer-token providers but not API keys.
+// Used for user-scoped routes like /auth/me and /workspace where an API key
+// should not grant access.
+func BearerOnlyAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecretKey string, firstPartyEnabled, legacyAuthEnabled, clerkMigrationOnly bool) gin.HandlerFunc {
 	// Create DualAuth handler once at init, not per-request
-	dualAuth := DualAuth(db, jwtSecret, jwksCache, clerkSecretKey, firstPartyEnabled, clerkMigrationOnly)
+	dualAuth := DualAuth(db, jwtSecret, jwksCache, clerkSecretKey, firstPartyEnabled, legacyAuthEnabled, clerkMigrationOnly)
 
 	return func(c *gin.Context) {
 		// Reject any request with API key, even if Authorization is also present
@@ -322,7 +327,7 @@ func BearerOnlyAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, cle
 			return
 		}
 
-		// Delegate to DualAuth for Bearer token handling (Clerk + legacy JWT)
+		// Delegate to DualAuth for the enabled Bearer token providers.
 		dualAuth(c)
 	}
 }

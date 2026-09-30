@@ -307,29 +307,138 @@ func (db *DB) CreateFirstPartySession(ctx context.Context, userID, clientType, d
 // and preinstalls that successor. Raw HTTP handlers must reject web callers so
 // refresh credentials are never returned to browser JavaScript.
 func (db *DB) CreateOrRecoverFirstPartySession(ctx context.Context, userID, clientType, deviceName, nextRefreshToken string) (*AuthTokenPair, error) {
-	if clientType != "web" && clientType != "ios" && clientType != "android" {
-		return nil, fmt.Errorf("unsupported client type")
-	}
-	deviceName = strings.TrimSpace(deviceName)
-	if len(deviceName) > 80 {
-		return nil, fmt.Errorf("device name is too long")
-	}
-	successorHash, err := refreshSuccessorHash(nextRefreshToken)
+	deviceName, successorHash, err := validateRecoverableSessionInput(clientType, deviceName, nextRefreshToken)
 	if err != nil {
 		return nil, err
 	}
-
 	now := time.Now().UTC()
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin recoverable session creation: %w", err)
 	}
 	defer tx.Rollback()
+	pair, commitOnError, err := createOrRecoverFirstPartySessionTx(ctx, tx, userID, clientType, deviceName, nextRefreshToken, successorHash, now, true)
+	if err != nil {
+		if commitOnError {
+			if commitErr := tx.Commit(); commitErr != nil {
+				return nil, fmt.Errorf("commit invalid session bootstrap: %w", commitErr)
+			}
+		}
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit session bootstrap: %w", err)
+	}
+	return pair, nil
+}
 
+// CreateOrRecoverClerkMigrationSession verifies the exact legacy provider link
+// and issues its first-party session under one account lock and transaction.
+// A concurrent detachment therefore linearizes entirely before or after this
+// operation; session bootstrap can never restore a link after detachment.
+func (db *DB) CreateOrRecoverClerkMigrationSession(ctx context.Context, userID, clerkSubject, clientType, deviceName, nextRefreshToken string) (*AuthTokenPair, error) {
+	clerkSubject = strings.TrimSpace(clerkSubject)
+	if userID == "" || clerkSubject == "" {
+		return nil, ErrClerkIdentityUnknown
+	}
+	deviceName, successorHash, err := validateRecoverableSessionInput(clientType, deviceName, nextRefreshToken)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin Clerk migration bootstrap: %w", err)
+	}
+	defer tx.Rollback()
+	// Keep the global order used by generic bootstrap: successor lock, then any
+	// user-row/FK lock. This prevents a reused successor from deadlocking a
+	// Clerk migration bootstrap against another session ceremony.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, successorHash); err != nil {
+		return nil, fmt.Errorf("lock Clerk migration successor: %w", err)
+	}
+
+	var storedClerkID sql.NullString
+	err = tx.GetContext(ctx, &storedClerkID, `SELECT clerk_id FROM users WHERE id = $1 FOR UPDATE /* clerk-bootstrap-lock */`, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrClerkIdentityUnknown
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock Clerk migration account: %w", err)
+	}
+	var identityOwner string
+	err = tx.GetContext(ctx, &identityOwner, `
+		SELECT user_id FROM auth_identities
+		WHERE provider = 'clerk' AND subject = $1`, clerkSubject)
+	switch {
+	case err == nil && identityOwner != userID:
+		return nil, ErrIdentityOwnedByOther
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return nil, fmt.Errorf("load Clerk migration identity: %w", err)
+	}
+	legacyLinked := storedClerkID.Valid && storedClerkID.String == clerkSubject
+	identityLinked := err == nil && identityOwner == userID
+	if !legacyLinked && !identityLinked {
+		return nil, ErrClerkIdentityUnknown
+	}
+	if !identityLinked {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO auth_identities (user_id, provider, subject)
+			VALUES ($1, 'clerk', $2)
+			ON CONFLICT (provider, subject) DO NOTHING`, userID, clerkSubject); err != nil {
+			return nil, fmt.Errorf("backfill Clerk migration identity: %w", err)
+		}
+		if err := tx.GetContext(ctx, &identityOwner, `
+			SELECT user_id FROM auth_identities
+			WHERE provider = 'clerk' AND subject = $1`, clerkSubject); err != nil {
+			return nil, fmt.Errorf("verify Clerk migration identity: %w", err)
+		}
+		if identityOwner != userID {
+			return nil, ErrIdentityOwnedByOther
+		}
+	}
+
+	pair, commitOnError, err := createOrRecoverFirstPartySessionTx(ctx, tx, userID, clientType, deviceName, nextRefreshToken, successorHash, now, false)
+	if err != nil {
+		if commitOnError {
+			if commitErr := tx.Commit(); commitErr != nil {
+				return nil, fmt.Errorf("commit invalid Clerk migration bootstrap: %w", commitErr)
+			}
+		}
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit Clerk migration bootstrap: %w", err)
+	}
+	return pair, nil
+}
+
+func validateRecoverableSessionInput(clientType, deviceName, nextRefreshToken string) (string, string, error) {
+	if clientType != "web" && clientType != "ios" && clientType != "android" {
+		return "", "", fmt.Errorf("unsupported client type")
+	}
+	deviceName = strings.TrimSpace(deviceName)
+	if len(deviceName) > 80 {
+		return "", "", fmt.Errorf("device name is too long")
+	}
+	successorHash, err := refreshSuccessorHash(nextRefreshToken)
+	if err != nil {
+		return "", "", err
+	}
+	return deviceName, successorHash, nil
+}
+
+// createOrRecoverFirstPartySessionTx lets one-time account ceremonies and
+// migration checks commit session issuance in the same transaction. The bool
+// asks the caller to preserve deliberate pruning/tombstones on a generic
+// invalid-session result.
+func createOrRecoverFirstPartySessionTx(ctx context.Context, tx *sqlx.Tx, userID, clientType, deviceName, nextRefreshToken, successorHash string, now time.Time, lockSuccessor bool) (*AuthTokenPair, bool, error) {
 	// Serialize one successor without locking the account or unrelated device
 	// bootstrap requests. The table's primary key remains the final safeguard.
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, successorHash); err != nil {
-		return nil, fmt.Errorf("lock session successor: %w", err)
+	if lockSuccessor {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, successorHash); err != nil {
+			return nil, false, fmt.Errorf("lock session successor: %w", err)
+		}
 	}
 	// An exact saved successor is the refresh credential itself, so a native
 	// bootstrap remains recoverable for the session's full active lifetime.
@@ -343,7 +452,7 @@ func (db *DB) CreateOrRecoverFirstPartySession(ctx context.Context, userID, clie
 		  AND r.session_id = s.id AND r.token_hash = i.successor_hash
 		  AND (s.revoked_at IS NOT NULL OR s.inactive_expires_at <= $1
 		       OR r.consumed_at IS NOT NULL OR r.expires_at <= $1)`, now, successorHash, userID); err != nil {
-		return nil, fmt.Errorf("prune session bootstrap issuances: %w", err)
+		return nil, false, fmt.Errorf("prune session bootstrap issuances: %w", err)
 	}
 
 	var issuance struct {
@@ -351,7 +460,7 @@ func (db *DB) CreateOrRecoverFirstPartySession(ctx context.Context, userID, clie
 		UserID     string `db:"user_id"`
 		ClientType string `db:"client_type"`
 	}
-	err = tx.GetContext(ctx, &issuance, `
+	err := tx.GetContext(ctx, &issuance, `
 		SELECT session_id, user_id, client_type
 		FROM auth_session_bootstrap_issuances
 		WHERE successor_hash = $1
@@ -359,7 +468,7 @@ func (db *DB) CreateOrRecoverFirstPartySession(ctx context.Context, userID, clie
 	switch {
 	case err == nil:
 		if issuance.UserID != userID || issuance.ClientType != clientType {
-			return nil, ErrSessionInvalid
+			return nil, false, ErrSessionInvalid
 		}
 		pair, recoverErr := recoverSessionWithSuccessorTx(
 			ctx, tx, issuance.SessionID, issuance.UserID,
@@ -370,43 +479,34 @@ func (db *DB) CreateOrRecoverFirstPartySession(ctx context.Context, userID, clie
 			// bootstrap prunes it once the matching invalid refresh row is
 			// visible, but a temporarily missing refresh row cannot turn a used
 			// client credential back into a new-session credential.
-			if err := tx.Commit(); err != nil {
-				return nil, fmt.Errorf("commit invalid session bootstrap: %w", err)
-			}
-			return nil, ErrSessionInvalid
+			return nil, true, ErrSessionInvalid
 		}
 		if recoverErr != nil {
-			return nil, fmt.Errorf("recover session bootstrap: %w", recoverErr)
+			return nil, false, fmt.Errorf("recover session bootstrap: %w", recoverErr)
 		}
-		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("commit recovered session bootstrap: %w", err)
-		}
-		return pair, nil
+		return pair, false, nil
 	case !errors.Is(err, sql.ErrNoRows):
-		return nil, fmt.Errorf("load session bootstrap issuance: %w", err)
+		return nil, false, fmt.Errorf("load session bootstrap issuance: %w", err)
 	}
 	// A successor may already belong to a session created by another ceremony.
 	// Detect it before attempting inserts so pruning can still commit and the
 	// failed bootstrap never creates even transaction-local session rows.
 	var successorExists bool
 	if err := tx.GetContext(ctx, &successorExists, `SELECT EXISTS (SELECT 1 FROM auth_refresh_tokens WHERE token_hash = $1)`, successorHash); err != nil {
-		return nil, fmt.Errorf("check session successor availability: %w", err)
+		return nil, false, fmt.Errorf("check session successor availability: %w", err)
 	}
 	if successorExists {
-		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("commit session bootstrap pruning: %w", err)
-		}
-		return nil, ErrSessionInvalid
+		return nil, true, ErrSessionInvalid
 	}
 
 	pair, err := createFirstPartySessionWithRefreshTx(
 		ctx, tx, userID, clientType, deviceName, nextRefreshToken, now,
 	)
 	if errors.Is(err, errSuccessorUnavailable) {
-		return nil, ErrSessionInvalid
+		return nil, false, ErrSessionInvalid
 	}
 	if err != nil {
-		return nil, fmt.Errorf("create recoverable session: %w", err)
+		return nil, false, fmt.Errorf("create recoverable session: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO auth_session_bootstrap_issuances
@@ -414,14 +514,11 @@ func (db *DB) CreateOrRecoverFirstPartySession(ctx context.Context, userID, clie
 		VALUES ($1, $2, $3, $4, $5)`,
 		successorHash, pair.SessionID, userID, clientType, now); err != nil {
 		if isUniqueViolation(err) {
-			return nil, ErrSessionInvalid
+			return nil, false, ErrSessionInvalid
 		}
-		return nil, fmt.Errorf("save session bootstrap issuance: %w", err)
+		return nil, false, fmt.Errorf("save session bootstrap issuance: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit session bootstrap: %w", err)
-	}
-	return pair, nil
+	return pair, false, nil
 }
 
 // RefreshFirstPartySession consumes a refresh credential exactly once. A very

@@ -136,7 +136,7 @@ func TestClerkMigrationOnlyMiddlewareAcceptsLinkedAndRejectsUnknown(t *testing.T
 	unknownToken := fixture.token(t, unknownSubject)
 	for name, auth := range map[string]gin.HandlerFunc{
 		"ClerkAuth": ClerkAuth(db, fixture.cache, "", true),
-		"DualAuth":  DualAuth(db, "test-jwt-secret", fixture.cache, "", false, true),
+		"DualAuth":  DualAuth(db, "test-jwt-secret", fixture.cache, "", false, false, true),
 	} {
 		t.Run(name+" linked", func(t *testing.T) {
 			response := runClerkMiddleware(t, auth, linkedToken)

@@ -98,11 +98,6 @@ func (h *WebSessionHandler) Bootstrap(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{Error: "unauthorized", Message: "A verified account is required", Code: http.StatusUnauthorized})
 		return
 	}
-	if err := h.db.EnsureAuthIdentity(c.Request.Context(), user.ID, "clerk", *user.ClerkID); err != nil {
-		log.Printf("link browser session identity: %v", err)
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not link your account", Code: http.StatusServiceUnavailable})
-		return
-	}
 	successor, err := c.Cookie(middleware.WebPendingCookie)
 	if err != nil || !database.ValidFirstPartyRefreshToken(successor) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "session_not_prepared", Message: "Prepare browser sign-in first", Code: http.StatusBadRequest})
@@ -113,7 +108,17 @@ func (h *WebSessionHandler) Bootstrap(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "session_creation_failed", Message: "Could not create browser session", Code: http.StatusServiceUnavailable})
 		return
 	}
-	pair, err := h.db.CreateOrRecoverFirstPartySession(c.Request.Context(), user.ID, "web", "Browser", successor)
+	pair, err := h.db.CreateOrRecoverClerkMigrationSession(c.Request.Context(), user.ID, *user.ClerkID, "web", "Browser", successor)
+	if errors.Is(err, database.ErrClerkIdentityUnknown) {
+		h.clearPending(c)
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{Error: "unauthorized", Message: "This Clerk account is no longer linked", Code: http.StatusUnauthorized})
+		return
+	}
+	if errors.Is(err, database.ErrIdentityOwnedByOther) {
+		h.clearPending(c)
+		c.JSON(http.StatusConflict, models.ErrorResponse{Error: "identity_conflict", Message: "Could not link this identity to the account", Code: http.StatusConflict})
+		return
+	}
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "session_creation_failed", Message: "Could not create browser session", Code: http.StatusServiceUnavailable})
 		return
