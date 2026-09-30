@@ -16,7 +16,9 @@ if [[ -n "$unformatted" ]]; then
   exit 1
 fi
 go list ./... | grep -v '/frontend/node_modules/' | xargs go vet
-go list ./... | grep -v '/frontend/node_modules/' | xargs go test -race
+# PostgreSQL integration packages share TEST_DATABASE_URL and include schema
+# migration tests, so run packages serially while keeping test-level concurrency.
+go list ./... | grep -v '/frontend/node_modules/' | xargs go test -p 1 -race
 
 echo "Running frontend checks"
 (
