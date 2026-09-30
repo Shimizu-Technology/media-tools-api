@@ -18,6 +18,7 @@ interface AuthProviderProps {
   canUseWorkspace: boolean;
   user?: User | null;
   refreshUser?: () => Promise<void>;
+  signOut?: () => Promise<void>;
 }
 
 /**
@@ -32,9 +33,10 @@ export function AuthProvider({
   canUseWorkspace,
   user = null,
   refreshUser = async () => undefined,
+  signOut = async () => undefined,
 }: AuthProviderProps) {
   return (
-    <AuthContext.Provider value={{ isClerkEnabled, isAuthenticated, isLoading, canUseWorkspace, user, refreshUser }}>
+    <AuthContext.Provider value={{ isClerkEnabled, isAuthenticated, isLoading, canUseWorkspace, user, refreshUser, signOut }}>
       {children}
     </AuthContext.Provider>
   );

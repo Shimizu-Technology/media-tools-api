@@ -7,5 +7,8 @@ https://media-tools-gu.netlify.app/* https://media.shimizu-technology.com/:splat
 /sitemap.xml   /sitemap.xml   200
 /manifest.json /manifest.json 200
 
+# Same-origin API proxy for first-party browser cookies. Keep above SPA fallback.
+/api/* https://media-tools-api.onrender.com/api/:splat 200
+
 # SPA fallback - all other routes go to index.html
 /*    /index.html   200

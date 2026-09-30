@@ -245,6 +245,8 @@ func main() {
 		JWTSecret:                   cfg.JWTSecret,
 		LegacyAuthEnabled:           cfg.LegacyAuthEnabled,
 		FirstPartyAuthEnabled:       cfg.FirstPartyAuthEnabled,
+		WebCookieAuthEnabled:        cfg.WebCookieAuthEnabled,
+		WebCookieSecure:             cfg.GinMode == "release",
 		AdminAPIKey:                 cfg.AdminAPIKey,
 		OwnerKeyID:                  cfg.OwnerAPIKeyID,
 		OwnerKeyPrefix:              cfg.OwnerAPIKeyPrefix,

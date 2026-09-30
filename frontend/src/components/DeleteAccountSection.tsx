@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useClerk } from '@clerk/clerk-react';
 import { AlertTriangle, LoaderCircle, Trash2 } from 'lucide-react';
 import { deleteAccount, getErrorMessage } from '../lib/api';
+import { useAuthContext } from '../contexts/useAuthContext';
 
 const accountStorageKeys = [
   'mta_active_audio_transcription_id',
@@ -21,7 +21,7 @@ function clearLocalAccountState() {
  * the request through the application purge before Clerk sign-out.
  */
 export function DeleteAccountSection() {
-  const { signOut } = useClerk();
+  const { signOut } = useAuthContext();
   const [isOpen, setIsOpen] = useState(false);
   const [confirmation, setConfirmation] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
@@ -35,7 +35,7 @@ export function DeleteAccountSection() {
       await deleteAccount('DELETE');
       clearLocalAccountState();
       try {
-        await signOut({ redirectUrl: '/' });
+        await signOut();
       } catch {
         setError('Your account deletion is underway, but this browser could not finish signing out. Close this tab and reopen Media Tools.');
         setIsDeleting(false);

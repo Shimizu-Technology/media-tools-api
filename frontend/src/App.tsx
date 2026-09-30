@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
-import { ClerkProvider, useAuth } from '@clerk/clerk-react'
+import { ClerkProvider, useAuth, useClerk } from '@clerk/clerk-react'
 import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { FileText } from 'lucide-react'
 import { AppShell } from './components/AppShell'
@@ -9,6 +9,7 @@ import { AuthProvider } from './contexts/AuthContext'
 import { AIProcessingConsentProvider } from './contexts/AIProcessingConsentContext'
 import { getCurrentUser, type User } from './lib/api'
 import { setAuthTokenGetter } from './lib/apiAuth'
+import { bootstrapWebSession, isWebSessionActive, logoutWebSession, restoreWebSession, setWebSessionActive, webSessionEnabled, webSessionStateChanged } from './lib/webSession'
 
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 const isClerkEnabled = Boolean(CLERK_PUBLISHABLE_KEY && CLERK_PUBLISHABLE_KEY !== 'YOUR_PUBLISHABLE_KEY')
@@ -159,8 +160,10 @@ function AppFooter() {
 
 function ClerkAppContent() {
   const { getToken, isLoaded, isSignedIn, userId } = useAuth()
+  const clerk = useClerk()
   const [user, setUser] = useState<User | null>(null)
-  const [isUserLoading, setIsUserLoading] = useState(false)
+  const [isUserLoading, setIsUserLoading] = useState(true)
+  const [hasWebSession, setHasWebSession] = useState(false)
 
   useEffect(() => {
     setAuthTokenGetter(async (forceRefresh) => {
@@ -173,7 +176,7 @@ function ClerkAppContent() {
   }, [getToken])
 
   const refreshUser = useCallback(async () => {
-    if (!isSignedIn) {
+    if (!isWebSessionActive() && !isSignedIn) {
       setUser(null)
       return
     }
@@ -188,25 +191,73 @@ function ClerkAppContent() {
   }, [isSignedIn])
 
   useEffect(() => {
-    if (isLoaded && !isSignedIn) {
-      localStorage.removeItem('mta_jwt_token')
+    const syncWebSessionState = () => setHasWebSession(isWebSessionActive())
+    window.addEventListener(webSessionStateChanged, syncWebSessionState)
+    return () => window.removeEventListener(webSessionStateChanged, syncWebSessionState)
+  }, [])
+
+  useEffect(() => {
+    if (!isLoaded) return
+    let cancelled = false
+    const restore = async () => {
+      setIsUserLoading(true)
+      setHasWebSession(false)
       setUser(null)
+      if (!isSignedIn) localStorage.removeItem('mta_jwt_token')
+      try {
+        if (webSessionEnabled) {
+          setWebSessionActive(false)
+          const existingClerkID = await restoreWebSession()
+          if (cancelled) return
+          if (existingClerkID !== null && userId && existingClerkID !== userId) {
+            await logoutWebSession()
+            if (cancelled) return
+            setWebSessionActive(false)
+          } else if (existingClerkID !== null) {
+            setWebSessionActive(true)
+          }
+          if (!isWebSessionActive() && userId) {
+            const token = await getToken()
+            if (cancelled) return
+            if (token && await bootstrapWebSession(token)) setWebSessionActive(true)
+          }
+        }
+        if (cancelled) return
+        setHasWebSession(isWebSessionActive())
+        if (isWebSessionActive() || isSignedIn) {
+          setUser(await getCurrentUser())
+        } else {
+          setUser(null)
+        }
+      } catch {
+        if (!cancelled) setUser(null)
+      } finally {
+        if (!cancelled) setIsUserLoading(false)
+      }
     }
-    if (isLoaded && isSignedIn) {
-      void refreshUser()
-    }
-  }, [isLoaded, isSignedIn, refreshUser])
+    void restore()
+    return () => { cancelled = true }
+  }, [getToken, isLoaded, isSignedIn, userId])
+
+  const signOut = useCallback(async () => {
+    if (isWebSessionActive()) await logoutWebSession()
+    setWebSessionActive(false)
+    setHasWebSession(false)
+    setUser(null)
+    await clerk.signOut({ redirectUrl: '/' })
+  }, [clerk])
 
   return (
     <AuthProvider
       isClerkEnabled={true}
-      isAuthenticated={isSignedIn ?? false}
+      isAuthenticated={hasWebSession || (isSignedIn ?? false)}
       isLoading={!isLoaded || isUserLoading}
       canUseWorkspace={true}
       user={user}
       refreshUser={refreshUser}
+      signOut={signOut}
     >
-      <AIProcessingConsentProvider ownerID={userId ?? null}>
+      <AIProcessingConsentProvider ownerID={user?.clerk_id ?? userId ?? null}>
         <AppRoutes />
       </AIProcessingConsentProvider>
     </AuthProvider>
