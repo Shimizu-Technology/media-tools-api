@@ -44,6 +44,7 @@ type RouterConfig struct {
 	ClerkIssuer                 string
 	ClerkAudience               string
 	ClerkAuthorizedParty        string
+	ClerkMigrationOnly          bool
 	ClerkAccountDeletionEnabled bool
 	AllowedOrigins              []string
 	DefaultRateLimit            int
@@ -114,7 +115,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		// Never exchange an API key or a legacy JWT for a device session.
 		if jwksCache != nil {
 			clerkSession := r.Group("/api/v1/auth")
-			clerkSession.Use(middleware.ClerkAuth(cfg.DB, jwksCache, cfg.ClerkSecretKey))
+			clerkSession.Use(middleware.ClerkAuth(cfg.DB, jwksCache, cfg.ClerkSecretKey, cfg.ClerkMigrationOnly))
 			clerkSession.POST("/session/bootstrap", h.BootstrapFirstPartySession)
 			if cfg.WebCookieAuthEnabled {
 				clerkSession.POST("/web/session/bootstrap", web.Bootstrap)
@@ -144,10 +145,10 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	// --- JWT-protected routes (MTA-20) — accepts Clerk or legacy JWT ---
 	jwtProtected := r.Group("/api/v1")
 	if jwksCache != nil {
-		jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey, cfg.FirstPartyAuthEnabled))
+		jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey, cfg.FirstPartyAuthEnabled, cfg.ClerkMigrationOnly))
 	} else {
 		if cfg.FirstPartyAuthEnabled {
-			jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, nil, "", true))
+			jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, nil, "", true, false))
 		} else {
 			jwtProtected.Use(middleware.JWTAuth(cfg.DB, cfg.JWTSecret))
 		}
@@ -175,7 +176,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 
 	// --- Protected Routes (API key OR Clerk JWT OR legacy JWT — backward compatible) ---
 	protected := r.Group("/api/v1")
-	protected.Use(middleware.DualAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey, cfg.FirstPartyAuthEnabled))
+	protected.Use(middleware.DualAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey, cfg.FirstPartyAuthEnabled, cfg.ClerkMigrationOnly))
 	protected.Use(rateLimiter.RateLimit())
 	{
 		// Transcript endpoints

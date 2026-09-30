@@ -255,6 +255,7 @@ func main() {
 		ClerkIssuer:                 cfg.ClerkIssuer,
 		ClerkAudience:               cfg.ClerkAudience,
 		ClerkAuthorizedParty:        cfg.ClerkAuthorizedParty,
+		ClerkMigrationOnly:          cfg.ClerkMigrationOnly,
 		ClerkAccountDeletionEnabled: clerkClient.IsConfigured(),
 		AllowedOrigins:              cfg.AllowedOrigins,
 		DefaultRateLimit:            cfg.DefaultRateLimit,

@@ -11,7 +11,10 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
 
-var ErrClerkEmailConflict = errors.New("email belongs to an existing non-Clerk account")
+var (
+	ErrClerkEmailConflict   = errors.New("email belongs to an existing non-Clerk account")
+	ErrClerkIdentityUnknown = errors.New("clerk identity is not linked to an account")
+)
 
 // CreateUser inserts a new user record.
 func (db *DB) CreateUser(ctx context.Context, u *models.User) error {
@@ -62,6 +65,50 @@ func (db *DB) GetUserByClerkID(ctx context.Context, clerkID string) (*models.Use
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
 	return &u, nil
+}
+
+// ResolveMigrationClerkUser accepts Clerk only as a migration bridge for an
+// account that was linked previously. The auth identity table is canonical;
+// users.clerk_id remains a compatibility fallback for databases created before
+// auth_identities existed. Email is deliberately absent from this lookup.
+//
+// The only write this method can make is backfilling auth_identities for an
+// exact legacy clerk_id match. An unknown Clerk subject never creates or links
+// an account.
+func (db *DB) ResolveMigrationClerkUser(ctx context.Context, clerkID string) (*models.User, error) {
+	clerkID = strings.TrimSpace(clerkID)
+	if clerkID == "" {
+		return nil, ErrClerkIdentityUnknown
+	}
+
+	var user models.User
+	err := db.GetContext(ctx, &user, `
+		SELECT u.*
+		FROM auth_identities ai
+		JOIN users u ON u.id = ai.user_id
+		WHERE ai.provider = 'clerk' AND ai.subject = $1`, clerkID)
+	if err == nil {
+		// Older handlers still read ClerkID when bootstrapping a first-party
+		// session. The verified identity subject is safe to expose in-memory
+		// even when a newer account no longer mirrors it into users.clerk_id.
+		user.ClerkID = &clerkID
+		return &user, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("find Clerk auth identity: %w", err)
+	}
+
+	legacy, err := db.GetUserByClerkID(ctx, clerkID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrClerkIdentityUnknown
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find legacy Clerk user: %w", err)
+	}
+	if err := db.EnsureAuthIdentity(ctx, legacy.ID, "clerk", clerkID); err != nil {
+		return nil, fmt.Errorf("backfill legacy Clerk identity: %w", err)
+	}
+	return legacy, nil
 }
 
 // CreateUserFromClerk creates a new user from Clerk authentication.

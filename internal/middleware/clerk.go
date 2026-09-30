@@ -257,8 +257,9 @@ type ClerkClaims struct {
 }
 
 // ClerkAuth returns middleware that validates Clerk JWT Bearer tokens.
-// It verifies the token using JWKS, looks up (or auto-creates) the user in the DB.
-func ClerkAuth(db *database.DB, jwksCache *JWKSCache, clerkSecretKey string) gin.HandlerFunc {
+// When migrationOnly is true, Clerk can authenticate only accounts whose exact
+// provider subject was linked already. It cannot create or email-link users.
+func ClerkAuth(db *database.DB, jwksCache *JWKSCache, clerkSecretKey string, migrationOnly bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
@@ -298,9 +299,23 @@ func ClerkAuth(db *database.DB, jwksCache *JWKSCache, clerkSecretKey string) gin
 			return
 		}
 
-		// Fast path: returning user already linked to Clerk (no external API call)
-		user, err := db.GetUserByClerkID(c.Request.Context(), clerkUserID)
-		if err != nil {
+		var user *models.User
+		if migrationOnly {
+			user, err = db.ResolveMigrationClerkUser(c.Request.Context(), clerkUserID)
+			if errors.Is(err, database.ErrClerkIdentityUnknown) {
+				c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+					Error:   "unauthorized",
+					Message: "Failed to verify user identity",
+					Code:    http.StatusUnauthorized,
+				})
+				c.Abort()
+				return
+			}
+		} else {
+			// Fast path: returning user already linked to Clerk (no external API call)
+			user, err = db.GetUserByClerkID(c.Request.Context(), clerkUserID)
+		}
+		if err != nil && !migrationOnly {
 			// Slow path: new user — fetch from Clerk API to get email/name
 			clerkUser, fetchErr := fetchClerkUser(clerkUserID, clerkSecretKey)
 			if fetchErr != nil {
@@ -325,7 +340,7 @@ func ClerkAuth(db *database.DB, jwksCache *JWKSCache, clerkSecretKey string) gin
 				c.Abort()
 				return
 			}
-			log.Printf("❌ Failed to find/create user for clerk_id %s: %v", clerkUserID, err)
+			log.Printf("❌ Failed to resolve Clerk user %s: %v", clerkUserID, err)
 			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 				Error:   "server_error",
 				Message: "Failed to authenticate user",
