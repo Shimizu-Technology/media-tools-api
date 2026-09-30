@@ -4,6 +4,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -178,6 +179,15 @@ func DualAuth(db *database.DB, jwtSecret string, jwksCache *JWKSCache, clerkSecr
 								var createErr error
 								user, createErr = db.FindOrCreateClerkUser(c.Request.Context(), claims.Subject, clerkUser.Email, clerkUser.Name)
 								if createErr != nil {
+									if errors.Is(createErr, database.ErrClerkEmailConflict) {
+										c.JSON(http.StatusConflict, models.ErrorResponse{
+											Error:   "identity_conflict",
+											Message: "An account with this email already exists. Sign in with its original method.",
+											Code:    http.StatusConflict,
+										})
+										c.Abort()
+										return
+									}
 									log.Printf("❌ DualAuth: failed to find/create Clerk user %s: %v", claims.Subject, createErr)
 									// Clerk token is valid but DB failed — return 500, don't fall through to legacy JWT
 									c.JSON(http.StatusInternalServerError, models.ErrorResponse{

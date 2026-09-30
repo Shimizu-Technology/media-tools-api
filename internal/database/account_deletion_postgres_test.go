@@ -73,7 +73,7 @@ func TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup(t *testing.T) {
 	}
 
 	cleanupAfter := time.Now().UTC().Add(time.Hour)
-	request, err := db.RequestAccountDeletion(ctx, userID, clerkID, cleanupAfter)
+	request, err := db.RequestAccountDeletion(ctx, userID, &clerkID, cleanupAfter)
 	if err != nil {
 		t.Fatalf("RequestAccountDeletion() error = %v", err)
 	}
@@ -167,5 +167,84 @@ func TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup(t *testing.T) {
 	}
 	if completed.Status != "completed" || completed.ClerkUserID != nil || string(completed.ObjectKeys) != "[]" {
 		t.Fatalf("completed deletion retained provider data: %#v", completed)
+	}
+}
+
+func TestRequestNativeAccountDeletionPurgesOwnedDataAndPreservesOtherUsers(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	ownedObjectKey := "audio/" + uuid.NewString() + ".m4a"
+
+	var userID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO users (email, password_hash, name)
+		VALUES ($1, '', 'Native Deletion') RETURNING id`, uuid.NewString()+"@example.com").Scan(&userID); err != nil {
+		t.Fatalf("insert native user: %v", err)
+	}
+	var otherUserID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO users (email, password_hash, name)
+		VALUES ($1, '', 'Other User') RETURNING id`, uuid.NewString()+"@example.com").Scan(&otherUserID); err != nil {
+		t.Fatalf("insert other user: %v", err)
+	}
+	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, otherUserID) })
+
+	var audioID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO audio_transcriptions (
+			filename, original_name, status, audio_s3_key, user_id
+		) VALUES ('native.m4a', 'native.m4a', 'completed', $1, $2)
+		RETURNING id`, ownedObjectKey, userID).Scan(&audioID); err != nil {
+		t.Fatalf("insert native audio: %v", err)
+	}
+	var otherAudioID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO audio_transcriptions (
+			filename, original_name, status, audio_s3_key, user_id
+		) VALUES ('other.m4a', 'other.m4a', 'completed', $1, $2)
+		RETURNING id`, "audio/"+uuid.NewString()+".m4a", otherUserID).Scan(&otherAudioID); err != nil {
+		t.Fatalf("insert other audio: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM audio_transcriptions WHERE id = $1`, otherAudioID)
+	})
+
+	request, err := db.RequestAccountDeletion(ctx, userID, nil, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("RequestAccountDeletion(native) error = %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM background_jobs WHERE resource_id = $1`, request.ID)
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM account_deletion_requests WHERE id = $1`, request.ID)
+	})
+	if request.ClerkUserID != nil || request.ClerkUserHash != "" || request.ClerkDeletedAt == nil {
+		t.Fatalf("native deletion retained provider state: %#v", request)
+	}
+
+	for table, id := range map[string]string{
+		"users":                userID,
+		"audio_transcriptions": audioID,
+	} {
+		var count int
+		if err := db.GetContext(ctx, &count, "SELECT COUNT(*) FROM "+table+" WHERE id = $1", id); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s row remained after native deletion", table)
+		}
+	}
+	var otherCount int
+	if err := db.GetContext(ctx, &otherCount, `SELECT COUNT(*) FROM users WHERE id = $1`, otherUserID); err != nil || otherCount != 1 {
+		t.Fatalf("other user count = %d, %v", otherCount, err)
+	}
+	if err := db.GetContext(ctx, &otherCount, `SELECT COUNT(*) FROM audio_transcriptions WHERE id = $1`, otherAudioID); err != nil || otherCount != 1 {
+		t.Fatalf("other audio count = %d, %v", otherCount, err)
+	}
+	var keys []string
+	if err := json.Unmarshal(request.ObjectKeys, &keys); err != nil {
+		t.Fatalf("decode native object keys: %v", err)
+	}
+	if len(keys) != 1 || keys[0] != ownedObjectKey {
+		t.Fatalf("native object keys = %#v", keys)
 	}
 }

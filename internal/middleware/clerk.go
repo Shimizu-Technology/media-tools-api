@@ -10,6 +10,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -315,6 +316,15 @@ func ClerkAuth(db *database.DB, jwksCache *JWKSCache, clerkSecretKey string) gin
 			user, err = db.FindOrCreateClerkUser(c.Request.Context(), clerkUserID, clerkUser.Email, clerkUser.Name)
 		}
 		if err != nil {
+			if errors.Is(err, database.ErrClerkEmailConflict) {
+				c.JSON(http.StatusConflict, models.ErrorResponse{
+					Error:   "identity_conflict",
+					Message: "An account with this email already exists. Sign in with its original method.",
+					Code:    http.StatusConflict,
+				})
+				c.Abort()
+				return
+			}
 			log.Printf("❌ Failed to find/create user for clerk_id %s: %v", clerkUserID, err)
 			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 				Error:   "server_error",
