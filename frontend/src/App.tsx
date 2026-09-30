@@ -9,7 +9,7 @@ import { AuthProvider } from './contexts/AuthContext'
 import { AIProcessingConsentProvider } from './contexts/AIProcessingConsentContext'
 import { getCurrentUser, type User } from './lib/api'
 import { setAuthTokenGetter } from './lib/apiAuth'
-import { bootstrapWebSession, isWebSessionActive, logoutWebSession, restoreWebSession, setWebSessionActive, webSessionEnabled } from './lib/webSession'
+import { bootstrapWebSession, isWebSessionActive, logoutWebSession, restoreWebSession, setWebSessionActive, webSessionEnabled, webSessionStateChanged } from './lib/webSession'
 
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 const isClerkEnabled = Boolean(CLERK_PUBLISHABLE_KEY && CLERK_PUBLISHABLE_KEY !== 'YOUR_PUBLISHABLE_KEY')
@@ -189,6 +189,12 @@ function ClerkAppContent() {
       setIsUserLoading(false)
     }
   }, [isSignedIn])
+
+  useEffect(() => {
+    const syncWebSessionState = () => setHasWebSession(isWebSessionActive())
+    window.addEventListener(webSessionStateChanged, syncWebSessionState)
+    return () => window.removeEventListener(webSessionStateChanged, syncWebSessionState)
+  }, [])
 
   useEffect(() => {
     if (!isLoaded) return

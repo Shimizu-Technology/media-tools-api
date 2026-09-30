@@ -1,8 +1,13 @@
 /** Same-origin browser session. The refresh credential never enters JavaScript. */
 export const webSessionEnabled = import.meta.env.VITE_WEB_COOKIE_AUTH_ENABLED === 'true';
 let active = false;
+export const webSessionStateChanged = 'mta:web-session-state-changed';
 export function isWebSessionActive(): boolean { return webSessionEnabled && active; }
-export function setWebSessionActive(value: boolean): void { active = value; }
+export function setWebSessionActive(value: boolean): void {
+  if (active === value) return;
+  active = value;
+  window.dispatchEvent(new CustomEvent(webSessionStateChanged, { detail: { active: isWebSessionActive() } }));
+}
 
 const base = '/api/v1/auth/web/session';
 let renewal: Promise<boolean> | null = null;
