@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { commitWebOnboarding, completeWebOnboarding, parseJoinFragment, transferJoinFragmentBeforeApp } from './onboarding';
+import { commitWebOnboarding, completeWebOnboarding, getWebOnboardingStatus, parseJoinFragment, transferJoinFragmentBeforeApp } from './onboarding';
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -122,6 +122,29 @@ describe('web onboarding commit', () => {
       '/api/v1/auth/web/session/prepare',
       '/api/v1/auth/web/session/refresh',
       '/api/v1/auth/web/onboarding/complete',
+    ]);
+  });
+
+  it('renews an expired access cookie before resuming an interrupted setup', async () => {
+    const incomplete = { pending: false, session_ready: false, onboarding_required: false, passkeys: 0, recovery_codes: 0, complete: false };
+    const resumed = { pending: false, session_ready: true, onboarding_required: true, passkeys: 1, recovery_codes: 0, complete: false };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(incomplete), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: false }), { status: 401, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: true, onboarding_required: true, user_id: 'user-1' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(resumed), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getWebOnboardingStatus()).resolves.toMatchObject({ session_ready: true, onboarding_required: true, passkeys: 1 });
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      '/api/v1/auth/web/onboarding/status',
+      '/api/v1/auth/web/session/status',
+      '/api/v1/auth/web/session/prepare',
+      '/api/v1/auth/web/session/refresh',
+      '/api/v1/auth/web/session/status',
+      '/api/v1/auth/web/onboarding/status',
     ]);
   });
 });

@@ -59,6 +59,17 @@ export function parseJoinFragment(hash: string): { kind: JoinKind; token: string
 }
 
 export async function getWebOnboardingStatus(): Promise<WebOnboardingStatus> {
+  let status = await fetchOnboardingStatus();
+  if (!status.pending && !status.session_ready) {
+    // An interrupted setup can outlive its short access cookie. Restore from
+    // the year-long HttpOnly refresh cookie before deciding the link is gone.
+    const restored = await restoreWebSession();
+    if (restored?.authenticated) status = await fetchOnboardingStatus();
+  }
+  return status;
+}
+
+async function fetchOnboardingStatus(): Promise<WebOnboardingStatus> {
   const response = await safeFetch(`${base}/status`, { credentials: 'same-origin' });
   if (!response.ok) throw await responseError(response, 'Could not check account setup.');
   return normalizeStatus(await response.json() as Partial<WebOnboardingStatus>);
