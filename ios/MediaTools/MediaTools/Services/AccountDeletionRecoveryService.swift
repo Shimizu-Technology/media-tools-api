@@ -137,7 +137,7 @@ final class AccountDeletionRecoveryService {
                 // An HTTP response proves the DELETE finished. When its
                 // receipt is also absent, do not replay that rejected request
                 // later without a fresh user confirmation.
-                if Self.receivedHTTPResponse(requestError) {
+                if Self.isDefinitiveRejection(requestError) {
                     journal.delete()
                 }
             } catch {
@@ -170,7 +170,7 @@ final class AccountDeletionRecoveryService {
                 if try await api.accountDeletionReceiptConfirmed(pending.receiptToken) {
                     return pending
                 }
-                if Self.receivedHTTPResponse(requestError) {
+                if Self.isDefinitiveRejection(requestError) {
                     journal.delete()
                 }
             } catch {
@@ -181,9 +181,17 @@ final class AccountDeletionRecoveryService {
         }
     }
 
-    private static func receivedHTTPResponse(_ error: Error) -> Bool {
-        if case APIError.httpError = error { return true }
-        return false
+    private static func isDefinitiveRejection(_ error: Error) -> Bool {
+        guard case APIError.httpError(let statusCode, let code, _) = error else {
+            return false
+        }
+        if statusCode == 400 || statusCode == 401 || statusCode == 403 {
+            return true
+        }
+        // This application response is emitted before the deletion database
+        // transaction starts. Generic 5xx responses stay ambiguous because a
+        // proxy error or lost commit acknowledgement may race the receipt read.
+        return statusCode == 503 && code == "account_deletion_unavailable"
     }
 
     /// Local recording cleanup records its own durable retry marker. Once that

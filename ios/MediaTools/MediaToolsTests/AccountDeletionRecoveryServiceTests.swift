@@ -15,7 +15,8 @@ private actor MockAccountDeletionAPI: AccountDeletionAPI {
     enum RequestResult: Equatable {
         case success
         case failure
-        case httpFailure
+        case definitiveHTTPFailure
+        case ambiguousHTTPFailure
     }
 
     enum ReceiptResult: Equatable {
@@ -40,11 +41,16 @@ private actor MockAccountDeletionAPI: AccountDeletionAPI {
             return
         case .failure:
             throw URLError(.timedOut)
-        case .httpFailure:
+        case .definitiveHTTPFailure:
             throw APIError.httpError(
                 statusCode: 503,
                 code: "account_deletion_unavailable",
                 message: "Account deletion is unavailable"
+            )
+        case .ambiguousHTTPFailure:
+            throw APIError.httpError(
+                statusCode: 503,
+                message: "Upstream response was unavailable"
             )
         }
     }
@@ -164,7 +170,7 @@ final class AccountDeletionRecoveryServiceTests: XCTestCase {
     func testRejectedDeleteWithAbsentReceiptRemovesReplayJournal() async {
         let journal = MemoryAccountDeletionJournal()
         let api = MockAccountDeletionAPI(
-            requestResult: .httpFailure,
+            requestResult: .definitiveHTTPFailure,
             receiptResult: .unconfirmed
         )
         let service = AccountDeletionRecoveryService(api: api, journal: journal)
@@ -183,7 +189,7 @@ final class AccountDeletionRecoveryServiceTests: XCTestCase {
     func testRejectedDeleteWithUnavailableReceiptLookupPreservesJournal() async {
         let journal = MemoryAccountDeletionJournal()
         let api = MockAccountDeletionAPI(
-            requestResult: .httpFailure,
+            requestResult: .definitiveHTTPFailure,
             receiptResult: .unavailable
         )
         let service = AccountDeletionRecoveryService(api: api, journal: journal)
@@ -191,6 +197,25 @@ final class AccountDeletionRecoveryServiceTests: XCTestCase {
         do {
             _ = try await service.requestDeletion(ownerID: "owner-a")
             XCTFail("unconfirmed deletion must not succeed")
+        } catch {
+            XCTAssertEqual(error as? AccountDeletionRecoveryError, .couldNotConfirm)
+        }
+
+        XCTAssertEqual(journal.value?.ownerID, "owner-a")
+    }
+
+    @MainActor
+    func testAmbiguousServerFailureWithAbsentReceiptPreservesJournal() async {
+        let journal = MemoryAccountDeletionJournal()
+        let api = MockAccountDeletionAPI(
+            requestResult: .ambiguousHTTPFailure,
+            receiptResult: .unconfirmed
+        )
+        let service = AccountDeletionRecoveryService(api: api, journal: journal)
+
+        do {
+            _ = try await service.requestDeletion(ownerID: "owner-a")
+            XCTFail("ambiguous deletion must not succeed")
         } catch {
             XCTAssertEqual(error as? AccountDeletionRecoveryError, .couldNotConfirm)
         }
@@ -208,7 +233,7 @@ final class AccountDeletionRecoveryServiceTests: XCTestCase {
         journal.value = pending
         let service = AccountDeletionRecoveryService(
             api: MockAccountDeletionAPI(
-                requestResult: .httpFailure,
+                requestResult: .definitiveHTTPFailure,
                 receiptResult: .unconfirmed
             ),
             journal: journal
@@ -220,6 +245,30 @@ final class AccountDeletionRecoveryServiceTests: XCTestCase {
 
         XCTAssertNil(recovered)
         XCTAssertNil(journal.value)
+    }
+
+    @MainActor
+    func testRelaunchAmbiguousServerFailurePreservesReplayJournal() async throws {
+        let pending = PendingAccountDeletion(
+            ownerID: "owner-a",
+            receiptToken: "mta_del_" + String(repeating: "e", count: 43)
+        )
+        let journal = MemoryAccountDeletionJournal()
+        journal.value = pending
+        let service = AccountDeletionRecoveryService(
+            api: MockAccountDeletionAPI(
+                requestResult: .ambiguousHTTPFailure,
+                receiptResult: .unconfirmed
+            ),
+            journal: journal
+        )
+
+        let recovered = try await service.confirmedPendingDeletion(
+            retryOwnerID: "owner-a"
+        )
+
+        XCTAssertNil(recovered)
+        XCTAssertEqual(journal.value, pending)
     }
 
     @MainActor
