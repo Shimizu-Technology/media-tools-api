@@ -77,6 +77,12 @@ and offer revocation of any lost device from the sessions list.
 4. On web, verify wrong-code retry, stale-successor replacement, access renewal,
    explicit saved confirmation, phone layout, and that no token or submitted
    recovery code enters browser storage.
+5. Android debug builds can enable `MEDIA_TOOLS_FIRST_PARTY_ANDROID_AUTH=true`
+   to test encrypted exact-response retries, stable-user-bound rotation, and
+   explicit save confirmation. Release builds keep the feature off until the
+   Play production signing certificate is published in Digital Asset Links and
+   native passkeys complete end-to-end verification; Clerk remains the account
+   migration fallback during that interval.
 
 Only SHA-256 hashes of 160-bit random codes are stored. Codes are bound to the
 existing `users.id`, so recovery never links accounts by email address. The

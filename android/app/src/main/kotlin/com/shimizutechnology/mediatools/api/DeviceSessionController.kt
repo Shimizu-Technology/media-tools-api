@@ -1,8 +1,6 @@
 package com.shimizutechnology.mediatools.api
 
-import java.security.SecureRandom
 import java.time.Instant
-import android.util.Base64
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,7 +10,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-/** Opaque credentials returned by Media Tools after a verified Clerk bootstrap. */
+/** Opaque credentials returned by Media Tools after verified native authentication. */
 @Serializable
 data class DeviceSessionPair(
     @SerialName("session_id") val sessionId: String,
@@ -26,7 +24,7 @@ data class DeviceSessionPair(
 @Serializable
 data class StoredDeviceSession(
     val pair: DeviceSessionPair,
-    val verifiedClerkId: String,
+    val verifiedClerkId: String? = null,
     // Save this before sending refresh. A lost response can retry the same old/new pair.
     val pendingNextRefreshToken: String? = null,
 )
@@ -39,6 +37,19 @@ data class PendingDeviceSessionBootstrap(
     val deviceName: String,
 )
 
+@Serializable
+data class PendingRecoveryCodeRedeem(
+    val code: String,
+    val nextRefreshToken: String,
+)
+
+@Serializable
+data class PendingRecoveryCodeRotation(
+    val userId: String,
+    val rotationId: String,
+    val codes: List<String>,
+)
+
 interface DeviceSessionStore {
     fun load(): StoredDeviceSession?
     fun save(session: StoredDeviceSession)
@@ -46,6 +57,13 @@ interface DeviceSessionStore {
     fun savePendingBootstrap(pending: PendingDeviceSessionBootstrap)
     fun promoteBootstrap(session: StoredDeviceSession)
     fun clearPendingBootstrap()
+    fun loadPendingRecoveryRedeem(): PendingRecoveryCodeRedeem?
+    fun savePendingRecoveryRedeem(pending: PendingRecoveryCodeRedeem)
+    fun clearPendingRecoveryRedeem()
+    fun loadPendingRecoveryRotation(): PendingRecoveryCodeRotation?
+    fun savePendingRecoveryRotation(pending: PendingRecoveryCodeRotation)
+    fun clearPendingRecoveryRotation()
+    fun promoteRecovery(session: StoredDeviceSession)
     fun clear()
 }
 
@@ -63,7 +81,7 @@ class DeviceSessionController(
     private val store: DeviceSessionStore,
     private val transport: DeviceSessionTransport,
     private val now: () -> Instant = Instant::now,
-    private val randomRefreshToken: () -> String = ::newRefreshToken,
+    private val randomRefreshToken: () -> String = ::newDeviceRefreshToken,
     private val currentExternalIdentity: () -> String?,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : SessionTokenProvider {
@@ -74,10 +92,10 @@ class DeviceSessionController(
     val revision: StateFlow<Int> = _revision
 
     val verifiedMigration: Pair<String, String>?
-        get() = stored?.let { it.verifiedClerkId to it.pair.userId }
+        get() = stored?.let { value -> value.verifiedClerkId?.let { it to value.pair.userId } }
 
     fun hasConflictingExternalIdentity(currentClerkId: String?): Boolean =
-        currentClerkId != null && stored?.verifiedClerkId?.let { it != currentClerkId } == true
+        currentClerkId != null && stored?.let { it.verifiedClerkId != currentClerkId } == true
 
     /** A different Clerk identity never inherits this device's account. */
     fun availableOwnerId(currentClerkId: String?): String? {
@@ -224,6 +242,22 @@ class DeviceSessionController(
         _revision.value++
     }
 
+    /** Installs a public recovery result only when no other local account is active. */
+    suspend fun installRecoveredSession(pair: DeviceSessionPair, expectedRefreshToken: String) = mutex.withLock {
+        if (stored != null && !rejected) {
+            throw MediaToolsAPIException(409, "Sign out of the current account before using a recovery code.")
+        }
+        if (pair.refreshToken != expectedRefreshToken) {
+            throw MediaToolsAPIException(502, "Media Tools returned an invalid device session.")
+        }
+        validatePair(pair)
+        val value = StoredDeviceSession(pair = pair, verifiedClerkId = null)
+        store.promoteRecovery(value)
+        stored = value
+        rejected = false
+        _revision.value++
+    }
+
     private fun SessionResponse.requirePair(): DeviceSessionPair {
         if (status !in 200..299) {
             val error = runCatching { json.decodeFromString<APIErrorEnvelope>(body) }.getOrNull()
@@ -232,13 +266,15 @@ class DeviceSessionController(
         val pair = runCatching { json.decodeFromString<DeviceSessionPair>(body) }.getOrElse {
             throw MediaToolsAPIException(502, "Media Tools returned an unreadable device session.")
         }
+        validatePair(pair)
+        return pair
+    }
+
+    private fun validatePair(pair: DeviceSessionPair) {
         if (pair.userId.isBlank() || pair.sessionId.isBlank() || !pair.accessToken.startsWith("mta_at_") ||
             !pair.refreshToken.startsWith("mta_rt_") ||
             runCatching { Instant.parse(pair.accessExpiresAt); Instant.parse(pair.inactiveExpiresAt) }.isFailure
-        ) {
-            throw MediaToolsAPIException(502, "Media Tools returned an invalid device session.")
-        }
-        return pair
+        ) throw MediaToolsAPIException(502, "Media Tools returned an invalid device session.")
     }
 
     private companion object {
@@ -252,12 +288,5 @@ class DeviceSessionController(
             @SerialName("next_refresh_token") val nextRefreshToken: String,
         )
 
-        fun newRefreshToken(): String {
-            val bytes = ByteArray(32).also(SecureRandom()::nextBytes)
-            return "mta_rt_" + Base64.encodeToString(
-                bytes,
-                Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
-            )
-        }
     }
 }

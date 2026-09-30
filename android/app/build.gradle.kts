@@ -49,6 +49,15 @@ android {
         buildConfig = true
     }
 
+    // Native recovery is ready for internal testing. Keep every distributable
+    // build on the migration path until the Play signing certificate can be
+    // published in Digital Asset Links and Android passkeys are verified.
+    buildTypes.getByName("release").buildConfigField(
+        "boolean",
+        "FIRST_PARTY_ANDROID_AUTH_ENABLED",
+        "false",
+    )
+
     val releaseKeystorePath = providers.environmentVariable("MEDIA_TOOLS_ANDROID_KEYSTORE_PATH").orNull
     val releaseKeystorePassword = providers.environmentVariable("MEDIA_TOOLS_ANDROID_KEYSTORE_PASSWORD").orNull
     val releaseKeyAlias = providers.environmentVariable("MEDIA_TOOLS_ANDROID_KEY_ALIAS").orNull
