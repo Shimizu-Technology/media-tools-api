@@ -94,7 +94,7 @@ func TestWebRecoverySignInAndRotationCookieFlow(t *testing.T) {
 	}
 	pending := cookieByName(prepare.Result().Cookies(), middleware.WebRecoveryPendingCookie)
 	csrf := cookieByName(prepare.Result().Cookies(), middleware.WebCSRFCookie)
-	if pending == nil || !pending.HttpOnly || pending.Path != "/api/v1/auth/web/session/recovery" || csrf == nil || csrf.HttpOnly {
+	if pending == nil || !pending.HttpOnly || pending.Path != "/api/v1/auth/web/session" || csrf == nil || csrf.HttpOnly {
 		t.Fatalf("prepare cookies = %#v", prepare.Result().Cookies())
 	}
 	for _, cookie := range prepare.Result().Cookies() {

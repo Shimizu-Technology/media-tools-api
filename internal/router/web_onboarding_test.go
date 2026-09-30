@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -54,7 +56,7 @@ func TestWebInvitationOnboardingCookieProtocolAndDurableCompletion(t *testing.T)
 	})
 	const origin = "https://media.example.com"
 	engine := Setup(RouterConfig{DB: db, FirstPartyAuthEnabled: true, WebCookieAuthEnabled: true, WebCookieSecure: true, AllowedOrigins: []string{origin}})
-	base := "/api/v1/auth/web/onboarding"
+	base := "/api/v1/auth/web/session/onboarding"
 
 	wrongOrigin := postWebRecovery(t, engine, base+"/transfer", map[string]any{"kind": "invite", "token": token}, nil, "https://attacker.example.com", "")
 	if wrongOrigin.Code != http.StatusForbidden {
@@ -113,6 +115,9 @@ func TestWebInvitationOnboardingCookieProtocolAndDurableCompletion(t *testing.T)
 	if withoutHint.Code != http.StatusOK || !strings.Contains(withoutHint.Body.String(), `"onboarding_required":true`) {
 		t.Fatalf("server requirement missing without hint cookie = %d: %s", withoutHint.Code, withoutHint.Body.String())
 	}
+	if _, err := db.ExecContext(ctx, `UPDATE auth_access_tokens SET expires_at = NOW() - INTERVAL '1 second' WHERE session_id = (SELECT id FROM auth_sessions WHERE user_id = $1 AND revoked_at IS NULL LIMIT 1)`, committed.UserID); err != nil {
+		t.Fatal(err)
+	}
 	second, secondToken, err := db.CreateInvitation(ctx, uuid.NewString()+"@example.com", "Second account")
 	if err != nil {
 		t.Fatal(err)
@@ -122,11 +127,14 @@ func TestWebInvitationOnboardingCookieProtocolAndDurableCompletion(t *testing.T)
 	})
 	blockedSwitch := postWebRecovery(t, engine, base+"/transfer", map[string]any{"kind": "invite", "token": secondToken}, activeCookies, origin, "")
 	if blockedSwitch.Code != http.StatusConflict || !strings.Contains(blockedSwitch.Body.String(), "onboarding_in_progress") {
-		t.Fatalf("second link replaced required account = %d: %s", blockedSwitch.Code, blockedSwitch.Body.String())
+		t.Fatalf("second link replaced required account after access expiry = %d: %s", blockedSwitch.Code, blockedSwitch.Body.String())
 	}
 	var consumed bool
 	if err := db.GetContext(ctx, &consumed, `SELECT consumed_at IS NOT NULL FROM auth_invitations WHERE id = $1`, second.ID); err != nil || consumed {
 		t.Fatalf("blocked second link was consumed = %v, %v", consumed, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE auth_access_tokens SET expires_at = NOW() + INTERVAL '15 minutes' WHERE session_id = (SELECT id FROM auth_sessions WHERE user_id = $1 AND revoked_at IS NULL LIMIT 1)`, committed.UserID); err != nil {
+		t.Fatal(err)
 	}
 	ordinary := getWebOnboarding(t, engine, "/api/v1/transcripts", access)
 	if ordinary.Code != http.StatusPreconditionRequired || !strings.Contains(ordinary.Body.String(), "onboarding_required") {
@@ -188,13 +196,13 @@ func TestWebOnboardingStaleSuccessorPreservesLinkAndOldSession(t *testing.T) {
 		_, _ = db.ExecContext(context.Background(), `DELETE FROM auth_invitations WHERE id = $1`, invitation.ID)
 	})
 	const origin = "https://media.example.com"
-	const base = "/api/v1/auth/web/onboarding"
+	const base = "/api/v1/auth/web/session/onboarding"
 	engine := Setup(RouterConfig{DB: db, FirstPartyAuthEnabled: true, WebCookieAuthEnabled: true, WebCookieSecure: true, AllowedOrigins: []string{origin}})
 	csrf := &http.Cookie{Name: middleware.WebCSRFCookie, Value: "csrf-stale"}
 	invite := &http.Cookie{Name: middleware.WebInvitationCookie, Value: token}
 	stale := &http.Cookie{Name: middleware.WebOnboardingPendingCookie, Value: oldSession.RefreshToken}
-	refresh := &http.Cookie{Name: middleware.WebRefreshCookie, Value: oldSession.RefreshToken}
-	commit := postWebRecovery(t, engine, base+"/commit", map[string]any{}, []*http.Cookie{csrf, invite, stale, refresh}, origin, csrf.Value)
+	access := &http.Cookie{Name: middleware.WebAccessCookie, Value: oldSession.AccessToken}
+	commit := postWebRecovery(t, engine, base+"/commit", map[string]any{}, []*http.Cookie{csrf, invite, stale, access}, origin, csrf.Value)
 	if commit.Code != http.StatusBadRequest || !strings.Contains(commit.Body.String(), "onboarding_not_prepared") {
 		t.Fatalf("stale successor = %d: %s", commit.Code, commit.Body.String())
 	}
@@ -213,18 +221,112 @@ func TestWebOnboardingStaleSuccessorPreservesLinkAndOldSession(t *testing.T) {
 	if user, _, err := db.GetUserByFirstPartyAccessToken(ctx, oldSession.AccessToken); err != nil || user.ID != oldUserID {
 		t.Fatalf("stale successor stranded prior account: %#v, %v", user, err)
 	}
-	prepare := postWebRecovery(t, engine, base+"/prepare", map[string]any{}, []*http.Cookie{invite, refresh}, origin, "")
+	prepare := postWebRecovery(t, engine, base+"/prepare", map[string]any{}, []*http.Cookie{invite, access}, origin, "")
 	fresh := cookieByName(prepare.Result().Cookies(), middleware.WebOnboardingPendingCookie)
 	freshCSRF := cookieByName(prepare.Result().Cookies(), middleware.WebCSRFCookie)
 	if prepare.Code != http.StatusNoContent || fresh == nil || fresh.Value == oldSession.RefreshToken || freshCSRF == nil {
 		t.Fatalf("fresh prepare = %d: %#v", prepare.Code, prepare.Result().Cookies())
 	}
-	retry := postWebRecovery(t, engine, base+"/commit", map[string]any{}, []*http.Cookie{invite, fresh, freshCSRF, refresh}, origin, freshCSRF.Value)
+	retry := postWebRecovery(t, engine, base+"/commit", map[string]any{}, []*http.Cookie{invite, fresh, freshCSRF, access}, origin, freshCSRF.Value)
 	if retry.Code != http.StatusCreated {
 		t.Fatalf("same link with fresh successor = %d: %s", retry.Code, retry.Body.String())
 	}
 	if _, _, err := db.GetUserByFirstPartyAccessToken(ctx, oldSession.AccessToken); !errors.Is(err, database.ErrSessionInvalid) {
 		t.Fatalf("successful account switch kept prior session: %v", err)
+	}
+}
+
+func TestWebOnboardingRealCookiePathsRevokePreviousSession(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	db, err := database.NewWithSimpleProtocol(databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.RunMigrations("../../migrations"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	var oldUserID string
+	if err := db.QueryRowContext(ctx, `INSERT INTO users (email, password_hash, name) VALUES ($1, '', 'Cookie path account') RETURNING id`, uuid.NewString()+"@example.com").Scan(&oldUserID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, oldUserID) })
+	oldSession, err := db.CreateFirstPartySession(ctx, oldUserID, "web", "Old browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	invitation, token, err := db.CreateInvitation(ctx, uuid.NewString()+"@example.com", "Cookie path invite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE email = $1`, invitation.Email)
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM auth_invitations WHERE id = $1`, invitation.ID)
+	})
+
+	const origin = "https://media.example.com"
+	const base = "/api/v1/auth/web/session/onboarding"
+	engine := Setup(RouterConfig{DB: db, FirstPartyAuthEnabled: true, WebCookieAuthEnabled: true, AllowedOrigins: []string{origin}})
+	server := httptest.NewServer(engine)
+	t.Cleanup(server.Close)
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(serverURL, []*http.Cookie{
+		{Name: middleware.WebAccessCookie, Value: oldSession.AccessToken, Path: "/api/v1"},
+		{Name: middleware.WebRefreshCookie, Value: oldSession.RefreshToken, Path: "/api/v1/auth/web/session"},
+	})
+	client := server.Client()
+	client.Jar = jar
+	post := func(path string, body []byte, csrf string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPost, server.URL+path, bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Content-Type", "application/json")
+		if csrf != "" {
+			req.Header.Set(middleware.WebCSRFHeader, csrf)
+		}
+		response, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	transferBody, _ := json.Marshal(map[string]string{"kind": "invite", "token": token})
+	transfer := post(base+"/transfer", transferBody, "")
+	transfer.Body.Close()
+	if transfer.StatusCode != http.StatusNoContent {
+		t.Fatalf("transfer = %d", transfer.StatusCode)
+	}
+	commitURL, _ := url.Parse(server.URL + base + "/commit")
+	var csrf string
+	for _, cookie := range jar.Cookies(commitURL) {
+		if cookie.Name == middleware.WebCSRFCookie {
+			csrf = cookie.Value
+		}
+	}
+	if csrf == "" {
+		t.Fatal("transfer did not install readable CSRF cookie")
+	}
+	commit := post(base+"/commit", []byte(`{}`), csrf)
+	commit.Body.Close()
+	if commit.StatusCode != http.StatusCreated {
+		t.Fatalf("commit = %d", commit.StatusCode)
+	}
+	if _, _, err := db.GetUserByFirstPartyAccessToken(ctx, oldSession.AccessToken); !errors.Is(err, database.ErrSessionInvalid) {
+		t.Fatalf("real cookie paths left previous session active: %v", err)
 	}
 }
 
@@ -236,7 +338,7 @@ func TestWebOnboardingRoutesRequireBothFlags(t *testing.T) {
 	} {
 		engine := Setup(cfg)
 		for _, path := range []string{"/transfer", "/prepare", "/commit", "/status", "/complete"} {
-			response := postWebRecovery(t, engine, "/api/v1/auth/web/onboarding"+path, map[string]any{}, nil, origin, "")
+			response := postWebRecovery(t, engine, "/api/v1/auth/web/session/onboarding"+path, map[string]any{}, nil, origin, "")
 			if response.Code != http.StatusNotFound {
 				t.Fatalf("flags off %s = %d", path, response.Code)
 			}

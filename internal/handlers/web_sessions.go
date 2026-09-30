@@ -54,7 +54,7 @@ func (h *WebSessionHandler) clear(c *gin.Context) {
 }
 
 func (h *WebSessionHandler) clearRecoveryPending(c *gin.Context) {
-	h.setCookie(c, middleware.WebRecoveryPendingCookie, "", -1, true, "/api/v1/auth/web/session/recovery")
+	h.setCookie(c, middleware.WebRecoveryPendingCookie, "", -1, true, "/api/v1/auth/web/session")
 }
 
 func (h *WebSessionHandler) clearPending(c *gin.Context) {

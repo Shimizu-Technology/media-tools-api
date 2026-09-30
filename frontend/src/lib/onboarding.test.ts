@@ -82,11 +82,11 @@ describe('web onboarding commit', () => {
 
     await expect(commitWebOnboarding()).resolves.toMatchObject({ session_ready: true, onboarding_required: true });
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
-      '/api/v1/auth/web/onboarding/commit',
-      '/api/v1/auth/web/onboarding/prepare',
-      '/api/v1/auth/web/onboarding/commit',
+      '/api/v1/auth/web/session/onboarding/commit',
+      '/api/v1/auth/web/session/onboarding/prepare',
+      '/api/v1/auth/web/session/onboarding/commit',
       '/api/v1/auth/web/session/status',
-      '/api/v1/auth/web/onboarding/status',
+      '/api/v1/auth/web/session/onboarding/status',
     ]);
   });
 
@@ -121,10 +121,10 @@ describe('web onboarding commit', () => {
 
     await expect(completeWebOnboarding()).resolves.toBeUndefined();
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
-      '/api/v1/auth/web/onboarding/complete',
+      '/api/v1/auth/web/session/onboarding/complete',
       '/api/v1/auth/web/session/prepare',
       '/api/v1/auth/web/session/refresh',
-      '/api/v1/auth/web/onboarding/complete',
+      '/api/v1/auth/web/session/onboarding/complete',
     ]);
   });
 
@@ -142,12 +142,12 @@ describe('web onboarding commit', () => {
 
     await expect(getWebOnboardingStatus()).resolves.toMatchObject({ session_ready: true, onboarding_required: true, passkeys: 1 });
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
-      '/api/v1/auth/web/onboarding/status',
+      '/api/v1/auth/web/session/onboarding/status',
       '/api/v1/auth/web/session/status',
       '/api/v1/auth/web/session/prepare',
       '/api/v1/auth/web/session/refresh',
       '/api/v1/auth/web/session/status',
-      '/api/v1/auth/web/onboarding/status',
+      '/api/v1/auth/web/session/onboarding/status',
     ]);
   });
 });

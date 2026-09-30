@@ -40,7 +40,9 @@ func (h *WebSessionHandler) PrepareRecoveryCodeLogin(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not prepare recovery sign-in", Code: http.StatusServiceUnavailable})
 		return
 	}
-	h.setCookie(c, middleware.WebRecoveryPendingCookie, successor, webRecoveryPendingMaxAge, true, "/api/v1/auth/web/session/recovery")
+	// Session scope lets a later invitation/rescue handoff revoke a committed
+	// response-loss successor in the same transaction as the account switch.
+	h.setCookie(c, middleware.WebRecoveryPendingCookie, successor, webRecoveryPendingMaxAge, true, "/api/v1/auth/web/session")
 	h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
 	c.Header("Cache-Control", "no-store")
 	c.Status(http.StatusNoContent)

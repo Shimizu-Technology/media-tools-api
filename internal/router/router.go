@@ -141,7 +141,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			webRecovery.Use(rateLimiter.RateLimitUnauthenticated("web-recovery", 20))
 			webRecovery.POST("/prepare", web.PrepareRecoveryCodeLogin)
 			webRecovery.POST("/finish", web.FinishRecoveryCodeLogin)
-			webOnboarding := r.Group("/api/v1/auth/web/onboarding")
+			webOnboarding := r.Group("/api/v1/auth/web/session/onboarding")
 			webOnboarding.Use(rateLimiter.RateLimitUnauthenticated("web-onboarding", 30))
 			webOnboarding.POST("/transfer", web.TransferOnboardingFragment)
 			webOnboarding.POST("/prepare", web.PrepareOnboardingCommit)

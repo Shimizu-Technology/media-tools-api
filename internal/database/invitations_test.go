@@ -239,7 +239,9 @@ func TestWebInvitationSwitchIsAtomicRecoverableAndRequiresOnboarding(t *testing.
 		_, _ = db.ExecContext(context.Background(), `DELETE FROM auth_invitations WHERE id = $1`, invitation.ID)
 	})
 	successor, _ := RandomFirstPartyRefreshToken()
-	pair, err := db.RedeemWebInvitation(ctx, token, successor, []string{oldSession.RefreshToken})
+	// The real onboarding route can see the access cookie (`/api/v1`), while
+	// the refresh cookie is intentionally scoped to `/auth/web/session`.
+	pair, err := db.RedeemWebInvitation(ctx, token, successor, []string{oldSession.AccessToken})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +253,7 @@ func TestWebInvitationSwitchIsAtomicRecoverableAndRequiresOnboarding(t *testing.
 	if err != nil || !user.OnboardingRequired {
 		t.Fatalf("invited web user requirement = %#v, %v", user, err)
 	}
-	retried, err := db.RedeemWebInvitation(ctx, token, successor, []string{oldSession.RefreshToken})
+	retried, err := db.RedeemWebInvitation(ctx, token, successor, []string{oldSession.AccessToken})
 	if err != nil || retried.SessionID != pair.SessionID || retried.AccessToken == pair.AccessToken {
 		t.Fatalf("lost response retry = %#v, %v", retried, err)
 	}
@@ -310,7 +312,7 @@ func TestWebInvitationRevocationFailureRollsBackAccountAndLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	successor, _ := RandomFirstPartyRefreshToken()
-	if _, err := db.RedeemWebInvitation(ctx, token, successor, []string{oldSession.RefreshToken}); err == nil {
+	if _, err := db.RedeemWebInvitation(ctx, token, successor, []string{oldSession.AccessToken}); err == nil {
 		t.Fatal("injected account-switch failure succeeded")
 	}
 	if user, _, err := db.GetUserByFirstPartyAccessToken(ctx, oldSession.AccessToken); err != nil || user.ID != oldUserID {
@@ -332,7 +334,7 @@ func TestWebInvitationRevocationFailureRollsBackAccountAndLink(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `DROP FUNCTION fail_web_invite_revoke_fn()`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.RedeemWebInvitation(ctx, token, successor, []string{oldSession.RefreshToken}); err != nil {
+	if _, err := db.RedeemWebInvitation(ctx, token, successor, []string{oldSession.AccessToken}); err != nil {
 		t.Fatalf("link not recoverable after rollback: %v", err)
 	}
 }

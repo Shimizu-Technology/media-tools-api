@@ -93,11 +93,11 @@ func (db *DB) RedeemInvitation(ctx context.Context, token, clientType, deviceNam
 // RedeemWebInvitation creates the invited browser account and revokes any
 // sessions already stored in that browser in the same transaction. A failed
 // redemption therefore leaves both the invitation and prior account intact.
-func (db *DB) RedeemWebInvitation(ctx context.Context, token, nextRefreshToken string, existingRefreshTokens []string) (*AuthTokenPair, error) {
-	return db.redeemInvitation(ctx, token, "web", "Browser", nextRefreshToken, existingRefreshTokens, true, true)
+func (db *DB) RedeemWebInvitation(ctx context.Context, token, nextRefreshToken string, existingCredentials []string) (*AuthTokenPair, error) {
+	return db.redeemInvitation(ctx, token, "web", "Browser", nextRefreshToken, existingCredentials, true, true)
 }
 
-func (db *DB) redeemInvitation(ctx context.Context, token, clientType, deviceName, nextRefreshToken string, existingRefreshTokens []string, distinguishUnavailableSuccessor, requireOnboarding bool) (*AuthTokenPair, error) {
+func (db *DB) redeemInvitation(ctx context.Context, token, clientType, deviceName, nextRefreshToken string, existingCredentials []string, distinguishUnavailableSuccessor, requireOnboarding bool) (*AuthTokenPair, error) {
 	hash, ok := invitationTokenHash(token)
 	if !ok {
 		return nil, ErrInvitationInvalid
@@ -173,7 +173,7 @@ func (db *DB) redeemInvitation(ctx context.Context, token, clientType, deviceNam
 		if err != nil {
 			return nil, fmt.Errorf("recover invitation redemption: %w", err)
 		}
-		if err := revokeBrowserSessionsByRefreshTx(ctx, tx, existingRefreshTokens, pair.SessionID, now); err != nil {
+		if err := revokeBrowserSessionsByCredentialTx(ctx, tx, existingCredentials, pair.SessionID, now); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -219,7 +219,7 @@ func (db *DB) redeemInvitation(ctx context.Context, token, clientType, deviceNam
 		WHERE id = $1`, invitation.ID, now, userID, pair.SessionID, successorHash); err != nil {
 		return nil, fmt.Errorf("consume invitation: %w", err)
 	}
-	if err := revokeBrowserSessionsByRefreshTx(ctx, tx, existingRefreshTokens, pair.SessionID, now); err != nil {
+	if err := revokeBrowserSessionsByCredentialTx(ctx, tx, existingCredentials, pair.SessionID, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

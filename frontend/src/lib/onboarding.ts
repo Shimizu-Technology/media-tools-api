@@ -17,7 +17,7 @@ export type WebOnboardingStatus = {
   complete: boolean;
 };
 
-const base = '/api/v1/auth/web/onboarding';
+const base = '/api/v1/auth/web/session/onboarding';
 let commitRequest: Promise<WebOnboardingStatus> | null = null;
 
 /**

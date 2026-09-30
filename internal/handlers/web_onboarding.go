@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	webOnboardingCookiePath   = "/api/v1/auth/web/onboarding"
+	webOnboardingCookiePath   = "/api/v1/auth/web/session/onboarding"
 	webOnboardingCookieMaxAge = 15 * 60
 	webOnboardingRequiredAge  = 24 * 60 * 60
 )
@@ -64,6 +64,20 @@ func (h *WebSessionHandler) TransferOnboardingFragment(c *gin.Context) {
 			// A completed account or expired access token does not block a new link.
 		default:
 			log.Printf("check existing web onboarding account: %v", lookupErr)
+			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "onboarding_unavailable", Message: "Could not safely open this setup link; retry", Code: http.StatusServiceUnavailable})
+			return
+		}
+	}
+	if refresh, err := c.Cookie(middleware.WebRefreshCookie); err == nil && refresh != "" {
+		user, _, lookupErr := h.db.GetUserByFirstPartyRefreshToken(c.Request.Context(), refresh)
+		switch {
+		case lookupErr == nil && user.OnboardingRequired:
+			c.JSON(http.StatusConflict, models.ErrorResponse{Error: "onboarding_in_progress", Message: "Finish the current account setup before opening another link", Code: http.StatusConflict})
+			return
+		case lookupErr == nil, errors.Is(lookupErr, database.ErrSessionInvalid):
+			// A completed or expired durable session does not block a new link.
+		default:
+			log.Printf("check existing web onboarding refresh account: %v", lookupErr)
 			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "onboarding_unavailable", Message: "Could not safely open this setup link; retry", Code: http.StatusServiceUnavailable})
 			return
 		}
@@ -157,6 +171,7 @@ func (h *WebSessionHandler) CommitWebOnboarding(c *gin.Context) {
 		return
 	}
 	existing := h.cookieCredentials(c,
+		middleware.WebAccessCookie,
 		middleware.WebRefreshCookie,
 		middleware.WebPendingCookie,
 		middleware.WebRecoveryPendingCookie,

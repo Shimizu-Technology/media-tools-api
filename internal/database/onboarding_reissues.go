@@ -100,11 +100,11 @@ func (db *DB) RedeemOnboardingReissue(ctx context.Context, token, clientType, de
 // RedeemWebOnboardingReissue performs the rescue and any browser-account
 // switch atomically. Existing sessions for the rescued account are also
 // revoked by the shared redemption transaction below.
-func (db *DB) RedeemWebOnboardingReissue(ctx context.Context, token, nextRefreshToken string, existingRefreshTokens []string) (*AuthTokenPair, error) {
-	return db.redeemOnboardingReissue(ctx, token, "web", "Browser", nextRefreshToken, existingRefreshTokens, true, true)
+func (db *DB) RedeemWebOnboardingReissue(ctx context.Context, token, nextRefreshToken string, existingCredentials []string) (*AuthTokenPair, error) {
+	return db.redeemOnboardingReissue(ctx, token, "web", "Browser", nextRefreshToken, existingCredentials, true, true)
 }
 
-func (db *DB) redeemOnboardingReissue(ctx context.Context, token, clientType, deviceName, nextRefreshToken string, existingRefreshTokens []string, distinguishUnavailableSuccessor, requireOnboarding bool) (*AuthTokenPair, error) {
+func (db *DB) redeemOnboardingReissue(ctx context.Context, token, clientType, deviceName, nextRefreshToken string, existingCredentials []string, distinguishUnavailableSuccessor, requireOnboarding bool) (*AuthTokenPair, error) {
 	hash, ok := onboardingReissueTokenHash(token)
 	if !ok {
 		return nil, ErrOnboardingReissueInvalid
@@ -174,7 +174,7 @@ func (db *DB) redeemOnboardingReissue(ctx context.Context, token, clientType, de
 		if err != nil {
 			return nil, fmt.Errorf("recover onboarding rescue: %w", err)
 		}
-		if err := revokeBrowserSessionsByRefreshTx(ctx, tx, existingRefreshTokens, pair.SessionID, now); err != nil {
+		if err := revokeBrowserSessionsByCredentialTx(ctx, tx, existingCredentials, pair.SessionID, now); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -222,7 +222,7 @@ func (db *DB) redeemOnboardingReissue(ctx context.Context, token, clientType, de
 		WHERE user_id = $1 AND id <> $2`, lockedID, pair.SessionID, now); err != nil {
 		return nil, fmt.Errorf("revoke stranded onboarding sessions: %w", err)
 	}
-	if err := revokeBrowserSessionsByRefreshTx(ctx, tx, existingRefreshTokens, pair.SessionID, now); err != nil {
+	if err := revokeBrowserSessionsByCredentialTx(ctx, tx, existingCredentials, pair.SessionID, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

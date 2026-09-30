@@ -50,7 +50,6 @@ func WebCookieAuth(allowedOrigins []string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !strings.HasPrefix(c.Request.URL.Path, "/api/v1/") ||
 			strings.HasPrefix(c.Request.URL.Path, "/api/v1/auth/web/session/") ||
-			strings.HasPrefix(c.Request.URL.Path, "/api/v1/auth/web/onboarding/") ||
 			c.GetHeader("Authorization") != "" || c.GetHeader("X-API-Key") != "" {
 			c.Next()
 			return

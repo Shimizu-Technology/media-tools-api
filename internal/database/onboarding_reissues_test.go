@@ -241,7 +241,9 @@ func TestWebOnboardingRescueSwitchPersistsRequirementAndRecoversResponse(t *test
 		t.Fatal(err)
 	}
 	successor, _ := RandomFirstPartyRefreshToken()
-	pair, err := db.RedeemWebOnboardingReissue(ctx, token, successor, []string{oldSession.RefreshToken})
+	// Account switching uses the access cookie visible at the onboarding path;
+	// the refresh cookie remains deliberately narrower.
+	pair, err := db.RedeemWebOnboardingReissue(ctx, token, successor, []string{oldSession.AccessToken})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +254,7 @@ func TestWebOnboardingRescueSwitchPersistsRequirementAndRecoversResponse(t *test
 	if err != nil || user.ID != targetUserID || !user.OnboardingRequired {
 		t.Fatalf("rescued web account = %#v, %v", user, err)
 	}
-	retried, err := db.RedeemWebOnboardingReissue(ctx, token, successor, []string{oldSession.RefreshToken})
+	retried, err := db.RedeemWebOnboardingReissue(ctx, token, successor, []string{oldSession.AccessToken})
 	if err != nil || retried.SessionID != pair.SessionID || retried.AccessToken == pair.AccessToken {
 		t.Fatalf("lost response retry = %#v, %v", retried, err)
 	}
