@@ -9,3 +9,6 @@ CREATE TABLE auth_session_bootstrap_issuances (
     client_type TEXT NOT NULL CHECK (client_type IN ('web', 'ios', 'android')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX auth_session_bootstrap_issuances_user_id_idx
+    ON auth_session_bootstrap_issuances(user_id);

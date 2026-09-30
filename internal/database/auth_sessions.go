@@ -337,11 +337,12 @@ func (db *DB) CreateOrRecoverFirstPartySession(ctx context.Context, userID, clie
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM auth_session_bootstrap_issuances i
 		USING auth_sessions s, auth_refresh_tokens r
-		WHERE i.successor_hash <> $2
+		WHERE i.user_id = $3
+		  AND i.successor_hash <> $2
 		  AND i.session_id = s.id
 		  AND r.session_id = s.id AND r.token_hash = i.successor_hash
 		  AND (s.revoked_at IS NOT NULL OR s.inactive_expires_at <= $1
-		       OR r.consumed_at IS NOT NULL OR r.expires_at <= $1)`, now, successorHash); err != nil {
+		       OR r.consumed_at IS NOT NULL OR r.expires_at <= $1)`, now, successorHash, userID); err != nil {
 		return nil, fmt.Errorf("prune session bootstrap issuances: %w", err)
 	}
 

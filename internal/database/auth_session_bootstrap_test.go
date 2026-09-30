@@ -156,7 +156,10 @@ func TestCreateOrRecoverFirstPartySessionRejectsUnavailableSuccessorsWithoutMint
 	ownerID := insertBootstrapTestUser(t, db)
 	otherID := insertBootstrapTestUser(t, db)
 
-	activeNext, _ := RandomFirstPartyRefreshToken()
+	activeNext, err := RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
 	active, err := db.CreateOrRecoverFirstPartySession(ctx, ownerID, "ios", "Owner phone", activeNext)
 	if err != nil {
 		t.Fatal(err)
@@ -301,6 +304,36 @@ func TestCreateOrRecoverFirstPartySessionLifetimeAndInvalidStatePruning(t *testi
 			t.Fatalf("missing-refresh tombstone = %d, %v", issuance, err)
 		}
 	})
+
+	t.Run("pruning is account scoped", func(t *testing.T) {
+		otherID := insertBootstrapTestUser(t, db)
+		pair, next := create(t)
+		hash, _ := refreshSuccessorHash(next)
+		if _, err := db.ExecContext(ctx, `UPDATE auth_sessions SET revoked_at = NOW() WHERE id = $1`, pair.SessionID); err != nil {
+			t.Fatal(err)
+		}
+		otherNext, err := RandomFirstPartyRefreshToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.CreateOrRecoverFirstPartySession(ctx, otherID, "ios", "Other account", otherNext); err != nil {
+			t.Fatal(err)
+		}
+		var issuance int
+		if err := db.GetContext(ctx, &issuance, `SELECT COUNT(*) FROM auth_session_bootstrap_issuances WHERE successor_hash = $1`, hash); err != nil || issuance != 1 {
+			t.Fatalf("other account pruned issuance: %d, %v", issuance, err)
+		}
+		ownerNext, err := RandomFirstPartyRefreshToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.CreateOrRecoverFirstPartySession(ctx, userID, "ios", "Owner maintenance", ownerNext); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.GetContext(ctx, &issuance, `SELECT COUNT(*) FROM auth_session_bootstrap_issuances WHERE successor_hash = $1`, hash); err != nil || issuance != 0 {
+			t.Fatalf("owner cleanup left invalid issuance: %d, %v", issuance, err)
+		}
+	})
 }
 
 func TestAuthSessionBootstrapMigrationDownAndUp(t *testing.T) {
@@ -339,5 +372,8 @@ func TestAuthSessionBootstrapMigrationDownAndUp(t *testing.T) {
 		WHERE table_name = 'auth_session_bootstrap_issuances'
 		  AND column_name IN ('successor_hash', 'session_id', 'user_id', 'client_type', 'created_at')`); err != nil || columns != 5 {
 		t.Fatalf("bootstrap issuance columns = %d, %v", columns, err)
+	}
+	if err := tx.GetContext(ctx, &exists, `SELECT to_regclass('auth_session_bootstrap_issuances_user_id_idx') IS NOT NULL`); err != nil || !exists {
+		t.Fatalf("bootstrap issuance user index missing after up: exists=%t err=%v", exists, err)
 	}
 }
