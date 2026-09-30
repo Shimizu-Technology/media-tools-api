@@ -168,7 +168,11 @@ final class FirstPartyAuthServiceTests: XCTestCase {
         XCTAssertEqual(response.rotationID, "rotation-a")
         XCTAssertEqual(response.codes, ["mta-1111", "mta-2222"])
 
-        let pending = PendingRecoveryCodeRotation(rotationID: response.rotationID, codes: response.codes)
+        let pending = PendingRecoveryCodeRotation(
+            userID: "server-user",
+            rotationID: response.rotationID,
+            codes: response.codes
+        )
         XCTAssertEqual(pending.codes.count, 2)
 
         let encoder = JSONEncoder()
@@ -240,6 +244,45 @@ final class FirstPartyAuthServiceTests: XCTestCase {
                 XCTAssertNil(try journal.load())
             }
         }
+    }
+
+    @MainActor
+    func testSuccessfulPasskeyFinishDecodesWirePairAndInstallsSession() async throws {
+        let pending = try makePendingPasskeyFinish()
+        let journal = InMemoryPasskeyLoginFinishJournal(pending)
+        let store = TestDeviceSessionStore(nil)
+        let service = FirstPartyAuthService(
+            api: SuccessfulPairFirstPartyAuthAPI(),
+            deviceSession: DeviceSessionController(store: store, enabled: true),
+            passkeyLoginJournal: journal
+        )
+
+        try await service.completeSavedPasskeyLogin(pending)
+
+        XCTAssertEqual(store.value?.pair.sessionID, "session-success")
+        XCTAssertEqual(store.value?.pair.userID, "server-user")
+        XCTAssertEqual(store.value?.pair.refreshToken, "mta_rt_successor")
+        XCTAssertEqual(store.value?.source, .passkey)
+        XCTAssertNil(try journal.load())
+    }
+
+    @MainActor
+    func testSuccessfulRecoveryRedeemDecodesWirePairAndInstallsSession() async throws {
+        let store = TestDeviceSessionStore(nil)
+        let journal = InMemoryRecoveryCodeRedeemJournal(nil)
+        let service = FirstPartyAuthService(
+            api: SuccessfulPairFirstPartyAuthAPI(),
+            deviceSession: DeviceSessionController(store: store, enabled: true),
+            recoveryRedeemJournal: journal
+        )
+
+        try await service.redeemRecoveryCode("mta-recovery-code")
+
+        XCTAssertEqual(store.value?.pair.sessionID, "session-success")
+        XCTAssertEqual(store.value?.pair.userID, "server-user")
+        XCTAssertTrue(store.value?.pair.refreshToken.hasPrefix("mta_rt_") == true)
+        XCTAssertEqual(store.value?.source, .recoveryCode)
+        XCTAssertNil(try journal.load())
     }
 
     @MainActor
@@ -336,12 +379,17 @@ final class FirstPartyAuthServiceTests: XCTestCase {
 
     @MainActor
     func testExpiredRecoveryRotationConfirmDeletesJournal() async throws {
+        let controller = await activeController()
         let journal = InMemoryRecoveryCodeRotationJournal(
-            PendingRecoveryCodeRotation(rotationID: "rotation-expired", codes: ["mta-1111"])
+            PendingRecoveryCodeRotation(
+                userID: "server-user",
+                rotationID: "rotation-expired",
+                codes: ["mta-1111"]
+            )
         )
         let service = FirstPartyAuthService(
             api: StatusFailingFirstPartyAuthAPI(statusCode: 404),
-            deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil), enabled: true),
+            deviceSession: controller,
             recoveryRotationJournal: journal
         )
 
@@ -356,11 +404,16 @@ final class FirstPartyAuthServiceTests: XCTestCase {
 
     @MainActor
     func testTransientRecoveryRotationConfirmKeepsJournal() async throws {
-        let pending = PendingRecoveryCodeRotation(rotationID: "rotation-retry", codes: ["mta-2222"])
+        let controller = await activeController()
+        let pending = PendingRecoveryCodeRotation(
+            userID: "server-user",
+            rotationID: "rotation-retry",
+            codes: ["mta-2222"]
+        )
         let journal = InMemoryRecoveryCodeRotationJournal(pending)
         let service = FirstPartyAuthService(
             api: StatusFailingFirstPartyAuthAPI(statusCode: 503),
-            deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil), enabled: true),
+            deviceSession: controller,
             recoveryRotationJournal: journal
         )
 
@@ -370,6 +423,99 @@ final class FirstPartyAuthServiceTests: XCTestCase {
         } catch APIError.httpError(503, _, _) {
             XCTAssertEqual(try journal.load(), pending)
         }
+    }
+
+    @MainActor
+    func testRecoveryRotationJournalNeverCrossesAccounts() async throws {
+        let controller = await activeController(userID: "user-b")
+        let journal = InMemoryRecoveryCodeRotationJournal(
+            PendingRecoveryCodeRotation(
+                userID: "user-a",
+                rotationID: "rotation-a",
+                codes: ["user-a-secret"]
+            )
+        )
+        let api = RecordingFirstPartyAuthAPI()
+        let service = FirstPartyAuthService(
+            api: api,
+            deviceSession: controller,
+            recoveryRotationJournal: journal
+        )
+
+        do {
+            _ = try await service.beginRecoveryCodeRotation()
+            XCTFail("Expected owner mismatch to discard pending codes")
+        } catch APIError.authenticationRequired(let message) {
+            XCTAssertTrue(message.contains("account changed"))
+            XCTAssertNil(try journal.load())
+            let paths = await api.recordedPaths()
+            XCTAssertEqual(paths, [])
+        }
+    }
+
+    @MainActor
+    func testRecoveryRotationConfirmRejectsAnotherAccountsJournal() async throws {
+        let controller = await activeController(userID: "user-b")
+        let journal = InMemoryRecoveryCodeRotationJournal(
+            PendingRecoveryCodeRotation(
+                userID: "user-a",
+                rotationID: "rotation-a",
+                codes: ["user-a-secret"]
+            )
+        )
+        let api = RecordingFirstPartyAuthAPI()
+        let service = FirstPartyAuthService(
+            api: api,
+            deviceSession: controller,
+            recoveryRotationJournal: journal
+        )
+
+        do {
+            _ = try await service.confirmRecoveryCodeRotation()
+            XCTFail("Expected owner mismatch to reject confirmation")
+        } catch APIError.authenticationRequired(let message) {
+            XCTAssertTrue(message.contains("account changed"))
+            XCTAssertNil(try journal.load())
+            let paths = await api.recordedPaths()
+            XCTAssertEqual(paths, [])
+        }
+    }
+
+    @MainActor
+    func testSessionEndClearsPendingRecoveryRotation() throws {
+        let pending = PendingRecoveryCodeRotation(
+            userID: "server-user",
+            rotationID: "rotation-a",
+            codes: ["mta-secret"]
+        )
+        let journal = InMemoryRecoveryCodeRotationJournal(pending)
+        let service = FirstPartyAuthService(
+            api: RecordingFirstPartyAuthAPI(),
+            deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil), enabled: true),
+            recoveryRotationJournal: journal
+        )
+
+        service.clearSessionScopedJournals()
+
+        XCTAssertNil(try journal.load())
+    }
+
+    @MainActor
+    private func activeController(userID: String = "server-user") async -> DeviceSessionController {
+        let pair = DeviceSessionPair(
+            sessionID: "session-active",
+            userID: userID,
+            accessToken: "mta_at_active",
+            accessExpiresAt: .distantFuture,
+            refreshToken: "mta_rt_active",
+            inactiveExpiresAt: .distantFuture
+        )
+        let controller = DeviceSessionController(
+            store: TestDeviceSessionStore(StoredDeviceSession(pair: pair, source: .passkey)),
+            enabled: true
+        )
+        _ = await controller.activate(clerkID: nil)
+        return controller
     }
 
     @MainActor
@@ -419,10 +565,14 @@ final class FirstPartyAuthServiceTests: XCTestCase {
     @MainActor
     func testAuthorizationCancellationIsRecognized() {
         let error = NSError(
-            domain: "com.apple.AuthenticationServices.AuthorizationError",
+            domain: ASAuthorizationError.errorDomain,
             code: ASAuthorizationError.Code.canceled.rawValue
         )
         XCTAssertTrue(FirstPartyAuthService.isCancellation(error))
+        XCTAssertFalse(FirstPartyAuthService.isCancellation(NSError(
+            domain: NSURLErrorDomain,
+            code: ASAuthorizationError.Code.canceled.rawValue
+        )))
         XCTAssertTrue(FirstPartyAuthService.isCancellation(FirstPartyAuthError.canceled))
     }
 
@@ -475,6 +625,19 @@ private final class InMemoryRecoveryCodeRotationJournal: RecoveryCodeRotationJou
 
     func load() throws -> PendingRecoveryCodeRotation? { pending }
     func save(_ value: PendingRecoveryCodeRotation) throws { pending = value }
+    func delete() { pending = nil }
+}
+
+@MainActor
+private final class InMemoryRecoveryCodeRedeemJournal: RecoveryCodeRedeemJournaling {
+    private var pending: PendingRecoveryCodeRedeem?
+
+    init(_ pending: PendingRecoveryCodeRedeem?) {
+        self.pending = pending
+    }
+
+    func load() throws -> PendingRecoveryCodeRedeem? { pending }
+    func save(_ value: PendingRecoveryCodeRedeem) throws { pending = value }
     func delete() { pending = nil }
 }
 
@@ -560,5 +723,43 @@ private actor PasskeyFinishFailingAPI: FirstPartyAuthAPI {
 
     func postJSON<T>(_ path: String, bodyData: Data, authenticated: Bool) async throws -> T where T: Decodable {
         throw error
+    }
+}
+
+private actor SuccessfulPairFirstPartyAuthAPI: FirstPartyAuthAPI {
+    func get<T>(_ path: String, expectedOwnerID: String?) async throws -> T where T: Decodable {
+        throw APIError.invalidResponse
+    }
+
+    func post<T, B>(_ path: String, body: B, expectedOwnerID: String?) async throws -> T where T: Decodable, B: Encodable {
+        throw APIError.invalidResponse
+    }
+
+    func postPublic<T, B>(_ path: String, body: B) async throws -> T where T: Decodable, B: Encodable {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        return try decodePairResponse(
+            as: T.self,
+            requestBody: try encoder.encode(body)
+        )
+    }
+
+    func postJSON<T>(_ path: String, bodyData: Data, authenticated: Bool) async throws -> T where T: Decodable {
+        try decodePairResponse(as: T.self, requestBody: bodyData)
+    }
+
+    private func decodePairResponse<T: Decodable>(as type: T.Type, requestBody: Data) throws -> T {
+        let request = try XCTUnwrap(JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
+        let refreshToken = try XCTUnwrap(request["next_refresh_token"] as? String)
+        let response: [String: Any] = [
+            "session_id": "session-success",
+            "user_id": "server-user",
+            "access_token": "mta_at_success",
+            "access_expires_at": "2099-01-01T00:00:00Z",
+            "refresh_token": refreshToken,
+            "inactive_expires_at": "2099-02-01T00:00:00Z",
+        ]
+        let data = try JSONSerialization.data(withJSONObject: response)
+        return try APIClient.makeDecoder().decode(T.self, from: data)
     }
 }

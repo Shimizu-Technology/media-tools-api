@@ -252,12 +252,17 @@ Live Activity provides a visible Stop action.
   `FIRST_PARTY_IOS_AUTH_ENABLED=YES` so simulator QA and archives exercise the
   native path intentionally. The API still controls rollout with
   `FIRST_PARTY_AUTH_ENABLED`; Clerk remains configured as the temporary
-  migration fallback. A current Clerk sign-in bootstraps a session for the same
-  server user. The app stores its rotating refresh credential in the device-only
-  Keychain and uses short access credentials for API calls. If an upload was
-  waiting when Clerk expired, the app can finish it with the device session.
-- **Safe rollout** — If the server disables the first-party path, API requests
-  continue using Clerk while a previously verified local owner ID remains
+  migration fallback. Enable the API flag for the controlled owner test before
+  distributing a Release archive that exposes these native controls. A current
+  Clerk sign-in bootstraps a session for the same server user. The app stores
+  its rotating refresh credential in the device-only Keychain and uses short
+  access credentials for API calls. If an upload was waiting when Clerk
+  expired, the app can finish it with the device session.
+- **Safe rollout** — If the server rejects a first-party credential while a
+  matching Clerk session is still present, the request retries once through
+  Clerk. Native-only passkey and recovery sessions require the server's
+  first-party route to remain enabled, so rollback disables new client entry
+  points before that server flag. A previously verified local owner ID remains
   available for recordings, including after sign-out and relaunch. This local
   mapping contains no credentials and is removed on account deletion. Migrated
   AI consent moves to that owner so later activation cannot restore a revoked

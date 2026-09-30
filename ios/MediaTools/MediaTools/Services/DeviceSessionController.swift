@@ -268,6 +268,15 @@ final class DeviceSessionController {
         return store.localOwnerID(for: clerkID) ?? clerkID
     }
 
+    /// A 401 may retry through Clerk only when that Clerk account resolves to
+    /// the same stable owner as the rejected device credential or request.
+    func canFallbackToClerk(clerkID: String, expectedOwnerID: String?) -> Bool {
+        let requestOwnerID = expectedOwnerID ?? activeUserID ?? stored?.pair.userID
+        guard let requestOwnerID else { return true }
+        let clerkOwnerID = fallbackOwnerID(for: clerkID)
+        return requestOwnerID == clerkOwnerID || requestOwnerID == clerkID
+    }
+
     /// Called before exposing an account workspace. A different Clerk account
     /// suspends the old device credential rather than borrowing its local data.
     func activate(clerkID: String?) async -> String? {

@@ -18,6 +18,29 @@ struct RecoveryCodeResponse: Decodable, Equatable {
     let codes: [String]
 }
 
+/// Wire shape decoded by APIClient's snake-case strategy. DeviceSessionPair
+/// keeps explicit snake-case keys for Keychain compatibility, so API responses
+/// must cross this DTO before becoming a stored pair.
+struct DeviceSessionPairResponse: Decodable, Equatable {
+    let sessionId: String
+    let userId: String
+    let accessToken: String
+    let accessExpiresAt: Date
+    let refreshToken: String
+    let inactiveExpiresAt: Date
+
+    var pair: DeviceSessionPair {
+        DeviceSessionPair(
+            sessionID: sessionId,
+            userID: userId,
+            accessToken: accessToken,
+            accessExpiresAt: accessExpiresAt,
+            refreshToken: refreshToken,
+            inactiveExpiresAt: inactiveExpiresAt
+        )
+    }
+}
+
 struct PasskeyBeginResponse<Options: Decodable>: Decodable {
     let ceremonyID: String
     let options: Options
@@ -364,24 +387,44 @@ final class FirstPartyAuthService {
     }
 
     func beginRecoveryCodeRotation() async throws -> [String] {
-        if let pending = try recoveryRotationJournal.load() { return pending.codes }
+        let ownerID = try activeRecoveryOwnerID()
+        if let pending = try recoveryRotationJournal.load() {
+            guard pending.userID == ownerID else {
+                recoveryRotationJournal.delete()
+                throw APIError.authenticationRequired(
+                    message: "The signed-in account changed. Create recovery codes for this account."
+                )
+            }
+            return pending.codes
+        }
         let response: RecoveryCodeRotationBeginResponse = try await api.post(
             "/auth/recovery/rotation/begin",
             body: EmptyRequest(),
-            expectedOwnerID: nil
+            expectedOwnerID: ownerID
         )
-        let pending = PendingRecoveryCodeRotation(rotationID: response.rotationID, codes: response.codes)
+        let pending = PendingRecoveryCodeRotation(
+            userID: ownerID,
+            rotationID: response.rotationID,
+            codes: response.codes
+        )
         try recoveryRotationJournal.save(pending)
         return response.codes
     }
 
     func confirmRecoveryCodeRotation() async throws -> RecoveryCodeStatus {
+        let ownerID = try activeRecoveryOwnerID()
         guard let pending = try recoveryRotationJournal.load() else { throw APIError.invalidResponse }
+        guard pending.userID == ownerID else {
+            recoveryRotationJournal.delete()
+            throw APIError.authenticationRequired(
+                message: "The signed-in account changed. Create recovery codes for this account."
+            )
+        }
         do {
             let status: RecoveryCodeStatus = try await api.post(
                 "/auth/recovery/rotation/confirm",
                 body: RecoveryCodeRotationConfirmRequest(rotationID: pending.rotationID),
-                expectedOwnerID: nil
+                expectedOwnerID: ownerID
             )
             recoveryRotationJournal.delete()
             return status
@@ -412,7 +455,7 @@ final class FirstPartyAuthService {
         guard let journal else { throw APIError.invalidResponse }
 
         do {
-            let pair: DeviceSessionPair = try await api.postPublic(
+            let response: DeviceSessionPairResponse = try await api.postPublic(
                 "/auth/recovery/redeem",
                 body: RecoveryCodeRedeemRequest(
                     code: journal.code,
@@ -421,6 +464,7 @@ final class FirstPartyAuthService {
                     nextRefreshToken: journal.nextRefreshToken
                 )
             )
+            let pair = response.pair
             guard pair.refreshToken == journal.nextRefreshToken else { throw APIError.invalidResponse }
             try await installFirstPartySession(pair: pair, nextRefreshToken: journal.nextRefreshToken, source: .recoveryCode)
             recoveryRedeemJournal.delete()
@@ -461,11 +505,23 @@ final class FirstPartyAuthService {
     }
 
     private func finishPasskeyLogin(_ pending: PendingPasskeyLoginFinish) async throws -> DeviceSessionPair {
-        try await api.postJSON(
+        let response: DeviceSessionPairResponse = try await api.postJSON(
             "/auth/passkeys/login/finish",
             bodyData: pending.credentialJSONData,
             authenticated: false
         )
+        return response.pair
+    }
+
+    func clearSessionScopedJournals() {
+        recoveryRotationJournal.delete()
+    }
+
+    private func activeRecoveryOwnerID() throws -> String {
+        guard let ownerID = deviceSession.activeUserID, !ownerID.isEmpty else {
+            throw APIError.authenticationRequired(message: "Sign in to manage recovery codes.")
+        }
+        return ownerID
     }
 
     private func installFirstPartySession(pair: DeviceSessionPair,
@@ -489,7 +545,8 @@ final class FirstPartyAuthService {
         if error is CancellationError { return true }
         if let firstParty = error as? FirstPartyAuthError, firstParty == .canceled { return true }
         let nsError = error as NSError
-        return nsError.code == ASAuthorizationError.Code.canceled.rawValue
+        return nsError.domain == ASAuthorizationError.errorDomain
+            && nsError.code == ASAuthorizationError.Code.canceled.rawValue
     }
 
     func perform(request: ASAuthorizationRequest) async throws -> ASAuthorization {
@@ -591,6 +648,7 @@ struct PendingRecoveryCodeRedeem: Codable, Equatable {
 }
 
 struct PendingRecoveryCodeRotation: Codable, Equatable {
+    let userID: String
     let rotationID: String
     let codes: [String]
 }
@@ -691,7 +749,13 @@ final class RecoveryCodeRotationJournal: RecoveryCodeRotationJournaling {
         guard status == errSecSuccess, let data = result as? Data else {
             throw RecoveryJournalKeychainFailure(status: status)
         }
-        return try JSONDecoder().decode(PendingRecoveryCodeRotation.self, from: data)
+        do {
+            return try JSONDecoder().decode(PendingRecoveryCodeRotation.self, from: data)
+        } catch {
+            // Ownerless legacy or corrupt state must never cross accounts.
+            delete()
+            return nil
+        }
     }
 
     func save(_ value: PendingRecoveryCodeRotation) throws {

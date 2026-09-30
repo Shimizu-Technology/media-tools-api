@@ -45,19 +45,22 @@ actor APIClient {
 
     private func authHeaders(
         forceRefresh: Bool = false,
-        expectedOwnerID: String? = nil
+        expectedOwnerID: String? = nil,
+        skipDeviceSession: Bool = false
     ) async throws -> [String: String] {
         var headers: [String: String] = [
             "Content-Type": "application/json",
             "Accept": "application/json"
         ]
 
-        if let token = try await DeviceSessionController.shared.accessToken(
-            expectedOwnerID: expectedOwnerID,
-            forceRefresh: forceRefresh
-        ) {
-            headers["Authorization"] = "Bearer \(token)"
-            return headers
+        if !skipDeviceSession {
+            if let token = try await DeviceSessionController.shared.accessToken(
+                expectedOwnerID: expectedOwnerID,
+                forceRefresh: forceRefresh
+            ) {
+                headers["Authorization"] = "Bearer \(token)"
+                return headers
+            }
         }
 
         guard !Configuration.clerkPublishableKey.isEmpty else {
@@ -118,12 +121,14 @@ actor APIClient {
     private func authenticatedRequest(
         from originalRequest: URLRequest,
         forceRefresh: Bool = false,
-        expectedOwnerID: String? = nil
+        expectedOwnerID: String? = nil,
+        skipDeviceSession: Bool = false
     ) async throws -> URLRequest {
         var request = originalRequest
         for (key, value) in try await authHeaders(
             forceRefresh: forceRefresh,
-            expectedOwnerID: expectedOwnerID
+            expectedOwnerID: expectedOwnerID,
+            skipDeviceSession: skipDeviceSession
         ) {
             // Multipart requests carry their boundary in Content-Type; never
             // replace it with the JSON default while applying auth headers.
@@ -152,9 +157,8 @@ actor APIClient {
             return firstResponse
         }
 
-        let retryRequest = try await authenticatedRequest(
+        let retryRequest = try await retryAuthenticatedRequest(
             from: originalRequest,
-            forceRefresh: true,
             expectedOwnerID: expectedOwnerID
         )
         return try await session.data(for: retryRequest)
@@ -174,12 +178,37 @@ actor APIClient {
             return firstResponse
         }
 
-        let retryRequest = try await authenticatedRequest(
+        let retryRequest = try await retryAuthenticatedRequest(
             from: originalRequest,
-            forceRefresh: true,
             expectedOwnerID: expectedOwnerID
         )
         return try await session.upload(for: retryRequest, fromFile: fileURL)
+    }
+
+    /// A rejected first-party credential can mean the staged server path was
+    /// rolled back. Prefer the still-present Clerk session for the one allowed
+    /// retry; native-only accounts continue through first-party refresh because
+    /// they have no Clerk credential to fall back to.
+    private func retryAuthenticatedRequest(
+        from originalRequest: URLRequest,
+        expectedOwnerID: String?
+    ) async throws -> URLRequest {
+        let clerkID = await Clerk.shared.user?.id
+        let hasClerkFallback: Bool
+        if let clerkID {
+            hasClerkFallback = await DeviceSessionController.shared.canFallbackToClerk(
+                clerkID: clerkID,
+                expectedOwnerID: expectedOwnerID
+            )
+        } else {
+            hasClerkFallback = false
+        }
+        return try await authenticatedRequest(
+            from: originalRequest,
+            forceRefresh: true,
+            expectedOwnerID: expectedOwnerID,
+            skipDeviceSession: hasClerkFallback
+        )
     }
 
     // MARK: - HTTP Methods

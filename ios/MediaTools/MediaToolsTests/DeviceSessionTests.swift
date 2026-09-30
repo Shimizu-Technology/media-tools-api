@@ -597,4 +597,28 @@ final class DeviceSessionTests: XCTestCase {
             XCTAssertFalse(controller.needsSignIn)
         }
     }
+
+    @MainActor
+    func testClerkFallbackRequiresTheSameStableOwner() {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let controller = DeviceSessionController(
+            store: MemoryDeviceSessionStore(
+                StoredDeviceSession(
+                    pair: pair,
+                    source: .clerk,
+                    verifiedClerkID: "clerk-a"
+                )
+            ),
+            enabled: true
+        )
+
+        XCTAssertTrue(controller.canFallbackToClerk(clerkID: "clerk-a", expectedOwnerID: nil))
+        XCTAssertTrue(controller.canFallbackToClerk(clerkID: "clerk-a", expectedOwnerID: "server-a"))
+        XCTAssertFalse(controller.canFallbackToClerk(clerkID: "clerk-b", expectedOwnerID: nil))
+        XCTAssertFalse(controller.canFallbackToClerk(clerkID: "clerk-a", expectedOwnerID: "server-b"))
+    }
 }

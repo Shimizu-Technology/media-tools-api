@@ -145,6 +145,7 @@ struct ContentView: View {
     }
 
     private func completeNativeSignIn(_ operation: NativeAuthOperation) async {
+        guard nativeAuthOperation == nil else { return }
         nativeAuthOperation = operation
         nativeAuthError = nil
         defer { nativeAuthOperation = nil }
@@ -164,7 +165,7 @@ struct ContentView: View {
                 do {
                     try await clerk.auth.signOut()
                 } catch {
-                    nativeAuthError = "Your passkey session is active. Media Tools will finish clearing the old sign-in when the app refreshes."
+                    nativeAuthError = "You are signed in. Media Tools will finish clearing the old sign-in when the app refreshes."
                 }
             }
             migrationRetry += 1
