@@ -15,6 +15,7 @@ import (
 
 const recoveryCodeCount = 10
 
+// ErrRecoveryCodeInvalid means a code is malformed, unknown, or already used.
 var ErrRecoveryCodeInvalid = errors.New("recovery code is invalid or already used")
 
 // Recovery codes contain 160 random bits. Their hashes can be stored with
@@ -85,6 +86,7 @@ func (db *DB) ReplaceRecoveryCodes(ctx context.Context, userID string) ([]string
 	return codes, nil
 }
 
+// RemainingRecoveryCodes returns the number of unused codes for an account.
 func (db *DB) RemainingRecoveryCodes(ctx context.Context, userID string) (int, error) {
 	var count int
 	if err := db.GetContext(ctx, &count, `SELECT COUNT(*) FROM auth_recovery_codes WHERE user_id = $1 AND consumed_at IS NULL`, userID); err != nil {
@@ -137,7 +139,8 @@ func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 	}
 	err = tx.GetContext(ctx, &userID, `
 		UPDATE auth_recovery_codes SET consumed_at = $2
-		WHERE code_hash = $1 AND consumed_at IS NULL RETURNING user_id`, hash, now)
+		WHERE code_hash = $1 AND consumed_at IS NULL AND user_id = $3
+		RETURNING user_id`, hash, now, lockedID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrRecoveryCodeInvalid
 	}

@@ -32,15 +32,18 @@ func TestRecoveryCodeConcurrentRedemption(t *testing.T) {
 		t.Fatal(err)
 	}
 	results := make(chan error, 2)
+	start := make(chan struct{})
 	var workers sync.WaitGroup
 	for i := 0; i < 2; i++ {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
+			<-start
 			_, err := db.RedeemRecoveryCode(ctx, codes[0], "ios", "Replacement phone")
 			results <- err
 		}()
 	}
+	close(start)
 	workers.Wait()
 	close(results)
 	var successes, rejections int

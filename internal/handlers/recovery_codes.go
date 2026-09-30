@@ -10,7 +10,6 @@ import (
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
-	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
 
 func (h *Handler) RecoveryCodeStatus(c *gin.Context) {
@@ -68,6 +67,6 @@ func (h *Handler) RedeemRecoveryCode(c *gin.Context) {
 		passkeyError(c, http.StatusUnauthorized, "invalid_recovery_code", "Recovery code is invalid or already used")
 	default:
 		log.Printf("redeem recovery code: %v", err)
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not complete recovery sign-in", Code: http.StatusServiceUnavailable})
+		passkeyError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Could not complete recovery sign-in")
 	}
 }
