@@ -31,9 +31,21 @@ data class StoredDeviceSession(
     val pendingNextRefreshToken: String? = null,
 )
 
+/** Saved before bootstrap so a lost success response can recover the same server session. */
+@Serializable
+data class PendingDeviceSessionBootstrap(
+    val verifiedClerkId: String,
+    val nextRefreshToken: String,
+    val deviceName: String,
+)
+
 interface DeviceSessionStore {
     fun load(): StoredDeviceSession?
     fun save(session: StoredDeviceSession)
+    fun loadPendingBootstrap(): PendingDeviceSessionBootstrap?
+    fun savePendingBootstrap(pending: PendingDeviceSessionBootstrap)
+    fun promoteBootstrap(session: StoredDeviceSession)
+    fun clearPendingBootstrap()
     fun clear()
 }
 
@@ -52,7 +64,7 @@ class DeviceSessionController(
     private val transport: DeviceSessionTransport,
     private val now: () -> Instant = Instant::now,
     private val randomRefreshToken: () -> String = ::newRefreshToken,
-    private val currentExternalIdentity: () -> String? = { null },
+    private val currentExternalIdentity: () -> String?,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : SessionTokenProvider {
     private val mutex = Mutex()
@@ -87,14 +99,47 @@ class DeviceSessionController(
                 }
                 return@withLock existing.pair
             }
+            if (currentExternalIdentity() != verifiedClerkId) {
+                throw MediaToolsAPIException(409, "The signed-in account changed. Try again.")
+            }
+            var pending = store.loadPendingBootstrap()
+            if (pending != null && pending.verifiedClerkId != verifiedClerkId) {
+                // A different verified Clerk identity must never reuse the old
+                // identity's successor credential.
+                store.clearPendingBootstrap()
+                pending = null
+            }
+            if (pending == null) {
+                pending = PendingDeviceSessionBootstrap(
+                    verifiedClerkId = verifiedClerkId,
+                    nextRefreshToken = randomRefreshToken(),
+                    deviceName = deviceName.trim().take(80),
+                )
+                store.savePendingBootstrap(pending)
+            }
             val response = transport.send(
                 "/auth/session/bootstrap",
-                json.encodeToString(BootstrapRequest(clientType = "android", deviceName = deviceName.take(80))),
+                json.encodeToString(
+                    BootstrapRequest(
+                        clientType = "android",
+                        deviceName = pending.deviceName,
+                        nextRefreshToken = pending.nextRefreshToken,
+                    )
+                ),
                 bearer = clerkToken,
             )
+            if (response.status == 400 || response.status == 401) {
+                store.clearPendingBootstrap()
+            }
             val pair = response.requirePair()
+            if (currentExternalIdentity() != verifiedClerkId) {
+                throw MediaToolsAPIException(409, "The signed-in account changed. Try again.")
+            }
+            if (pair.refreshToken != pending.nextRefreshToken) {
+                throw MediaToolsAPIException(502, "Media Tools returned an invalid device session.")
+            }
             val value = StoredDeviceSession(pair, verifiedClerkId)
-            store.save(value)
+            store.promoteBootstrap(value)
             stored = value
             rejected = false
             _revision.value++
@@ -200,6 +245,7 @@ class DeviceSessionController(
         @Serializable private data class BootstrapRequest(
             @SerialName("client_type") val clientType: String,
             @SerialName("device_name") val deviceName: String,
+            @SerialName("next_refresh_token") val nextRefreshToken: String,
         )
         @Serializable private data class RefreshRequest(
             @SerialName("refresh_token") val refreshToken: String,
