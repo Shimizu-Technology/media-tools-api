@@ -347,11 +347,33 @@ final class DeviceSessionController {
     /// Called before exposing an account workspace. A different Clerk account
     /// suspends the old device credential rather than borrowing its local data.
     func activate(clerkID: String?) async -> String? {
-        // An irreversibly deleted account may remain cached in Clerk during a
-        // network outage. Block that exact provider identity before any local
-        // fallback can expose a new workspace under its obsolete subject.
-        deletedClerkIdentities.removeAll(except: clerkID)
-        if let clerkID, deletedClerkIdentities.contains(clerkID) {
+        await activate(clerkID: clerkID, clerkIsLoaded: Clerk.shared.isLoaded)
+    }
+
+    func activate(clerkID: String?, clerkIsLoaded: Bool) async -> String? {
+        // A nil user is authoritative only after Clerk has finished hydrating
+        // its local cache. Preserve sign-out and deletion intent during the
+        // earlier nil state so a cached identity cannot reappear on relaunch.
+        if clerkID != nil || clerkIsLoaded {
+            deletedClerkIdentities.removeAll(except: clerkID)
+        }
+
+        let hasUsableNativeSession: Bool
+        if let stored {
+            hasUsableNativeSession = enabled
+                && stored.pendingRevocation != true
+                && stored.source != .clerk
+        } else {
+            hasUsableNativeSession = false
+        }
+
+        // A retired Clerk subject may remain cached during an outage. It can
+        // never bootstrap or reopen a fallback workspace. A durable native
+        // session remains authoritative after Clerk detachment, even while
+        // clearing that stale provider cache is temporarily unavailable.
+        if let clerkID,
+           deletedClerkIdentities.contains(clerkID),
+           !hasUsableNativeSession {
             activeUserID = nil
             if Clerk.shared.user?.id == clerkID {
                 try? await Clerk.shared.auth.signOut()

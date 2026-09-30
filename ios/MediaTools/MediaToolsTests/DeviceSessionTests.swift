@@ -535,6 +535,123 @@ final class DeviceSessionTests: XCTestCase {
         XCTAssertFalse(deletedIdentities.contains("clerk-a"))
     }
 
+    @MainActor
+    func testUnhydratedNilPreservesRetiredClerkIdentityAcrossRelaunch() async {
+        let store = MemoryDeviceSessionStore(nil)
+        let deletedIdentities = MemoryDeletedClerkIdentityStore()
+        deletedIdentities.insert("clerk-a")
+        let controller = DeviceSessionController(
+            transport: DisabledSessionTransport(),
+            baseURL: URL(string: "https://example.test/api/v1")!,
+            store: store,
+            deletedClerkIdentities: deletedIdentities,
+            enabled: true
+        )
+
+        let unhydratedOwner = await controller.activate(
+            clerkID: nil,
+            clerkIsLoaded: false
+        )
+        let cachedOwner = await controller.activate(
+            clerkID: "clerk-a",
+            clerkIsLoaded: true
+        )
+
+        XCTAssertNil(unhydratedOwner)
+        XCTAssertNil(cachedOwner)
+        XCTAssertTrue(deletedIdentities.contains("clerk-a"))
+    }
+
+    @MainActor
+    func testLoadedSignedOutClerkClearsCompletedSignOutBlock() async {
+        let deletedIdentities = MemoryDeletedClerkIdentityStore()
+        deletedIdentities.insert("clerk-a")
+        let controller = DeviceSessionController(
+            store: MemoryDeviceSessionStore(nil),
+            deletedClerkIdentities: deletedIdentities,
+            enabled: true
+        )
+
+        let owner = await controller.activate(
+            clerkID: nil,
+            clerkIsLoaded: true
+        )
+
+        XCTAssertNil(owner)
+        XCTAssertFalse(deletedIdentities.contains("clerk-a"))
+    }
+
+    @MainActor
+    func testDetachedNativeSessionSurvivesStaleBlockedClerkIdentity() async throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: pair, verifiedClerkID: "clerk-a",
+                                pendingNextRefreshToken: nil)
+        )
+        let deletedIdentities = MemoryDeletedClerkIdentityStore()
+        let controller = DeviceSessionController(
+            store: store,
+            deletedClerkIdentities: deletedIdentities,
+            enabled: true
+        )
+        try controller.markClerkDetached(expectedOwnerID: "server-a")
+        deletedIdentities.insert("clerk-a")
+
+        let owner = await controller.activate(
+            clerkID: "clerk-a",
+            clerkIsLoaded: true
+        )
+        let token = try await controller.accessToken(
+            expectedOwnerID: "server-a",
+            forceRefresh: false
+        )
+
+        XCTAssertEqual(owner, "server-a")
+        XCTAssertEqual(token, "mta_at_valid")
+        XCTAssertEqual(store.value?.source, .passkey)
+        XCTAssertTrue(deletedIdentities.contains("clerk-a"))
+    }
+
+    @MainActor
+    func testBlockedClerkCannotRestorePendingRevocationFallback() async {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(
+                pair: pair,
+                verifiedClerkID: "clerk-a",
+                pendingNextRefreshToken: nil,
+                pendingRevocation: true
+            )
+        )
+        let deletedIdentities = MemoryDeletedClerkIdentityStore()
+        deletedIdentities.insert("clerk-a")
+        let controller = DeviceSessionController(
+            transport: DisabledSessionTransport(),
+            baseURL: URL(string: "https://example.test/api/v1")!,
+            store: store,
+            deletedClerkIdentities: deletedIdentities,
+            enabled: true
+        )
+
+        let owner = await controller.activate(
+            clerkID: "clerk-a",
+            clerkIsLoaded: true
+        )
+
+        XCTAssertNil(owner)
+        XCTAssertNil(controller.activeUserID)
+        XCTAssertEqual(store.value?.pendingRevocation, true)
+        XCTAssertTrue(deletedIdentities.contains("clerk-a"))
+    }
+
 
     @MainActor
     func testPrepareForNewNativeSessionRequiresRevocationBeforeContinuing() async throws {

@@ -78,7 +78,7 @@ struct ContentView: View {
                 }
             }
         }
-        .task(id: "\(clerk.user?.id ?? "signed-out")|\(deviceSession.needsSignIn)|\(deviceSession.sessionRevision)|\(migrationRetry)") {
+        .task(id: "\(clerk.isLoaded)|\(clerk.user?.id ?? "signed-out")|\(deviceSession.needsSignIn)|\(deviceSession.sessionRevision)|\(migrationRetry)") {
             let clerkID = forceSignedOutForUITesting ? nil : clerk.user?.id
             if Configuration.firstPartyIOSAuthEnabled && !forceSignedOutForUITesting {
                 isResolvingAccount = true
@@ -99,7 +99,10 @@ struct ContentView: View {
                 }
                 guard !Task.isCancelled else { return }
                 let clerkID = clerk.user?.id
-                let ownerID = await deviceSession.activate(clerkID: clerkID)
+                let ownerID = await deviceSession.activate(
+                    clerkID: clerkID,
+                    clerkIsLoaded: clerk.isLoaded
+                )
                 guard !Task.isCancelled else { return }
                 if let migration = deviceSession.verifiedMigration {
                     do {
@@ -140,7 +143,10 @@ struct ContentView: View {
                 if forceSignedOutForUITesting {
                     ownerID = nil
                 } else {
-                    ownerID = await deviceSession.activate(clerkID: clerkID)
+                    ownerID = await deviceSession.activate(
+                        clerkID: clerkID,
+                        clerkIsLoaded: clerk.isLoaded
+                    )
                 }
                 await uploadCoordinator.setActiveOwnerID(ownerID)
                 guard !Task.isCancelled else { return }
