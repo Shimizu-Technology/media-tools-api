@@ -72,6 +72,35 @@ func TestRateLimiterReturnsRetryAfterWhenBucketIsEmpty(t *testing.T) {
 	}
 }
 
+func TestUnauthenticatedRateLimiterSeparatesAuthenticationScopes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	limiter := NewRateLimiter("", "", 100, 100)
+	router := gin.New()
+	router.POST("/recovery", limiter.RateLimitUnauthenticated("recovery", 1), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	router.POST("/passkey", limiter.RateLimitUnauthenticated("passkey", 2), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	request := func(path string) int {
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.RemoteAddr = "192.0.2.10:54321"
+		router.ServeHTTP(recorder, req)
+		return recorder.Code
+	}
+	if got := request("/recovery"); got != http.StatusNoContent {
+		t.Fatalf("first recovery status = %d", got)
+	}
+	if got := request("/recovery"); got != http.StatusTooManyRequests {
+		t.Fatalf("second recovery status = %d", got)
+	}
+	if got := request("/passkey"); got != http.StatusNoContent {
+		t.Fatalf("recovery bucket limited passkey status = %d", got)
+	}
+}
+
 func assertRateLimitResponse(t *testing.T, handler http.Handler, method string, wantStatus int, wantLimit, wantRemaining string) {
 	t.Helper()
 	recorder := httptest.NewRecorder()
