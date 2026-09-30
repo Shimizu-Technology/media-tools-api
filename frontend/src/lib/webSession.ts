@@ -6,6 +6,7 @@ export function setWebSessionActive(value: boolean): void { active = value; }
 
 const base = '/api/v1/auth/web/session';
 let renewal: Promise<boolean> | null = null;
+type WebSessionStatus = { clerk_id?: string | null };
 
 function csrfToken(): string {
   const value = document.cookie.split('; ').find((part) => part.startsWith('mta_web_csrf='));
@@ -42,13 +43,17 @@ export async function renewWebSession(): Promise<boolean> {
 export async function restoreWebSession(): Promise<string | null> {
   try {
     const status = await fetch(`${base}/status`, { credentials: 'same-origin' });
-    if (status.ok) return (await status.json() as { clerk_id?: string }).clerk_id ?? '';
+    if (status.ok) return restoredClerkID(await status.json() as WebSessionStatus);
     if (!await renewWebSession()) return null;
     const renewed = await fetch(`${base}/status`, { credentials: 'same-origin' });
-    return renewed.ok ? (await renewed.json() as { clerk_id?: string }).clerk_id ?? '' : null;
+    return renewed.ok ? restoredClerkID(await renewed.json() as WebSessionStatus) : null;
   } catch {
     return null;
   }
+}
+
+function restoredClerkID(status: WebSessionStatus): string {
+  return typeof status.clerk_id === 'string' ? status.clerk_id : '';
 }
 
 export async function logoutWebSession(): Promise<void> {

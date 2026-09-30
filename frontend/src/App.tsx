@@ -202,13 +202,17 @@ function ClerkAppContent() {
         if (webSessionEnabled) {
           setWebSessionActive(false)
           const existingClerkID = await restoreWebSession()
+          if (cancelled) return
           if (existingClerkID !== null && userId && existingClerkID !== userId) {
             await logoutWebSession()
+            if (cancelled) return
+            setWebSessionActive(false)
           } else if (existingClerkID !== null) {
             setWebSessionActive(true)
           }
           if (!isWebSessionActive() && userId) {
             const token = await getToken()
+            if (cancelled) return
             if (token && await bootstrapWebSession(token)) setWebSessionActive(true)
           }
         }
