@@ -57,6 +57,26 @@ func postPasskeyJSON(t *testing.T, engine *gin.Engine, path string, body any, be
 	return response
 }
 
+func getPasskeyJSON(t *testing.T, engine *gin.Engine, path, bearer string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, req)
+	return response
+}
+
+func newTestRefreshToken(t *testing.T) string {
+	t.Helper()
+	token, err := database.RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
 func readPasskeyOptions(t *testing.T, response *httptest.ResponseRecorder) passkeyOptionsResponse {
 	t.Helper()
 	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" {
@@ -172,6 +192,7 @@ func TestPasskeyRegistrationAndLoginHTTP(t *testing.T) {
 	engine := Setup(RouterConfig{DB: db, FirstPartyAuthEnabled: true, JWTSecret: "test-only"})
 	registerBegin := "/api/v1/auth/passkeys/register/begin"
 	registerFinish := "/api/v1/auth/passkeys/register/finish"
+	statusPath := "/api/v1/auth/passkeys"
 	loginBegin := "/api/v1/auth/passkeys/login/begin"
 	loginFinish := "/api/v1/auth/passkeys/login/finish"
 
@@ -185,6 +206,12 @@ func TestPasskeyRegistrationAndLoginHTTP(t *testing.T) {
 	if response := postPasskeyJSON(t, engine, registerBegin, map[string]any{}, legacy); response.Code != http.StatusUnauthorized {
 		t.Fatalf("legacy JWT enrolled passkey = %d", response.Code)
 	}
+	if response := getPasskeyJSON(t, engine, statusPath, legacy); response.Code != http.StatusUnauthorized {
+		t.Fatalf("legacy JWT checked passkeys = %d", response.Code)
+	}
+	if response := getPasskeyJSON(t, engine, statusPath, firstSession.AccessToken); response.Code != http.StatusOK || response.Body.String() != `{"count":0}` || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("initial passkey status = %d %q", response.Code, response.Body.String())
+	}
 	begin := readPasskeyOptions(t, postPasskeyJSON(t, engine, registerBegin, map[string]any{}, firstSession.AccessToken))
 	if begin.Options.RP.ID != testPasskeyRPID || begin.Options.User.ID == "" {
 		t.Fatalf("registration RP/user options = %#v", begin.Options)
@@ -197,6 +224,9 @@ func TestPasskeyRegistrationAndLoginHTTP(t *testing.T) {
 	finish := postPasskeyJSON(t, engine, registerFinish, finishBody, firstSession.AccessToken)
 	if finish.Code != http.StatusCreated {
 		t.Fatalf("registration finish = %d: %s", finish.Code, finish.Body.String())
+	}
+	if response := getPasskeyJSON(t, engine, statusPath, firstSession.AccessToken); response.Code != http.StatusOK || response.Body.String() != `{"count":1}` {
+		t.Fatalf("registered passkey status = %d %q", response.Code, response.Body.String())
 	}
 	if response := postPasskeyJSON(t, engine, registerFinish, finishBody, firstSession.AccessToken); response.Code != http.StatusUnauthorized {
 		t.Fatalf("replayed registration = %d", response.Code)
@@ -219,31 +249,50 @@ func TestPasskeyRegistrationAndLoginHTTP(t *testing.T) {
 	}
 	handle := uuid.MustParse(userID)
 	assertion := createVirtualPasskeyAssertion(t, login.Options.Challenge, testPasskeyOrigin, privateKey, credentialID, handle[:])
-	loginBody := map[string]any{"ceremony_id": login.CeremonyID, "credential": assertion, "client_type": "ios", "device_name": "Test phone"}
+	nextRefresh := newTestRefreshToken(t)
+	loginBody := map[string]any{"ceremony_id": login.CeremonyID, "credential": assertion, "client_type": "web", "device_name": "Browser", "next_refresh_token": nextRefresh}
+	webResponse := postPasskeyJSON(t, engine, loginFinish, loginBody, "")
+	if webResponse.Code != http.StatusBadRequest || bytes.Contains(webResponse.Body.Bytes(), []byte("access_token")) || bytes.Contains(webResponse.Body.Bytes(), []byte("refresh_token")) {
+		t.Fatalf("raw web passkey login leaked credentials = %d: %s", webResponse.Code, webResponse.Body.String())
+	}
+	loginBody["client_type"] = "ios"
 	response := postPasskeyJSON(t, engine, loginFinish, loginBody, "")
 	if response.Code != http.StatusCreated || response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("passkey login = %d: %s", response.Code, response.Body.String())
 	}
 	var pair database.AuthTokenPair
-	if err := json.Unmarshal(response.Body.Bytes(), &pair); err != nil || pair.UserID != userID || pair.AccessToken == "" || pair.RefreshToken == "" {
+	if err := json.Unmarshal(response.Body.Bytes(), &pair); err != nil || pair.UserID != userID || pair.AccessToken == "" || pair.RefreshToken != nextRefresh {
 		t.Fatalf("passkey session = %#v, %v", pair, err)
 	}
 	if authenticated, _, err := db.GetUserByFirstPartyAccessToken(ctx, pair.AccessToken); err != nil || authenticated.ID != userID {
 		t.Fatalf("passkey session resolved wrong user: %#v, %v", authenticated, err)
 	}
-	if replay := postPasskeyJSON(t, engine, loginFinish, loginBody, ""); replay.Code != http.StatusUnauthorized {
-		t.Fatalf("replayed passkey assertion = %d", replay.Code)
+	retry := postPasskeyJSON(t, engine, loginFinish, map[string]any{"ceremony_id": login.CeremonyID, "client_type": "ios", "next_refresh_token": nextRefresh}, "")
+	var recovered database.AuthTokenPair
+	if retry.Code != http.StatusCreated || json.Unmarshal(retry.Body.Bytes(), &recovered) != nil ||
+		recovered.SessionID != pair.SessionID || recovered.RefreshToken != nextRefresh || recovered.AccessToken == pair.AccessToken {
+		t.Fatalf("lost passkey response recovery = %d %#v: %s", retry.Code, recovered, retry.Body.String())
+	}
+	wrongSuccessor := newTestRefreshToken(t)
+	wrongRetry := postPasskeyJSON(t, engine, loginFinish, map[string]any{"ceremony_id": login.CeremonyID, "client_type": "ios", "next_refresh_token": wrongSuccessor}, "")
+	if wrongRetry.Code != http.StatusUnauthorized || bytes.Contains(wrongRetry.Body.Bytes(), []byte("access_token")) || bytes.Contains(wrongRetry.Body.Bytes(), []byte("refresh_token")) {
+		t.Fatalf("wrong passkey successor = %d: %s", wrongRetry.Code, wrongRetry.Body.String())
 	}
 
 	wrongOrigin := readPasskeyOptions(t, postPasskeyJSON(t, engine, loginBegin, map[string]any{}, ""))
 	badAssertion := createVirtualPasskeyAssertion(t, wrongOrigin.Options.Challenge, "https://attacker.example", privateKey, credentialID, handle[:])
-	badLogin := postPasskeyJSON(t, engine, loginFinish, map[string]any{"ceremony_id": wrongOrigin.CeremonyID, "credential": badAssertion, "client_type": "web"}, "")
+	badNext := newTestRefreshToken(t)
+	badLogin := postPasskeyJSON(t, engine, loginFinish, map[string]any{"ceremony_id": wrongOrigin.CeremonyID, "credential": badAssertion, "client_type": "ios", "next_refresh_token": badNext}, "")
 	if badLogin.Code != http.StatusUnauthorized {
 		t.Fatalf("wrong origin accepted = %d: %s", badLogin.Code, badLogin.Body.String())
 	}
+	validAfterBad := createVirtualPasskeyAssertion(t, wrongOrigin.Options.Challenge, testPasskeyOrigin, privateKey, credentialID, handle[:])
+	if replay := postPasskeyJSON(t, engine, loginFinish, map[string]any{"ceremony_id": wrongOrigin.CeremonyID, "credential": validAfterBad, "client_type": "ios", "next_refresh_token": badNext}, ""); replay.Code != http.StatusUnauthorized {
+		t.Fatalf("failed passkey ceremony was reusable = %d: %s", replay.Code, replay.Body.String())
+	}
 	wrongChallenge := readPasskeyOptions(t, postPasskeyJSON(t, engine, loginBegin, map[string]any{}, ""))
 	challengeAssertion := createVirtualPasskeyAssertion(t, login.Options.Challenge, testPasskeyOrigin, privateKey, credentialID, handle[:])
-	if response := postPasskeyJSON(t, engine, loginFinish, map[string]any{"ceremony_id": wrongChallenge.CeremonyID, "credential": challengeAssertion, "client_type": "ios"}, ""); response.Code != http.StatusUnauthorized {
+	if response := postPasskeyJSON(t, engine, loginFinish, map[string]any{"ceremony_id": wrongChallenge.CeremonyID, "credential": challengeAssertion, "client_type": "ios", "next_refresh_token": newTestRefreshToken(t)}, ""); response.Code != http.StatusUnauthorized {
 		t.Fatalf("wrong challenge accepted = %d: %s", response.Code, response.Body.String())
 	}
 	badSignature := readPasskeyOptions(t, postPasskeyJSON(t, engine, loginBegin, map[string]any{}, ""))
@@ -252,7 +301,7 @@ func TestPasskeyRegistrationAndLoginHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	forgedAssertion := createVirtualPasskeyAssertion(t, badSignature.Options.Challenge, testPasskeyOrigin, otherKey, credentialID, handle[:])
-	if response := postPasskeyJSON(t, engine, loginFinish, map[string]any{"ceremony_id": badSignature.CeremonyID, "credential": forgedAssertion, "client_type": "ios"}, ""); response.Code != http.StatusUnauthorized {
+	if response := postPasskeyJSON(t, engine, loginFinish, map[string]any{"ceremony_id": badSignature.CeremonyID, "credential": forgedAssertion, "client_type": "ios", "next_refresh_token": newTestRefreshToken(t)}, ""); response.Code != http.StatusUnauthorized {
 		t.Fatalf("invalid signature accepted = %d: %s", response.Code, response.Body.String())
 	}
 	if _, err := db.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, userID); err != nil {
@@ -260,7 +309,7 @@ func TestPasskeyRegistrationAndLoginHTTP(t *testing.T) {
 	}
 	deleted := readPasskeyOptions(t, postPasskeyJSON(t, engine, loginBegin, map[string]any{}, ""))
 	deletedAssertion := createVirtualPasskeyAssertion(t, deleted.Options.Challenge, testPasskeyOrigin, privateKey, credentialID, handle[:])
-	if response := postPasskeyJSON(t, engine, loginFinish, map[string]any{"ceremony_id": deleted.CeremonyID, "credential": deletedAssertion, "client_type": "ios"}, ""); response.Code != http.StatusUnauthorized {
+	if response := postPasskeyJSON(t, engine, loginFinish, map[string]any{"ceremony_id": deleted.CeremonyID, "credential": deletedAssertion, "client_type": "ios", "next_refresh_token": newTestRefreshToken(t)}, ""); response.Code != http.StatusUnauthorized {
 		t.Fatalf("deleted account signed in = %d: %s", response.Code, response.Body.String())
 	}
 }

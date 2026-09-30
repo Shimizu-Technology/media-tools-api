@@ -63,7 +63,7 @@ func (db *DB) CreateInvitation(ctx context.Context, email, name string) (*AuthIn
 	return invitation, token, nil
 }
 
-func (db *DB) RedeemInvitation(ctx context.Context, token, clientType, deviceName string) (*AuthTokenPair, error) {
+func (db *DB) RedeemInvitation(ctx context.Context, token, clientType, deviceName, nextRefreshToken string) (*AuthTokenPair, error) {
 	hash, ok := invitationTokenHash(token)
 	if !ok {
 		return nil, ErrInvitationInvalid
@@ -75,12 +75,12 @@ func (db *DB) RedeemInvitation(ctx context.Context, token, clientType, deviceNam
 	if len(deviceName) > 80 {
 		return nil, fmt.Errorf("device name is too long")
 	}
-
-	now := time.Now().UTC()
-	pair, accessHash, refreshHash, err := newAuthTokenPair(now)
+	successorHash, err := refreshSuccessorHash(nextRefreshToken)
 	if err != nil {
 		return nil, err
 	}
+
+	now := time.Now().UTC()
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin invitation redemption: %w", err)
@@ -88,14 +88,18 @@ func (db *DB) RedeemInvitation(ctx context.Context, token, clientType, deviceNam
 	defer tx.Rollback()
 
 	var invitation struct {
-		ID         string       `db:"id"`
-		Email      string       `db:"email"`
-		Name       string       `db:"name"`
-		ExpiresAt  time.Time    `db:"expires_at"`
-		ConsumedAt sql.NullTime `db:"consumed_at"`
+		ID         string         `db:"id"`
+		Email      string         `db:"email"`
+		Name       string         `db:"name"`
+		ExpiresAt  time.Time      `db:"expires_at"`
+		ConsumedAt sql.NullTime   `db:"consumed_at"`
+		UserID     sql.NullString `db:"consumed_by_user_id"`
+		SessionID  sql.NullString `db:"consumed_session_id"`
+		Successor  sql.NullString `db:"successor_hash"`
 	}
 	err = tx.GetContext(ctx, &invitation, `
-		SELECT id, email, name, expires_at, consumed_at
+		SELECT id, email, name, expires_at, consumed_at,
+		       consumed_by_user_id, consumed_session_id, successor_hash
 		FROM auth_invitations
 		WHERE token_hash = $1
 		FOR UPDATE`, hash)
@@ -105,7 +109,27 @@ func (db *DB) RedeemInvitation(ctx context.Context, token, clientType, deviceNam
 	if err != nil {
 		return nil, fmt.Errorf("load invitation: %w", err)
 	}
-	if invitation.ConsumedAt.Valid || !now.Before(invitation.ExpiresAt) {
+	if invitation.ConsumedAt.Valid {
+		if !invitation.UserID.Valid || !invitation.SessionID.Valid ||
+			!invitation.Successor.Valid || invitation.Successor.String != successorHash {
+			return nil, ErrInvitationInvalid
+		}
+		pair, err := recoverCredentialIssuanceTx(
+			ctx, tx, invitation.SessionID.String, invitation.UserID.String,
+			nextRefreshToken, invitation.ConsumedAt.Time, now,
+		)
+		if errors.Is(err, ErrSessionInvalid) {
+			return nil, ErrInvitationInvalid
+		}
+		if err != nil {
+			return nil, fmt.Errorf("recover invitation redemption: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit recovered invitation redemption: %w", err)
+		}
+		return pair, nil
+	}
+	if !now.Before(invitation.ExpiresAt) {
 		return nil, ErrInvitationInvalid
 	}
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, normalizeInvitationEmail(invitation.Email)); err != nil {
@@ -126,32 +150,22 @@ func (db *DB) RedeemInvitation(ctx context.Context, token, clientType, deviceNam
 		RETURNING id`, normalizeInvitationEmail(invitation.Email), invitation.Name).Scan(&userID); err != nil {
 		return nil, fmt.Errorf("create invited user: %w", err)
 	}
-	if err := tx.QueryRowContext(ctx, `
-		INSERT INTO auth_sessions (user_id, client_type, device_name, last_used_at, inactive_expires_at)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id`,
-		userID, clientType, deviceName, now, pair.InactiveExpiresAt).Scan(&pair.SessionID); err != nil {
+	pair, err := createFirstPartySessionWithRefreshTx(ctx, tx, userID, clientType, deviceName, nextRefreshToken, now)
+	if errors.Is(err, errSuccessorUnavailable) {
+		return nil, ErrInvitationInvalid
+	}
+	if err != nil {
 		return nil, fmt.Errorf("create invited session: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO auth_access_tokens (token_hash, session_id, expires_at)
-		VALUES ($1, $2, $3)`, accessHash, pair.SessionID, pair.AccessExpiresAt); err != nil {
-		return nil, fmt.Errorf("save invitation access credential: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO auth_refresh_tokens (token_hash, session_id, expires_at)
-		VALUES ($1, $2, $3)`, refreshHash, pair.SessionID, pair.InactiveExpiresAt); err != nil {
-		return nil, fmt.Errorf("save invitation refresh credential: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
 		UPDATE auth_invitations
-		SET consumed_at = $2, consumed_by_user_id = $3
-		WHERE id = $1`, invitation.ID, now, userID); err != nil {
+		SET consumed_at = $2, consumed_by_user_id = $3,
+		    consumed_session_id = $4, successor_hash = $5
+		WHERE id = $1`, invitation.ID, now, userID, pair.SessionID, successorHash); err != nil {
 		return nil, fmt.Errorf("consume invitation: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit invitation redemption: %w", err)
 	}
-	pair.UserID = userID
-	return &pair, nil
+	return pair, nil
 }

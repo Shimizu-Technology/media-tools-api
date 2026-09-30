@@ -93,24 +93,25 @@ func (h *Handler) CreateInvitation(c *gin.Context) {
 }
 
 type redeemInvitationRequest struct {
-	Token      string `json:"token" binding:"required"`
-	ClientType string `json:"client_type" binding:"required"`
-	DeviceName string `json:"device_name"`
+	Token            string `json:"token" binding:"required"`
+	ClientType       string `json:"client_type" binding:"required"`
+	DeviceName       string `json:"device_name"`
+	NextRefreshToken string `json:"next_refresh_token" binding:"required"`
 }
 
 func (h *Handler) RedeemInvitation(c *gin.Context) {
 	var req redeemInvitationRequest
 	if err := c.ShouldBindJSON(&req); err != nil ||
-		(req.ClientType != "web" && req.ClientType != "ios" && req.ClientType != "android") ||
+		(req.ClientType != "ios" && req.ClientType != "android") ||
 		len(strings.TrimSpace(req.DeviceName)) > 80 {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "invalid_request",
-			Message: "Invitation token and valid client type are required",
+			Message: "Invitation token, saved refresh token, and valid native client type are required",
 			Code:    http.StatusBadRequest,
 		})
 		return
 	}
-	pair, err := h.DB.RedeemInvitation(c.Request.Context(), req.Token, req.ClientType, req.DeviceName)
+	pair, err := h.DB.RedeemInvitation(c.Request.Context(), req.Token, req.ClientType, req.DeviceName, req.NextRefreshToken)
 	switch {
 	case err == nil:
 		c.Header("Cache-Control", "no-store")
@@ -126,6 +127,12 @@ func (h *Handler) RedeemInvitation(c *gin.Context) {
 			Error:   "email_taken",
 			Message: "An account with this email already exists",
 			Code:    http.StatusConflict,
+		})
+	case errors.Is(err, database.ErrInvalidSuccessorToken):
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "A valid saved refresh token is required",
+			Code:    http.StatusBadRequest,
 		})
 	default:
 		log.Printf("redeem invitation: %v", err)

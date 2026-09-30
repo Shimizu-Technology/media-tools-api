@@ -97,7 +97,7 @@ func (db *DB) RemainingRecoveryCodes(ctx context.Context, userID string) (int, e
 
 // RedeemRecoveryCode consumes the code and creates its device session in one
 // transaction. A failed session write therefore cannot burn the only code.
-func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceName string) (*AuthTokenPair, error) {
+func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceName, nextRefreshToken string) (*AuthTokenPair, error) {
 	hash, valid := parseRecoveryCode(code)
 	if !valid {
 		return nil, ErrRecoveryCodeInvalid
@@ -109,11 +109,11 @@ func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 	if len(deviceName) > 80 {
 		return nil, fmt.Errorf("device name is too long")
 	}
-	now := time.Now().UTC()
-	pair, accessHash, refreshHash, err := newAuthTokenPair(now)
+	successorHash, err := refreshSuccessorHash(nextRefreshToken)
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now().UTC()
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin recovery sign-in: %w", err)
@@ -122,7 +122,7 @@ func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 	var userID string
 	// Match replacement's lock order (account, then code). A concurrent rotate
 	// can invalidate this candidate while we wait, so consumption is rechecked.
-	err = tx.GetContext(ctx, &userID, `SELECT user_id FROM auth_recovery_codes WHERE code_hash = $1 AND consumed_at IS NULL`, hash)
+	err = tx.GetContext(ctx, &userID, `SELECT user_id FROM auth_recovery_codes WHERE code_hash = $1`, hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrRecoveryCodeInvalid
 	}
@@ -137,31 +137,64 @@ func (db *DB) RedeemRecoveryCode(ctx context.Context, code, clientType, deviceNa
 	if err != nil {
 		return nil, fmt.Errorf("lock recovery account: %w", err)
 	}
-	err = tx.GetContext(ctx, &userID, `
-		UPDATE auth_recovery_codes SET consumed_at = $2
-		WHERE code_hash = $1 AND consumed_at IS NULL AND user_id = $3
-		RETURNING user_id`, hash, now, lockedID)
+	var recovery struct {
+		UserID     string         `db:"user_id"`
+		ConsumedAt sql.NullTime   `db:"consumed_at"`
+		SessionID  sql.NullString `db:"consumed_session_id"`
+		Successor  sql.NullString `db:"successor_hash"`
+	}
+	err = tx.GetContext(ctx, &recovery, `
+		SELECT user_id, consumed_at, consumed_session_id, successor_hash
+		FROM auth_recovery_codes
+		WHERE code_hash = $1 AND user_id = $2
+		FOR UPDATE`, hash, lockedID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrRecoveryCodeInvalid
 	}
 	if err != nil {
-		return nil, fmt.Errorf("consume recovery code: %w", err)
+		return nil, fmt.Errorf("load recovery code: %w", err)
 	}
-	if err := tx.QueryRowContext(ctx, `
-		INSERT INTO auth_sessions (user_id, client_type, device_name, last_used_at, inactive_expires_at)
-		VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		userID, clientType, deviceName, now, pair.InactiveExpiresAt).Scan(&pair.SessionID); err != nil {
+	if recovery.ConsumedAt.Valid {
+		if !recovery.SessionID.Valid || !recovery.Successor.Valid || recovery.Successor.String != successorHash {
+			return nil, ErrRecoveryCodeInvalid
+		}
+		pair, err := recoverCredentialIssuanceTx(
+			ctx, tx, recovery.SessionID.String, recovery.UserID,
+			nextRefreshToken, recovery.ConsumedAt.Time, now,
+		)
+		if errors.Is(err, ErrSessionInvalid) {
+			return nil, ErrRecoveryCodeInvalid
+		}
+		if err != nil {
+			return nil, fmt.Errorf("recover recovery-code sign-in: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit recovered recovery-code sign-in: %w", err)
+		}
+		return pair, nil
+	}
+	pair, err := createFirstPartySessionWithRefreshTx(ctx, tx, recovery.UserID, clientType, deviceName, nextRefreshToken, now)
+	if errors.Is(err, errSuccessorUnavailable) {
+		return nil, ErrRecoveryCodeInvalid
+	}
+	if err != nil {
 		return nil, fmt.Errorf("create recovered session: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO auth_access_tokens (token_hash, session_id, expires_at) VALUES ($1, $2, $3)`, accessHash, pair.SessionID, pair.AccessExpiresAt); err != nil {
-		return nil, fmt.Errorf("save recovered access credential: %w", err)
+	result, err := tx.ExecContext(ctx, `
+		UPDATE auth_recovery_codes
+		SET consumed_at = $2, consumed_session_id = $3, successor_hash = $4
+		WHERE code_hash = $1 AND consumed_at IS NULL AND user_id = $5`,
+		hash, now, pair.SessionID, successorHash, recovery.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("consume recovery code: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO auth_refresh_tokens (token_hash, session_id, expires_at) VALUES ($1, $2, $3)`, refreshHash, pair.SessionID, pair.InactiveExpiresAt); err != nil {
-		return nil, fmt.Errorf("save recovered refresh credential: %w", err)
+	if affected, err := result.RowsAffected(); err != nil {
+		return nil, fmt.Errorf("confirm recovery code consumption: %w", err)
+	} else if affected != 1 {
+		return nil, ErrRecoveryCodeInvalid
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit recovery sign-in: %w", err)
 	}
-	pair.UserID = userID
-	return &pair, nil
+	return pair, nil
 }

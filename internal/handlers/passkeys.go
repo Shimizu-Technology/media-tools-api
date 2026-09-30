@@ -86,6 +86,21 @@ func passkeyError(c *gin.Context, status int, code, message string) {
 	c.JSON(status, models.ErrorResponse{Error: code, Message: message, Code: status})
 }
 
+func (h *Handler) PasskeyStatus(c *gin.Context) {
+	user, binding := middleware.GetUser(c), middleware.AuthSessionBinding(c)
+	if user == nil || binding == "" {
+		passkeyError(c, http.StatusUnauthorized, "unauthorized", "A signed-in device session is required")
+		return
+	}
+	count, err := h.DB.CountPasskeysForUser(c.Request.Context(), user.ID)
+	if err != nil {
+		passkeyError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Could not check passkeys")
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"count": count})
+}
+
 func (h *Handler) BeginPasskeyRegistration(c *gin.Context) {
 	user, binding := middleware.GetUser(c), middleware.AuthSessionBinding(c)
 	if user == nil || binding == "" {
@@ -116,7 +131,7 @@ func (h *Handler) BeginPasskeyRegistration(c *gin.Context) {
 
 type passkeyFinishRequest struct {
 	CeremonyID string          `json:"ceremony_id" binding:"required"`
-	Credential json.RawMessage `json:"credential" binding:"required"`
+	Credential json.RawMessage `json:"credential"`
 }
 
 func passkeyCredentialRequest(c *gin.Context, encoded json.RawMessage) *http.Request {
@@ -186,15 +201,32 @@ func (h *Handler) BeginPasskeyLogin(c *gin.Context) {
 
 type passkeyLoginFinishRequest struct {
 	passkeyFinishRequest
-	ClientType string `json:"client_type" binding:"required"`
-	DeviceName string `json:"device_name"`
+	ClientType       string `json:"client_type" binding:"required"`
+	DeviceName       string `json:"device_name"`
+	NextRefreshToken string `json:"next_refresh_token" binding:"required"`
 }
 
 func (h *Handler) FinishPasskeyLogin(c *gin.Context) {
 	var req passkeyLoginFinishRequest
-	if err := c.ShouldBindJSON(&req); err != nil || uuid.Validate(req.CeremonyID) != nil || len(req.Credential) == 0 ||
-		(req.ClientType != "web" && req.ClientType != "ios" && req.ClientType != "android") || len(strings.TrimSpace(req.DeviceName)) > 80 {
-		passkeyError(c, http.StatusBadRequest, "invalid_request", "Valid ceremony, passkey response, and client type are required")
+	if err := c.ShouldBindJSON(&req); err != nil || uuid.Validate(req.CeremonyID) != nil ||
+		(req.ClientType != "ios" && req.ClientType != "android") || len(strings.TrimSpace(req.DeviceName)) > 80 ||
+		!database.ValidFirstPartyRefreshToken(req.NextRefreshToken) {
+		passkeyError(c, http.StatusBadRequest, "invalid_request", "Valid ceremony, saved refresh token, and native client type are required")
+		return
+	}
+	// A successful ceremony records only the successor hash and session ID.
+	// Retrying with that exact successor can recover a lost response without
+	// another platform prompt or another long-lived device session.
+	if pair, err := h.DB.RecoverPasskeyLogin(c.Request.Context(), req.CeremonyID, req.NextRefreshToken); err == nil {
+		c.Header("Cache-Control", "no-store")
+		c.JSON(http.StatusCreated, pair)
+		return
+	} else if !errors.Is(err, database.ErrPasskeyCeremonyInvalid) {
+		passkeyError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Could not recover passkey sign-in")
+		return
+	}
+	if len(req.Credential) == 0 {
+		passkeyError(c, http.StatusUnauthorized, "invalid_challenge", "Passkey challenge expired or was already used")
 		return
 	}
 	session, err := h.DB.ConsumePasskeyCeremony(c.Request.Context(), req.CeremonyID, "login", "", "")
@@ -236,12 +268,15 @@ func (h *Handler) FinishPasskeyLogin(c *gin.Context) {
 		passkeyError(c, http.StatusUnauthorized, "invalid_passkey", "Passkey sign-in could not be verified")
 		return
 	}
-	if err := h.DB.UpdatePasskeyCredential(c.Request.Context(), account.user.ID, credential, revision); err != nil {
-		passkeyError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Could not update passkey state; try again")
-		return
-	}
-	pair, err := h.DB.CreateFirstPartySession(c.Request.Context(), account.user.ID, req.ClientType, req.DeviceName)
+	pair, err := h.DB.CompletePasskeyLogin(
+		c.Request.Context(), req.CeremonyID, account.user.ID,
+		credential, revision, req.ClientType, req.DeviceName, req.NextRefreshToken,
+	)
 	if err != nil {
+		if errors.Is(err, database.ErrPasskeyCeremonyInvalid) {
+			passkeyError(c, http.StatusUnauthorized, "invalid_challenge", "Passkey challenge expired or was already used")
+			return
+		}
 		passkeyError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Could not create device session")
 		return
 	}

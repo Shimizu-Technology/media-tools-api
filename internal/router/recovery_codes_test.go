@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -64,20 +65,38 @@ func TestRecoveryCodesIssueRotateAndRedeemHTTP(t *testing.T) {
 	if err != nil || count != 10 {
 		t.Fatalf("remaining codes = %d, %v", count, err)
 	}
-	invalid := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": "MTR-INVALID", "client_type": "web"}, "")
+	next, err := database.RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": "MTR-INVALID", "client_type": "ios", "next_refresh_token": next}, "")
 	if invalid.Code != http.StatusUnauthorized {
 		t.Fatalf("invalid code response = %d", invalid.Code)
 	}
-	redeem := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": first.Codes[0], "client_type": "ios", "device_name": "Replacement iPhone"}, "")
+	web := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": first.Codes[0], "client_type": "web", "next_refresh_token": next}, "")
+	if web.Code != http.StatusBadRequest || strings.Contains(web.Body.String(), "access_token") || strings.Contains(web.Body.String(), "refresh_token") {
+		t.Fatalf("raw web recovery leaked credentials = %d: %s", web.Code, web.Body.String())
+	}
+	redeem := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": first.Codes[0], "client_type": "ios", "device_name": "Replacement iPhone", "next_refresh_token": next}, "")
 	if redeem.Code != http.StatusCreated || redeem.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("redeem response = %d: %s", redeem.Code, redeem.Body.String())
 	}
 	var recovered database.AuthTokenPair
-	if err := json.Unmarshal(redeem.Body.Bytes(), &recovered); err != nil || recovered.UserID != userID || recovered.AccessToken == "" || recovered.RefreshToken == "" {
+	if err := json.Unmarshal(redeem.Body.Bytes(), &recovered); err != nil || recovered.UserID != userID || recovered.AccessToken == "" || recovered.RefreshToken != next {
 		t.Fatalf("recovered pair = %#v, %v", recovered, err)
 	}
-	if response := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": first.Codes[0], "client_type": "ios"}, ""); response.Code != http.StatusUnauthorized {
-		t.Fatalf("replayed code = %d", response.Code)
+	retry := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": first.Codes[0], "client_type": "ios", "next_refresh_token": next}, "")
+	var retried database.AuthTokenPair
+	if retry.Code != http.StatusCreated || json.Unmarshal(retry.Body.Bytes(), &retried) != nil ||
+		retried.SessionID != recovered.SessionID || retried.RefreshToken != next || retried.AccessToken == recovered.AccessToken {
+		t.Fatalf("exact recovery retry = %d %#v: %s", retry.Code, retried, retry.Body.String())
+	}
+	wrong, err := database.RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": first.Codes[0], "client_type": "ios", "next_refresh_token": wrong}, ""); response.Code != http.StatusUnauthorized || strings.Contains(response.Body.String(), "access_token") || strings.Contains(response.Body.String(), "refresh_token") {
+		t.Fatalf("wrong recovery successor = %d: %s", response.Code, response.Body.String())
 	}
 	if count, err := db.RemainingRecoveryCodes(ctx, userID); err != nil || count != 9 {
 		t.Fatalf("remaining after redeem = %d, %v", count, err)
@@ -86,10 +105,10 @@ func TestRecoveryCodesIssueRotateAndRedeemHTTP(t *testing.T) {
 	if rotated.Code != http.StatusCreated {
 		t.Fatalf("rotate response = %d: %s", rotated.Code, rotated.Body.String())
 	}
-	if response := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": first.Codes[1], "client_type": "ios"}, ""); response.Code != http.StatusUnauthorized {
+	if response := postPasskeyJSON(t, engine, redeemPath, map[string]any{"code": first.Codes[1], "client_type": "ios", "next_refresh_token": wrong}, ""); response.Code != http.StatusUnauthorized {
 		t.Fatalf("invalidated old code = %d", response.Code)
 	}
-	if response := postPasskeyJSON(t, Setup(RouterConfig{DB: db, JWTSecret: "test-only"}), redeemPath, map[string]any{"code": first.Codes[1], "client_type": "ios"}, ""); response.Code != http.StatusNotFound {
+	if response := postPasskeyJSON(t, Setup(RouterConfig{DB: db, JWTSecret: "test-only"}), redeemPath, map[string]any{"code": first.Codes[1], "client_type": "ios", "next_refresh_token": wrong}, ""); response.Code != http.StatusNotFound {
 		t.Fatalf("disabled recovery route = %d", response.Code)
 	}
 }
