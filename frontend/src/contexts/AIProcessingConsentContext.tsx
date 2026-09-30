@@ -8,36 +8,14 @@ import {
 } from 'react';
 import { BrainCircuit, ExternalLink, ShieldCheck } from 'lucide-react';
 import { AIProcessingConsentContext } from './aiProcessingConsentValue';
-
-const CONSENT_KEY_PREFIX = 'mta_ai_processing_consent:v1:';
-
-function storageKey(ownerID: string): string {
-  return `${CONSENT_KEY_PREFIX}${encodeURIComponent(ownerID)}`;
-}
-
-function readConsent(ownerID: string): boolean {
-  try {
-    return localStorage.getItem(storageKey(ownerID)) === 'granted';
-  } catch {
-    return false;
-  }
-}
-
-function writeConsent(ownerID: string, granted: boolean): void {
-  try {
-    if (granted) localStorage.setItem(storageKey(ownerID), 'granted');
-    else localStorage.removeItem(storageKey(ownerID));
-  } catch {
-    // A blocked storage API means permission lasts only for this page session.
-  }
-}
+import { readAIConsent, writeAIConsent } from '../lib/aiConsentStorage';
 
 export function AIProcessingConsentProvider({ ownerID, children }: { ownerID: string | null; children: ReactNode }) {
   return <AIProcessingConsentSession key={ownerID ?? 'no-owner'} ownerID={ownerID}>{children}</AIProcessingConsentSession>;
 }
 
 function AIProcessingConsentSession({ ownerID, children }: { ownerID: string | null; children: ReactNode }) {
-  const [hasConsent, setHasConsent] = useState(() => ownerID ? readConsent(ownerID) : false);
+  const [hasConsent, setHasConsent] = useState(() => ownerID ? readAIConsent(ownerID) : false);
   const [isOpen, setIsOpen] = useState(false);
   const pendingResolvers = useRef<Array<(granted: boolean) => void>>([]);
 
@@ -68,7 +46,7 @@ function AIProcessingConsentSession({ ownerID, children }: { ownerID: string | n
       setIsOpen(false);
       return;
     }
-    writeConsent(ownerID, true);
+    writeAIConsent(ownerID, true);
     setHasConsent(true);
     setIsOpen(false);
     settlePending(true);
@@ -80,7 +58,7 @@ function AIProcessingConsentSession({ ownerID, children }: { ownerID: string | n
   }, [settlePending]);
 
   const revokeConsent = useCallback(() => {
-    if (ownerID) writeConsent(ownerID, false);
+    if (ownerID) writeAIConsent(ownerID, false);
     setHasConsent(false);
   }, [ownerID]);
 

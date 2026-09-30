@@ -13,6 +13,8 @@ import { AuthContext } from './authContextValue';
 interface AuthProviderProps {
   children: ReactNode;
   isClerkEnabled: boolean;
+  accountAuthEnabled: boolean;
+  isFirstPartySession: boolean;
   isAuthenticated: boolean;
   isLoading: boolean;
   canUseWorkspace: boolean;
@@ -28,6 +30,8 @@ interface AuthProviderProps {
 export function AuthProvider({
   children,
   isClerkEnabled,
+  accountAuthEnabled,
+  isFirstPartySession,
   isAuthenticated,
   isLoading,
   canUseWorkspace,
@@ -36,7 +40,7 @@ export function AuthProvider({
   signOut = async () => undefined,
 }: AuthProviderProps) {
   return (
-    <AuthContext.Provider value={{ isClerkEnabled, isAuthenticated, isLoading, canUseWorkspace, user, refreshUser, signOut }}>
+    <AuthContext.Provider value={{ isClerkEnabled, accountAuthEnabled, isFirstPartySession, isAuthenticated, isLoading, canUseWorkspace, user, refreshUser, signOut }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,74 +1,81 @@
-# Passkey API contract
+# Passkey authentication contract
 
-This is the server ceremony contract for the staged first-party authentication
-rollout. `FIRST_PARTY_AUTH_ENABLED=false` keeps the routes unavailable. The
-production relying-party ID is `media.shimizu-technology.com`, with web origin
-`https://media.shimizu-technology.com`. Changing that ID strands registered
-credentials. iOS uses the same domain through its Associated Domains entitlement.
-An Android origin needs separately verified production signing metadata before
-Android passkeys can be enabled.
+Passkeys are the primary durable sign-in method for Media Tools. Routes remain
+unavailable while `FIRST_PARTY_AUTH_ENABLED=false`. The relying-party ID is
+`media.shimizu-technology.com` and the web origin is
+`https://media.shimizu-technology.com`. Changing the RP ID strands existing
+credentials. iOS uses the same domain through Associated Domains. Android must
+not be enabled until its production signing identity and Digital Asset Links
+association are verified.
 
 ## Enroll an existing account
 
-1. Sign in through Clerk or a first-party device session. Call
-   `POST /api/v1/auth/passkeys/register/begin` with its Bearer token and an
-   empty JSON object. A legacy JWT or API key cannot enroll a passkey.
-2. The response is `{"ceremony_id":"<uuid>","options":{...}}`. Pass `options`
-   to the platform's WebAuthn registration API. Its binary fields are unpadded
-   base64url strings and must be decoded to bytes for browser or native APIs.
-3. Call `POST /api/v1/auth/passkeys/register/finish` with the **same** Bearer
-   session and `{"ceremony_id":"<uuid>","credential":{...}}`. The credential
-   is the platform's registration response in WebAuthn JSON form. Encode its
-   binary fields as unpadded base64url, including `rawId`, `clientDataJSON`,
-   and `attestationObject`. Include `id` and `type: "public-key"`.
-4. A successful response is HTTP 201 with `credential_id` in unpadded base64url.
+An enrollment requires a first-party device session or a verified Clerk bridge
+session. Legacy JWTs and API keys cannot enroll passkeys.
 
-The challenge expires after five minutes. It belongs to that account and
-session. A finish attempt consumes it, including an invalid attempt; begin a
-new ceremony before retrying. The authenticator must create a discoverable
-credential and verify the user.
+1. Read `GET /api/v1/auth/passkeys` and save the current `count`. The web app
+   authenticates with its access cookie; native clients send a Bearer token.
+2. Call `POST /api/v1/auth/passkeys/register/begin` and pass the returned inner
+   `options` object to the platform WebAuthn registration API.
+3. Call `POST /api/v1/auth/passkeys/register/finish` with the same session and
+   `{"ceremony_id":"<uuid>","credential":{...}}`.
+4. After an ambiguous network failure, read the count again. An increase is the
+   durable receipt that registration committed and prevents a duplicate prompt.
 
-## Sign in
+The challenge expires after five minutes and belongs to the exact account and
+session. Every finish attempt consumes it, including an invalid attempt. Binary
+WebAuthn fields use unpadded base64url. Browsers should use
+`PublicKeyCredential.parseCreationOptionsFromJSON()` and `credential.toJSON()`
+when available; the checked fallback performs only the required binary-field
+conversions.
 
-1. Call `POST /api/v1/auth/passkeys/login/begin` with `{}`. No prior
-   authentication is required. Its response has the same `ceremony_id` and
-   `options` envelope. Invoke a discoverable credential assertion with the
-   returned options.
-2. Call `POST /api/v1/auth/passkeys/login/finish` with:
+## Native sign-in
 
-   ```json
-   {
-     "ceremony_id": "<uuid>",
-     "credential": {"id": "<base64url>", "rawId": "<base64url>", "type": "public-key", "response": {}},
-     "client_type": "ios",
-     "device_name": "Leon's iPhone"
-   }
-   ```
+Native clients use the public `/api/v1/auth/passkeys/login/begin` and `/finish`
+routes. Before finish, generate and persist a canonical `mta_rt_` successor in
+secure storage with the ceremony ID and credential JSON. The finish body is:
 
-   The assertion `response` must contain base64url `clientDataJSON`,
-   `authenticatorData`, and `signature`, plus `userHandle` when supplied by
-   the platform. `client_type` is `web`, `ios`, or `android`; `device_name` is
-   optional and at most 80 characters. The server verifies challenge, RP ID,
-   origin, user verification, account ownership, and signature.
-3. HTTP 201 returns the existing first-party token pair and session metadata.
-   Store the refresh credential in the platform's secure storage and use the
-   existing `/auth/session/refresh` flow. Sign-out revokes that device session;
-   the passkey itself remains enrolled.
+```json
+{
+  "ceremony_id": "<uuid>",
+  "credential": {"id": "<base64url>", "rawId": "<base64url>", "type": "public-key", "response": {}},
+  "client_type": "ios",
+  "device_name": "Leon's iPhone",
+  "next_refresh_token": "mta_rt_<saved-random-value>"
+}
+```
 
-Browser clients can use `PublicKeyCredential.toJSON()` where available. Native
-clients construct the same credential JSON from the platform response's raw
-byte properties; they must not send standard padded base64 or UTF-8 text in
-place of bytes. All ceremony and credential responses use `Cache-Control:
-no-store`.
+Raw token responses accept `ios` and `android`; `client_type:web` is rejected.
+HTTP 201 returns the token pair. If the response is lost, retry the same ceremony
+and exact saved successor without opening another platform prompt. The server
+recovers the same session and mints only a fresh short-lived access token. A
+wrong successor, expired recovery window, revoked session, or different account
+does not reveal the issuance.
 
-## Rollout dependencies
+## Browser sign-in
 
-- Registration currently accepts Clerk Bearer sessions and first-party Bearer
-  device sessions. The staged browser cookie work must add a session-bound
-  registration path with origin and CSRF checks before the web app enrolls
-  passkeys through cookies. Do not put refresh credentials in JavaScript storage.
-- This server slice does not turn on first-party auth, migrate existing clients,
-  establish account recovery, or provide new-user onboarding. Those flows need
-  completion before Clerk can be removed.
-- No Android passkey origin is allowed until the production signing certificate
-  and Digital Asset Links association are verified.
+The web app never calls a raw token-returning finish route. It uses:
+
+1. `POST /api/v1/auth/web/session/passkeys/login/begin` with the exact allowed
+   `Origin`. The response installs a host-only HttpOnly pending successor and a
+   readable CSRF cookie, then returns the ceremony and options.
+2. The browser journals only `ceremony_id`, gets the assertion, and calls
+   `POST /api/v1/auth/web/session/passkeys/login/finish` with the CSRF header.
+3. Finish writes access and refresh credentials only to host-only HttpOnly,
+   `SameSite=Strict` cookies. The JSON body contains user and expiry metadata,
+   never a bearer token.
+4. If the response is lost or the tab reloads, the browser retries the journaled
+   ceremony without another assertion. The pending HttpOnly successor recovers
+   the same server session. The journal is cleared only after status confirms
+   the installed session.
+
+Passkey enrollment in Settings uses the same cookie-authenticated registration
+routes with exact-Origin CSRF checks. Clerk remains an optional migration bridge
+for an existing account; browser passkey restore and sign-in work without Clerk
+configuration or a Clerk session.
+
+## Remaining rollout dependency
+
+Recovery codes and invite-only onboarding must be verified before Clerk is
+removed. No Android passkey origin is allowed until production app association
+is verified. All ceremony and credential responses use `Cache-Control: no-store`.

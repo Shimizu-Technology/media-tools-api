@@ -190,8 +190,8 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("CLERK_AUDIENCE, CLERK_AUTHORIZED_PARTY, or single CORS_ORIGIN must be set in production when Clerk auth is enabled")
 		}
 	}
-	if cfg.WebCookieAuthEnabled && (!cfg.FirstPartyAuthEnabled || cfg.ClerkJWKSURL == "") {
-		return nil, fmt.Errorf("WEB_COOKIE_AUTH_ENABLED requires FIRST_PARTY_AUTH_ENABLED and CLERK_JWKS_URL")
+	if cfg.WebCookieAuthEnabled && !cfg.FirstPartyAuthEnabled {
+		return nil, fmt.Errorf("WEB_COOKIE_AUTH_ENABLED requires FIRST_PARTY_AUTH_ENABLED")
 	}
 
 	// Validate required configuration

@@ -20,7 +20,7 @@ import { CapturePageHeader } from '../components/CapturePageHeader'
 export function HomePage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const { isClerkEnabled, isAuthenticated, isLoading: isAuthLoading } = useAuthContext()
+  const { isClerkEnabled, accountAuthEnabled, isAuthenticated, isLoading: isAuthLoading } = useAuthContext()
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('mta_api_key') || '')
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -110,7 +110,7 @@ export function HomePage() {
       )}
 
       {/* Auth / API Key Setup */}
-      {!transcript && isClerkEnabled && !isAuthLoading && !isAuthenticated && (
+      {!transcript && accountAuthEnabled && !isAuthLoading && !isAuthenticated && (
         <div
           className="max-w-md mx-auto mb-8 p-6 rounded-2xl border text-center"
           style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}
@@ -127,7 +127,7 @@ export function HomePage() {
           <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>
             Your videos, recordings, PDFs, chats, and collections stay tied to your account.
           </p>
-          <SignInButton mode="modal">
+          {isClerkEnabled && <SignInButton mode="modal">
             <button
               className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90"
               style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
@@ -135,15 +135,15 @@ export function HomePage() {
               <LogIn className="w-4 h-4" />
               Sign in
             </button>
-          </SignInButton>
+          </SignInButton>}
         </div>
       )}
 
-      {!transcript && isClerkEnabled && isAuthLoading && (
+      {!transcript && accountAuthEnabled && isAuthLoading && (
         <div className="max-w-2xl mx-auto h-16 rounded-2xl animate-pulse" style={{ backgroundColor: 'var(--color-surface-elevated)' }} />
       )}
 
-      {!transcript && !isClerkEnabled && !apiKey && (
+      {!transcript && !accountAuthEnabled && !apiKey && (
         <div className="mb-8">
           <ApiKeySetup onKeySet={setApiKey} hasKey={!!apiKey} />
         </div>

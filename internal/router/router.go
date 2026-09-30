@@ -109,7 +109,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			panic("invalid passkey relying-party configuration: " + err.Error())
 		}
 		h.Passkeys = passkeys
-		web := handlers.NewWebSessionHandler(cfg.DB, cfg.WebCookieSecure, cfg.AllowedOrigins)
+		web := handlers.NewWebSessionHandler(cfg.DB, h, cfg.WebCookieSecure, cfg.AllowedOrigins)
 		// A still-valid Clerk identity is the bridge to the same existing user.
 		// Never exchange an API key or a legacy JWT for a device session.
 		if jwksCache != nil {
@@ -129,10 +129,15 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		passkeyLogin.POST("/finish", h.FinishPasskeyLogin)
 		r.POST("/api/v1/auth/recovery/redeem", rateLimiter.RateLimitUnauthenticated("recovery", 20), h.RedeemRecoveryCode)
 		if cfg.WebCookieAuthEnabled {
+			r.POST("/api/v1/auth/web/session/bootstrap/prepare", web.PrepareBootstrap)
 			r.GET("/api/v1/auth/web/session/status", web.Status)
 			r.POST("/api/v1/auth/web/session/prepare", web.Prepare)
 			r.POST("/api/v1/auth/web/session/refresh", web.Refresh)
 			r.POST("/api/v1/auth/web/session/logout", web.Logout)
+			webPasskeyLogin := r.Group("/api/v1/auth/web/session/passkeys/login")
+			webPasskeyLogin.Use(rateLimiter.RateLimitUnauthenticated("web-passkey", 300))
+			webPasskeyLogin.POST("/begin", web.BeginPasskeyLogin)
+			webPasskeyLogin.POST("/finish", web.FinishPasskeyLogin)
 		}
 	}
 

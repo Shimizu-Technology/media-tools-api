@@ -15,7 +15,7 @@ import (
 
 func TestWebSessionCredentialsAreHostOnlyHttpOnlyAndSameSite(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := NewWebSessionHandler(nil, true, nil)
+	h := NewWebSessionHandler(nil, nil, true, nil)
 	response := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(response)
 	h.setPair(c, &database.AuthTokenPair{
@@ -46,7 +46,7 @@ func TestWebSessionCredentialsAreHostOnlyHttpOnlyAndSameSite(t *testing.T) {
 
 func TestWebSessionMutationsRejectInvalidCSRF(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := NewWebSessionHandler(nil, true, []string{"https://media.example.com"})
+	h := NewWebSessionHandler(nil, nil, true, []string{"https://media.example.com"})
 	for _, handler := range []struct {
 		name string
 		call func(*gin.Context)
@@ -54,6 +54,8 @@ func TestWebSessionMutationsRejectInvalidCSRF(t *testing.T) {
 		{"prepare", h.Prepare},
 		{"refresh", h.Refresh},
 		{"logout", h.Logout},
+		{"bootstrap", h.Bootstrap},
+		{"passkey-finish", h.FinishPasskeyLogin},
 	} {
 		t.Run(handler.name, func(t *testing.T) {
 			response := httptest.NewRecorder()
@@ -70,9 +72,57 @@ func TestWebSessionMutationsRejectInvalidCSRF(t *testing.T) {
 	}
 }
 
+func TestPrepareWebBootstrapSetsOnlyHostCookies(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewWebSessionHandler(nil, nil, true, []string{"https://media.example.com"})
+	response := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(response)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/web/session/bootstrap/prepare", nil)
+	c.Request.Header.Set("Origin", "https://media.example.com")
+	h.PrepareBootstrap(c)
+	c.Writer.WriteHeaderNow()
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("prepare bootstrap = %d: %s", response.Code, response.Body.String())
+	}
+	cookies := response.Result().Cookies()
+	var pending, csrf *http.Cookie
+	for _, cookie := range cookies {
+		if cookie.Domain != "" || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode {
+			t.Errorf("unsafe bootstrap cookie: %+v", cookie)
+		}
+		if cookie.Name == middleware.WebPendingCookie {
+			pending = cookie
+		}
+		if cookie.Name == middleware.WebCSRFCookie {
+			csrf = cookie
+		}
+	}
+	if pending == nil || !pending.HttpOnly || !database.ValidFirstPartyRefreshToken(pending.Value) {
+		t.Fatalf("missing safe pending successor: %+v", pending)
+	}
+	if csrf == nil || csrf.HttpOnly || !strings.HasPrefix(csrf.Value, "mta_csrf_") {
+		t.Fatalf("missing readable CSRF cookie: %+v", csrf)
+	}
+}
+
+func TestSignedOutWebAuthBeginsRejectWrongOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewWebSessionHandler(nil, nil, true, []string{"https://media.example.com"})
+	for _, call := range []func(*gin.Context){h.PrepareBootstrap, h.BeginPasskeyLogin} {
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/web/session/start", nil)
+		c.Request.Header.Set("Origin", "https://attacker.example.com")
+		call(c)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("wrong origin status = %d", response.Code)
+		}
+	}
+}
+
 func TestWebSessionRefreshRequiresPreparation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := NewWebSessionHandler(nil, true, []string{"https://media.example.com"})
+	h := NewWebSessionHandler(nil, nil, true, []string{"https://media.example.com"})
 	response := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(response)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/web/session/refresh", nil)
@@ -88,7 +138,7 @@ func TestWebSessionRefreshRequiresPreparation(t *testing.T) {
 
 func TestWebSessionClearPendingCookie(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := NewWebSessionHandler(nil, true, nil)
+	h := NewWebSessionHandler(nil, nil, true, nil)
 	response := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(response)
 	h.clearPending(c)
@@ -107,7 +157,7 @@ func TestWebSessionClearPendingCookie(t *testing.T) {
 
 func TestWebSessionLogoutClearsAllCookies(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := NewWebSessionHandler(nil, true, []string{"https://media.example.com"})
+	h := NewWebSessionHandler(nil, nil, true, []string{"https://media.example.com"})
 	response := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(response)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/web/session/logout", nil)

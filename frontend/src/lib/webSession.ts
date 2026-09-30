@@ -12,7 +12,21 @@ export function setWebSessionActive(value: boolean): void {
 const base = '/api/v1/auth/web/session';
 export type WebSessionRenewal = 'renewed' | 'invalid' | 'retry';
 let renewal: Promise<WebSessionRenewal> | null = null;
-type WebSessionStatus = { clerk_id?: string | null };
+export type WebSessionStatus = { authenticated: true; user_id: string; clerk_id?: string | null };
+
+export function webSessionConflictsWithClerk(status: WebSessionStatus, clerkUserID: string | null): boolean {
+  return Boolean(clerkUserID && status.clerk_id !== clerkUserID);
+}
+
+export async function reconcileWebSessionWithClerk(
+  status: WebSessionStatus | null,
+  clerkUserID: string | null,
+  revoke: () => Promise<void> = logoutWebSession,
+): Promise<WebSessionStatus | null> {
+  if (!status || !webSessionConflictsWithClerk(status, clerkUserID)) return status;
+  await revoke();
+  return null;
+}
 
 function csrfToken(): string {
   const value = document.cookie.split('; ').find((part) => part.startsWith('mta_web_csrf='));
@@ -24,13 +38,43 @@ export function webCSRFHeaders(): Record<string, string> {
   return token ? { 'X-CSRF-Token': token } : {};
 }
 
-export async function bootstrapWebSession(clerkToken: string): Promise<boolean> {
-  const res = await fetch(`${base}/bootstrap`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${clerkToken}` },
-    credentials: 'same-origin',
-  });
-  return res.ok;
+export async function bootstrapWebSession(clerkToken: string, expectedClerkID: string): Promise<boolean> {
+  try {
+    const prepared = await fetch(`${base}/bootstrap/prepare`, { method: 'POST', credentials: 'same-origin' });
+    if (!prepared.ok) return false;
+    const commit = () => fetch(`${base}/bootstrap`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${clerkToken}`, ...webCSRFHeaders() },
+      credentials: 'same-origin',
+    });
+    let response: Response;
+    try { response = await commit(); } catch { response = await commit(); }
+    // The successor cookie makes an identical retry safe: the server recovers
+    // the first session and only replaces its short-lived access credential.
+    if (!response.ok && response.status >= 500) response = await commit();
+    if (response.ok) {
+      const result = await response.json().catch(() => null) as WebSessionStatus | null;
+      if (result?.clerk_id === expectedClerkID) return true;
+      await logoutWebSession().catch(() => undefined);
+      return false;
+    }
+    return await statusMatchesClerk(expectedClerkID);
+  } catch {
+    return await statusMatchesClerk(expectedClerkID);
+  }
+}
+
+async function statusMatchesClerk(expectedClerkID: string): Promise<boolean> {
+  try {
+    const status = await fetch(`${base}/status`, { credentials: 'same-origin' });
+    if (!status.ok) return false;
+    const restored = (await status.json()) as WebSessionStatus;
+    if (restored.clerk_id === expectedClerkID) return true;
+    // A response-loss probe must never leave another account's cookie active
+    // beside the currently verified Clerk subject.
+    await logoutWebSession().catch(() => undefined);
+    return false;
+  } catch { return false; }
 }
 
 export async function renewWebSession(): Promise<WebSessionRenewal> {
@@ -70,20 +114,16 @@ function classifyRenewalFailure(response: Response): WebSessionRenewal {
   return 'invalid';
 }
 
-export async function restoreWebSession(): Promise<string | null> {
+export async function restoreWebSession(): Promise<WebSessionStatus | null> {
   try {
     const status = await fetch(`${base}/status`, { credentials: 'same-origin' });
-    if (status.ok) return restoredClerkID(await status.json() as WebSessionStatus);
+    if (status.ok) return await status.json() as WebSessionStatus;
     if (await renewWebSession() !== 'renewed') return null;
     const renewed = await fetch(`${base}/status`, { credentials: 'same-origin' });
-    return renewed.ok ? restoredClerkID(await renewed.json() as WebSessionStatus) : null;
+    return renewed.ok ? await renewed.json() as WebSessionStatus : null;
   } catch {
     return null;
   }
-}
-
-function restoredClerkID(status: WebSessionStatus): string {
-  return typeof status.clerk_id === 'string' ? status.clerk_id : '';
 }
 
 export async function logoutWebSession(): Promise<void> {

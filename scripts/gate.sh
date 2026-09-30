@@ -23,6 +23,7 @@ echo "Running frontend checks"
   cd frontend
   npm ci
   npm run lint
+  npm run test
   npm run build
   npm run audit:prod
 )

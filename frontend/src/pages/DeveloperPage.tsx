@@ -6,7 +6,7 @@ import { createUserAPIKey, getErrorMessage, listAPIKeys, revokeAPIKey, type APIK
 import { useAuthContext } from '../contexts/useAuthContext';
 
 export function DeveloperPage() {
-  const { isClerkEnabled } = useAuthContext();
+  const { accountAuthEnabled } = useAuthContext();
   const [apiKeys, setApiKeys] = useState<APIKey[]>([]);
   const [name, setName] = useState('media-tools-app');
   const [createdKey, setCreatedKey] = useState('');
@@ -46,12 +46,12 @@ export function DeveloperPage() {
   }, []);
 
   useEffect(() => {
-    if (isClerkEnabled || localKeyConfigured) {
+    if (accountAuthEnabled || localKeyConfigured) {
       void loadKeys();
     } else {
       setIsLoading(false);
     }
-  }, [isClerkEnabled, localKeyConfigured, loadKeys]);
+  }, [accountAuthEnabled, localKeyConfigured, loadKeys]);
 
   const handleCreate = async () => {
     const trimmedName = name.trim();
@@ -130,13 +130,13 @@ export function DeveloperPage() {
         </div>
       </section>
 
-      {!isClerkEnabled && !localKeyConfigured && (
+      {!accountAuthEnabled && !localKeyConfigured && (
         <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
           <ApiKeySetup onKeySet={() => setLocalKeyConfigured(true)} hasKey={false} />
         </section>
       )}
 
-      {isClerkEnabled && (
+      {accountAuthEnabled && (
         <section className="rounded-[2rem] border p-6 sm:p-8" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
           <div className="flex items-start gap-4">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>

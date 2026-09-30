@@ -57,6 +57,35 @@ func postPasskeyJSON(t *testing.T, engine *gin.Engine, path string, body any, be
 	return response
 }
 
+func postWebPasskeyJSON(t *testing.T, engine *gin.Engine, path string, body any, cookies []*http.Cookie, csrf string) *httptest.ResponseRecorder {
+	t.Helper()
+	data, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", testPasskeyOrigin)
+	if csrf != "" {
+		req.Header.Set(middleware.WebCSRFHeader, csrf)
+	}
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, req)
+	return response
+}
+
+func cookieByName(cookies []*http.Cookie, name string) *http.Cookie {
+	for _, cookie := range cookies {
+		if cookie.Name == name && cookie.MaxAge >= 0 {
+			return cookie
+		}
+	}
+	return nil
+}
+
 func getPasskeyJSON(t *testing.T, engine *gin.Engine, path, bearer string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -134,10 +163,17 @@ func createVirtualPasskeyRegistration(t *testing.T, challenge string) (map[strin
 }
 
 func createVirtualPasskeyAssertion(t *testing.T, challenge, origin string, key *ecdsa.PrivateKey, credentialID, userHandle []byte) map[string]any {
+	return createVirtualPasskeyAssertionWithCounter(t, challenge, origin, key, credentialID, userHandle, 1)
+}
+
+func createVirtualPasskeyAssertionWithCounter(t *testing.T, challenge, origin string, key *ecdsa.PrivateKey, credentialID, userHandle []byte, counter uint32) map[string]any {
 	t.Helper()
 	rpHash := sha256.Sum256([]byte(testPasskeyRPID))
 	authData := append([]byte{}, rpHash[:]...)
-	authData = append(authData, 0x05, 0, 0, 0, 1) // present + verified; counter 1
+	authData = append(authData, 0x05) // present + verified
+	counterBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(counterBytes, counter)
+	authData = append(authData, counterBytes...)
 	clientData, err := json.Marshal(map[string]any{"type": "webauthn.get", "challenge": challenge, "origin": origin})
 	if err != nil {
 		t.Fatal(err)
@@ -277,6 +313,55 @@ func TestPasskeyRegistrationAndLoginHTTP(t *testing.T) {
 	wrongRetry := postPasskeyJSON(t, engine, loginFinish, map[string]any{"ceremony_id": login.CeremonyID, "client_type": "ios", "next_refresh_token": wrongSuccessor}, "")
 	if wrongRetry.Code != http.StatusUnauthorized || bytes.Contains(wrongRetry.Body.Bytes(), []byte("access_token")) || bytes.Contains(wrongRetry.Body.Bytes(), []byte("refresh_token")) {
 		t.Fatalf("wrong passkey successor = %d: %s", wrongRetry.Code, wrongRetry.Body.String())
+	}
+
+	webEngine := Setup(RouterConfig{
+		DB: db, FirstPartyAuthEnabled: true, WebCookieAuthEnabled: true, WebCookieSecure: true,
+		JWTSecret: "test-only", AllowedOrigins: []string{testPasskeyOrigin},
+	})
+	webLoginBegin := "/api/v1/auth/web/session/passkeys/login/begin"
+	webLoginFinish := "/api/v1/auth/web/session/passkeys/login/finish"
+	beginResponse := postWebPasskeyJSON(t, webEngine, webLoginBegin, map[string]any{}, nil, "")
+	// Use the second ceremony so its response cookies and challenge come from
+	// the same request, matching a browser's credential jar.
+	webBegin := readPasskeyOptions(t, beginResponse)
+	pendingCookie := cookieByName(beginResponse.Result().Cookies(), middleware.WebPendingCookie)
+	csrfCookie := cookieByName(beginResponse.Result().Cookies(), middleware.WebCSRFCookie)
+	if pendingCookie == nil || !pendingCookie.HttpOnly || csrfCookie == nil || csrfCookie.HttpOnly {
+		t.Fatalf("web begin cookies = %#v", beginResponse.Result().Cookies())
+	}
+	webAssertion := createVirtualPasskeyAssertionWithCounter(t, webBegin.Options.Challenge, testPasskeyOrigin, privateKey, credentialID, handle[:], 2)
+	webFinishBody := map[string]any{"ceremony_id": webBegin.CeremonyID, "credential": webAssertion}
+	beginCookies := []*http.Cookie{pendingCookie, csrfCookie}
+	webFinish := postWebPasskeyJSON(t, webEngine, webLoginFinish, webFinishBody, beginCookies, csrfCookie.Value)
+	if webFinish.Code != http.StatusCreated || bytes.Contains(webFinish.Body.Bytes(), []byte("access_token")) || bytes.Contains(webFinish.Body.Bytes(), []byte("refresh_token")) {
+		t.Fatalf("web passkey finish = %d: %s", webFinish.Code, webFinish.Body.String())
+	}
+	accessCookie := cookieByName(webFinish.Result().Cookies(), middleware.WebAccessCookie)
+	refreshCookie := cookieByName(webFinish.Result().Cookies(), middleware.WebRefreshCookie)
+	if accessCookie == nil || !accessCookie.HttpOnly || refreshCookie == nil || !refreshCookie.HttpOnly || refreshCookie.Value != pendingCookie.Value {
+		t.Fatalf("web finish cookies = %#v", webFinish.Result().Cookies())
+	}
+	statusRequest := httptest.NewRequest(http.MethodGet, "/api/v1/auth/web/session/status", nil)
+	statusRequest.AddCookie(accessCookie)
+	statusResponse := httptest.NewRecorder()
+	webEngine.ServeHTTP(statusResponse, statusRequest)
+	if statusResponse.Code != http.StatusOK || !bytes.Contains(statusResponse.Body.Bytes(), []byte(userID)) {
+		t.Fatalf("web passkey status = %d: %s", statusResponse.Code, statusResponse.Body.String())
+	}
+	// Simulate a reload that kept the pre-finish cookie jar and only journaled
+	// the ceremony ID. The retry recovers the same session without an assertion.
+	webRecovery := postWebPasskeyJSON(t, webEngine, webLoginFinish, map[string]any{"ceremony_id": webBegin.CeremonyID}, beginCookies, csrfCookie.Value)
+	if webRecovery.Code != http.StatusCreated || bytes.Contains(webRecovery.Body.Bytes(), []byte("access_token")) || bytes.Contains(webRecovery.Body.Bytes(), []byte("refresh_token")) {
+		t.Fatalf("web passkey response recovery = %d: %s", webRecovery.Code, webRecovery.Body.String())
+	}
+	recoveredRefresh := cookieByName(webRecovery.Result().Cookies(), middleware.WebRefreshCookie)
+	if recoveredRefresh == nil || recoveredRefresh.Value != pendingCookie.Value {
+		t.Fatalf("web recovery changed successor: %#v", webRecovery.Result().Cookies())
+	}
+	var browserSessions int
+	if err := db.GetContext(ctx, &browserSessions, `SELECT COUNT(*) FROM auth_sessions WHERE user_id = $1 AND client_type = 'web' AND device_name = 'Browser'`, userID); err != nil || browserSessions != 1 {
+		t.Fatalf("web passkey session count = %d, %v", browserSessions, err)
 	}
 
 	wrongOrigin := readPasskeyOptions(t, postPasskeyJSON(t, engine, loginBegin, map[string]any{}, ""))

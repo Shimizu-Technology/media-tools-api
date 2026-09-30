@@ -1226,6 +1226,69 @@ paths:
         "201": {description: First-party access token, refresh token, and session metadata; store securely}
         "401": {description: Challenge or passkey verification failed}
         "429": {description: Too many attempts}
+  /auth/web/session/bootstrap/prepare:
+    post:
+      tags: [Authentication]
+      summary: Prepare a response-loss-safe Clerk-to-cookie session exchange
+      security: []
+      description: |
+        Requires an exact allowed Origin. Installs a host-only HttpOnly refresh
+        successor and a readable CSRF cookie before the authenticated commit.
+        No credential is returned to JavaScript.
+      responses:
+        "204": {description: Successor and CSRF cookies installed}
+        "403": {description: Origin is not allowed}
+  /auth/web/session/bootstrap:
+    post:
+      tags: [Authentication]
+      summary: Exchange a verified Clerk identity for browser cookies
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: X-CSRF-Token, in: header, required: true, schema: {type: string}}
+      description: |
+        Requires the prepared HttpOnly successor and matching CSRF cookie. An
+        exact retry recovers the same recent session. The response contains
+        user and expiry metadata only; access and refresh credentials are set
+        as host-only HttpOnly cookies.
+      responses:
+        "201": {description: Browser session cookies installed}
+        "400": {description: Browser sign-in was not prepared}
+        "403": {description: Origin or CSRF validation failed}
+  /auth/web/session/passkeys/login/begin:
+    post:
+      tags: [Authentication]
+      summary: Begin passkey sign-in for an HttpOnly browser session
+      security: []
+      description: |
+        Requires an exact allowed Origin. Revokes any replaced browser session,
+        installs a pending HttpOnly successor and CSRF cookie, and returns a
+        discoverable WebAuthn ceremony. No bearer token is exposed.
+      responses:
+        "200": {description: Ceremony and PublicKeyCredentialRequestOptions}
+        "403": {description: Origin is not allowed}
+        "429": {description: Too many attempts}
+  /auth/web/session/passkeys/login/finish:
+    post:
+      tags: [Authentication]
+      summary: Finish passkey sign-in and install HttpOnly browser cookies
+      security: []
+      parameters:
+        - {name: X-CSRF-Token, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ceremony_id]
+              properties:
+                ceremony_id: {type: string, format: uuid}
+                credential: {type: object, description: Required on the first finish; omitted for exact response-loss recovery}
+      responses:
+        "201": {description: Browser cookies installed; body contains metadata only}
+        "401": {description: Challenge or passkey verification failed}
+        "403": {description: Origin or CSRF validation failed}
+        "429": {description: Too many attempts}
   /account:
     delete:
       tags: [Authentication]
