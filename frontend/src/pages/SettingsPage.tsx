@@ -6,6 +6,7 @@ import { useTheme } from '../hooks/useTheme';
 import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
 import { isWebSessionActive } from '../lib/webSession';
 import { getPasskeyStatus, passkeysSupported, PasskeyError, registerPasskey } from '../lib/passkeys';
+import { RecoveryCodeSecuritySection } from '../components/RecoveryCodeSecuritySection';
 
 const DeleteAccountSection = lazy(() => import('../components/DeleteAccountSection').then((module) => ({ default: module.DeleteAccountSection })));
 
@@ -35,6 +36,7 @@ export function SettingsPage() {
       </section>
 
       {isFirstPartySession && <PasskeySecuritySection />}
+      {isFirstPartySession && <RecoveryCodeSecuritySection />}
 
       <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

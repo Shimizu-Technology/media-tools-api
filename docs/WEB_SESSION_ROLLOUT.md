@@ -18,6 +18,11 @@ recovery codes.
   before committing server state. Exact retries recover the same session after
   a lost response rather than creating an orphan. The passkey ceremony ID is
   the only passkey login state journaled in web storage.
+- Recovery sign-in uses a separate pending successor. The submitted recovery
+  code stays only in component memory. Redemption, creation of the replacement
+  session, and revocation of any prior browser session commit atomically. A
+  stale successor is cleared and prepared once before retrying the same unused
+  code; ordinary wrong codes leave the prepared successor usable.
 - When Clerk is active, its subject must exactly match the restored cookie
   user's linked Clerk ID. A different or unlinked cookie account is revoked
   before the Clerk account can bootstrap. A revocation failure exposes neither
@@ -47,7 +52,8 @@ recovery codes.
 6. Build the frontend with `VITE_WEB_COOKIE_AUTH_ENABLED=true` and no
    `VITE_API_URL`. `VITE_CLERK_PUBLISHABLE_KEY` may remain during migration, but
    also test a build without it: passkey restore, passkey sign-in, Settings
-   enrollment, account deletion, and sign-out must still work.
+   enrollment, recovery-code sign-in and rotation, account deletion, and
+   sign-out must still work.
 7. On the existing owner account, confirm the same stable user and media appear,
    enroll a passkey, save recovery codes, sign out, sign in with the passkey,
    reload after access expiry, simulate a lost finish response, and verify the

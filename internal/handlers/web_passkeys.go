@@ -65,14 +65,19 @@ func (h *WebSessionHandler) BeginPasskeyLogin(c *gin.Context) {
 	h.setCookie(c, middleware.WebAccessCookie, "", -1, true, "/api/v1")
 	h.setCookie(c, middleware.WebRefreshCookie, "", -1, true, "/api/v1/auth/web/session")
 	h.setCookie(c, middleware.WebPendingCookie, successor, 24*60*60, true, "/api/v1/auth/web/session")
+	h.clearRecoveryPending(c)
 	h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{"ceremony_id": ceremonyID, "options": assertion.Response})
 }
 
 func (h *WebSessionHandler) revokeStoredSessions(c *gin.Context) error {
-	seen := make(map[string]struct{}, 2)
-	for _, name := range []string{middleware.WebRefreshCookie, middleware.WebPendingCookie} {
+	return h.revokeCookieSessions(c, middleware.WebRefreshCookie, middleware.WebPendingCookie, middleware.WebRecoveryPendingCookie)
+}
+
+func (h *WebSessionHandler) revokeCookieSessions(c *gin.Context, names ...string) error {
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
 		credential, err := c.Cookie(name)
 		if err != nil || credential == "" {
 			continue

@@ -50,8 +50,15 @@ token in one transaction. If the response is lost, retry the same code and the
 same saved successor within 24 hours to recover the same session and receive a
 fresh access token. A different, expired, revoked, or already rotated successor
 gets the same generic rejection and does not create a session. Raw token
-responses accept only `ios` and `android`; browser recovery must use a later
-cookie-specific wrapper.
+responses accept only `ios` and `android`. Browsers use the cookie-only
+`/api/v1/auth/web/session/recovery/prepare` and `/finish` flow. Prepare stores a
+dedicated successor in a host-only HttpOnly cookie and issues a readable CSRF
+secret. Finish accepts the recovery code, sets access and refresh credentials
+only as HttpOnly cookies, and returns account metadata. It atomically revokes
+any session previously stored in that browser only when redemption commits.
+An empty exact retry recovers a committed lost response. If a prepared
+successor becomes unavailable, the server clears only that pending cookie; the
+client prepares once and retries the still-unused in-memory code.
 
 After recovery, enroll another passkey, rotate and confirm a fresh code set,
 and offer revocation of any lost device from the sessions list.
@@ -67,7 +74,9 @@ and offer revocation of any lost device from the sessions list.
 3. Verify account switching, sign-out revocation, session expiry, replacement
    of an unconfirmed set, repeated confirmation, and recovery after an app
    restart before expanding access.
-4. Add the cookie-only browser recovery flow before offering recovery on web.
+4. On web, verify wrong-code retry, stale-successor replacement, access renewal,
+   explicit saved confirmation, phone layout, and that no token or submitted
+   recovery code enters browser storage.
 
 Only SHA-256 hashes of 160-bit random codes are stored. Codes are bound to the
 existing `users.id`, so recovery never links accounts by email address. The

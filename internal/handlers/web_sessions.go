@@ -48,7 +48,12 @@ func (h *WebSessionHandler) clear(c *gin.Context) {
 	h.setCookie(c, middleware.WebAccessCookie, "", -1, true, "/api/v1")
 	h.setCookie(c, middleware.WebRefreshCookie, "", -1, true, "/api/v1/auth/web/session")
 	h.clearPending(c)
+	h.clearRecoveryPending(c)
 	h.setCookie(c, middleware.WebCSRFCookie, "", -1, false, "/")
+}
+
+func (h *WebSessionHandler) clearRecoveryPending(c *gin.Context) {
+	h.setCookie(c, middleware.WebRecoveryPendingCookie, "", -1, true, "/api/v1/auth/web/session/recovery")
 }
 
 func (h *WebSessionHandler) clearPending(c *gin.Context) {
@@ -132,17 +137,21 @@ func (h *WebSessionHandler) PrepareBootstrap(c *gin.Context) {
 		return
 	}
 	if pending, err := c.Cookie(middleware.WebPendingCookie); err == nil && database.ValidFirstPartyRefreshToken(pending) {
+		if err := h.revokeCookieSessions(c, middleware.WebRecoveryPendingCookie); err != nil {
+			log.Printf("revoke interrupted recovery before Clerk bootstrap retry: %v", err)
+			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not prepare this browser for sign-in; retry", Code: http.StatusServiceUnavailable})
+			return
+		}
+		h.clearRecoveryPending(c)
 		h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
 		c.Header("Cache-Control", "no-store")
 		c.Status(http.StatusNoContent)
 		return
 	}
-	if refresh, err := c.Cookie(middleware.WebRefreshCookie); err == nil && refresh != "" {
-		if err := h.db.RevokeFirstPartySessionByRefreshToken(c.Request.Context(), refresh); err != nil && !errors.Is(err, database.ErrSessionInvalid) {
-			log.Printf("revoke browser session before Clerk bootstrap: %v", err)
-			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not prepare this browser for sign-in; retry", Code: http.StatusServiceUnavailable})
-			return
-		}
+	if err := h.revokeCookieSessions(c, middleware.WebRefreshCookie, middleware.WebRecoveryPendingCookie); err != nil {
+		log.Printf("revoke browser session before Clerk bootstrap: %v", err)
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not prepare this browser for sign-in; retry", Code: http.StatusServiceUnavailable})
+		return
 	}
 	successor, err := webRandomToken("mta_rt_")
 	if err != nil {
@@ -152,6 +161,7 @@ func (h *WebSessionHandler) PrepareBootstrap(c *gin.Context) {
 	h.setCookie(c, middleware.WebAccessCookie, "", -1, true, "/api/v1")
 	h.setCookie(c, middleware.WebRefreshCookie, "", -1, true, "/api/v1/auth/web/session")
 	h.setCookie(c, middleware.WebPendingCookie, successor, 24*60*60, true, "/api/v1/auth/web/session")
+	h.clearRecoveryPending(c)
 	h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
 	c.Header("Cache-Control", "no-store")
 	c.Status(http.StatusNoContent)
@@ -240,14 +250,12 @@ func (h *WebSessionHandler) Logout(c *gin.Context) {
 			return
 		}
 	}
-	// A refresh response may have been lost after rotation. In that case the
-	// pending successor is the active credential and must be revoked too.
-	if pending, err := c.Cookie(middleware.WebPendingCookie); err == nil {
-		if err := h.db.RevokeFirstPartySessionByRefreshToken(c.Request.Context(), pending); err != nil && !errors.Is(err, database.ErrSessionInvalid) {
-			log.Printf("revoke pending browser session on logout: %v", err)
-			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not sign out; please try again", Code: http.StatusServiceUnavailable})
-			return
-		}
+	// Lost refresh or recovery responses can leave the active credential in a
+	// pending HttpOnly cookie. Revoke every exact credential before clearing.
+	if err := h.revokeCookieSessions(c, middleware.WebPendingCookie, middleware.WebRecoveryPendingCookie); err != nil {
+		log.Printf("revoke pending browser session on logout: %v", err)
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not sign out; please try again", Code: http.StatusServiceUnavailable})
+		return
 	}
 	h.clear(c)
 	c.Header("Cache-Control", "no-store")
