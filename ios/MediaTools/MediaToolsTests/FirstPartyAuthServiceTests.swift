@@ -135,6 +135,33 @@ final class FirstPartyAuthServiceTests: XCTestCase {
         XCTAssertEqual(object["next_refresh_token"] as? String, "mta_rt_successor")
     }
 
+    func testClerkDetachmentStatusDecodesServerShape() throws {
+        let data = Data("""
+        {"linked":true,"ready":true,"passkey_count":2,"unused_recovery_codes":7}
+        """.utf8)
+        let status = try APIClient.makeDecoder().decode(ClerkDetachmentStatus.self, from: data)
+        XCTAssertTrue(status.linked)
+        XCTAssertTrue(status.ready)
+        XCTAssertEqual(status.passkeyCount, 2)
+        XCTAssertEqual(status.unusedRecoveryCodes, 7)
+    }
+
+    @MainActor
+    func testClerkDetachmentRecoversLostPostResponseFromStatus() async throws {
+        let api = LostClerkDetachmentResponseAPI()
+        let service = FirstPartyAuthService(api: api)
+
+        let status = try await service.detachClerk(expectedOwnerID: "server-user")
+        let paths = await api.recordedPaths()
+
+        XCTAssertFalse(status.linked)
+        XCTAssertTrue(status.ready)
+        XCTAssertEqual(paths, [
+            "POST /auth/clerk-detachment server-user",
+            "GET /auth/clerk-detachment server-user",
+        ])
+    }
+
 
     @MainActor
     func testPasskeyLoginJournalExtractsExactSuccessorFromFinishBody() throws {
@@ -678,6 +705,37 @@ private actor RecordingFirstPartyAuthAPI: FirstPartyAuthAPI {
 
     func postJSON<T>(_ path: String, bodyData: Data, authenticated: Bool) async throws -> T where T: Decodable {
         paths.append("POST_JSON \(path)")
+        throw APIError.invalidResponse
+    }
+}
+
+private actor LostClerkDetachmentResponseAPI: FirstPartyAuthAPI {
+    private var paths: [String] = []
+
+    func recordedPaths() -> [String] { paths }
+
+    func get<T>(_ path: String, expectedOwnerID: String?) async throws -> T where T: Decodable {
+        paths.append("GET \(path) \(expectedOwnerID ?? "nil")")
+        let status = ClerkDetachmentStatus(
+            linked: false,
+            ready: true,
+            passkeyCount: 1,
+            unusedRecoveryCodes: 8
+        )
+        guard let typed = status as? T else { throw APIError.invalidResponse }
+        return typed
+    }
+
+    func post<T, B>(_ path: String, body: B, expectedOwnerID: String?) async throws -> T where T: Decodable, B: Encodable {
+        paths.append("POST \(path) \(expectedOwnerID ?? "nil")")
+        throw URLError(.timedOut)
+    }
+
+    func postPublic<T, B>(_ path: String, body: B) async throws -> T where T: Decodable, B: Encodable {
+        throw APIError.invalidResponse
+    }
+
+    func postJSON<T>(_ path: String, bodyData: Data, authenticated: Bool) async throws -> T where T: Decodable {
         throw APIError.invalidResponse
     }
 }

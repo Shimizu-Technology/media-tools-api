@@ -78,12 +78,31 @@ struct ContentView: View {
                 }
             }
         }
-        .task(id: "\(clerk.user?.id ?? "signed-out")|\(deviceSession.needsSignIn)|\(deviceSession.sessionRevision)|\(migrationRetry)") {
+        .task(id: "\(clerk.isLoaded)|\(clerk.user?.id ?? "signed-out")|\(deviceSession.needsSignIn)|\(deviceSession.sessionRevision)|\(migrationRetry)") {
             let clerkID = forceSignedOutForUITesting ? nil : clerk.user?.id
             if Configuration.firstPartyIOSAuthEnabled && !forceSignedOutForUITesting {
                 isResolvingAccount = true
                 migrationFailed = false
-                let ownerID = await deviceSession.activate(clerkID: clerkID)
+                let retryDeletionOwnerID = deviceSession.storedUserID
+                    ?? deviceSession.fallbackOwnerID(for: clerk.user?.id)
+                if let pending = try? await AccountDeletionRecoveryService.shared.confirmedPendingDeletion(
+                    retryOwnerID: retryDeletionOwnerID
+                ) {
+                    try? await AccountDeletionRecoveryService.shared.finishLocalDeletion(
+                        pending,
+                        uploadCoordinator: uploadCoordinator,
+                        consent: aiProcessingConsent,
+                        deviceSession: deviceSession,
+                        tokenSync: tokenSync,
+                        clerk: clerk
+                    )
+                }
+                guard !Task.isCancelled else { return }
+                let clerkID = clerk.user?.id
+                let ownerID = await deviceSession.activate(
+                    clerkID: clerkID,
+                    clerkIsLoaded: clerk.isLoaded
+                )
                 guard !Task.isCancelled else { return }
                 if let migration = deviceSession.verifiedMigration {
                     do {
@@ -124,7 +143,10 @@ struct ContentView: View {
                 if forceSignedOutForUITesting {
                     ownerID = nil
                 } else {
-                    ownerID = await deviceSession.activate(clerkID: clerkID)
+                    ownerID = await deviceSession.activate(
+                        clerkID: clerkID,
+                        clerkIsLoaded: clerk.isLoaded
+                    )
                 }
                 await uploadCoordinator.setActiveOwnerID(ownerID)
                 guard !Task.isCancelled else { return }

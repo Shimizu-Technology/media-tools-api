@@ -92,6 +92,9 @@ struct MediaToolsApp: App {
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-security-status-error") {
             SignInSecurityStatusFailurePreviewHost()
                 .preferredColorScheme(.dark)
+        } else if ProcessInfo.processInfo.arguments.contains("-ui-test-clerk-migration") {
+            ClerkMigrationPreviewHost()
+                .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-quick-capture") {
             NavigationStack {
                 RecordView()

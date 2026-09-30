@@ -208,6 +208,60 @@ protocol DeviceSessionTransport {
 
 extension URLSession: DeviceSessionTransport {}
 
+@MainActor
+protocol DeletedClerkIdentityStoring: AnyObject {
+    func contains(_ clerkID: String) -> Bool
+    func insert(_ clerkID: String)
+    func remove(_ clerkID: String)
+    func removeAll(except clerkID: String?)
+}
+
+@MainActor
+final class DeletedClerkIdentityStore: DeletedClerkIdentityStoring {
+    static let shared = DeletedClerkIdentityStore()
+
+    private let defaults: UserDefaults
+    private let key = "locallyDeletedClerkIdentityIDs.v1"
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func contains(_ clerkID: String) -> Bool { values.contains(clerkID) }
+
+    func insert(_ clerkID: String) {
+        var updated = values
+        updated.insert(clerkID)
+        defaults.set(updated.sorted(), forKey: key)
+    }
+
+    func remove(_ clerkID: String) {
+        var updated = values
+        updated.remove(clerkID)
+        persist(updated)
+    }
+
+    func removeAll(except clerkID: String?) {
+        guard let clerkID else {
+            defaults.removeObject(forKey: key)
+            return
+        }
+        persist(values.contains(clerkID) ? [clerkID] : [])
+    }
+
+    private var values: Set<String> {
+        Set(defaults.stringArray(forKey: key) ?? [])
+    }
+
+    private func persist(_ values: Set<String>) {
+        if values.isEmpty {
+            defaults.removeObject(forKey: key)
+        } else {
+            defaults.set(values.sorted(), forKey: key)
+        }
+    }
+}
+
 private struct KeychainFailure: LocalizedError {
     let status: OSStatus
     var errorDescription: String? { "Could not secure this device session (\(status))." }
@@ -222,6 +276,7 @@ final class DeviceSessionController {
     private let transport: any DeviceSessionTransport
     private let baseURL: URL
     private let enabled: Bool
+    private let deletedClerkIdentities: any DeletedClerkIdentityStoring
     private var stored: StoredDeviceSession?
     private var refreshTask: Task<DeviceSessionPair, Error>?
     private var generation = 0
@@ -233,10 +288,12 @@ final class DeviceSessionController {
     init(transport: any DeviceSessionTransport = URLSession.shared,
          baseURL: URL = URL(string: Configuration.apiBaseURL + "/api/v1")!,
          store: (any DeviceSessionStoring)? = nil,
+         deletedClerkIdentities: (any DeletedClerkIdentityStoring)? = nil,
          enabled: Bool = Configuration.firstPartyIOSAuthEnabled) {
         self.transport = transport
         self.baseURL = baseURL
         self.store = store ?? DeviceSessionKeychainStore()
+        self.deletedClerkIdentities = deletedClerkIdentities ?? DeletedClerkIdentityStore.shared
         self.enabled = enabled
         // Keep the verified local-owner mapping available during an iOS flag
         // rollback without ever using its first-party bearer credential.
@@ -252,15 +309,25 @@ final class DeviceSessionController {
         return (clerkID, stored.pair.userID)
     }
 
+    var storedUserID: String? { stored?.pair.userID }
+
     var hasNativeFirstPartySession: Bool {
         guard let stored, stored.pendingRevocation != true else { return false }
-        return stored.source == .passkey || stored.source == .recoveryCode
+        return stored.source != .clerk
     }
 
     func clerkIDForFallbackOwner(_ ownerID: String) -> String? {
         if let clerkID = Clerk.shared.user?.id,
            store.localOwnerID(for: clerkID) == ownerID { return clerkID }
         return store.clerkID(forLocalOwnerID: ownerID)
+    }
+
+    func markLocallyDeletedClerkIdentity(_ clerkID: String) {
+        deletedClerkIdentities.insert(clerkID)
+    }
+
+    func clearLocallyDeletedClerkIdentity(_ clerkID: String) {
+        deletedClerkIdentities.remove(clerkID)
     }
 
     func fallbackOwnerID(for clerkID: String?) -> String? {
@@ -271,6 +338,7 @@ final class DeviceSessionController {
     /// A 401 may retry through Clerk only when that Clerk account resolves to
     /// the same stable owner as the rejected device credential or request.
     func canFallbackToClerk(clerkID: String, expectedOwnerID: String?) -> Bool {
+        guard !deletedClerkIdentities.contains(clerkID) else { return false }
         let requestOwnerID = expectedOwnerID ?? activeUserID ?? stored?.pair.userID
         guard let requestOwnerID else { return true }
         let clerkOwnerID = fallbackOwnerID(for: clerkID)
@@ -280,6 +348,34 @@ final class DeviceSessionController {
     /// Called before exposing an account workspace. A different Clerk account
     /// suspends the old device credential rather than borrowing its local data.
     func activate(clerkID: String?) async -> String? {
+        await activate(clerkID: clerkID, clerkIsLoaded: Clerk.shared.isLoaded)
+    }
+
+    func activate(clerkID: String?, clerkIsLoaded: Bool) async -> String? {
+        // A nil user is authoritative only after Clerk has finished hydrating
+        // its local cache. Preserve sign-out and deletion intent during the
+        // earlier nil state so a cached identity cannot reappear on relaunch.
+        if clerkID != nil || clerkIsLoaded {
+            deletedClerkIdentities.removeAll(except: clerkID)
+        }
+
+        let hasUsableNativeSession: Bool
+        if let stored {
+            hasUsableNativeSession = enabled
+                && stored.pendingRevocation != true
+                && stored.source != .clerk
+        } else {
+            hasUsableNativeSession = false
+        }
+
+        // A retired Clerk subject may remain cached during an outage. It can
+        // never bootstrap or reopen a fallback workspace. A durable native
+        // session remains authoritative after Clerk detachment, even while
+        // clearing that stale provider cache is temporarily unavailable.
+        if !hasUsableNativeSession,
+           await rejectRetiredClerkIdentity(clerkID) {
+            return nil
+        }
         guard enabled else {
             activeUserID = fallbackOwnerID(for: clerkID)
             return activeUserID
@@ -301,6 +397,7 @@ final class DeviceSessionController {
                 return nil
             }
             clear()
+            if await rejectRetiredClerkIdentity(clerkID) { return nil }
         }
         if let clerkID, let stored, stored.source == .clerk, !stored.belongs(to: clerkID) {
             do {
@@ -315,9 +412,19 @@ final class DeviceSessionController {
             do {
                 try await bootstrap(verifiedClerkID: clerkID)
             } catch {
-                // The server rollout may be disabled. Clerk remains the safe
-                // fallback for this already signed-in account.
-                activeUserID = fallbackOwnerID(for: clerkID)
+                // A missing route or temporary outage can use the verified
+                // migration fallback. Explicit identity rejection must fail
+                // closed because it also means the Clerk link was detached.
+                if Self.allowsClerkWorkspaceFallback(after: error),
+                   let verifiedOwnerID = store.localOwnerID(for: clerkID) {
+                    activeUserID = verifiedOwnerID
+                } else {
+                    activeUserID = nil
+                    if Self.shouldClearRejectedClerkSession(after: error),
+                       Clerk.shared.user?.id == clerkID {
+                        try? await Clerk.shared.auth.signOut()
+                    }
+                }
                 return activeUserID
             }
         }
@@ -334,6 +441,7 @@ final class DeviceSessionController {
                 if needsSignIn {
                     if let clerkID {
                         clear()
+                        if await rejectRetiredClerkIdentity(clerkID) { return nil }
                         try? await bootstrap(verifiedClerkID: clerkID)
                     } else {
                         activeUserID = nil
@@ -342,8 +450,30 @@ final class DeviceSessionController {
                 }
             }
         }
+        if self.stored == nil,
+           await rejectRetiredClerkIdentity(clerkID) {
+            return nil
+        }
         activeUserID = self.stored?.pair.userID ?? fallbackOwnerID(for: clerkID)
         return activeUserID
+    }
+
+    /// Prevent a locally retired provider identity from authenticating through
+    /// any Clerk bootstrap or fallback path. A successful local Clerk sign-out
+    /// releases ordinary sign-out blocks; deletion and detachment remain safe
+    /// because the server has already removed that provider link.
+    private func rejectRetiredClerkIdentity(_ clerkID: String?) async -> Bool {
+        guard let clerkID, deletedClerkIdentities.contains(clerkID) else {
+            return false
+        }
+        activeUserID = nil
+        if Clerk.shared.user?.id == clerkID {
+            try? await Clerk.shared.auth.signOut()
+            if Clerk.shared.user?.id != clerkID {
+                deletedClerkIdentities.remove(clerkID)
+            }
+        }
+        return true
     }
 
     /// Returns nil only when the staged client has no first-party credential.
@@ -445,6 +575,50 @@ final class DeviceSessionController {
         store.removeLocalOwnerID(for: clerkID)
     }
 
+    func removeLocalOwnerMappings(ownerID: String) {
+        while let clerkID = store.clerkID(forLocalOwnerID: ownerID) {
+            store.removeLocalOwnerID(for: clerkID)
+        }
+    }
+
+    /// Preserve the device session while removing every local dependency on
+    /// Clerk after the server confirms its one-way provider detachment.
+    func markClerkDetached(expectedOwnerID: String) throws {
+        guard var value = stored, value.pendingRevocation != true else {
+            throw APIError.authenticationRequired(message: "Sign in again before disconnecting the old sign-in.")
+        }
+        guard value.pair.userID == expectedOwnerID else {
+            throw APIError.authenticationRequired(message: "The signed-in account changed. Switch back and try again.")
+        }
+        var changed = false
+        while let clerkID = store.clerkID(forLocalOwnerID: expectedOwnerID) {
+            store.removeLocalOwnerID(for: clerkID)
+            changed = true
+        }
+        if let clerkID = value.verifiedClerkID {
+            store.removeLocalOwnerID(for: clerkID)
+            changed = true
+        }
+        if value.source == .clerk {
+            // Detachment is permitted only after a passkey exists. Reuse the
+            // already-shipped passkey source value so a rollback build can
+            // still decode and use this durable device session.
+            value.source = .passkey
+            changed = true
+        }
+        if value.verifiedClerkID != nil {
+            value.verifiedClerkID = nil
+            changed = true
+        }
+        guard changed else { return }
+        if stored != value {
+            try store.save(value)
+            stored = value
+        }
+        generation += 1
+        sessionRevision += 1
+    }
+
     func revokeAndClear() async throws {
         guard let sessionID = stored?.pair.sessionID else {
             clear()
@@ -522,8 +696,26 @@ final class DeviceSessionController {
 
     private func bootstrap(verifiedClerkID: String) async throws {
         guard let session = Clerk.shared.session,
-              session.user?.id == verifiedClerkID,
-              let clerkToken = try await session.getToken() else {
+              session.user?.id == verifiedClerkID else {
+            throw APIError.authenticationRequired(message: "Sign in to connect this device.")
+        }
+        let clerkToken: String?
+        do {
+            clerkToken = try await session.getToken()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            if Clerk.shared.session?.id == session.id,
+               Clerk.shared.session?.user?.id == verifiedClerkID {
+                throw APIError.authenticationTemporarilyUnavailable(
+                    message: "The sign-in service is temporarily unavailable. Media Tools will retry."
+                )
+            }
+            throw APIError.authenticationRequired(message: "Sign in to connect this device.")
+        }
+        guard let clerkToken, !clerkToken.isEmpty,
+              Clerk.shared.session?.id == session.id,
+              Clerk.shared.session?.user?.id == verifiedClerkID else {
             throw APIError.authenticationRequired(message: "Sign in to connect this device.")
         }
         try await bootstrap(
@@ -571,7 +763,7 @@ final class DeviceSessionController {
         let pair: DeviceSessionPair
         do {
             pair = try await sendPairRequest(request)
-        } catch APIError.httpError(let status, _, _) where [400, 401, 404].contains(status) {
+        } catch APIError.httpError(let status, _, _) where status == 400 || status == 401 {
             store.deletePendingBootstrap()
             throw APIError.authenticationRequired(message: "Sign in to connect this device.")
         }
@@ -584,6 +776,30 @@ final class DeviceSessionController {
         }
         try saveSession(pair: pair, source: .clerk, verifiedClerkID: verifiedClerkID)
         store.deletePendingBootstrap()
+    }
+
+    static func allowsClerkWorkspaceFallback(after error: Error) -> Bool {
+        switch error {
+        case APIError.httpError(let status, _, _):
+            return status == 404 || status >= 500
+        case APIError.authenticationTemporarilyUnavailable:
+            return true
+        case is URLError:
+            return true
+        default:
+            return false
+        }
+    }
+
+    static func shouldClearRejectedClerkSession(after error: Error) -> Bool {
+        switch error {
+        case APIError.authenticationRequired:
+            return true
+        case APIError.httpError(let status, _, _):
+            return status == 400 || status == 401 || status == 403 || status == 409
+        default:
+            return false
+        }
     }
 
     private func refresh() async throws -> DeviceSessionPair {

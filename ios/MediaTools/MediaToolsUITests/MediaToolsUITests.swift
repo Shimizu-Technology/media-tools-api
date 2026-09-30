@@ -133,6 +133,24 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Could not check sign-in security."].exists)
     }
 
+    func testClerkMigrationRequiresExplicitConfirmationAndKeepsWorkspaceCopy() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-test-clerk-migration"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Finish moving off Clerk"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Passkey"].exists)
+        XCTAssertTrue(app.staticTexts["Recovery codes"].exists)
+
+        app.buttons["clerk-migration.disconnect"].tap()
+        XCTAssertTrue(app.buttons["Disconnect Clerk"].waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.staticTexts["Your recordings and current device session stay in Media Tools. Future sign-ins will use your passkey or a recovery code."].exists
+        )
+        app.buttons["Disconnect Clerk"].tap()
+        XCTAssertTrue(app.staticTexts["Media Tools sign-in active"].waitForExistence(timeout: 5))
+    }
+
     func testRecoveryCodeOneTimeDisplayRequiresExplicitSavedConfirmation() {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-test-recovery-codes-sheet"]

@@ -85,6 +85,15 @@ link; the stable user, media, API keys, and device sessions remain. The detach
 request is idempotent and refuses a linked account that lacks either recovery
 factor.
 
+On iOS, Settings reads this readiness from the current first-party device
+session and shows the disconnect action only when both factors are ready. The
+client changes its stored session from Clerk-bootstrapped to first-party only
+after the server reports `linked:false`; it keeps the same session, stable user
+ID, recordings, and upload ownership. If the detach response or local Keychain
+write is interrupted, the next status read repairs the local state before the
+old Clerk session is cleared. Never revoke the first-party device session as
+part of provider detachment.
+
 Keep `LEGACY_AUTH_ENABLED=false` in production. That setting controls both the
 old email/password routes and acceptance of old HS256 bearer tokens, including
 when no Clerk JWKS is configured. After detachment, account deletion uses the

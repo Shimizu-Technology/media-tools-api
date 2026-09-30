@@ -19,11 +19,16 @@ var ErrAccountDeletionAlreadyRequested = errors.New("account deletion already re
 const accountDeletionColumns = `
 	id, app_user_id, clerk_user_id, COALESCE(clerk_user_hash, '') AS clerk_user_hash, object_keys, status,
 	cleanup_after, clerk_deleted_at, completed_at, last_error,
-	requested_at, updated_at
+	requested_at, updated_at, COALESCE(deletion_receipt_hash, '') AS deletion_receipt_hash
 `
 
 func clerkUserHash(clerkUserID string) string {
 	sum := sha256.Sum256([]byte(clerkUserID))
+	return hex.EncodeToString(sum[:])
+}
+
+func deletionReceiptHash(token string) string {
+	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -53,6 +58,16 @@ func (db *DB) RequestAccountDeletion(
 	clerkUserID *string,
 	cleanupAfter time.Time,
 ) (*models.AccountDeletionRequest, error) {
+	return db.RequestAccountDeletionWithReceipt(ctx, userID, clerkUserID, cleanupAfter, "")
+}
+
+func (db *DB) RequestAccountDeletionWithReceipt(
+	ctx context.Context,
+	userID string,
+	clerkUserID *string,
+	cleanupAfter time.Time,
+	receiptToken string,
+) (*models.AccountDeletionRequest, error) {
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin account deletion: %w", err)
@@ -74,6 +89,10 @@ func (db *DB) RequestAccountDeletion(
 	var providerID any
 	var providerHash any
 	var identityDeletedAt any
+	var receiptHash any
+	if strings.TrimSpace(receiptToken) != "" {
+		receiptHash = deletionReceiptHash(receiptToken)
+	}
 	if storedClerkID.Valid && storedClerkID.String != "" {
 		if clerkUserID == nil || strings.TrimSpace(*clerkUserID) != storedClerkID.String {
 			return nil, fmt.Errorf("account is not linked to the authenticated Clerk identity")
@@ -119,11 +138,12 @@ func (db *DB) RequestAccountDeletion(
 	request := &models.AccountDeletionRequest{}
 	err = tx.GetContext(ctx, request, `
 		INSERT INTO account_deletion_requests (
-			app_user_id, clerk_user_id, clerk_user_hash, object_keys, cleanup_after, clerk_deleted_at
+			app_user_id, clerk_user_id, clerk_user_hash, object_keys, cleanup_after, clerk_deleted_at,
+			deletion_receipt_hash
 		)
-		VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+		VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
 		RETURNING `+accountDeletionColumns,
-		userID, providerID, providerHash, string(encodedKeys), cleanupAfter, identityDeletedAt,
+		userID, providerID, providerHash, string(encodedKeys), cleanupAfter, identityDeletedAt, receiptHash,
 	)
 	if err != nil {
 		var existing string
@@ -231,6 +251,21 @@ func (db *DB) RequestAccountDeletion(
 		return nil, fmt.Errorf("commit account deletion: %w", err)
 	}
 	return request, nil
+}
+
+func (db *DB) HasAccountDeletionReceipt(ctx context.Context, token string) (bool, error) {
+	if strings.TrimSpace(token) == "" {
+		return false, nil
+	}
+	var exists bool
+	if err := db.GetContext(ctx, &exists, `
+		SELECT EXISTS (
+			SELECT 1 FROM account_deletion_requests
+			WHERE deletion_receipt_hash = $1
+		)`, deletionReceiptHash(token)); err != nil {
+		return false, fmt.Errorf("check account deletion receipt: %w", err)
+	}
+	return exists, nil
 }
 
 func (db *DB) GetAccountDeletionRequest(ctx context.Context, id string) (*models.AccountDeletionRequest, error) {

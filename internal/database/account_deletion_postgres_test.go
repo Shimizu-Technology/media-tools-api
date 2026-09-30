@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -209,7 +210,8 @@ func TestRequestNativeAccountDeletionPurgesOwnedDataAndPreservesOtherUsers(t *te
 		_, _ = db.ExecContext(context.Background(), `DELETE FROM audio_transcriptions WHERE id = $1`, otherAudioID)
 	})
 
-	request, err := db.RequestAccountDeletion(ctx, userID, nil, time.Now().UTC())
+	receiptToken := "mta_del_" + strings.Repeat("a", 43)
+	request, err := db.RequestAccountDeletionWithReceipt(ctx, userID, nil, time.Now().UTC(), receiptToken)
 	if err != nil {
 		t.Fatalf("RequestAccountDeletion(native) error = %v", err)
 	}
@@ -219,6 +221,17 @@ func TestRequestNativeAccountDeletionPurgesOwnedDataAndPreservesOtherUsers(t *te
 	})
 	if request.ClerkUserID != nil || request.ClerkUserHash != "" || request.ClerkDeletedAt == nil {
 		t.Fatalf("native deletion retained provider state: %#v", request)
+	}
+	if request.DeletionReceiptHash == "" || request.DeletionReceiptHash == receiptToken {
+		t.Fatalf("deletion receipt was not stored as a one-way hash: %#v", request)
+	}
+	confirmed, err := db.HasAccountDeletionReceipt(ctx, receiptToken)
+	if err != nil || !confirmed {
+		t.Fatalf("committed deletion receipt = %v, %v", confirmed, err)
+	}
+	unknown, err := db.HasAccountDeletionReceipt(ctx, "mta_del_"+strings.Repeat("b", 43))
+	if err != nil || unknown {
+		t.Fatalf("unknown deletion receipt = %v, %v", unknown, err)
 	}
 
 	for table, id := range map[string]string{
