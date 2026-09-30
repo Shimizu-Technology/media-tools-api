@@ -14,8 +14,9 @@ import (
 )
 
 type bootstrapSessionRequest struct {
-	ClientType string `json:"client_type" binding:"required"`
-	DeviceName string `json:"device_name"`
+	ClientType       string `json:"client_type" binding:"required"`
+	DeviceName       string `json:"device_name"`
+	NextRefreshToken string `json:"next_refresh_token" binding:"required"`
 }
 
 // BootstrapFirstPartySession is reachable only after ClerkAuth has verified a
@@ -29,12 +30,12 @@ func (h *Handler) BootstrapFirstPartySession(c *gin.Context) {
 	var req bootstrapSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.Printf("bootstrap request binding failed: %v", err)
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Client type and device name are required", Code: http.StatusBadRequest})
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Client type and next refresh credential are required", Code: http.StatusBadRequest})
 		return
 	}
 	req.DeviceName = strings.TrimSpace(req.DeviceName)
-	if (req.ClientType != "web" && req.ClientType != "ios" && req.ClientType != "android") || len(req.DeviceName) > 80 {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Unsupported client type or device name is too long", Code: http.StatusBadRequest})
+	if (req.ClientType != "ios" && req.ClientType != "android") || len(req.DeviceName) > 80 || !database.ValidFirstPartyRefreshToken(req.NextRefreshToken) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Unsupported client type, device name, or refresh credential", Code: http.StatusBadRequest})
 		return
 	}
 	if err := h.DB.EnsureAuthIdentity(c.Request.Context(), user.ID, "clerk", *user.ClerkID); err != nil {
@@ -46,7 +47,11 @@ func (h *Handler) BootstrapFirstPartySession(c *gin.Context) {
 		}
 		return
 	}
-	pair, err := h.DB.CreateFirstPartySession(c.Request.Context(), user.ID, req.ClientType, req.DeviceName)
+	pair, err := h.DB.CreateOrRecoverFirstPartySession(c.Request.Context(), user.ID, req.ClientType, req.DeviceName, req.NextRefreshToken)
+	if errors.Is(err, database.ErrInvalidSuccessorToken) || errors.Is(err, database.ErrSessionInvalid) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Could not create device session with this credential", Code: http.StatusBadRequest})
+		return
+	}
 	if err != nil {
 		log.Printf("bootstrap session creation failed for user %s: %v", user.ID, err)
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "session_creation_failed", Message: "Could not create device session", Code: http.StatusServiceUnavailable})
