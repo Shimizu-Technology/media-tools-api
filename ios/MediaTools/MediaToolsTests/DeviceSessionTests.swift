@@ -195,6 +195,34 @@ final class DeviceSessionTests: XCTestCase {
     }
 
     @MainActor
+    func testAccountSwitchSuspendsPreviousCredentialForRevocation() async throws {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",
+            accessExpiresAt: .distantFuture, refreshToken: "mta_rt_valid",
+            inactiveExpiresAt: .distantFuture
+        )
+        let store = MemoryDeviceSessionStore(
+            StoredDeviceSession(pair: pair, verifiedClerkID: "clerk-a",
+                                pendingNextRefreshToken: nil)
+        )
+        let controller = DeviceSessionController(
+            store: store,
+            enabled: true
+        )
+
+        let owner = await controller.activate(clerkID: "clerk-b")
+
+        XCTAssertEqual(owner, "clerk-b")
+        XCTAssertEqual(store.value?.pair, pair)
+        XCTAssertEqual(store.value?.pendingRevocation, true)
+        XCTAssertEqual(controller.clerkIDForFallbackOwner("server-a"), "clerk-a")
+        let token = try await controller.accessToken(
+            expectedOwnerID: "server-a", forceRefresh: false
+        )
+        XCTAssertNil(token)
+    }
+
+    @MainActor
     func testSignOutRetainsCredentialUntilServerConfirmsRevocation() async throws {
         let pair = DeviceSessionPair(
             sessionID: "session-a", userID: "server-a", accessToken: "mta_at_valid",

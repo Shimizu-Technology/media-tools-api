@@ -194,7 +194,13 @@ final class DeviceSessionController {
             clear()
         }
         if let clerkID, let stored, stored.verifiedClerkID != clerkID {
-            clear()
+            do {
+                try suspendForRevocation(stored)
+            } catch {
+                needsSignIn = true
+            }
+            activeUserID = fallbackOwnerID(for: clerkID)
+            return activeUserID
         }
         if stored == nil, let clerkID {
             do {
@@ -306,16 +312,21 @@ final class DeviceSessionController {
         do {
             try await revokeAndClear()
         } catch {
-            guard var value = stored, value.pair.sessionID == sessionID else { throw error }
-            value.pendingRevocation = true
-            try store.save(value)
-            stored = value
-            generation += 1
-            refreshTask?.cancel()
-            refreshTask = nil
-            activeUserID = nil
-            needsSignIn = false
+            guard let value = stored, value.pair.sessionID == sessionID else { throw error }
+            try suspendForRevocation(value)
         }
+    }
+
+    private func suspendForRevocation(_ value: StoredDeviceSession) throws {
+        var suspended = value
+        suspended.pendingRevocation = true
+        try store.save(suspended)
+        stored = suspended
+        generation += 1
+        refreshTask?.cancel()
+        refreshTask = nil
+        activeUserID = nil
+        needsSignIn = false
     }
 
     private func revoke(sessionID: String, forceRefresh: Bool) async throws {
