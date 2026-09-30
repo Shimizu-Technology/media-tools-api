@@ -129,16 +129,28 @@ final class AccountDeletionRecoveryService {
                 receiptToken: pending.receiptToken
             )
             return pending
-        } catch {
-            if (try? await api.accountDeletionReceiptConfirmed(pending.receiptToken)) == true {
-                return pending
+        } catch let requestError {
+            do {
+                if try await api.accountDeletionReceiptConfirmed(pending.receiptToken) {
+                    return pending
+                }
+                // An HTTP response proves the DELETE finished. When its
+                // receipt is also absent, do not replay that rejected request
+                // later without a fresh user confirmation.
+                if Self.receivedHTTPResponse(requestError) {
+                    journal.delete()
+                }
+            } catch {
+                // A failed receipt lookup leaves the outcome unknown. Keep the
+                // exact journal so the same request can be reconciled later.
             }
             throw AccountDeletionRecoveryError.couldNotConfirm
         }
     }
 
-    /// Called before restoring a workspace. A false or unavailable lookup is
-    /// deliberately non-destructive and leaves the journal available to retry.
+    /// Called before restoring a workspace. An initial false or unavailable
+    /// lookup preserves the journal. A same-owner retry clears it only when an
+    /// HTTP rejection plus a second false lookup proves deletion did not commit.
     func confirmedPendingDeletion(retryOwnerID: String? = nil) async throws -> PendingAccountDeletion? {
         guard let pending = try journal.load() else { return nil }
         if try await api.accountDeletionReceiptConfirmed(pending.receiptToken) {
@@ -153,12 +165,25 @@ final class AccountDeletionRecoveryService {
                 receiptToken: pending.receiptToken
             )
             return pending
-        } catch {
-            guard (try? await api.accountDeletionReceiptConfirmed(pending.receiptToken)) == true else {
-                return nil
+        } catch let requestError {
+            do {
+                if try await api.accountDeletionReceiptConfirmed(pending.receiptToken) {
+                    return pending
+                }
+                if Self.receivedHTTPResponse(requestError) {
+                    journal.delete()
+                }
+            } catch {
+                // Keep an indeterminate request journal for a later exact
+                // receipt lookup; never infer deletion from a transport error.
             }
-            return pending
+            return nil
         }
+    }
+
+    private static func receivedHTTPResponse(_ error: Error) -> Bool {
+        if case APIError.httpError = error { return true }
+        return false
     }
 
     /// Local recording cleanup records its own durable retry marker. Once that

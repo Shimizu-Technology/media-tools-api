@@ -15,6 +15,7 @@ private actor MockAccountDeletionAPI: AccountDeletionAPI {
     enum RequestResult: Equatable {
         case success
         case failure
+        case httpFailure
     }
 
     enum ReceiptResult: Equatable {
@@ -34,7 +35,18 @@ private actor MockAccountDeletionAPI: AccountDeletionAPI {
 
     func requestAccountDeletion(ownerID: String, receiptToken: String) async throws {
         requested.append((ownerID, receiptToken))
-        if requestResult == .failure { throw URLError(.timedOut) }
+        switch requestResult {
+        case .success:
+            return
+        case .failure:
+            throw URLError(.timedOut)
+        case .httpFailure:
+            throw APIError.httpError(
+                statusCode: 503,
+                code: "account_deletion_unavailable",
+                message: "Account deletion is unavailable"
+            )
+        }
     }
 
     func accountDeletionReceiptConfirmed(_ receiptToken: String) async throws -> Bool {
@@ -146,6 +158,68 @@ final class AccountDeletionRecoveryServiceTests: XCTestCase {
             }
             XCTAssertEqual(journal.value?.ownerID, "owner-a")
         }
+    }
+
+    @MainActor
+    func testRejectedDeleteWithAbsentReceiptRemovesReplayJournal() async {
+        let journal = MemoryAccountDeletionJournal()
+        let api = MockAccountDeletionAPI(
+            requestResult: .httpFailure,
+            receiptResult: .unconfirmed
+        )
+        let service = AccountDeletionRecoveryService(api: api, journal: journal)
+
+        do {
+            _ = try await service.requestDeletion(ownerID: "owner-a")
+            XCTFail("rejected deletion must not succeed")
+        } catch {
+            XCTAssertEqual(error as? AccountDeletionRecoveryError, .couldNotConfirm)
+        }
+
+        XCTAssertNil(journal.value)
+    }
+
+    @MainActor
+    func testRejectedDeleteWithUnavailableReceiptLookupPreservesJournal() async {
+        let journal = MemoryAccountDeletionJournal()
+        let api = MockAccountDeletionAPI(
+            requestResult: .httpFailure,
+            receiptResult: .unavailable
+        )
+        let service = AccountDeletionRecoveryService(api: api, journal: journal)
+
+        do {
+            _ = try await service.requestDeletion(ownerID: "owner-a")
+            XCTFail("unconfirmed deletion must not succeed")
+        } catch {
+            XCTAssertEqual(error as? AccountDeletionRecoveryError, .couldNotConfirm)
+        }
+
+        XCTAssertEqual(journal.value?.ownerID, "owner-a")
+    }
+
+    @MainActor
+    func testRelaunchRejectedRetryWithAbsentReceiptRemovesReplayJournal() async throws {
+        let pending = PendingAccountDeletion(
+            ownerID: "owner-a",
+            receiptToken: "mta_del_" + String(repeating: "b", count: 43)
+        )
+        let journal = MemoryAccountDeletionJournal()
+        journal.value = pending
+        let service = AccountDeletionRecoveryService(
+            api: MockAccountDeletionAPI(
+                requestResult: .httpFailure,
+                receiptResult: .unconfirmed
+            ),
+            journal: journal
+        )
+
+        let recovered = try await service.confirmedPendingDeletion(
+            retryOwnerID: "owner-a"
+        )
+
+        XCTAssertNil(recovered)
+        XCTAssertNil(journal.value)
     }
 
     @MainActor

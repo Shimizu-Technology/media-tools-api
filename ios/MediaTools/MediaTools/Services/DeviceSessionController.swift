@@ -415,8 +415,9 @@ final class DeviceSessionController {
                 // A missing route or temporary outage can use the verified
                 // migration fallback. Explicit identity rejection must fail
                 // closed because it also means the Clerk link was detached.
-                if Self.allowsClerkWorkspaceFallback(after: error) {
-                    activeUserID = fallbackOwnerID(for: clerkID)
+                if Self.allowsClerkWorkspaceFallback(after: error),
+                   let verifiedOwnerID = store.localOwnerID(for: clerkID) {
+                    activeUserID = verifiedOwnerID
                 } else {
                     activeUserID = nil
                     if Self.shouldClearRejectedClerkSession(after: error),
