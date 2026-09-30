@@ -10,7 +10,8 @@ export function setWebSessionActive(value: boolean): void {
 }
 
 const base = '/api/v1/auth/web/session';
-let renewal: Promise<boolean> | null = null;
+export type WebSessionRenewal = 'renewed' | 'invalid' | 'retry';
+let renewal: Promise<WebSessionRenewal> | null = null;
 type WebSessionStatus = { clerk_id?: string | null };
 
 function csrfToken(): string {
@@ -32,24 +33,48 @@ export async function bootstrapWebSession(clerkToken: string): Promise<boolean> 
   return res.ok;
 }
 
-export async function renewWebSession(): Promise<boolean> {
+export async function renewWebSession(): Promise<WebSessionRenewal> {
   if (renewal) return renewal;
-  renewal = (async () => {
+  renewal = (async (): Promise<WebSessionRenewal> => {
     const headers = webCSRFHeaders();
-    if (!headers['X-CSRF-Token']) return false;
-    const prepare = await fetch(`${base}/prepare`, { method: 'POST', headers, credentials: 'same-origin' });
-    if (!prepare.ok) return false;
-    const refresh = await fetch(`${base}/refresh`, { method: 'POST', headers, credentials: 'same-origin' });
-    return refresh.ok;
-  })().catch(() => false).finally(() => { renewal = null; });
+    if (!headers['X-CSRF-Token']) return 'invalid';
+    const first = await prepareAndRefresh(headers);
+    if (first === 'invalid_pending') {
+      const second = await prepareAndRefresh(headers);
+      return second === 'invalid_pending' ? 'invalid' : second;
+    }
+    return first;
+  })().catch(() => 'retry' as const).finally(() => { renewal = null; });
   return renewal;
+}
+
+type PreparedRefreshResult = WebSessionRenewal | 'invalid_pending';
+
+async function prepareAndRefresh(headers: Record<string, string>): Promise<PreparedRefreshResult> {
+  const prepare = await fetch(`${base}/prepare`, { method: 'POST', headers, credentials: 'same-origin' });
+  if (!prepare.ok) return classifyRenewalFailure(prepare);
+  const refresh = await fetch(`${base}/refresh`, { method: 'POST', headers, credentials: 'same-origin' });
+  if (refresh.ok) return 'renewed';
+  if (await isInvalidPendingRefresh(refresh)) return 'invalid_pending';
+  return classifyRenewalFailure(refresh);
+}
+
+async function isInvalidPendingRefresh(response: Response): Promise<boolean> {
+  if (response.status !== 400) return false;
+  const body = await response.clone().json().catch(() => null) as { error?: string } | null;
+  return body?.error === 'invalid_request';
+}
+
+function classifyRenewalFailure(response: Response): WebSessionRenewal {
+  if (response.status >= 500) return 'retry';
+  return 'invalid';
 }
 
 export async function restoreWebSession(): Promise<string | null> {
   try {
     const status = await fetch(`${base}/status`, { credentials: 'same-origin' });
     if (status.ok) return restoredClerkID(await status.json() as WebSessionStatus);
-    if (!await renewWebSession()) return null;
+    if (await renewWebSession() !== 'renewed') return null;
     const renewed = await fetch(`${base}/status`, { credentials: 'same-origin' });
     return renewed.ok ? restoredClerkID(await renewed.json() as WebSessionStatus) : null;
   } catch {

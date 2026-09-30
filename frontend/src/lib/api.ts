@@ -428,7 +428,9 @@ async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit): Prom
   const response = await fetch(input, init);
   if (response.status !== 401) return response;
   if (isWebSessionActive()) {
-    if (await renewWebSession()) return fetch(input, init);
+    const renewal = await renewWebSession();
+    if (renewal === 'renewed') return fetch(input, init);
+    if (renewal === 'retry') return retryWebSessionResponse();
     setWebSessionActive(false);
   }
 
@@ -443,6 +445,18 @@ async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit): Prom
   if (isMultipart) existingHeaders.delete('Content-Type');
 
   return fetch(input, { ...init, headers: existingHeaders });
+}
+
+
+function retryWebSessionResponse(): Response {
+  return new Response(JSON.stringify({
+    error: 'authentication_unavailable',
+    message: 'Could not renew session; retry',
+    code: 503,
+  }), {
+    status: 503,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 function getAPIKeyHeaders(): Record<string, string> {
