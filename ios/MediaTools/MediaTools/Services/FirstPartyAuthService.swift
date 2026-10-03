@@ -14,10 +14,16 @@ struct PasskeyStatus: Decodable, Equatable {
     let count: Int
 }
 
+struct PasswordStatus: Decodable, Equatable {
+    let configured: Bool
+    let updatedAt: Date?
+}
+
 struct ClerkDetachmentStatus: Decodable, Equatable {
     let linked: Bool
     let ready: Bool
     let passkeyCount: Int
+    let passwordConfigured: Bool
     let unusedRecoveryCodes: Int
 }
 
@@ -261,6 +267,13 @@ protocol RecoveryCodeRotationJournaling: AnyObject {
 }
 
 @MainActor
+protocol PasswordLoginJournaling: AnyObject {
+    func load() throws -> PendingPasswordLogin?
+    func save(_ value: PendingPasswordLogin) throws
+    func delete()
+}
+
+@MainActor
 @Observable
 final class FirstPartyAuthService {
     static let shared = FirstPartyAuthService()
@@ -271,6 +284,7 @@ final class FirstPartyAuthService {
     @ObservationIgnored private let passkeyLoginJournal: any PasskeyLoginFinishJournaling
     @ObservationIgnored private let recoveryRedeemJournal: any RecoveryCodeRedeemJournaling
     @ObservationIgnored private let recoveryRotationJournal: any RecoveryCodeRotationJournaling
+    @ObservationIgnored private let passwordLoginJournal: any PasswordLoginJournaling
     private var authorizationController: ASAuthorizationController?
     private var delegate: PasskeyAuthorizationDelegate?
     private var activePasskeyCeremony: ActivePasskeyCeremony?
@@ -282,12 +296,14 @@ final class FirstPartyAuthService {
          deviceSession: DeviceSessionController? = nil,
          passkeyLoginJournal: (any PasskeyLoginFinishJournaling)? = nil,
          recoveryRedeemJournal: (any RecoveryCodeRedeemJournaling)? = nil,
-         recoveryRotationJournal: (any RecoveryCodeRotationJournaling)? = nil) {
+         recoveryRotationJournal: (any RecoveryCodeRotationJournaling)? = nil,
+         passwordLoginJournal: (any PasswordLoginJournaling)? = nil) {
         self.api = api
         self.deviceSession = deviceSession ?? .shared
         self.passkeyLoginJournal = passkeyLoginJournal ?? PasskeyLoginFinishJournal.shared
         self.recoveryRedeemJournal = recoveryRedeemJournal ?? RecoveryCodeRedeemJournal.shared
         self.recoveryRotationJournal = recoveryRotationJournal ?? RecoveryCodeRotationJournal.shared
+        self.passwordLoginJournal = passwordLoginJournal ?? PasswordLoginJournal.shared
     }
 
     func signInWithPasskey() async throws {
@@ -391,6 +407,61 @@ final class FirstPartyAuthService {
 
     func recoveryStatus() async throws -> RecoveryCodeStatus {
         try await api.get("/auth/recovery", expectedOwnerID: nil)
+    }
+
+    func passwordStatus() async throws -> PasswordStatus {
+        try await api.get("/auth/password", expectedOwnerID: nil)
+    }
+
+    func setPassword(_ password: String) async throws -> PasswordStatus {
+        try await api.post(
+            "/auth/password",
+            body: SetPasswordRequest(password: password),
+            expectedOwnerID: activeRecoveryOwnerID()
+        )
+    }
+
+    func signInWithPassword(email: String, password: String) async throws {
+        try await deviceSession.prepareForNewNativeSession()
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var pending = try passwordLoginJournal.load()
+        if let existing = pending, existing.email != normalizedEmail {
+            passwordLoginJournal.delete()
+            pending = nil
+        }
+        if pending == nil {
+            pending = PendingPasswordLogin(
+                email: normalizedEmail,
+                nextRefreshToken: try DeviceSessionController.randomRefreshToken()
+            )
+            try passwordLoginJournal.save(pending!)
+        }
+        guard let pending else { throw APIError.invalidResponse }
+        do {
+            let response: DeviceSessionPairResponse = try await api.postPublic(
+                "/auth/password/login",
+                body: PasswordLoginRequest(
+                    email: pending.email,
+                    password: password,
+                    clientType: "ios",
+                    deviceName: Self.deviceName(),
+                    nextRefreshToken: pending.nextRefreshToken
+                )
+            )
+            let pair = response.pair
+            guard pair.refreshToken == pending.nextRefreshToken else { throw APIError.invalidResponse }
+            // Build 12 understands .passkey and .recoveryCode only. Reusing
+            // .passkey keeps a downgraded app from discarding this session.
+            try await installFirstPartySession(pair: pair, nextRefreshToken: pending.nextRefreshToken, source: .passkey)
+            passwordLoginJournal.delete()
+        } catch APIError.httpError(let statusCode, let code, _) where statusCode == 400 || statusCode == 401 {
+            if statusCode == 400 { passwordLoginJournal.delete() }
+            throw APIError.authenticationRequired(
+                message: code == "invalid_credentials"
+                    ? "Email or password is incorrect."
+                    : "Could not use that saved sign-in. Try again."
+            )
+        }
     }
 
     func clerkDetachmentStatus(expectedOwnerID: String) async throws -> ClerkDetachmentStatus {
@@ -683,6 +754,23 @@ struct PendingRecoveryCodeRotation: Codable, Equatable {
     let codes: [String]
 }
 
+struct PendingPasswordLogin: Codable, Equatable {
+    let email: String
+    let nextRefreshToken: String
+}
+
+struct PasswordLoginRequest: Encodable, Equatable {
+    let email: String
+    let password: String
+    let clientType: String
+    let deviceName: String
+    let nextRefreshToken: String
+}
+
+struct SetPasswordRequest: Encodable, Equatable {
+    let password: String
+}
+
 struct RecoveryCodeRedeemRequest: Encodable, Equatable {
     let code: String
     let clientType: String
@@ -855,6 +943,44 @@ private struct RecoveryJournalKeychainFailure: LocalizedError {
     let status: OSStatus
     var errorDescription: String? {
         "Media Tools couldn’t secure this sign-in. Restart the app and try again."
+    }
+}
+
+@MainActor
+final class PasswordLoginJournal: PasswordLoginJournaling {
+    static let shared = PasswordLoginJournal()
+    private let service = "com.shimizu-technology.media-tools.password-login"
+    private let account = "password-login-v1"
+
+    func load() throws -> PendingPasswordLogin? {
+        var query = baseQuery
+        query[kSecReturnData as String] = true
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw RecoveryJournalKeychainFailure(status: status)
+        }
+        do { return try JSONDecoder().decode(PendingPasswordLogin.self, from: data) }
+        catch { delete(); return nil }
+    }
+
+    func save(_ value: PendingPasswordLogin) throws {
+        let data = try JSONEncoder().encode(value)
+        let status = SecItemUpdate(baseQuery as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecSuccess { return }
+        guard status == errSecItemNotFound else { throw RecoveryJournalKeychainFailure(status: status) }
+        var attributes = baseQuery
+        attributes[kSecValueData as String] = data
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let addStatus = SecItemAdd(attributes as CFDictionary, nil)
+        guard addStatus == errSecSuccess else { throw RecoveryJournalKeychainFailure(status: addStatus) }
+    }
+
+    func delete() { SecItemDelete(baseQuery as CFDictionary) }
+
+    private var baseQuery: [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
     }
 }
 

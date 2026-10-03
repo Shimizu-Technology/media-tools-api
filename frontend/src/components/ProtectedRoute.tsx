@@ -4,6 +4,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { KeyRound, Loader2, Lock, LogIn } from 'lucide-react';
 import { ApiKeySetup } from './ApiKeySetup';
 import { PasskeySignInButton } from './PasskeySignInButton';
+import { PasswordSignIn } from './PasswordSignIn';
 import { RecoveryCodeSignIn } from './RecoveryCodeSignIn';
 import { useAuthContext } from '../contexts/useAuthContext';
 import { isWebOnboardingRequired, webSessionEnabled } from '../lib/webSession';
@@ -67,7 +68,7 @@ function SignInGate({ returnTo, isClerkEnabled }: { returnTo: string; isClerkEna
         <p className="mx-auto mt-3 max-w-sm text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
           Your transcripts, recordings, PDFs, summaries, chats, and collections stay tied to your account.
         </p>
-        {webSessionEnabled && <div className="mt-6 space-y-3"><PasskeySignInButton className="w-full" /><RecoveryCodeSignIn className="w-full" /></div>}
+        {webSessionEnabled && <div className="mt-6 space-y-3"><PasswordSignIn className="w-full" /><PasskeySignInButton className="w-full" /><RecoveryCodeSignIn className="w-full" /></div>}
         {isClerkEnabled && (
           <div className={webSessionEnabled ? 'mt-4 border-t pt-4' : 'mt-6'} style={{ borderColor: 'var(--color-border)' }}>
             {webSessionEnabled && <p className="mb-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>Migrating from the previous sign-in?</p>}

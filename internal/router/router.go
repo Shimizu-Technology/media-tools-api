@@ -13,6 +13,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/handlers"
 	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
+	accountservice "github.com/Shimizu-Technology/media-tools-api/internal/services/account"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
@@ -24,32 +25,33 @@ import (
 // Avoids a fragile 13-parameter function signature.
 type RouterConfig struct {
 	// Version is the build identifier exposed by health endpoints.
-	Version                     string
-	DB                          *database.DB
-	WorkerPool                  *worker.Pool
-	AudioTranscriber            *audio.Transcriber
-	AudioStorage                *storage.S3
-	Webhooks                    *webhookservice.Service
-	Summarizer                  *summary.Service
-	JWTSecret                   string
-	LegacyAuthEnabled           bool
-	FirstPartyAuthEnabled       bool
-	WebCookieAuthEnabled        bool
-	WebCookieSecure             bool
-	AdminAPIKey                 string
-	OwnerKeyID                  string
-	OwnerKeyPrefix              string
-	ClerkJWKSURL                string
-	ClerkSecretKey              string
-	ClerkIssuer                 string
-	ClerkAudience               string
-	ClerkAuthorizedParty        string
-	ClerkMigrationOnly          bool
-	ClerkAccountDeletionEnabled bool
-	AllowedOrigins              []string
-	DefaultRateLimit            int
-	DefaultBrowserReadRateLimit int
-	YtDlpCookiesConfigured      bool
+	Version                       string
+	DB                            *database.DB
+	WorkerPool                    *worker.Pool
+	AudioTranscriber              *audio.Transcriber
+	AudioStorage                  *storage.S3
+	Webhooks                      *webhookservice.Service
+	Summarizer                    *summary.Service
+	JWTSecret                     string
+	LegacyAuthEnabled             bool
+	FirstPartyAuthEnabled         bool
+	FirstPartyPasswordAuthEnabled bool
+	WebCookieAuthEnabled          bool
+	WebCookieSecure               bool
+	AdminAPIKey                   string
+	OwnerKeyID                    string
+	OwnerKeyPrefix                string
+	ClerkJWKSURL                  string
+	ClerkSecretKey                string
+	ClerkIssuer                   string
+	ClerkAudience                 string
+	ClerkAuthorizedParty          string
+	ClerkMigrationOnly            bool
+	ClerkAccountDeletionEnabled   bool
+	AllowedOrigins                []string
+	DefaultRateLimit              int
+	DefaultBrowserReadRateLimit   int
+	YtDlpCookiesConfigured        bool
 }
 
 // Setup creates and configures the Gin router with all routes.
@@ -113,6 +115,16 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			panic("invalid passkey relying-party configuration: " + err.Error())
 		}
 		h.Passkeys = passkeys
+		if cfg.FirstPartyPasswordAuthEnabled {
+			passwords, err := accountservice.NewPasswordHasher(2)
+			if err != nil {
+				panic("initialize password authentication: " + err.Error())
+			}
+			h.Passwords = passwords
+			passwordLogin := r.Group("/api/v1/auth/password")
+			passwordLogin.Use(rateLimiter.RateLimitUnauthenticated("password", 20))
+			passwordLogin.POST("/login", h.LoginWithPassword)
+		}
 		web := handlers.NewWebSessionHandler(cfg.DB, h, cfg.WebCookieSecure, cfg.AllowedOrigins)
 		// A still-valid Clerk identity is the bridge to the same existing user.
 		// Never exchange an API key or a legacy JWT for a device session.
@@ -144,6 +156,12 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			webRecovery.Use(rateLimiter.RateLimitUnauthenticated("web-recovery", 20))
 			webRecovery.POST("/prepare", web.PrepareRecoveryCodeLogin)
 			webRecovery.POST("/finish", web.FinishRecoveryCodeLogin)
+			if cfg.FirstPartyPasswordAuthEnabled {
+				webPassword := r.Group("/api/v1/auth/web/session/password")
+				webPassword.Use(rateLimiter.RateLimitUnauthenticated("web-password", 20))
+				webPassword.POST("/prepare", web.PreparePasswordLogin)
+				webPassword.POST("/finish", web.FinishPasswordLogin)
+			}
 			webOnboarding := r.Group("/api/v1/auth/web/session/onboarding")
 			webOnboarding.Use(rateLimiter.RateLimitUnauthenticated("web-onboarding", 30))
 			webOnboarding.POST("/transfer", web.TransferOnboardingFragment)
@@ -186,6 +204,10 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			jwtProtected.POST("/auth/recovery/rotation/confirm", h.ConfirmRecoveryCodeRotation)
 			jwtProtected.GET("/auth/clerk-detachment", h.ClerkDetachmentStatus)
 			jwtProtected.POST("/auth/clerk-detachment", h.DetachClerk)
+			if cfg.FirstPartyPasswordAuthEnabled {
+				jwtProtected.GET("/auth/password", h.PasswordStatus)
+				jwtProtected.POST("/auth/password", h.SetPassword)
+			}
 		}
 		jwtProtected.DELETE("/account", h.DeleteAccount)
 		if cfg.LegacyAuthEnabled {

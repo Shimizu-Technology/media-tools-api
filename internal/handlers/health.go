@@ -19,6 +19,7 @@ import (
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
+	accountservice "github.com/Shimizu-Technology/media-tools-api/internal/services/account"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
@@ -37,17 +38,18 @@ type readinessChecker interface {
 type Handler struct {
 	DB                          *database.DB
 	Worker                      *worker.Pool
-	AudioTranscriber            *audio.Transcriber      // MTA-16: Whisper API transcriber
-	AudioStorage                *storage.S3             // Raw audio storage + playback URLs
-	WebhookService              *webhookservice.Service // MTA-18: Webhook notifications
-	Summarizer                  *summary.Service        // MTA-22: AI summary service
-	JWTSecret                   string                  // MTA-20: JWT signing secret
-	AdminAPIKey                 string                  // Admin key for protected bootstrap operations
-	OwnerAPIKeyID               string                  // Optional owner key ID override
-	OwnerAPIKeyPrefix           string                  // Optional owner key prefix override
-	YtDlpCookiesConfigured      bool                    // True when yt-dlp cookies are configured
-	ClerkAccountDeletionEnabled bool                    // Clerk Backend API deletion is configured
-	Passkeys                    *webauthn.WebAuthn      // Enabled only behind the first-party auth flag
+	AudioTranscriber            *audio.Transcriber             // MTA-16: Whisper API transcriber
+	AudioStorage                *storage.S3                    // Raw audio storage + playback URLs
+	WebhookService              *webhookservice.Service        // MTA-18: Webhook notifications
+	Summarizer                  *summary.Service               // MTA-22: AI summary service
+	JWTSecret                   string                         // MTA-20: JWT signing secret
+	AdminAPIKey                 string                         // Admin key for protected bootstrap operations
+	OwnerAPIKeyID               string                         // Optional owner key ID override
+	OwnerAPIKeyPrefix           string                         // Optional owner key prefix override
+	YtDlpCookiesConfigured      bool                           // True when yt-dlp cookies are configured
+	ClerkAccountDeletionEnabled bool                           // Clerk Backend API deletion is configured
+	Passkeys                    *webauthn.WebAuthn             // Enabled only behind the first-party auth flag
+	Passwords                   *accountservice.PasswordHasher // Enabled only behind the first-party password flag
 	// Version is the build identifier reported by health endpoints.
 	Version          string
 	readinessChecker readinessChecker

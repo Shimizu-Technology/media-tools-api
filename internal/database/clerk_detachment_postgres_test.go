@@ -73,6 +73,30 @@ func TestDetachClerkIdentityRequiresBothRecoveryFactors(t *testing.T) {
 	}
 }
 
+func TestDetachClerkIdentityAcceptsPasswordWithRecoveryCodes(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID, _ := createClerkDetachmentFixture(t, db)
+	pair, err := db.CreateFirstPartySession(ctx, userID, "ios", "Password iPhone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SetPasswordCredential(ctx, userID, pair.SessionID, "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"); err != nil {
+		t.Fatal(err)
+	}
+	rotation, err := db.BeginRecoveryCodeRotation(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ConfirmRecoveryCodeRotation(ctx, userID, rotation.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, err := db.DetachClerkIdentity(ctx, userID)
+	if err != nil || status.Linked || !status.Ready || !status.PasswordConfigured || status.PasskeyCount != 0 {
+		t.Fatalf("password detachment = %#v, %v", status, err)
+	}
+}
+
 func TestDetachClerkIdentityIsConcurrentIdempotentAndPreservesSessions(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
 	ctx := context.Background()

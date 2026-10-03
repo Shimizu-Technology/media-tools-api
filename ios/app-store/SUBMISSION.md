@@ -7,17 +7,21 @@ implements it. Run `make ios-release-preflight` before an archive and again with
 ## Current release status
 
 - Version: `1.0`
-- Next TestFlight build: `12`
+- Next TestFlight build: `13`
 - Bundle ID: `com.ShimizuTechnology.MediaTools`
 - Apple team: `4T358A5S74`
 - Minimum OS: iOS 18.5
 - Release compiler: Xcode 26.6 / iOS 26.5 SDK
-- TestFlight: build 12 adds a durable first-party device session, passkey sign-in
+- TestFlight: build 13 adds first-party email/password sign-in and password
+  management on top of the durable device sessions introduced in build 12.
+  Passwords are hashed with Argon2id on the API; plaintext passwords are never
+  stored on the device. Build 13 also keeps passkey sign-in
   and enrollment, recovery codes, device management, and recoverable account
   deletion. Clerk remains only as a migration bridge for an already-linked
   account. Build 11 is the prior TestFlight baseline with the Share Extension.
-  Before installing build 12, production must enable `CLERK_MIGRATION_ONLY` and
-  then `FIRST_PARTY_AUTH_ENABLED`; keep browser cookie auth disabled until its
+  Before installing build 13, production must enable `CLERK_MIGRATION_ONLY`,
+  `FIRST_PARTY_AUTH_ENABLED`, and `FIRST_PARTY_PASSWORD_AUTH_ENABLED`; keep
+  browser cookie auth disabled until its
   separate rollout is tested.
 
 Apple requires iOS uploads to use the iOS 26 SDK or later as of April 28, 2026.

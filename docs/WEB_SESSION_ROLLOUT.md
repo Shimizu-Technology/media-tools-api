@@ -34,7 +34,8 @@ recovery codes.
 ## Deployment order
 
 1. Deploy all auth migrations and API code with `FIRST_PARTY_AUTH_ENABLED=false`,
-   `WEB_COOKIE_AUTH_ENABLED=false`, and `CLERK_MIGRATION_ONLY=false`.
+   `FIRST_PARTY_PASSWORD_AUTH_ENABLED=false`, `WEB_COOKIE_AUTH_ENABLED=false`,
+   and `CLERK_MIGRATION_ONLY=false`.
 2. Configure the exact canonical `CORS_ORIGIN` as
    `https://media.shimizu-technology.com`. Add a preview origin only when it is
    intentionally trusted for auth. Keep `WEB_COOKIE_SECURE=true` in production.
@@ -46,7 +47,8 @@ recovery codes.
    unknown Clerk subject receives a generic 401 without creating a user. In
    release mode the server refuses to start with Clerk plus first-party auth
    unless this guard is enabled.
-5. Enable `FIRST_PARTY_AUTH_ENABLED`, then `WEB_COOKIE_AUTH_ENABLED` on Render.
+5. Enable `FIRST_PARTY_AUTH_ENABLED`, then
+   `FIRST_PARTY_PASSWORD_AUTH_ENABLED`, then `WEB_COOKIE_AUTH_ENABLED` on Render.
    Verify readiness, cookie attributes, passkey begin/finish, response-loss
    retry, logout revocation, and account switching before enabling the frontend.
 6. Build the frontend with `VITE_WEB_COOKIE_AUTH_ENABLED=true` and no

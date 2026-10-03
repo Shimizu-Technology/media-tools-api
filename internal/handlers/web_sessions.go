@@ -48,9 +48,14 @@ func (h *WebSessionHandler) clear(c *gin.Context) {
 	h.setCookie(c, middleware.WebAccessCookie, "", -1, true, "/api/v1")
 	h.setCookie(c, middleware.WebRefreshCookie, "", -1, true, "/api/v1/auth/web/session")
 	h.clearPending(c)
+	h.clearPasswordPending(c)
 	h.clearRecoveryPending(c)
 	h.clearOnboardingAll(c)
 	h.setCookie(c, middleware.WebCSRFCookie, "", -1, false, "/")
+}
+
+func (h *WebSessionHandler) clearPasswordPending(c *gin.Context) {
+	h.setCookie(c, middleware.WebPasswordPendingCookie, "", -1, true, "/api/v1/auth/web/session")
 }
 
 func (h *WebSessionHandler) clearRecoveryPending(c *gin.Context) {
@@ -261,7 +266,7 @@ func (h *WebSessionHandler) Logout(c *gin.Context) {
 	}
 	// Lost refresh or recovery responses can leave the active credential in a
 	// pending HttpOnly cookie. Revoke every exact credential before clearing.
-	if err := h.revokeCookieSessions(c, middleware.WebPendingCookie, middleware.WebRecoveryPendingCookie, middleware.WebOnboardingPendingCookie); err != nil {
+	if err := h.revokeCookieSessions(c, middleware.WebPendingCookie, middleware.WebPasswordPendingCookie, middleware.WebRecoveryPendingCookie, middleware.WebOnboardingPendingCookie); err != nil {
 		log.Printf("revoke pending browser session on logout: %v", err)
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not sign out; please try again", Code: http.StatusServiceUnavailable})
 		return

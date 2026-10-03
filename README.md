@@ -20,7 +20,7 @@ end-to-end workflows, architecture, ownership, and current boundaries. See
 - **PDF Text Extraction** — Extract text from PDF documents
 - **Cited AI Summaries & Chat** — Every supported claim links back to the exact video/audio timestamp or PDF page
 - **Background Processing** — PostgreSQL-backed jobs continue independently of the current page and survive server restarts
-- **Dual Auth** — API keys for scripts + Clerk sign-in for browser users
+- **Durable Auth** — API keys for agents plus first-party password, passkey, and recovery-code sign-in
 - **Universal Video URLs** — YouTube, Vimeo, and any yt-dlp-supported video platform
 - **Ownership** — Each transcript is linked to the user or API key that created it
 - **Unified Library** — Server-side search, pagination, and exact workspace metrics across all media
@@ -115,24 +115,31 @@ installs, and launches the native iOS app.
 
 ### Authentication
 
-The API supports two authentication methods:
+The API supports two current authentication methods:
 
 **1. API Key** (for scripts, automation):
 ```bash
 curl -H "X-API-Key: mta_your_key_here" http://localhost:8080/api/v1/transcripts
 ```
 
-**2. Clerk JWT** (for browser users — automatic via the React UI):
+**2. First-party session** (for iPhone, Android, and the React UI):
 ```bash
-curl -H "Authorization: Bearer eyJ..." http://localhost:8080/api/v1/transcripts
+curl -H "Authorization: Bearer mta_at_your_access_credential" http://localhost:8080/api/v1/transcripts
 ```
 
-When using the React frontend, Clerk protects `/app/*` routes automatically. Public docs stay at `/docs`; legacy web URLs such as `/audio`, `/pdf`, `/library`, and `/collections` redirect into the signed-in app shell.
+First-party accounts can sign in with an email and password, passkey, or saved
+recovery code. Passwords are stored as Argon2id hashes; successful legacy
+bcrypt verification upgrades the hash in the same transaction that creates a
+session. Access and rotating refresh credentials are opaque, revocable, and
+stored only as hashes by the API. The browser keeps them in host-only HttpOnly
+cookies, and native apps keep them in Keychain or encrypted platform storage.
 
-The first-party rollout uses durable device sessions, passkeys, rotating
-recovery codes, and invite-only accounts. See [invite onboarding and
-rescue](docs/INVITE_ONBOARDING.md) for operator issuance, replacement, and
-incomplete-account recovery rules.
+Accounts remain invite-only. Clerk is temporarily available only to move an
+existing linked account into first-party authentication during the migration.
+Public docs stay at `/docs`; legacy web URLs such as `/audio`, `/pdf`,
+`/library`, and `/collections` redirect into the signed-in app shell. See
+[invite onboarding and rescue](docs/INVITE_ONBOARDING.md) for operator
+issuance, replacement, and incomplete-account recovery rules.
 
 ### Create an API Key
 
@@ -229,7 +236,7 @@ Options:
 
 ## Product Roadmap
 
-See [`PRODUCT_ROADMAP.md`](PRODUCT_ROADMAP.md) for the planned direction now that Media Tools is a Clerk-authenticated media workspace: unified item pages, global search, processing center, exports/sharing, AI templates, collection intelligence, team workspaces, billing, and integrations.
+See [`PRODUCT_ROADMAP.md`](PRODUCT_ROADMAP.md) for the planned direction for the authenticated Media Tools workspace: unified item pages, global search, processing center, exports/sharing, AI templates, collection intelligence, team workspaces, billing, and integrations.
 
 ### Migration history note
 
@@ -254,7 +261,10 @@ not copy its hard-coded identity into future migrations.
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `JWT_SECRET` | Yes | Independent random value, minimum 32 characters |
 | `ADMIN_API_KEY` | Yes | Independent bootstrap key, minimum 32 characters |
-| `CLERK_SECRET_KEY` | Browser auth | Clerk Backend API key for syncing signed-in users |
+| `FIRST_PARTY_AUTH_ENABLED` | First-party auth | Enable revocable device sessions, passkeys, and recovery codes |
+| `FIRST_PARTY_PASSWORD_AUTH_ENABLED` | First-party auth | Enable Argon2id password enrollment and sign-in; requires first-party auth and cannot be combined with legacy auth |
+| `WEB_COOKIE_AUTH_ENABLED` | Browser auth | Store browser access and refresh credentials in same-origin HttpOnly cookies |
+| `CLERK_SECRET_KEY` | Migration only | Clerk Backend API key used while linked accounts move to first-party sign-in |
 | `CLERK_JWKS_URL` | Browser auth | Clerk JWKS URL for validating signed-in users |
 | `CLERK_AUTHORIZED_PARTY` | Browser auth | Comma-separated frontend origins allowed in Clerk token `azp` claim |
 | `CLERK_MIGRATION_ONLY` | First-party rollout | Restrict Clerk to an existing exact identity or legacy `clerk_id`; required when first-party auth and Clerk are both enabled in production |

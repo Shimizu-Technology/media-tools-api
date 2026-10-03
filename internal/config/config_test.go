@@ -208,6 +208,25 @@ func TestLoadAllowsProductionFirstPartyAuthWithMigrationOnlyClerk(t *testing.T) 
 	}
 }
 
+func TestLoadRequiresFirstPartyAuthForPasswordAuth(t *testing.T) {
+	t.Setenv("FIRST_PARTY_PASSWORD_AUTH_ENABLED", "true")
+	t.Setenv("FIRST_PARTY_AUTH_ENABLED", "false")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "FIRST_PARTY_PASSWORD_AUTH_ENABLED requires FIRST_PARTY_AUTH_ENABLED") {
+		t.Fatalf("Load error = %v", err)
+	}
+}
+
+func TestLoadRejectsPasswordAuthWithLegacyAuth(t *testing.T) {
+	t.Setenv("FIRST_PARTY_PASSWORD_AUTH_ENABLED", "true")
+	t.Setenv("FIRST_PARTY_AUTH_ENABLED", "true")
+	t.Setenv("LEGACY_AUTH_ENABLED", "true")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "FIRST_PARTY_PASSWORD_AUTH_ENABLED cannot be combined with LEGACY_AUTH_ENABLED") {
+		t.Fatalf("Load error = %v", err)
+	}
+}
+
 func TestLoadRequiresClerkAudienceAuthorizedPartyOrCORSOriginInRelease(t *testing.T) {
 	setRequiredReleaseEnv(t)
 	t.Setenv("CORS_ORIGIN", "")

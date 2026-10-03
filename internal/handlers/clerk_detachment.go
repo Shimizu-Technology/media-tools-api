@@ -43,8 +43,8 @@ func (h *Handler) ClerkDetachmentStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, status)
 }
 
-// DetachClerk removes the legacy provider link only after a passkey and at
-// least one unused recovery code are present. It does not revoke device
+// DetachClerk removes the legacy provider link only after a password or
+// passkey and at least one unused recovery code are present. It does not revoke device
 // sessions or delete account data.
 func (h *Handler) DetachClerk(c *gin.Context) {
 	user := firstPartyAccount(c)
@@ -55,7 +55,7 @@ func (h *Handler) DetachClerk(c *gin.Context) {
 	if errors.Is(err, database.ErrClerkDetachmentNotReady) {
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusConflict, gin.H{
-			"error": "first_party_recovery_required", "message": "Add a passkey and save recovery codes before disconnecting Clerk.", "code": http.StatusConflict,
+			"error": "first_party_recovery_required", "message": "Add a password or passkey and save recovery codes before disconnecting Clerk.", "code": http.StatusConflict,
 			"readiness": status,
 		})
 		return

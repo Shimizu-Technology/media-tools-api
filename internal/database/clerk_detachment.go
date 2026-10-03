@@ -7,7 +7,7 @@ import (
 	"fmt"
 )
 
-var ErrClerkDetachmentNotReady = errors.New("account needs a passkey and an unused recovery code before Clerk can be detached")
+var ErrClerkDetachmentNotReady = errors.New("account needs a password or passkey plus an unused recovery code before Clerk can be detached")
 
 // ClerkDetachmentReadiness describes whether Clerk is still linked and which
 // first-party recovery factors make it safe to remove that link.
@@ -15,6 +15,7 @@ type ClerkDetachmentReadiness struct {
 	Linked              bool `json:"linked"`
 	Ready               bool `json:"ready"`
 	PasskeyCount        int  `json:"passkey_count"`
+	PasswordConfigured  bool `json:"password_configured"`
 	UnusedRecoveryCodes int  `json:"unused_recovery_codes"`
 }
 
@@ -28,12 +29,13 @@ func clerkDetachmentReadinessTx(ctx context.Context, tx *sql.Tx, userID string) 
 		SELECT
 			EXISTS (SELECT 1 FROM auth_identities WHERE user_id = $1 AND provider = 'clerk'),
 			(SELECT COUNT(*) FROM auth_passkey_credentials WHERE user_id = $1),
+			EXISTS (SELECT 1 FROM auth_password_credentials WHERE user_id = $1),
 			(SELECT COUNT(*) FROM auth_recovery_codes WHERE user_id = $1 AND active AND consumed_at IS NULL)`, userID).
-		Scan(&status.Linked, &status.PasskeyCount, &status.UnusedRecoveryCodes); err != nil {
+		Scan(&status.Linked, &status.PasskeyCount, &status.PasswordConfigured, &status.UnusedRecoveryCodes); err != nil {
 		return nil, fmt.Errorf("check Clerk detachment factors: %w", err)
 	}
 	status.Linked = status.Linked || (clerkID.Valid && clerkID.String != "")
-	status.Ready = !status.Linked || (status.PasskeyCount > 0 && status.UnusedRecoveryCodes > 0)
+	status.Ready = !status.Linked || ((status.PasskeyCount > 0 || status.PasswordConfigured) && status.UnusedRecoveryCodes > 0)
 	return &status, nil
 }
 

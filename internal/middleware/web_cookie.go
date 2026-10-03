@@ -14,6 +14,7 @@ const (
 	WebAccessCookie             = "mta_web_access"
 	WebRefreshCookie            = "mta_web_refresh"
 	WebPendingCookie            = "mta_web_pending"
+	WebPasswordPendingCookie    = "mta_web_password_pending"
 	WebRecoveryPendingCookie    = "mta_web_recovery_pending"
 	WebInvitationCookie         = "mta_web_invitation"
 	WebOnboardingRescueCookie   = "mta_web_onboarding_rescue"
