@@ -39,7 +39,7 @@ func ValidOnboardingReissueToken(token string) bool {
 	return ok
 }
 
-func (db *DB) CreateOnboardingReissue(ctx context.Context, userID string) (*AuthOnboardingReissue, string, error) {
+func (db *DB) CreateOnboardingReissue(ctx context.Context, userID string, passwordAuthEnabled bool) (*AuthOnboardingReissue, string, error) {
 	userID = strings.TrimSpace(userID)
 	if uuid.Validate(userID) != nil {
 		return nil, "", ErrOnboardingAccountNotFound
@@ -68,7 +68,7 @@ func (db *DB) CreateOnboardingReissue(ctx context.Context, userID string) (*Auth
 	if err != nil {
 		return nil, "", fmt.Errorf("lock onboarding account: %w", err)
 	}
-	if allowed, err := onboardingRescueAllowedTx(ctx, tx, account.ID); err != nil {
+	if allowed, err := onboardingRescueAllowedTx(ctx, tx, account.ID, passwordAuthEnabled); err != nil {
 		return nil, "", err
 	} else if !allowed {
 		return nil, "", ErrOnboardingReissueNotAllowed
@@ -93,18 +93,18 @@ func (db *DB) CreateOnboardingReissue(ctx context.Context, userID string) (*Auth
 	return reissue, token, nil
 }
 
-func (db *DB) RedeemOnboardingReissue(ctx context.Context, token, clientType, deviceName, nextRefreshToken string) (*AuthTokenPair, error) {
-	return db.redeemOnboardingReissue(ctx, token, clientType, deviceName, nextRefreshToken, nil, false, false)
+func (db *DB) RedeemOnboardingReissue(ctx context.Context, token, clientType, deviceName, nextRefreshToken string, passwordAuthEnabled bool) (*AuthTokenPair, error) {
+	return db.redeemOnboardingReissue(ctx, token, clientType, deviceName, nextRefreshToken, nil, false, false, passwordAuthEnabled)
 }
 
 // RedeemWebOnboardingReissue performs the rescue and any browser-account
 // switch atomically. Existing sessions for the rescued account are also
 // revoked by the shared redemption transaction below.
-func (db *DB) RedeemWebOnboardingReissue(ctx context.Context, token, nextRefreshToken string, existingCredentials []string) (*AuthTokenPair, error) {
-	return db.redeemOnboardingReissue(ctx, token, "web", "Browser", nextRefreshToken, existingCredentials, true, true)
+func (db *DB) RedeemWebOnboardingReissue(ctx context.Context, token, nextRefreshToken string, existingCredentials []string, passwordAuthEnabled bool) (*AuthTokenPair, error) {
+	return db.redeemOnboardingReissue(ctx, token, "web", "Browser", nextRefreshToken, existingCredentials, true, true, passwordAuthEnabled)
 }
 
-func (db *DB) redeemOnboardingReissue(ctx context.Context, token, clientType, deviceName, nextRefreshToken string, existingCredentials []string, distinguishUnavailableSuccessor, requireOnboarding bool) (*AuthTokenPair, error) {
+func (db *DB) redeemOnboardingReissue(ctx context.Context, token, clientType, deviceName, nextRefreshToken string, existingCredentials []string, distinguishUnavailableSuccessor, requireOnboarding, passwordAuthEnabled bool) (*AuthTokenPair, error) {
 	hash, ok := onboardingReissueTokenHash(token)
 	if !ok {
 		return nil, ErrOnboardingReissueInvalid
@@ -185,7 +185,7 @@ func (db *DB) redeemOnboardingReissue(ctx context.Context, token, clientType, de
 	if reissue.RevokedAt.Valid || !now.Before(reissue.ExpiresAt) {
 		return nil, ErrOnboardingReissueInvalid
 	}
-	if allowed, err := onboardingRescueAllowedTx(ctx, tx, lockedID); err != nil {
+	if allowed, err := onboardingRescueAllowedTx(ctx, tx, lockedID, passwordAuthEnabled); err != nil {
 		return nil, err
 	} else if !allowed {
 		return nil, ErrOnboardingReissueNotAllowed
@@ -286,14 +286,15 @@ func (db *DB) CompleteOnboarding(ctx context.Context, userID string) (bool, erro
 
 func onboardingRescueAllowedTx(ctx context.Context, tx interface {
 	GetContext(context.Context, any, string, ...any) error
-}, userID string) (bool, error) {
+}, userID string, passwordAuthEnabled bool) (bool, error) {
 	var blocked bool
 	if err := tx.GetContext(ctx, &blocked, `
 		SELECT EXISTS (SELECT 1 FROM auth_passkey_credentials WHERE user_id = $1)
+		    OR ($2 AND EXISTS (SELECT 1 FROM auth_password_credentials WHERE user_id = $1))
 		    OR EXISTS (
 		        SELECT 1 FROM auth_recovery_codes
 		        WHERE user_id = $1 AND active AND consumed_at IS NULL
-		    )`, userID); err != nil {
+		    )`, userID, passwordAuthEnabled); err != nil {
 		return false, fmt.Errorf("check onboarding recovery methods: %w", err)
 	}
 	return !blocked, nil

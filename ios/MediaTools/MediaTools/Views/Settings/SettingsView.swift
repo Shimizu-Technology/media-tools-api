@@ -30,6 +30,13 @@ struct SettingsView: View {
     @State private var deviceAccountError: String?
     @State private var deviceAccountRetry = 0
     @State private var passkeyStatus: PasskeyStatus?
+    @State private var passwordStatus: PasswordStatus?
+    @State private var passwordAuthAvailable = false
+    @State private var showPasswordSetup = false
+    @State private var newPassword = ""
+    @State private var confirmPassword = ""
+    @State private var isSavingPassword = false
+    @State private var passwordError: String?
     @State private var recoveryStatus: RecoveryCodeStatus?
     @State private var isLoadingRecoveryStatus = false
     @State private var isEnrollingPasskey = false
@@ -110,6 +117,26 @@ struct SettingsView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showPasswordSetup) {
+            PasswordSetupSheet(
+                configured: passwordStatus?.configured == true,
+                password: $newPassword,
+                confirmation: $confirmPassword,
+                isSaving: isSavingPassword,
+                errorMessage: passwordError,
+                onCancel: { showPasswordSetup = false; newPassword = ""; confirmPassword = "" },
+                onSave: { Task { await savePassword() } }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(isSavingPassword)
+        }
+        .onChange(of: showPasswordSetup) { _, isPresented in
+            guard !isPresented else { return }
+            newPassword = ""
+            confirmPassword = ""
+            passwordError = nil
+        }
         .confirmationDialog(
             recoveryStatus?.remaining ?? 0 > 0 ? "Replace recovery codes?" : "Create recovery codes?",
             isPresented: $showReplaceRecoveryCodesConfirmation,
@@ -136,7 +163,7 @@ struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Your recordings and current device session stay in Media Tools. Future sign-ins will use your passkey or a recovery code.")
+            Text("Your recordings and current device session stay in Media Tools. Future sign-ins will use your password, passkey, or a recovery code.")
         }
     }
 
@@ -403,6 +430,34 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isEnrollingPasskey || isGeneratingRecoveryCodes)
+
+                    if passwordAuthAvailable {
+                        Divider().overlay(Theme.borderSubtle)
+
+                        Button {
+                            passwordError = nil
+                            showPasswordSetup = true
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "lock.fill").foregroundStyle(Theme.brand400)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(passwordStatus?.configured == true ? "Change password" : "Create a password")
+                                        .font(Theme.body(14, weight: .semibold))
+                                        .foregroundStyle(Theme.textPrimary)
+                                    Text(passwordStatus?.configured == true
+                                         ? "Sign in with your email on any device."
+                                         : "Add a password you control for email sign-in.")
+                                        .font(Theme.caption(12))
+                                        .foregroundStyle(Theme.textSecondary)
+                                }
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 52)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("sign-in-security.password")
+                    }
 
                     Divider().overlay(Theme.borderSubtle)
 
@@ -855,6 +910,48 @@ struct SettingsView: View {
             guard !Task.isCancelled else { return }
             securityStatusError = "Could not check sign-in security."
         }
+        do {
+            let health: HealthResponse = try await APIClient.shared.getPublic("/health")
+            guard !Task.isCancelled else { return }
+            passwordAuthAvailable = health.passwordAuthEnabled == true
+            if passwordAuthAvailable {
+                passwordStatus = try await FirstPartyAuthService.shared.passwordStatus()
+            } else {
+                passwordStatus = nil
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            // Password rollout can be disabled independently. Keep passkey and
+            // recovery management usable if that capability is unavailable.
+            passwordAuthAvailable = false
+            passwordStatus = nil
+        }
+    }
+
+    private func savePassword() async {
+        guard !isSavingPassword else { return }
+        guard newPassword == confirmPassword else {
+            passwordError = "The passwords do not match."
+            return
+        }
+        isSavingPassword = true
+        passwordError = nil
+        defer { isSavingPassword = false }
+        do {
+            let wasConfigured = passwordStatus?.configured == true
+            passwordStatus = try await FirstPartyAuthService.shared.setPassword(newPassword)
+            newPassword = ""
+            confirmPassword = ""
+            showPasswordSetup = false
+            securityMessage = wasConfigured
+                ? "Password changed. Other devices were signed out."
+                : "Password created. You can now sign in with your email."
+            await loadClerkDetachmentStatus()
+        } catch {
+            passwordError = error.localizedDescription.isEmpty
+                ? "Could not save the password. Please try again."
+                : error.localizedDescription
+        }
     }
 
     private func loadClerkDetachmentStatus() async {
@@ -1050,6 +1147,69 @@ struct SettingsView: View {
 
 }
 
+private struct PasswordSetupSheet: View {
+    let configured: Bool
+    @Binding var password: String
+    @Binding var confirmation: String
+    let isSaving: Bool
+    let errorMessage: String?
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(configured ? "Change password" : "Create a password")
+                            .font(Theme.heading(24))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text(configured
+                             ? "Changing your password signs out your other devices. This iPhone stays signed in."
+                             : "Use this password with your account email on iPhone and web.")
+                            .font(Theme.body(14))
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    SecureField("New password", text: $password)
+                        .textContentType(.newPassword)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 50)
+                        .background(Theme.surfaceCard)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                    SecureField("Confirm password", text: $confirmation)
+                        .textContentType(.newPassword)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 50)
+                        .background(Theme.surfaceCard)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                    Text("Use at least 15 characters. Spaces and password managers are supported.")
+                        .font(Theme.caption(12))
+                        .foregroundStyle(Theme.textMuted)
+                    if let errorMessage {
+                        Text(errorMessage).font(Theme.caption(13)).foregroundStyle(Theme.error)
+                    }
+                    Button { onSave() } label: {
+                        HStack(spacing: 8) {
+                            if isSaving { ProgressView().tint(.white) }
+                            Text(isSaving ? "Saving…" : configured ? "Change password" : "Create password")
+                        }
+                        .font(Theme.body(15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(Theme.brand500, in: RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                    }
+                    .disabled(isSaving || password.count < 15 || confirmation.count < 15)
+                    .accessibilityIdentifier("password-setup.save")
+                }
+                .padding(20)
+            }
+            .background(Theme.surface)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { onCancel() }.disabled(isSaving) } }
+        }
+    }
+}
+
 private struct ClerkMigrationCard: View {
     let status: ClerkDetachmentStatus
     let isDisconnecting: Bool
@@ -1067,15 +1227,17 @@ private struct ClerkMigrationCard: View {
             .foregroundStyle(status.linked ? Theme.textPrimary : Theme.success)
 
             if status.linked {
-                Text("Disconnect Clerk after both backup sign-in methods are ready. Your account, recordings, and this device session stay in Media Tools.")
+                Text("Disconnect Clerk after a password or passkey is ready and recovery codes are saved. Your account, recordings, and this device session stay in Media Tools.")
                     .font(Theme.caption(12))
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 readinessRow(
-                    title: "Passkey",
-                    isReady: status.passkeyCount > 0,
-                    detail: status.passkeyCount > 0 ? "Ready" : "Add one above"
+                    title: "Password or passkey",
+                    isReady: status.passwordConfigured || status.passkeyCount > 0,
+                    detail: status.passwordConfigured
+                        ? "Password ready"
+                        : status.passkeyCount > 0 ? "Passkey ready" : "Add one above"
                 )
                 readinessRow(
                     title: "Recovery codes",
@@ -1100,7 +1262,7 @@ private struct ClerkMigrationCard: View {
                     .accessibilityIdentifier("clerk-migration.disconnect")
                 }
             } else {
-                Text("Use your passkey or a recovery code whenever you need to sign in again.")
+                Text("Use your password, passkey, or a recovery code whenever you need to sign in again.")
                     .font(Theme.caption(12))
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1332,6 +1494,7 @@ struct ClerkMigrationPreviewHost: View {
         linked: true,
         ready: true,
         passkeyCount: 1,
+        passwordConfigured: true,
         unusedRecoveryCodes: 8
     )
     @State private var showConfirmation = false
@@ -1362,12 +1525,13 @@ struct ClerkMigrationPreviewHost: View {
                     linked: false,
                     ready: true,
                     passkeyCount: 1,
+                    passwordConfigured: true,
                     unusedRecoveryCodes: 8
                 )
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Your recordings and current device session stay in Media Tools. Future sign-ins will use your passkey or a recovery code.")
+            Text("Your recordings and current device session stay in Media Tools. Future sign-ins will use your password, passkey, or a recovery code.")
         }
     }
 }

@@ -8,9 +8,17 @@
   provider's encrypted environment settings.
 - Variables prefixed with `VITE_` are included in the browser bundle. Only
   public client configuration, such as a Clerk publishable key, belongs there.
-- iOS binaries also cannot hold secrets. The Clerk publishable key and API URL
-  are configuration, not credentials; backend/AI/admin secrets must stay on the
-  server.
+- iOS binaries also cannot hold secrets. Public migration-provider
+  configuration and the API URL are configuration, not credentials;
+  backend/AI/admin secrets must stay on the server.
+- First-party passwords are normalized and hashed with Argon2id. Plaintext
+  passwords must never be logged, persisted in browser storage or Keychain, or
+  included in crash and analytics events. Native retry journals may store only
+  the email and a pre-generated refresh successor.
+- First-party access and refresh credentials are opaque random values. Store
+  only their hashes on the server. Browsers must keep them in host-only,
+  HttpOnly, Secure, SameSite=Strict cookies with origin and CSRF checks on
+  mutations.
 - Treat yt-dlp cookie files and `YT_DLP_COOKIES_B64` as credentials. Restrict
   access, rotate the underlying session when exposed, and never attach their
   content to an issue or pull request.
@@ -45,6 +53,12 @@ When `GIN_MODE=release`, startup refuses:
 - a missing or shorter-than-32-character `ADMIN_API_KEY`; or
 - Clerk authentication without an audience/authorized-party boundary (or a
   single explicit production `CORS_ORIGIN` from which one can be inferred).
+
+First-party password auth additionally requires first-party sessions and may
+not run alongside the legacy bcrypt/JWT routes. Production should keep
+`LEGACY_AUTH_ENABLED=false`; Clerk should remain in migration-only mode until
+the linked owner account has verified password, recovery, relaunch, and
+sign-out flows on a physical device.
 
 Generate independent random values; do not reuse a Clerk, OpenAI, OpenRouter,
 AWS, database, or Media Tools API credential.

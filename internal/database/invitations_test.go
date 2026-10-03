@@ -223,6 +223,33 @@ func TestFindOrCreateClerkUserDoesNotLinkByEmail(t *testing.T) {
 	}
 }
 
+func TestInvitationEmailUsesCanonicalUnicodeIdentity(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	prefix := uuid.NewString()
+	decomposed := prefix + "e\u0301@example.com"
+	composed := prefix + "é@example.com"
+	invitation, token, err := db.CreateInvitation(ctx, decomposed, "Unicode User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM auth_invitations WHERE id = $1`, invitation.ID)
+	})
+	successor, err := RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := db.RedeemInvitation(ctx, token, "ios", "Phone", successor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, pair.UserID) })
+	if _, _, err := db.CreateInvitation(ctx, composed, "Duplicate Unicode User"); !errors.Is(err, ErrInvitationEmailExists) {
+		t.Fatalf("canonical duplicate invitation error = %v", err)
+	}
+}
+
 func TestWebInvitationSwitchIsAtomicRecoverableAndRequiresOnboarding(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
 	ctx := context.Background()

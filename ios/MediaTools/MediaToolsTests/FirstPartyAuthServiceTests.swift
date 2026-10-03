@@ -137,12 +137,13 @@ final class FirstPartyAuthServiceTests: XCTestCase {
 
     func testClerkDetachmentStatusDecodesServerShape() throws {
         let data = Data("""
-        {"linked":true,"ready":true,"passkey_count":2,"unused_recovery_codes":7}
+        {"linked":true,"ready":true,"passkey_count":2,"password_configured":true,"unused_recovery_codes":7}
         """.utf8)
         let status = try APIClient.makeDecoder().decode(ClerkDetachmentStatus.self, from: data)
         XCTAssertTrue(status.linked)
         XCTAssertTrue(status.ready)
         XCTAssertEqual(status.passkeyCount, 2)
+        XCTAssertTrue(status.passwordConfigured)
         XCTAssertEqual(status.unusedRecoveryCodes, 7)
     }
 
@@ -309,6 +310,26 @@ final class FirstPartyAuthServiceTests: XCTestCase {
         XCTAssertEqual(store.value?.pair.userID, "server-user")
         XCTAssertTrue(store.value?.pair.refreshToken.hasPrefix("mta_rt_") == true)
         XCTAssertEqual(store.value?.source, .recoveryCode)
+        XCTAssertNil(try journal.load())
+    }
+
+    @MainActor
+    func testSuccessfulPasswordSignInStoresOnlyDurableSession() async throws {
+        let store = TestDeviceSessionStore(nil)
+        let journal = InMemoryPasswordLoginJournal(nil)
+        let service = FirstPartyAuthService(
+            api: SuccessfulPairFirstPartyAuthAPI(),
+            deviceSession: DeviceSessionController(store: store, enabled: true),
+            passwordLoginJournal: journal
+        )
+
+        try await service.signInWithPassword(
+            email: " Owner@Example.com ",
+            password: "a password that is never journaled"
+        )
+
+        XCTAssertEqual(store.value?.pair.userID, "server-user")
+        XCTAssertEqual(store.value?.source, .passkey)
         XCTAssertNil(try journal.load())
     }
 
@@ -668,6 +689,16 @@ private final class InMemoryRecoveryCodeRedeemJournal: RecoveryCodeRedeemJournal
     func delete() { pending = nil }
 }
 
+@MainActor
+private final class InMemoryPasswordLoginJournal: PasswordLoginJournaling {
+    private var pending: PendingPasswordLogin?
+
+    init(_ pending: PendingPasswordLogin?) { self.pending = pending }
+    func load() throws -> PendingPasswordLogin? { pending }
+    func save(_ value: PendingPasswordLogin) throws { pending = value }
+    func delete() { pending = nil }
+}
+
 private actor FailingRevocationTransport: DeviceSessionTransport {
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         let data = Data("{\"error\":\"unavailable\",\"message\":\"unavailable\"}".utf8)
@@ -720,6 +751,7 @@ private actor LostClerkDetachmentResponseAPI: FirstPartyAuthAPI {
             linked: false,
             ready: true,
             passkeyCount: 1,
+            passwordConfigured: true,
             unusedRecoveryCodes: 8
         )
         guard let typed = status as? T else { throw APIError.invalidResponse }

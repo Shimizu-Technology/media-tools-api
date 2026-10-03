@@ -633,4 +633,5 @@ type HealthResponse struct {
 	Database               string `json:"database"`
 	Workers                int    `json:"workers"`
 	YtDlpCookiesConfigured bool   `json:"yt_dlp_cookies_configured"`
+	PasswordAuthEnabled    bool   `json:"password_auth_enabled"`
 }

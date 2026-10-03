@@ -181,7 +181,7 @@ func (h *WebSessionHandler) CommitWebOnboarding(c *gin.Context) {
 	if kind == "invite" {
 		pair, err = h.db.RedeemWebInvitation(c.Request.Context(), secret, successor, existing)
 	} else {
-		pair, err = h.db.RedeemWebOnboardingReissue(c.Request.Context(), secret, successor, existing)
+		pair, err = h.db.RedeemWebOnboardingReissue(c.Request.Context(), secret, successor, existing, h.auth != nil && h.auth.PasswordAuthEnabled)
 	}
 	switch {
 	case err == nil:

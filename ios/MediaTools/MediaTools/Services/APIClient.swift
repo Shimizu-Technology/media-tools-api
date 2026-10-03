@@ -220,6 +220,18 @@ actor APIClient {
 
     // MARK: - HTTP Methods
 
+    func getPublic<T: Decodable>(_ path: String) async throws -> T {
+        let url = URL(string: baseURL + path)!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        try validateResponse(response, data: data)
+        return try decoder.decode(T.self, from: data)
+    }
+
     func get<T: Decodable>(
         _ path: String,
         expectedOwnerID: String? = nil

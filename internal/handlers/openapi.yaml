@@ -365,6 +365,10 @@ components:
         yt_dlp_cookies_configured:
           type: boolean
           example: true
+        password_auth_enabled:
+          type: boolean
+          description: Whether first-party password enrollment and sign-in are available
+          example: true
 
 paths:
   /health:
@@ -386,6 +390,7 @@ paths:
                 database: "unchecked"
                 workers: 3
                 yt_dlp_cookies_configured: true
+                password_auth_enabled: true
 
   /ready:
     get:
@@ -1038,7 +1043,9 @@ paths:
       summary: Reissue onboarding access for a stranded account
       description: |
         Requires the configured X-Admin-Key and an immutable users.id. The
-        account must have no passkey and no active unused recovery code. A new
+        account must have no passkey, no active unused recovery code, and no
+        configured password while password authentication is enabled. A stored
+        password does not block rescue during a password-auth rollback. A new
         link revokes older unused rescue links for the same account. The token
         and fragment URL are returned once for manual secure sharing.
       security: []
@@ -1054,7 +1061,7 @@ paths:
       responses:
         "201": {description: One-time onboarding rescue created}
         "404": {description: Account not found}
-        "409": {description: Account already has a sign-in recovery method}
+        "409": {description: Account already has an enabled sign-in recovery method}
   /auth/onboarding/reissues/redeem:
     post:
       tags: [Authentication]
@@ -1081,7 +1088,7 @@ paths:
       responses:
         "201": {description: First-party session credentials}
         "401": {description: Invalid, expired, revoked, or mismatched rescue retry}
-        "409": {description: Account gained a sign-in recovery method before redemption}
+        "409": {description: Account gained an enabled sign-in recovery method before redemption}
   /auth/recovery:
     get:
       tags: [Authentication]
@@ -1176,8 +1183,8 @@ paths:
       summary: Check whether an account can disconnect Clerk
       description: |
         Requires a valid first-party device session. Reports only factor counts
-        and link state. A linked account is ready after it has at least one
-        passkey and one active unused recovery code.
+        and link state. A linked account is ready after it has an active unused
+        recovery code plus either a passkey or an enabled configured password.
       security: [{BearerAuth: []}]
       responses:
         "200": {description: Clerk link and first-party recovery readiness}
@@ -1187,15 +1194,15 @@ paths:
       summary: Disconnect the legacy Clerk identity
       description: |
         Requires a valid first-party device session. Atomically clears the
-        legacy users.clerk_id and removes Clerk auth-identity rows only after a
-        passkey and an active unused recovery code exist. User data, API keys,
-        and device sessions are preserved. Repeating a successful request is
-        idempotent.
+        legacy users.clerk_id and removes Clerk auth-identity rows only after an
+        active unused recovery code exists together with either a passkey or an
+        enabled configured password. User data, API keys, and device sessions
+        are preserved. Repeating a successful request is idempotent.
       security: [{BearerAuth: []}]
       responses:
         "200": {description: Clerk is disconnected or was already disconnected}
         "401": {description: A first-party device session is required}
-        "409": {description: A passkey and unused recovery code are required}
+        "409": {description: An unused recovery code plus a passkey or enabled password is required}
   /auth/passkeys:
     get:
       tags: [Authentication]
@@ -1305,6 +1312,86 @@ paths:
         "201": {description: First-party access token, refresh token, and session metadata; store securely}
         "401": {description: Challenge or passkey verification failed}
         "429": {description: Too many attempts}
+  /auth/password/login:
+    post:
+      tags: [Authentication]
+      summary: Verify a first-party password and create a revocable device session
+      security: []
+      description: |
+        Native clients generate and securely save next_refresh_token before the
+        request. Exact retries recover the same session after a lost response.
+        Passwords are stored as Argon2id hashes; legacy bcrypt hashes are
+        upgraded after a successful sign-in.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, client_type, next_refresh_token]
+              properties:
+                email: {type: string, format: email}
+                password: {type: string, maxLength: 1024}
+                client_type: {type: string, enum: [ios, android]}
+                device_name: {type: string, maxLength: 80}
+                next_refresh_token: {type: string, description: Client-generated mta_rt_ credential saved before sending}
+      responses:
+        "201": {description: First-party access token, refresh token, and session metadata}
+        "401": {description: Email or password is incorrect}
+        "429": {description: Too many attempts}
+  /auth/password:
+    get:
+      tags: [Authentication]
+      summary: Check whether the signed-in account has a password
+      security: [{BearerAuth: []}]
+      responses:
+        "200": {description: Password configuration status}
+    post:
+      tags: [Authentication]
+      summary: Create or replace the signed-in account password
+      security: [{BearerAuth: []}]
+      description: Replacing a password revokes every other device session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: {type: string, minLength: 15, maxLength: 128}
+      responses:
+        "200": {description: Password saved}
+        "400": {description: Password does not meet policy}
+  /auth/web/session/password/prepare:
+    post:
+      tags: [Authentication]
+      summary: Prepare password sign-in for an HttpOnly browser session
+      security: []
+      responses:
+        "204": {description: Password successor and CSRF cookies installed}
+        "403": {description: Origin is not allowed}
+  /auth/web/session/password/finish:
+    post:
+      tags: [Authentication]
+      summary: Verify a password and install HttpOnly browser cookies
+      security: []
+      parameters:
+        - {name: X-CSRF-Token, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: {type: string, format: email}
+                password: {type: string}
+      responses:
+        "201": {description: Browser cookies installed; body contains metadata only}
+        "401": {description: Email or password is incorrect}
+        "403": {description: Origin or CSRF validation failed}
   /auth/web/session/bootstrap/prepare:
     post:
       tags: [Authentication]

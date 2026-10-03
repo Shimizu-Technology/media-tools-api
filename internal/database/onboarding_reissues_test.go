@@ -35,11 +35,11 @@ func TestOnboardingReissueSupersedesAndRecoversOneSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, firstToken, err := db.CreateOnboardingReissue(ctx, userID)
+	_, firstToken, err := db.CreateOnboardingReissue(ctx, userID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, currentToken, err := db.CreateOnboardingReissue(ctx, userID)
+	_, currentToken, err := db.CreateOnboardingReissue(ctx, userID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestOnboardingReissueSupersedesAndRecoversOneSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.RedeemOnboardingReissue(ctx, firstToken, "ios", "New phone", next); !errors.Is(err, ErrOnboardingReissueInvalid) {
+	if _, err := db.RedeemOnboardingReissue(ctx, firstToken, "ios", "New phone", next, true); !errors.Is(err, ErrOnboardingReissueInvalid) {
 		t.Fatalf("superseded rescue redemption = %v", err)
 	}
 
@@ -61,7 +61,7 @@ func TestOnboardingReissueSupersedesAndRecoversOneSession(t *testing.T) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			pair, err := db.RedeemOnboardingReissue(ctx, currentToken, "ios", "New phone", next)
+			pair, err := db.RedeemOnboardingReissue(ctx, currentToken, "ios", "New phone", next, true)
 			results <- result{pair: pair, err: err}
 		}()
 	}
@@ -98,7 +98,7 @@ func TestOnboardingReissueSupersedesAndRecoversOneSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.RedeemOnboardingReissue(ctx, currentToken, "ios", "New phone", wrong); !errors.Is(err, ErrOnboardingReissueInvalid) {
+	if _, err := db.RedeemOnboardingReissue(ctx, currentToken, "ios", "New phone", wrong, true); !errors.Is(err, ErrOnboardingReissueInvalid) {
 		t.Fatalf("wrong successor retry = %v", err)
 	}
 }
@@ -107,7 +107,7 @@ func TestOnboardingReissueRefusesAccountsWithRecoveryMethod(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
 	ctx := context.Background()
 	userID := insertOnboardingRescueTestUser(t, db)
-	_, token, err := db.CreateOnboardingReissue(ctx, userID)
+	_, token, err := db.CreateOnboardingReissue(ctx, userID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,14 +116,14 @@ func TestOnboardingReissueRefusesAccountsWithRecoveryMethod(t *testing.T) {
 		VALUES ($1, $2, TRUE)`, recoveryCodeHash("MTR-test-"+uuid.NewString()), userID); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := db.CreateOnboardingReissue(ctx, userID); !errors.Is(err, ErrOnboardingReissueNotAllowed) {
+	if _, _, err := db.CreateOnboardingReissue(ctx, userID, true); !errors.Is(err, ErrOnboardingReissueNotAllowed) {
 		t.Fatalf("secured account reissue creation = %v", err)
 	}
 	next, err := RandomFirstPartyRefreshToken()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.RedeemOnboardingReissue(ctx, token, "android", "Phone", next); !errors.Is(err, ErrOnboardingReissueNotAllowed) {
+	if _, err := db.RedeemOnboardingReissue(ctx, token, "android", "Phone", next, true); !errors.Is(err, ErrOnboardingReissueNotAllowed) {
 		t.Fatalf("secured account reissue redemption = %v", err)
 	}
 	var sessions int
@@ -132,9 +132,56 @@ func TestOnboardingReissueRefusesAccountsWithRecoveryMethod(t *testing.T) {
 	}
 }
 
+func TestOnboardingReissueRefusesAccountWithPassword(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := insertOnboardingRescueTestUser(t, db)
+	_, token, err := db.CreateOnboardingReissue(ctx, userID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO auth_password_credentials (user_id, email_normalized, password_hash)
+		SELECT id, lower(email), $2 FROM users WHERE id = $1`, userID, "$2a$04$abcdefghijklmnopqrstuu8OcnTnO4oZ0JHf9w5k3XjY2v2lZ5o1a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.CreateOnboardingReissue(ctx, userID, true); !errors.Is(err, ErrOnboardingReissueNotAllowed) {
+		t.Fatalf("password-secured reissue creation = %v", err)
+	}
+	next, err := RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RedeemOnboardingReissue(ctx, token, "ios", "Phone", next, true); !errors.Is(err, ErrOnboardingReissueNotAllowed) {
+		t.Fatalf("password-secured reissue redemption = %v", err)
+	}
+}
+
+func TestOnboardingReissueAllowsStoredPasswordWhilePasswordAuthIsDisabled(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := insertOnboardingRescueTestUser(t, db)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO auth_password_credentials (user_id, email_normalized, password_hash)
+		SELECT id, lower(email), $2 FROM users WHERE id = $1`, userID, "$2a$04$abcdefghijklmnopqrstuu8OcnTnO4oZ0JHf9w5k3XjY2v2lZ5o1a"); err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := db.CreateOnboardingReissue(ctx, userID, false)
+	if err != nil {
+		t.Fatalf("disabled password capability blocked rescue creation: %v", err)
+	}
+	next, err := RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RedeemOnboardingReissue(ctx, token, "ios", "Phone", next, false); err != nil {
+		t.Fatalf("disabled password capability blocked rescue redemption: %v", err)
+	}
+}
+
 func TestOnboardingReissueRejectsMalformedUserID(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
-	if _, _, err := db.CreateOnboardingReissue(context.Background(), "not-a-user-id"); !errors.Is(err, ErrOnboardingAccountNotFound) {
+	if _, _, err := db.CreateOnboardingReissue(context.Background(), "not-a-user-id", true); !errors.Is(err, ErrOnboardingAccountNotFound) {
 		t.Fatalf("malformed user ID = %v", err)
 	}
 }
@@ -236,14 +283,14 @@ func TestWebOnboardingRescueSwitchPersistsRequirementAndRecoversResponse(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, token, err := db.CreateOnboardingReissue(ctx, targetUserID)
+	_, token, err := db.CreateOnboardingReissue(ctx, targetUserID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	successor, _ := RandomFirstPartyRefreshToken()
 	// Account switching uses the access cookie visible at the onboarding path;
 	// the refresh cookie remains deliberately narrower.
-	pair, err := db.RedeemWebOnboardingReissue(ctx, token, successor, []string{oldSession.AccessToken})
+	pair, err := db.RedeemWebOnboardingReissue(ctx, token, successor, []string{oldSession.AccessToken}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +301,7 @@ func TestWebOnboardingRescueSwitchPersistsRequirementAndRecoversResponse(t *test
 	if err != nil || user.ID != targetUserID || !user.OnboardingRequired {
 		t.Fatalf("rescued web account = %#v, %v", user, err)
 	}
-	retried, err := db.RedeemWebOnboardingReissue(ctx, token, successor, []string{oldSession.AccessToken})
+	retried, err := db.RedeemWebOnboardingReissue(ctx, token, successor, []string{oldSession.AccessToken}, true)
 	if err != nil || retried.SessionID != pair.SessionID || retried.AccessToken == pair.AccessToken {
 		t.Fatalf("lost response retry = %#v, %v", retried, err)
 	}
@@ -267,12 +314,12 @@ func TestNativeOnboardingRescueDoesNotRequireWebOnlyCompletion(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE users SET onboarding_required = TRUE WHERE id = $1`, userID); err != nil {
 		t.Fatal(err)
 	}
-	_, token, err := db.CreateOnboardingReissue(ctx, userID)
+	_, token, err := db.CreateOnboardingReissue(ctx, userID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	successor, _ := RandomFirstPartyRefreshToken()
-	pair, err := db.RedeemOnboardingReissue(ctx, token, "android", "Phone", successor)
+	pair, err := db.RedeemOnboardingReissue(ctx, token, "android", "Phone", successor, true)
 	if err != nil {
 		t.Fatal(err)
 	}

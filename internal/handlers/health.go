@@ -19,6 +19,7 @@ import (
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
+	accountservice "github.com/Shimizu-Technology/media-tools-api/internal/services/account"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
@@ -37,17 +38,19 @@ type readinessChecker interface {
 type Handler struct {
 	DB                          *database.DB
 	Worker                      *worker.Pool
-	AudioTranscriber            *audio.Transcriber      // MTA-16: Whisper API transcriber
-	AudioStorage                *storage.S3             // Raw audio storage + playback URLs
-	WebhookService              *webhookservice.Service // MTA-18: Webhook notifications
-	Summarizer                  *summary.Service        // MTA-22: AI summary service
-	JWTSecret                   string                  // MTA-20: JWT signing secret
-	AdminAPIKey                 string                  // Admin key for protected bootstrap operations
-	OwnerAPIKeyID               string                  // Optional owner key ID override
-	OwnerAPIKeyPrefix           string                  // Optional owner key prefix override
-	YtDlpCookiesConfigured      bool                    // True when yt-dlp cookies are configured
-	ClerkAccountDeletionEnabled bool                    // Clerk Backend API deletion is configured
-	Passkeys                    *webauthn.WebAuthn      // Enabled only behind the first-party auth flag
+	AudioTranscriber            *audio.Transcriber             // MTA-16: Whisper API transcriber
+	AudioStorage                *storage.S3                    // Raw audio storage + playback URLs
+	WebhookService              *webhookservice.Service        // MTA-18: Webhook notifications
+	Summarizer                  *summary.Service               // MTA-22: AI summary service
+	JWTSecret                   string                         // MTA-20: JWT signing secret
+	AdminAPIKey                 string                         // Admin key for protected bootstrap operations
+	OwnerAPIKeyID               string                         // Optional owner key ID override
+	OwnerAPIKeyPrefix           string                         // Optional owner key prefix override
+	YtDlpCookiesConfigured      bool                           // True when yt-dlp cookies are configured
+	ClerkAccountDeletionEnabled bool                           // Clerk Backend API deletion is configured
+	Passkeys                    *webauthn.WebAuthn             // Enabled only behind the first-party auth flag
+	Passwords                   *accountservice.PasswordHasher // Enabled only behind the first-party password flag
+	PasswordAuthEnabled         bool                           // Public capability used by clients during staged rollout
 	// Version is the build identifier reported by health endpoints.
 	Version          string
 	readinessChecker readinessChecker
@@ -75,6 +78,7 @@ func NewHandler(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *sto
 // database so infrastructure probes do not prevent Neon from scaling to zero.
 // GET /api/v1/health
 func (h *Handler) HealthCheck(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, h.healthResponse("ok", "unchecked"))
 }
 
@@ -82,6 +86,7 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 // for explicit diagnostics, not high-frequency infrastructure polling.
 // GET /api/v1/ready
 func (h *Handler) ReadinessCheck(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	if h.readinessChecker == nil {
 		c.JSON(http.StatusServiceUnavailable, h.healthResponse("unhealthy", "unhealthy"))
 		return
@@ -112,5 +117,6 @@ func (h *Handler) healthResponse(status, databaseStatus string) models.HealthRes
 		Database:               databaseStatus,
 		Workers:                workers,
 		YtDlpCookiesConfigured: h.YtDlpCookiesConfigured,
+		PasswordAuthEnabled:    h.PasswordAuthEnabled,
 	}
 }

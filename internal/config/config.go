@@ -64,6 +64,9 @@ type Config struct {
 	// First-party sessions can be enabled for staged client migration. Clerk
 	// remains accepted until every installed client has moved.
 	FirstPartyAuthEnabled bool
+	// FirstPartyPasswordAuthEnabled adds Argon2id credentials to the durable
+	// first-party session system. It never enables the legacy JWT routes.
+	FirstPartyPasswordAuthEnabled bool
 	// WebCookieAuthEnabled enables the staged, same-origin browser cookie flow.
 	WebCookieAuthEnabled bool
 
@@ -152,10 +155,11 @@ func Load() (*Config, error) {
 		OpenAITranscriptFormatModel: getEnv("OPENAI_TRANSCRIPT_FORMAT_MODEL", "gpt-4.1-mini"),
 
 		// JWT Authentication
-		JWTSecret:             getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),
-		LegacyAuthEnabled:     getEnvBool("LEGACY_AUTH_ENABLED", ginMode != "release"),
-		FirstPartyAuthEnabled: getEnvBool("FIRST_PARTY_AUTH_ENABLED", false),
-		WebCookieAuthEnabled:  getEnvBool("WEB_COOKIE_AUTH_ENABLED", false),
+		JWTSecret:                     getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),
+		LegacyAuthEnabled:             getEnvBool("LEGACY_AUTH_ENABLED", ginMode != "release"),
+		FirstPartyAuthEnabled:         getEnvBool("FIRST_PARTY_AUTH_ENABLED", false),
+		FirstPartyPasswordAuthEnabled: getEnvBool("FIRST_PARTY_PASSWORD_AUTH_ENABLED", false),
+		WebCookieAuthEnabled:          getEnvBool("WEB_COOKIE_AUTH_ENABLED", false),
 
 		// Clerk Authentication
 		ClerkPublishableKey:  getEnv("CLERK_PUBLISHABLE_KEY", ""),
@@ -197,6 +201,12 @@ func Load() (*Config, error) {
 	}
 	if cfg.WebCookieAuthEnabled && !cfg.FirstPartyAuthEnabled {
 		return nil, fmt.Errorf("WEB_COOKIE_AUTH_ENABLED requires FIRST_PARTY_AUTH_ENABLED")
+	}
+	if cfg.FirstPartyPasswordAuthEnabled && !cfg.FirstPartyAuthEnabled {
+		return nil, fmt.Errorf("FIRST_PARTY_PASSWORD_AUTH_ENABLED requires FIRST_PARTY_AUTH_ENABLED")
+	}
+	if cfg.FirstPartyPasswordAuthEnabled && cfg.LegacyAuthEnabled {
+		return nil, fmt.Errorf("FIRST_PARTY_PASSWORD_AUTH_ENABLED cannot be combined with LEGACY_AUTH_ENABLED")
 	}
 	// Once first-party auth is public, Clerk must be a bridge for accounts that
 	// were linked already. Otherwise a valid Clerk signup could bypass the

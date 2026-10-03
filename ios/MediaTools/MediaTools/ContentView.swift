@@ -7,6 +7,7 @@ struct ContentView: View {
     @Environment(RecordingUploadCoordinator.self) private var uploadCoordinator
     @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @Environment(DeviceSessionController.self) private var deviceSession
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showAuth = false
     @State private var isResolvingAccount = Configuration.firstPartyIOSAuthEnabled
     @State private var migrationFailed = false
@@ -15,11 +16,17 @@ struct ContentView: View {
     @State private var nativeAuthError: String?
     @State private var recoveryCode = ""
     @State private var showRecoveryCode = false
+    @State private var showPasswordSignIn = false
+    @State private var passwordEmail = ""
+    @State private var passwordValue = ""
+    @State private var passwordAuthAvailable: Bool?
+    @State private var passwordCapabilityRetry = 0
     private let forceSignedOutForUITesting: Bool
     private let tokenSync = TokenSyncService.shared
 
     init(forceSignedOutForUITesting: Bool = false) {
         self.forceSignedOutForUITesting = forceSignedOutForUITesting
+        _passwordAuthAvailable = State(initialValue: forceSignedOutForUITesting ? true : nil)
     }
 
     private var activeUserID: String? {
@@ -67,10 +74,16 @@ struct ContentView: View {
                 WelcomeView(
                     showAuth: $showAuth,
                     showRecoveryCode: $showRecoveryCode,
+                    showPasswordSignIn: $showPasswordSignIn,
                     recoveryCode: $recoveryCode,
+                    passwordEmail: $passwordEmail,
+                    passwordValue: $passwordValue,
+                    passwordAuthAvailable: passwordAuthAvailable,
                     nativeAuthOperation: nativeAuthOperation,
-                    nativeAuthError: nativeAuthError,
+                    nativeAuthError: $nativeAuthError,
+                    onRetryPasswordCapability: { passwordCapabilityRetry += 1 },
                     onPasskeySignIn: { await completeNativeSignIn(.passkey) },
+                    onPasswordSignIn: { await completeNativeSignIn(.password) },
                     onRecoveryCodeSignIn: { await completeNativeSignIn(.recoveryCode) }
                 )
                 .onAppear {
@@ -154,6 +167,20 @@ struct ContentView: View {
                 isResolvingAccount = false
             }
         }
+        .task(id: "password-capability|\(scenePhase)|\(activeUserID ?? "signed-out")|\(passwordCapabilityRetry)") {
+            guard Configuration.firstPartyIOSAuthEnabled,
+                  !forceSignedOutForUITesting,
+                  scenePhase == .active,
+                  activeUserID == nil else { return }
+            do {
+                let health: HealthResponse = try await APIClient.shared.getPublic("/health")
+                guard !Task.isCancelled else { return }
+                passwordAuthAvailable = health.passwordAuthEnabled == true
+            } catch {
+                guard !Task.isCancelled else { return }
+                passwordAuthAvailable = nil
+            }
+        }
         .sheet(isPresented: $showAuth) {
             AuthView()
         }
@@ -176,6 +203,13 @@ struct ContentView: View {
             switch operation {
             case .passkey:
                 try await FirstPartyAuthService.shared.signInWithPasskey()
+            case .password:
+                try await FirstPartyAuthService.shared.signInWithPassword(
+                    email: passwordEmail,
+                    password: passwordValue
+                )
+                passwordValue = ""
+                showPasswordSignIn = false
             case .recoveryCode:
                 try await FirstPartyAuthService.shared.redeemRecoveryCode(recoveryCode)
                 recoveryCode = ""
@@ -203,6 +237,7 @@ struct ContentView: View {
 
 enum NativeAuthOperation {
     case passkey
+    case password
     case recoveryCode
 }
 
@@ -211,10 +246,16 @@ enum NativeAuthOperation {
 struct WelcomeView: View {
     @Binding var showAuth: Bool
     @Binding var showRecoveryCode: Bool
+    @Binding var showPasswordSignIn: Bool
     @Binding var recoveryCode: String
+    @Binding var passwordEmail: String
+    @Binding var passwordValue: String
+    let passwordAuthAvailable: Bool?
     let nativeAuthOperation: NativeAuthOperation?
-    let nativeAuthError: String?
+    @Binding var nativeAuthError: String?
+    let onRetryPasswordCapability: () -> Void
     let onPasskeySignIn: () async -> Void
+    let onPasswordSignIn: () async -> Void
     let onRecoveryCodeSignIn: () async -> Void
     @Environment(RecordingCoordinator.self) private var recorder
 
@@ -326,6 +367,27 @@ struct WelcomeView: View {
 
                     if Configuration.firstPartyIOSAuthEnabled {
                         VStack(spacing: 10) {
+                            if passwordAuthAvailable == true {
+                                Button {
+                                    nativeAuthError = nil
+                                    showPasswordSignIn = true
+                                } label: {
+                                    Label("Sign in with email", systemImage: "envelope.fill")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .brandButtonStyle()
+                                .disabled(nativeAuthOperation != nil)
+                            } else if passwordAuthAvailable == nil {
+                                Button {
+                                    onRetryPasswordCapability()
+                                } label: {
+                                    Label("Check email sign-in", systemImage: "arrow.clockwise")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .secondaryButtonStyle()
+                                .disabled(nativeAuthOperation != nil)
+                            }
+
                             Button {
                                 Task { await onPasskeySignIn() }
                             } label: {
@@ -365,7 +427,7 @@ struct WelcomeView: View {
 
                         HStack(spacing: 12) {
                             Rectangle().fill(Theme.borderSubtle).frame(height: 1)
-                            Text("Existing sign-in")
+                            Text("More sign-in options")
                                 .font(Theme.caption(12, weight: .semibold))
                                 .foregroundStyle(Theme.textMuted)
                             Rectangle().fill(Theme.borderSubtle).frame(height: 1)
@@ -377,7 +439,7 @@ struct WelcomeView: View {
                     } label: {
                         Label(
                             Configuration.firstPartyIOSAuthEnabled
-                                ? "Use Apple, Google, or email"
+                                ? "Move an existing Clerk account"
                                 : "Sign in or create account",
                             systemImage: "arrow.right"
                         )
@@ -387,7 +449,7 @@ struct WelcomeView: View {
                     .disabled(nativeAuthOperation != nil)
 
                     Text(Configuration.firstPartyIOSAuthEnabled
-                         ? "Use passkey or recovery code first. Apple, Google, and email remain available for existing accounts during migration."
+                         ? "Apple, Google, and Clerk email sign-in are available only to move an existing account into Media Tools."
                          : "Continue with Apple, Google, or email. Apple lets you keep your email private.")
                         .font(Theme.caption(12))
                         .foregroundStyle(Theme.textMuted)
@@ -415,6 +477,93 @@ struct WelcomeView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showPasswordSignIn) {
+            PasswordSignInSheet(
+                email: $passwordEmail,
+                password: $passwordValue,
+                isSigningIn: nativeAuthOperation == .password,
+                errorMessage: nativeAuthError,
+                onCancel: { showPasswordSignIn = false; passwordValue = "" },
+                onContinue: { Task { await onPasswordSignIn() } }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(nativeAuthOperation == .password)
+        }
+        .onChange(of: showPasswordSignIn) { _, isPresented in
+            if isPresented {
+                nativeAuthError = nil
+            } else {
+                passwordValue = ""
+                nativeAuthError = nil
+            }
+        }
+    }
+}
+
+private struct PasswordSignInSheet: View {
+    @Binding var email: String
+    @Binding var password: String
+    let isSigningIn: Bool
+    let errorMessage: String?
+    let onCancel: () -> Void
+    let onContinue: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Sign in with email")
+                            .font(Theme.heading(24))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("Use your Media Tools password. This iPhone stays signed in until you sign out or revoke it.")
+                            .font(Theme.body(14))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    TextField("Email", text: $email)
+                        .keyboardType(.emailAddress)
+                        .textContentType(.username)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textFieldCardStyle()
+                        .accessibilityIdentifier("password-sign-in.email")
+                    SecureField("Password", text: $password)
+                        .textContentType(.password)
+                        .textFieldCardStyle()
+                        .accessibilityIdentifier("password-sign-in.password")
+                    if let errorMessage {
+                        Text(errorMessage).font(Theme.caption(13)).foregroundStyle(Theme.error)
+                    }
+                    Button { onContinue() } label: {
+                        HStack(spacing: 8) {
+                            if isSigningIn { ProgressView().tint(.white) }
+                            Text(isSigningIn ? "Signing in…" : "Sign in")
+                        }
+                        .font(Theme.body(15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(Theme.brand500, in: RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                    }
+                    .disabled(isSigningIn || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
+                    .accessibilityIdentifier("password-sign-in.continue")
+                }
+                .padding(20)
+            }
+            .background(Theme.surface)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { onCancel() }.disabled(isSigningIn) } }
+        }
+    }
+}
+
+private extension View {
+    func textFieldCardStyle() -> some View {
+        self
+            .padding(.horizontal, 14)
+            .frame(minHeight: 50)
+            .background(Theme.surfaceCard)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+            .overlay { RoundedRectangle(cornerRadius: Theme.radiusMedium).stroke(Theme.borderSubtle, lineWidth: 1) }
     }
 }
 

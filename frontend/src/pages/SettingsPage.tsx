@@ -7,6 +7,8 @@ import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
 import { isWebSessionActive } from '../lib/webSession';
 import { getPasskeyStatus, passkeysSupported, PasskeyError, registerPasskey } from '../lib/passkeys';
 import { RecoveryCodeSecuritySection } from '../components/RecoveryCodeSecuritySection';
+import { getPasswordStatus, PasswordError, setPassword } from '../lib/passwords';
+import { usePasswordAuthCapability } from '../hooks/usePasswordAuthCapability';
 
 const DeleteAccountSection = lazy(() => import('../components/DeleteAccountSection').then((module) => ({ default: module.DeleteAccountSection })));
 
@@ -15,6 +17,7 @@ export function SettingsPage() {
   const { isDark, toggle } = useTheme();
   const [cleared, setCleared] = useState(false);
   const { hasConsent: hasAIConsent, requestConsent: requestAIConsent, revokeConsent: revokeAIConsent } = useAIProcessingConsent();
+  const { status: passwordCapability, checking: checkingPasswordCapability, refresh: refreshPasswordCapability } = usePasswordAuthCapability();
 
   const clearLocalKey = () => {
     localStorage.removeItem('mta_api_key');
@@ -36,6 +39,18 @@ export function SettingsPage() {
       </section>
 
       {isFirstPartySession && <PasskeySecuritySection />}
+      {isFirstPartySession && passwordCapability === 'enabled' && <PasswordSecuritySection />}
+      {isFirstPartySession && passwordCapability === 'unknown' && <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold">Password</h2>
+            <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>Password availability could not be checked.</p>
+          </div>
+          <button type="button" onClick={() => void refreshPasswordCapability()} disabled={checkingPasswordCapability} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold disabled:opacity-50" style={{ borderColor: 'var(--color-border)' }}>
+            {checkingPasswordCapability && <Loader2 className="h-4 w-4 animate-spin" />}{checkingPasswordCapability ? 'Checking…' : 'Try again'}
+          </button>
+        </div>
+      </section>}
       {isFirstPartySession && <RecoveryCodeSecuritySection />}
 
       <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
@@ -140,6 +155,52 @@ export function SettingsPage() {
       )}
     </div>
   );
+}
+
+function PasswordSecuritySection() {
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [password, updatePassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    getPasswordStatus().then((status) => setConfigured(status.configured)).catch((caught) => {
+      setError(caught instanceof PasswordError ? caught.message : 'Could not check password status.');
+    });
+  }, []);
+
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (password !== confirmation) { setError('The passwords do not match.'); return; }
+    setSaving(true); setError(''); setMessage('');
+    try {
+      const status = await setPassword(password);
+      setConfigured(status.configured); updatePassword(''); setConfirmation('');
+      setMessage(configured ? 'Password changed. Other devices were signed out.' : 'Password created. You can now sign in with your email.');
+    } catch (caught) {
+      setError(caught instanceof PasswordError ? caught.message : 'Could not save the password.');
+    } finally { setSaving(false); }
+  };
+
+  return <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+    <div className="flex items-start gap-4">
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}><KeyRound className="h-5 w-5" /></div>
+      <div className="min-w-0 flex-1">
+        <h2 className="text-xl font-semibold">Password</h2>
+        <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{configured === null ? 'Checking password status…' : configured ? 'Change your Media Tools password. Other signed-in devices are revoked when you change it.' : 'Create a Media Tools password so you can sign in with your email on any device.'}</p>
+        <form onSubmit={(event) => void save(event)} className="mt-5 grid gap-3 sm:grid-cols-2">
+          <input type="password" autoComplete="new-password" value={password} onChange={(event) => updatePassword(event.target.value)} placeholder="New password" aria-label="New password" className="min-h-12 rounded-xl border bg-transparent px-4" style={{ borderColor: 'var(--color-border)' }} />
+          <input type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="Confirm password" aria-label="Confirm password" className="min-h-12 rounded-xl border bg-transparent px-4" style={{ borderColor: 'var(--color-border)' }} />
+          <p className="text-xs sm:col-span-2" style={{ color: 'var(--color-text-muted)' }}>Use at least 15 characters. Spaces and password managers are supported.</p>
+          {error && <p role="alert" className="text-sm sm:col-span-2" style={{ color: 'var(--color-danger)' }}>{error}</p>}
+          {message && <p role="status" className="text-sm sm:col-span-2" style={{ color: 'var(--color-success)' }}>{message}</p>}
+          <button type="submit" disabled={saving || password.length < 15 || confirmation.length < 15} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white disabled:opacity-50 sm:col-span-2 sm:justify-self-start" style={{ backgroundColor: 'var(--color-brand-500)' }}>{saving && <Loader2 className="h-4 w-4 animate-spin" />}{saving ? 'Saving…' : configured ? 'Change password' : 'Create password'}</button>
+        </form>
+      </div>
+    </div>
+  </section>;
 }
 
 function PasskeySecuritySection() {

@@ -8,12 +8,13 @@ useDefault = true
 # follow. These exceptions match only the exact placeholder families; they do
 # not exempt any file or credential type from scanning.
 [[allowlists]]
-description = "Documented API-key header placeholders"
+description = "Documented authentication header placeholders"
 targetRules = ["curl-auth-header"]
 regexTarget = "line"
 regexes = [
   '''(?i)X-API-Key:\s*(?:mta_your[_a-z0-9.-]*|YOUR_(?:API_)?KEY(?:_HERE)?)''',
   '''(?i)X-Admin-Key:\s*(?:your[-_]admin[-_]key|YOUR_ADMIN_KEY)''',
+  '''(?i)Authorization:\s*Bearer\s+mta_at_your_access_credential''',
 ]
 
 [[allowlists]]

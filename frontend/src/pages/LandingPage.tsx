@@ -4,6 +4,7 @@ import { ArrowRight, BookOpen, CheckCircle2, FileText, Library, Lock, Mic, Spark
 import { useAuthContext } from '../contexts/useAuthContext';
 import { PasskeySignInButton } from '../components/PasskeySignInButton';
 import { RecoveryCodeSignIn } from '../components/RecoveryCodeSignIn';
+import { PasswordSignIn } from '../components/PasswordSignIn';
 import { webSessionEnabled } from '../lib/webSession';
 
 const features = [
@@ -81,10 +82,11 @@ export function LandingPage() {
               </Link>
             ) : webSessionEnabled ? (
               <>
+                <PasswordSignIn onSuccess={() => navigate('/app')} />
                 <PasskeySignInButton onSuccess={() => navigate('/app')} />
                 <RecoveryCodeSignIn onSuccess={() => navigate('/app')} />
                 {isClerkEnabled && <SignInButton mode="modal" fallbackRedirectUrl="/app">
-                  <button className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border px-5 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>Use previous sign-in</button>
+                  <button className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border px-5 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>Move an existing Clerk account</button>
                 </SignInButton>}
               </>
             ) : isClerkEnabled ? (

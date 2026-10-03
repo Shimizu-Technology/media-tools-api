@@ -149,6 +149,7 @@ export interface HealthResponse {
   version: string;
   database: string;
   workers: number;
+  password_auth_enabled: boolean;
 }
 
 /**

@@ -66,14 +66,21 @@ final class MediaToolsUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.buttons["Continue with passkey"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Sign in with email"].exists)
         XCTAssertTrue(app.buttons["Use a recovery code"].exists)
-        XCTAssertTrue(app.buttons["Use Apple, Google, or email"].exists)
+        XCTAssertTrue(app.buttons["Move an existing Clerk account"].exists)
         let options = app.staticTexts["welcome.authentication.options"]
         XCTAssertTrue(options.exists)
         XCTAssertEqual(
             options.label,
-            "Use passkey or recovery code first. Apple, Google, and email remain available for existing accounts during migration."
+            "Apple, Google, and Clerk email sign-in are available only to move an existing account into Media Tools."
         )
+
+        app.buttons["Sign in with email"].tap()
+        XCTAssertTrue(app.staticTexts["Sign in with email"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["password-sign-in.email"].exists)
+        XCTAssertTrue(app.secureTextFields["password-sign-in.password"].exists)
+        XCTAssertTrue(app.buttons["password-sign-in.continue"].exists)
     }
 
     func testMainWorkspaceConnectsCaptureAndOrganizationDestinations() {
@@ -145,7 +152,7 @@ final class MediaToolsUITests: XCTestCase {
         app.buttons["clerk-migration.disconnect"].tap()
         XCTAssertTrue(app.buttons["Disconnect Clerk"].waitForExistence(timeout: 5))
         XCTAssertTrue(
-            app.staticTexts["Your recordings and current device session stay in Media Tools. Future sign-ins will use your passkey or a recovery code."].exists
+            app.staticTexts["Your recordings and current device session stay in Media Tools. Future sign-ins will use your password, passkey, or a recovery code."].exists
         )
         app.buttons["Disconnect Clerk"].tap()
         XCTAssertTrue(app.staticTexts["Media Tools sign-in active"].waitForExistence(timeout: 5))

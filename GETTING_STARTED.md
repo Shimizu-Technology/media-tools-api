@@ -180,11 +180,31 @@ curl http://localhost:8080/api/v1/ready | jq
 
 Open **http://localhost:5173** — you're in!
 
-### 6. (Optional) Enable Clerk Authentication
+### 6. (Optional) Enable First-Party Authentication
 
-Without Clerk keys, the app runs in **API-key-only development mode**. The `/app/*` workspace prompts for a local API key, while public docs remain available.
+Without auth flags, the app runs in **API-key-only development mode**. The
+`/app/*` workspace prompts for a local API key, while public docs remain
+available.
 
-To enable **user sign-in via Clerk** (Google/email login, user accounts):
+To exercise durable user sessions and first-party passwords locally, add:
+
+```bash
+LEGACY_AUTH_ENABLED=false
+FIRST_PARTY_AUTH_ENABLED=true
+FIRST_PARTY_PASSWORD_AUTH_ENABLED=true
+WEB_COOKIE_AUTH_ENABLED=true
+CORS_ORIGIN=http://localhost:5173
+```
+
+Accounts remain invite-only. Create an invitation through the admin endpoint,
+redeem it, then add a password, passkey, and recovery codes in Settings. Native
+and browser sessions use opaque access and rotating refresh credentials; the
+server stores only hashes. API keys remain available for agents and scripts.
+
+### Clerk migration bridge
+
+Clerk is optional and exists only to move an account that was linked before
+first-party auth. New development accounts should use invitations.
 
 #### a. Create a Clerk Application
 
@@ -223,23 +243,24 @@ make run
 make frontend-dev
 ```
 
-You should now see a signed-out landing page and a protected `/app/*` workspace. When a user signs in via Clerk, the app automatically:
-- Creates or updates a local user record linked to their Clerk ID
-- Sends fresh Clerk bearer tokens just-in-time on API requests
-- Shows their account controls inside the app shell
+Set `CLERK_MIGRATION_ONLY=true` whenever Clerk and first-party auth are enabled
+together. The server then accepts only an exact existing Clerk identity and
+will not create an account from a new Clerk signup.
 
-#### How Auth Works (Dual Mode)
+#### How Auth Works
 
-The app supports **two auth modes simultaneously**:
+The app supports two current authentication families:
 
 | Mode | How It Works | Best For |
 |------|-------------|----------|
 | **API Key** | `X-API-Key` header | Scripts, automation, CI/CD |
-| **Clerk JWT** | `Authorization: Bearer <token>` header | Browser users, the React UI |
+| **First-party session** | Opaque bearer credential or same-origin HttpOnly cookies | iPhone, Android, and browser users |
 
-Most media endpoints accept both modes. Developer-only webhook/ops flows still use API keys because webhooks fire for API-key-owned jobs.
+Clerk JWTs are accepted only during migration when configured. The old bcrypt
+plus JWT routes remain disabled when first-party password auth is on.
 
-**Without Clerk keys configured**, the frontend hides sign-in UI and protects `/app/*` with the local API-key prompt. No code changes needed — it's automatic.
+**Without user-auth flags configured**, the frontend hides sign-in UI and
+protects `/app/*` with the local API-key prompt.
 
 ---
 
