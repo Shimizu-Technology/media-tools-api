@@ -8,6 +8,7 @@ import { isWebSessionActive } from '../lib/webSession';
 import { getPasskeyStatus, passkeysSupported, PasskeyError, registerPasskey } from '../lib/passkeys';
 import { RecoveryCodeSecuritySection } from '../components/RecoveryCodeSecuritySection';
 import { getPasswordStatus, PasswordError, setPassword } from '../lib/passwords';
+import { usePasswordAuthCapability } from '../hooks/usePasswordAuthCapability';
 
 const DeleteAccountSection = lazy(() => import('../components/DeleteAccountSection').then((module) => ({ default: module.DeleteAccountSection })));
 
@@ -16,6 +17,7 @@ export function SettingsPage() {
   const { isDark, toggle } = useTheme();
   const [cleared, setCleared] = useState(false);
   const { hasConsent: hasAIConsent, requestConsent: requestAIConsent, revokeConsent: revokeAIConsent } = useAIProcessingConsent();
+  const { status: passwordCapability, checking: checkingPasswordCapability, refresh: refreshPasswordCapability } = usePasswordAuthCapability();
 
   const clearLocalKey = () => {
     localStorage.removeItem('mta_api_key');
@@ -37,7 +39,18 @@ export function SettingsPage() {
       </section>
 
       {isFirstPartySession && <PasskeySecuritySection />}
-      {isFirstPartySession && <PasswordSecuritySection />}
+      {isFirstPartySession && passwordCapability === 'enabled' && <PasswordSecuritySection />}
+      {isFirstPartySession && passwordCapability === 'unknown' && <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold">Password</h2>
+            <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>Password availability could not be checked.</p>
+          </div>
+          <button type="button" onClick={() => void refreshPasswordCapability()} disabled={checkingPasswordCapability} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold disabled:opacity-50" style={{ borderColor: 'var(--color-border)' }}>
+            {checkingPasswordCapability && <Loader2 className="h-4 w-4 animate-spin" />}{checkingPasswordCapability ? 'Checking…' : 'Try again'}
+          </button>
+        </div>
+      </section>}
       {isFirstPartySession && <RecoveryCodeSecuritySection />}
 
       <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>

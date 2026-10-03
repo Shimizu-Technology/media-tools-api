@@ -47,7 +47,7 @@ func (h *Handler) CreateOnboardingReissue(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "A user ID is required", Code: http.StatusBadRequest})
 		return
 	}
-	reissue, token, err := h.DB.CreateOnboardingReissue(c.Request.Context(), req.UserID)
+	reissue, token, err := h.DB.CreateOnboardingReissue(c.Request.Context(), req.UserID, h.PasswordAuthEnabled)
 	switch {
 	case err == nil:
 		c.Header("Cache-Control", "no-store")
@@ -81,7 +81,7 @@ func (h *Handler) RedeemOnboardingReissue(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "A rescue link, saved refresh token, and valid native client type are required", Code: http.StatusBadRequest})
 		return
 	}
-	pair, err := h.DB.RedeemOnboardingReissue(c.Request.Context(), req.Token, req.ClientType, req.DeviceName, req.NextRefreshToken)
+	pair, err := h.DB.RedeemOnboardingReissue(c.Request.Context(), req.Token, req.ClientType, req.DeviceName, req.NextRefreshToken, h.PasswordAuthEnabled)
 	switch {
 	case err == nil:
 		c.Header("Cache-Control", "no-store")

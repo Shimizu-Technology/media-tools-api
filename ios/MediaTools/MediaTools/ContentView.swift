@@ -7,6 +7,7 @@ struct ContentView: View {
     @Environment(RecordingUploadCoordinator.self) private var uploadCoordinator
     @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @Environment(DeviceSessionController.self) private var deviceSession
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showAuth = false
     @State private var isResolvingAccount = Configuration.firstPartyIOSAuthEnabled
     @State private var migrationFailed = false
@@ -18,13 +19,14 @@ struct ContentView: View {
     @State private var showPasswordSignIn = false
     @State private var passwordEmail = ""
     @State private var passwordValue = ""
-    @State private var passwordAuthAvailable: Bool
+    @State private var passwordAuthAvailable: Bool?
+    @State private var passwordCapabilityRetry = 0
     private let forceSignedOutForUITesting: Bool
     private let tokenSync = TokenSyncService.shared
 
     init(forceSignedOutForUITesting: Bool = false) {
         self.forceSignedOutForUITesting = forceSignedOutForUITesting
-        _passwordAuthAvailable = State(initialValue: forceSignedOutForUITesting)
+        _passwordAuthAvailable = State(initialValue: forceSignedOutForUITesting ? true : nil)
     }
 
     private var activeUserID: String? {
@@ -79,6 +81,7 @@ struct ContentView: View {
                     passwordAuthAvailable: passwordAuthAvailable,
                     nativeAuthOperation: nativeAuthOperation,
                     nativeAuthError: $nativeAuthError,
+                    onRetryPasswordCapability: { passwordCapabilityRetry += 1 },
                     onPasskeySignIn: { await completeNativeSignIn(.passkey) },
                     onPasswordSignIn: { await completeNativeSignIn(.password) },
                     onRecoveryCodeSignIn: { await completeNativeSignIn(.recoveryCode) }
@@ -164,15 +167,18 @@ struct ContentView: View {
                 isResolvingAccount = false
             }
         }
-        .task {
-            guard Configuration.firstPartyIOSAuthEnabled, !forceSignedOutForUITesting else { return }
+        .task(id: "password-capability|\(scenePhase)|\(activeUserID ?? "signed-out")|\(passwordCapabilityRetry)") {
+            guard Configuration.firstPartyIOSAuthEnabled,
+                  !forceSignedOutForUITesting,
+                  scenePhase == .active,
+                  activeUserID == nil else { return }
             do {
                 let health: HealthResponse = try await APIClient.shared.getPublic("/health")
                 guard !Task.isCancelled else { return }
                 passwordAuthAvailable = health.passwordAuthEnabled == true
             } catch {
                 guard !Task.isCancelled else { return }
-                passwordAuthAvailable = false
+                passwordAuthAvailable = nil
             }
         }
         .sheet(isPresented: $showAuth) {
@@ -244,9 +250,10 @@ struct WelcomeView: View {
     @Binding var recoveryCode: String
     @Binding var passwordEmail: String
     @Binding var passwordValue: String
-    let passwordAuthAvailable: Bool
+    let passwordAuthAvailable: Bool?
     let nativeAuthOperation: NativeAuthOperation?
     @Binding var nativeAuthError: String?
+    let onRetryPasswordCapability: () -> Void
     let onPasskeySignIn: () async -> Void
     let onPasswordSignIn: () async -> Void
     let onRecoveryCodeSignIn: () async -> Void
@@ -360,7 +367,7 @@ struct WelcomeView: View {
 
                     if Configuration.firstPartyIOSAuthEnabled {
                         VStack(spacing: 10) {
-                            if passwordAuthAvailable {
+                            if passwordAuthAvailable == true {
                                 Button {
                                     nativeAuthError = nil
                                     showPasswordSignIn = true
@@ -369,6 +376,15 @@ struct WelcomeView: View {
                                         .frame(maxWidth: .infinity)
                                 }
                                 .brandButtonStyle()
+                                .disabled(nativeAuthOperation != nil)
+                            } else if passwordAuthAvailable == nil {
+                                Button {
+                                    onRetryPasswordCapability()
+                                } label: {
+                                    Label("Check email sign-in", systemImage: "arrow.clockwise")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .secondaryButtonStyle()
                                 .disabled(nativeAuthOperation != nil)
                             }
 

@@ -350,7 +350,7 @@ func TestNativeRescueClearsWebOnlyGateForProtectedAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, userID) })
-	_, token, err := db.CreateOnboardingReissue(ctx, userID)
+	_, token, err := db.CreateOnboardingReissue(ctx, userID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +358,7 @@ func TestNativeRescueClearsWebOnlyGateForProtectedAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pair, err := db.RedeemOnboardingReissue(ctx, token, "ios", "iPhone", successor)
+	pair, err := db.RedeemOnboardingReissue(ctx, token, "ios", "iPhone", successor, true)
 	if err != nil {
 		t.Fatal(err)
 	}

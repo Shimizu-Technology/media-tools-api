@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, LockKeyhole, Mail, X } from 'lucide-react';
 import { PasswordError, signInWithPassword } from '../lib/passwords';
+import { usePasswordAuthCapability } from '../hooks/usePasswordAuthCapability';
 
 export function PasswordSignIn({ onSuccess, className = '' }: { onSuccess?: () => void; className?: string }) {
-  const [available, setAvailable] = useState(false);
+  const { status: capability, checking, refresh: refreshCapability } = usePasswordAuthCapability();
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [email, setEmail] = useState('');
@@ -14,15 +15,6 @@ export function PasswordSignIn({ onSuccess, className = '' }: { onSuccess?: () =
   const dialogRef = useRef<HTMLElement>(null);
   const submittingRef = useRef(false);
   submittingRef.current = submitting;
-
-  useEffect(() => {
-    let active = true;
-    fetch('/api/v1/health', { credentials: 'same-origin' })
-      .then(async (response) => response.ok ? await response.json() as { password_auth_enabled?: boolean } : null)
-      .then((health) => { if (active) setAvailable(health?.password_auth_enabled === true); })
-      .catch(() => { if (active) setAvailable(false); });
-    return () => { active = false; };
-  }, []);
 
   const close = useCallback(() => {
     if (submittingRef.current) return;
@@ -61,7 +53,12 @@ export function PasswordSignIn({ onSuccess, className = '' }: { onSuccess?: () =
     } finally { setSubmitting(false); }
   };
 
-  if (!available) return null;
+  if (capability === 'disabled') return null;
+  if (capability === 'unknown') {
+    return <button type="button" onClick={() => void refreshCapability()} disabled={checking} className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border px-5 text-sm font-semibold disabled:opacity-50 ${className}`} style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
+      {checking && <Loader2 className="h-4 w-4 animate-spin" />}{checking ? 'Checking email sign-in…' : 'Check email sign-in'}
+    </button>;
+  }
 
   return <>
     <button ref={triggerRef} type="button" onClick={() => setOpen(true)} className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white ${className}`} style={{ backgroundColor: 'var(--color-brand-500)' }}>

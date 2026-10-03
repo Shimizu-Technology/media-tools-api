@@ -78,6 +78,7 @@ func NewHandler(db *database.DB, wp *worker.Pool, at *audio.Transcriber, as *sto
 // database so infrastructure probes do not prevent Neon from scaling to zero.
 // GET /api/v1/health
 func (h *Handler) HealthCheck(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, h.healthResponse("ok", "unchecked"))
 }
 
@@ -85,6 +86,7 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 // for explicit diagnostics, not high-frequency infrastructure polling.
 // GET /api/v1/ready
 func (h *Handler) ReadinessCheck(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	if h.readinessChecker == nil {
 		c.JSON(http.StatusServiceUnavailable, h.healthResponse("unhealthy", "unhealthy"))
 		return
