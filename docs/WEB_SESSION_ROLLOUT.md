@@ -3,8 +3,8 @@
 Media Tools web auth uses first-party access and refresh cookies. A passkey can
 restore or create that session without Clerk. Clerk is an optional migration
 bridge that links a verified existing Clerk subject to the same stable
-`users.id`; it is not required after a user has enrolled a passkey and saved
-recovery codes.
+`users.id`; it is not required after a user has enrolled a password or passkey
+and saved recovery codes.
 
 ## Security contract
 
@@ -33,31 +33,33 @@ recovery codes.
 
 ## Deployment order
 
-1. Deploy all auth migrations and API code with `FIRST_PARTY_AUTH_ENABLED=false`,
-   `FIRST_PARTY_PASSWORD_AUTH_ENABLED=false`, `WEB_COOKIE_AUTH_ENABLED=false`,
-   and `CLERK_MIGRATION_ONLY=false`.
+1. Keep the already-live `FIRST_PARTY_AUTH_ENABLED=true` and
+   `CLERK_MIGRATION_ONLY=true`. Deploy migration 054 and the password API with
+   `FIRST_PARTY_PASSWORD_AUTH_ENABLED=false` and
+   `WEB_COOKIE_AUTH_ENABLED=false`.
 2. Configure the exact canonical `CORS_ORIGIN` as
    `https://media.shimizu-technology.com`. Add a preview origin only when it is
    intentionally trusted for auth. Keep `WEB_COOKIE_SECURE=true` in production.
 3. Verify Netlify sends `/api/*` to the Render API through the same-origin proxy
    and that the old Netlify hostname redirects to the canonical domain.
 4. Confirm the existing owner has an exact Clerk identity in
-   `auth_identities` (or an exact legacy `users.clerk_id`), then enable
-   `CLERK_MIGRATION_ONLY`. Verify the owner can still authenticate and an
+   `auth_identities` (or an exact legacy `users.clerk_id`). Verify the owner can
+   still authenticate and an
    unknown Clerk subject receives a generic 401 without creating a user. In
    release mode the server refuses to start with Clerk plus first-party auth
    unless this guard is enabled.
-5. Enable `FIRST_PARTY_AUTH_ENABLED`, then
-   `FIRST_PARTY_PASSWORD_AUTH_ENABLED`, then `WEB_COOKIE_AUTH_ENABLED` on Render.
-   Verify readiness, cookie attributes, passkey begin/finish, response-loss
-   retry, logout revocation, and account switching before enabling the frontend.
-6. Build the frontend with `VITE_WEB_COOKIE_AUTH_ENABLED=true` and no
+5. Enable only `FIRST_PARTY_PASSWORD_AUTH_ENABLED` for the build 13 iOS
+   rollout. Verify readiness, password enrollment, sign-in, response-loss
+   retry, replacement revocation, passkey/recovery fallback, and sign-out on
+   the physical iPhone. Keep `WEB_COOKIE_AUTH_ENABLED=false`.
+6. For the later browser rollout, enable `WEB_COOKIE_AUTH_ENABLED`, then build
+   the frontend with `VITE_WEB_COOKIE_AUTH_ENABLED=true` and no
    `VITE_API_URL`. `VITE_CLERK_PUBLISHABLE_KEY` may remain during migration, but
    also test a build without it: passkey restore, passkey sign-in, Settings
    enrollment, recovery-code sign-in and rotation, account deletion, and
    sign-out must still work.
 7. On the existing owner account, confirm the same stable user and media appear,
-   enroll a passkey, save recovery codes, sign out, sign in with the passkey,
+   create a password or enroll a passkey, save recovery codes, sign out, sign in with the first-party method,
    reload after access expiry, simulate a lost finish response, and verify the
    previous Clerk sign-in can still bridge only the same account.
 
@@ -71,7 +73,7 @@ Disable `VITE_WEB_COOKIE_AUTH_ENABLED` first so new browser traffic stops using
 cookie auth. Then disable `WEB_COOKIE_AUTH_ENABLED` after in-flight traffic has
 drained. Keep `FIRST_PARTY_AUTH_ENABLED` while native clients use first-party
 sessions. Do not remove migrations or delete session rows during rollback.
-Clerk remains the temporary fallback until passkey and recovery sign-in have
+Clerk remains the temporary fallback until password or passkey plus recovery sign-in have
 been verified on the owner account and future-user onboarding is available.
 If first-party auth must be rolled back temporarily, leave
 `CLERK_MIGRATION_ONLY=true`; reopening Clerk account creation would bypass
@@ -80,15 +82,15 @@ change after reviewing that impact.
 
 ## Clerk retirement
 
-After the owner has enrolled a passkey and confirmed a recovery-code set, use
+After the owner has enrolled a password or passkey and confirmed a recovery-code set, use
 `GET /api/v1/auth/clerk-detachment` from a first-party session to verify the
 factor counts. `POST /api/v1/auth/clerk-detachment` then removes only the Clerk
 link; the stable user, media, API keys, and device sessions remain. The detach
-request is idempotent and refuses a linked account that lacks either recovery
-factor.
+request is idempotent and refuses a linked account that lacks a password or
+passkey plus an unused recovery code.
 
 On iOS, Settings reads this readiness from the current first-party device
-session and shows the disconnect action only when both factors are ready. The
+session and shows the disconnect action only when both requirements are ready. The
 client changes its stored session from Clerk-bootstrapped to first-party only
 after the server reports `linked:false`; it keeps the same session, stable user
 ID, recordings, and upload ownership. If the detach response or local Keychain

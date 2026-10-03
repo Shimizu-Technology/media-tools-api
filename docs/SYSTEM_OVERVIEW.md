@@ -49,9 +49,9 @@ server restart does not silently discard accepted work.
 
 | Surface | Primary role | Authentication |
 |---|---|---|
-| React web app | Full workspace, processing center, exports, developer tools | Clerk JWT or local API-key mode |
-| SwiftUI iPhone app | Fast capture, recording, library search, details, chat, and collections | Native Clerk session |
-| Go API | Media processing and automation | `X-API-Key` or Clerk/legacy bearer token |
+| React web app | Full workspace, processing center, exports, developer tools | First-party cookie session or local API-key mode; Clerk is a migration bridge |
+| SwiftUI iPhone app | Fast capture, recording, library search, details, chat, and collections | First-party password, passkey, or recovery-code session |
+| Go API | Media processing and automation | `X-API-Key` or opaque first-party access credential; Clerk is migration-only |
 
 The iPhone client is native SwiftUI, not React Native. The Share Extension
 stages supported files locally for the app to import after launch. The widget
@@ -100,7 +100,7 @@ still needs TestFlight verification.
 2. `internal/router/router.go` — public, authenticated, and admin route groups.
 3. `internal/models/models.go` — core API/domain structures.
 4. `internal/services/worker/worker.go` — durable job execution and recovery.
-5. `internal/middleware/` — API-key and Clerk authentication, CORS, rate limits.
+5. `internal/middleware/` — API-key, first-party session, and migration-only Clerk authentication, CORS, and rate limits.
 6. `frontend/src/App.tsx` — web routes and app shell.
 7. `ios/MediaTools/MediaTools/` — native app, services, and SwiftUI workflows.
 

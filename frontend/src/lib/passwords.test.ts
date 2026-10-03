@@ -58,18 +58,38 @@ describe('web password sign-in', () => {
     expect(fetchMock.mock.calls[2][1]?.body).toBe(fetchMock.mock.calls[1][1]?.body);
   });
 
-  it('accepts a committed session when both finish responses are lost', async () => {
+  it('does not mistake an existing cookie session for a lost password response', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockRejectedValueOnce(new TypeError('first response lost'))
       .mockRejectedValueOnce(new TypeError('retry response lost'))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: true, user_id: 'user-1' }), {
+      .mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: true, user_id: 'old-user' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(signInWithPassword('owner@example.com', 'aaaaaaaaaaaaaaa')).resolves.toBeUndefined();
+    await expect(signInWithPassword('owner@example.com', 'aaaaaaaaaaaaaaa'))
+      .rejects.toMatchObject({ code: 'network_error' });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not treat a rejected password as success because another session exists', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'invalid_credentials', message: 'Email or password is incorrect' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: true, user_id: 'old-user' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(signInWithPassword('owner@example.com', 'aaaaaaaaaaaaaaa'))
+      .rejects.toMatchObject({ code: 'invalid_credentials' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('rejects token-bearing JSON even when the server reports success', async () => {

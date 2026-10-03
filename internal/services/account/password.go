@@ -46,8 +46,9 @@ type PasswordVerification struct {
 // intentionally expensive; without a shared cap a burst of login attempts can
 // exhaust a small Render instance before HTTP rate limiting takes effect.
 type PasswordHasher struct {
-	semaphore chan struct{}
-	dummyHash string
+	semaphore       chan struct{}
+	dummyHash       string
+	dummyBcryptHash string
 }
 
 func NewPasswordHasher(maxConcurrent int) (*PasswordHasher, error) {
@@ -60,6 +61,11 @@ func NewPasswordHasher(maxConcurrent int) (*PasswordHasher, error) {
 		return nil, fmt.Errorf("create dummy password hash: %w", err)
 	}
 	h.dummyHash = dummy
+	dummyBcrypt, err := bcrypt.GenerateFromPassword([]byte("dummy-password-never-used"), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, fmt.Errorf("create dummy bcrypt hash: %w", err)
+	}
+	h.dummyBcryptHash = string(dummyBcrypt)
 	return h, nil
 }
 
@@ -82,8 +88,13 @@ func NormalizePasswordForLogin(password string) (string, bool) {
 	if !utf8.ValidString(password) || len(password) == 0 || len(password) > 1024 {
 		return "", false
 	}
-	return norm.NFC.String(password), true
+	// Legacy bcrypt credentials were created from the exact submitted bytes.
+	// Preserve those bytes for verification; Verify applies NFC only to the
+	// first-party Argon2id path, and a successful bcrypt login rehashes NFC.
+	return password, true
 }
+
+func NormalizeVerifiedPassword(password string) string { return norm.NFC.String(password) }
 
 func (h *PasswordHasher) acquire(ctx context.Context) error {
 	select {
@@ -117,8 +128,13 @@ func (h *PasswordHasher) Verify(ctx context.Context, encoded, password string) (
 		if err := h.acquire(ctx); err != nil {
 			return PasswordVerification{}, err
 		}
-		defer h.release()
 		err := bcrypt.CompareHashAndPassword([]byte(encoded), []byte(password))
+		h.release()
+		// Unknown accounts and Argon2id accounts perform both bounded primitives
+		// too, keeping legacy-account timing from becoming an email oracle.
+		if _, paddingErr := h.verifyArgon2(ctx, h.dummyHash, NormalizeVerifiedPassword(password)); paddingErr != nil {
+			return PasswordVerification{}, paddingErr
+		}
 		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
 			return PasswordVerification{}, nil
 		}
@@ -128,6 +144,19 @@ func (h *PasswordHasher) Verify(ctx context.Context, encoded, password string) (
 		return PasswordVerification{Valid: true, NeedsRehash: true}, nil
 	}
 
+	verification, err := h.verifyArgon2(ctx, encoded, NormalizeVerifiedPassword(password))
+	if err != nil {
+		return PasswordVerification{}, err
+	}
+	if err := h.acquire(ctx); err != nil {
+		return PasswordVerification{}, err
+	}
+	_ = bcrypt.CompareHashAndPassword([]byte(h.dummyBcryptHash), []byte(password))
+	h.release()
+	return verification, nil
+}
+
+func (h *PasswordHasher) verifyArgon2(ctx context.Context, encoded, password string) (PasswordVerification, error) {
 	params, salt, expected, err := parseArgon2id(encoded)
 	if err != nil {
 		return PasswordVerification{}, err

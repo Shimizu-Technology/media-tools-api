@@ -44,7 +44,7 @@ func runHealthHandler(t *testing.T, handler gin.HandlerFunc) (int, models.Health
 
 func TestHealthCheckDoesNotQueryDatabase(t *testing.T) {
 	checker := &stubReadinessChecker{}
-	handler := &Handler{readinessChecker: checker, Version: "test-build"}
+	handler := &Handler{readinessChecker: checker, Version: "test-build", PasswordAuthEnabled: true}
 
 	status, response := runHealthHandler(t, handler.HealthCheck)
 
@@ -56,6 +56,9 @@ func TestHealthCheckDoesNotQueryDatabase(t *testing.T) {
 	}
 	if response.Version != "test-build" {
 		t.Fatalf("version = %q, want build version", response.Version)
+	}
+	if !response.PasswordAuthEnabled {
+		t.Fatal("password capability was not reported")
 	}
 	if checker.called != 0 {
 		t.Fatalf("database health checker called %d times, want 0", checker.called)

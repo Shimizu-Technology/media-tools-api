@@ -18,6 +18,7 @@ var (
 
 // CreateUser inserts a new user record.
 func (db *DB) CreateUser(ctx context.Context, u *models.User) error {
+	u.Email = NormalizeLoginEmail(u.Email)
 	query := `
 		INSERT INTO users (email, password_hash, name)
 		VALUES ($1, $2, $3)
@@ -31,7 +32,7 @@ func (db *DB) CreateUser(ctx context.Context, u *models.User) error {
 // GetUserByEmail retrieves a user by email address.
 func (db *DB) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	var u models.User
-	err := db.GetContext(ctx, &u, `SELECT * FROM users WHERE email = $1`, email)
+	err := db.GetContext(ctx, &u, `SELECT * FROM users WHERE lower(normalize(btrim(email), NFC)) = $1`, NormalizeLoginEmail(email))
 	if err != nil {
 		return nil, fmt.Errorf("get user by email: %w", err)
 	}
@@ -40,7 +41,7 @@ func (db *DB) GetUserByEmail(ctx context.Context, email string) (*models.User, e
 
 func (db *DB) getUserByEmailFold(ctx context.Context, email string) (*models.User, error) {
 	var u models.User
-	err := db.GetContext(ctx, &u, `SELECT * FROM users WHERE lower(email) = lower($1)`, email)
+	err := db.GetContext(ctx, &u, `SELECT * FROM users WHERE lower(normalize(btrim(email), NFC)) = $1`, NormalizeLoginEmail(email))
 	if err != nil {
 		return nil, fmt.Errorf("get user by email: %w", err)
 	}
@@ -135,6 +136,7 @@ func (db *DB) CreateUserFromClerk(ctx context.Context, u *models.User) error {
 	if u.ClerkID == nil || *u.ClerkID == "" {
 		return fmt.Errorf("clerk_id is required for CreateUserFromClerk")
 	}
+	u.Email = NormalizeLoginEmail(u.Email)
 
 	query := `
 		INSERT INTO users (email, password_hash, name, clerk_id)
@@ -159,7 +161,7 @@ func (db *DB) LinkClerkIDToUser(ctx context.Context, userID, clerkID string) err
 // 2. Reject matching email owned by a different identity
 // 3. Not found → create new Clerk-backed user
 func (db *DB) FindOrCreateClerkUser(ctx context.Context, clerkID, email, name string) (*models.User, error) {
-	email = strings.ToLower(strings.TrimSpace(email))
+	email = NormalizeLoginEmail(email)
 	name = strings.TrimSpace(name)
 
 	// 1. Already linked to Clerk

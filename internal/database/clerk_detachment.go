@@ -19,7 +19,7 @@ type ClerkDetachmentReadiness struct {
 	UnusedRecoveryCodes int  `json:"unused_recovery_codes"`
 }
 
-func clerkDetachmentReadinessTx(ctx context.Context, tx *sql.Tx, userID string) (*ClerkDetachmentReadiness, error) {
+func clerkDetachmentReadinessTx(ctx context.Context, tx *sql.Tx, userID string, passwordAuthEnabled bool) (*ClerkDetachmentReadiness, error) {
 	var status ClerkDetachmentReadiness
 	var clerkID sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT clerk_id FROM users WHERE id = $1 FOR UPDATE /* clerk-detachment-lock */`, userID).Scan(&clerkID); err != nil {
@@ -34,6 +34,9 @@ func clerkDetachmentReadinessTx(ctx context.Context, tx *sql.Tx, userID string) 
 		Scan(&status.Linked, &status.PasskeyCount, &status.PasswordConfigured, &status.UnusedRecoveryCodes); err != nil {
 		return nil, fmt.Errorf("check Clerk detachment factors: %w", err)
 	}
+	if !passwordAuthEnabled {
+		status.PasswordConfigured = false
+	}
 	status.Linked = status.Linked || (clerkID.Valid && clerkID.String != "")
 	status.Ready = !status.Linked || ((status.PasskeyCount > 0 || status.PasswordConfigured) && status.UnusedRecoveryCodes > 0)
 	return &status, nil
@@ -43,13 +46,13 @@ func clerkDetachmentReadinessTx(ctx context.Context, tx *sql.Tx, userID string) 
 // The same account lock is used by DetachClerkIdentity and recovery-code
 // rotation/redemption, so the operation cannot race a code becoming active or
 // consumed while it decides whether the account remains recoverable.
-func (db *DB) GetClerkDetachmentReadiness(ctx context.Context, userID string) (*ClerkDetachmentReadiness, error) {
+func (db *DB) GetClerkDetachmentReadiness(ctx context.Context, userID string, passwordAuthEnabled bool) (*ClerkDetachmentReadiness, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin Clerk detachment readiness: %w", err)
 	}
 	defer tx.Rollback()
-	status, err := clerkDetachmentReadinessTx(ctx, tx, userID)
+	status, err := clerkDetachmentReadinessTx(ctx, tx, userID, passwordAuthEnabled)
 	if err != nil {
 		return nil, err
 	}
@@ -62,13 +65,13 @@ func (db *DB) GetClerkDetachmentReadiness(ctx context.Context, userID string) (*
 // DetachClerkIdentity removes only the provider link after first-party recovery
 // is ready. The stable user, content, API keys, and device sessions are kept.
 // Repeating the operation after a successful detach is an idempotent success.
-func (db *DB) DetachClerkIdentity(ctx context.Context, userID string) (*ClerkDetachmentReadiness, error) {
+func (db *DB) DetachClerkIdentity(ctx context.Context, userID string, passwordAuthEnabled bool) (*ClerkDetachmentReadiness, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin Clerk detachment: %w", err)
 	}
 	defer tx.Rollback()
-	status, err := clerkDetachmentReadinessTx(ctx, tx, userID)
+	status, err := clerkDetachmentReadinessTx(ctx, tx, userID, passwordAuthEnabled)
 	if err != nil {
 		return nil, err
 	}

@@ -25,7 +25,7 @@ type AuthInvitation struct {
 }
 
 func normalizeInvitationEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
+	return NormalizeLoginEmail(email)
 }
 
 func invitationTokenHash(token string) (string, bool) {
@@ -61,7 +61,7 @@ func (db *DB) CreateInvitation(ctx context.Context, email, name string) (*AuthIn
 		return nil, "", fmt.Errorf("lock invitation email: %w", err)
 	}
 	var existing int
-	if err := tx.GetContext(ctx, &existing, `SELECT COUNT(*) FROM users WHERE lower(email) = lower($1)`, email); err != nil {
+	if err := tx.GetContext(ctx, &existing, `SELECT COUNT(*) FROM users WHERE lower(normalize(btrim(email), NFC)) = $1`, email); err != nil {
 		return nil, "", fmt.Errorf("check invitation email: %w", err)
 	}
 	if existing > 0 {
@@ -69,7 +69,7 @@ func (db *DB) CreateInvitation(ctx context.Context, email, name string) (*AuthIn
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE auth_invitations SET revoked_at = $2
-		WHERE lower(email) = lower($1) AND consumed_at IS NULL AND revoked_at IS NULL`, email, now); err != nil {
+		WHERE lower(normalize(btrim(email), NFC)) = $1 AND consumed_at IS NULL AND revoked_at IS NULL`, email, now); err != nil {
 		return nil, "", fmt.Errorf("supersede invitation: %w", err)
 	}
 	invitation := &AuthInvitation{}
@@ -188,7 +188,7 @@ func (db *DB) redeemInvitation(ctx context.Context, token, clientType, deviceNam
 		return nil, ErrInvitationInvalid
 	}
 	var existing int
-	if err := tx.GetContext(ctx, &existing, `SELECT COUNT(*) FROM users WHERE lower(email) = lower($1)`, invitation.Email); err != nil {
+	if err := tx.GetContext(ctx, &existing, `SELECT COUNT(*) FROM users WHERE lower(normalize(btrim(email), NFC)) = $1`, normalizeInvitationEmail(invitation.Email)); err != nil {
 		return nil, fmt.Errorf("check invitation account: %w", err)
 	}
 	if existing > 0 {

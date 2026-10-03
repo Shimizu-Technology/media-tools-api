@@ -90,6 +90,11 @@ func (db *DB) RecordPasswordFailure(ctx context.Context, userID, hashSnapshot st
 	if err != nil {
 		return fmt.Errorf("lock password failure: %w", err)
 	}
+	if row.LockedUntil != nil && now.Before(*row.LockedUntil) {
+		// Do not let a caller keep extending an active lock indefinitely. The
+		// handler has already performed uniform-cost password verification.
+		return nil
+	}
 	attempts := row.FailedAttempts + 1
 	window := now
 	if row.FailureWindowStartedAt != nil && now.Sub(*row.FailureWindowStartedAt) < passwordFailureWindow {
@@ -104,8 +109,8 @@ func (db *DB) RecordPasswordFailure(ctx context.Context, userID, hashSnapshot st
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE auth_password_credentials
 		SET failed_attempts = $2, failure_window_started_at = $3,
-		    locked_until = $4, updated_at = $5
-		WHERE user_id = $1`, userID, attempts, window, lockedUntil, now); err != nil {
+		    locked_until = $4
+		WHERE user_id = $1`, userID, attempts, window, lockedUntil); err != nil {
 		return fmt.Errorf("record password failure: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -143,6 +148,13 @@ func (db *DB) createOrRecoverPasswordSession(ctx context.Context, userID, hashSn
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, successorHash); err != nil {
 		return nil, fmt.Errorf("lock password session successor: %w", err)
 	}
+	var lockedUserID string
+	if err := tx.GetContext(ctx, &lockedUserID, `SELECT id FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrPasswordCredentialInvalid
+		}
+		return nil, fmt.Errorf("lock password account: %w", err)
+	}
 	var row PasswordCredential
 	err = tx.GetContext(ctx, &row, `
 		SELECT user_id, email_normalized, password_hash, failed_attempts,
@@ -179,8 +191,8 @@ func (db *DB) createOrRecoverPasswordSession(ctx context.Context, userID, hashSn
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE auth_password_credentials
 		SET failed_attempts = 0, failure_window_started_at = NULL,
-		    locked_until = NULL, updated_at = GREATEST(updated_at, $2)
-		WHERE user_id = $1`, userID, now); err != nil {
+		    locked_until = NULL
+		WHERE user_id = $1`, userID); err != nil {
 		return nil, fmt.Errorf("clear password failures: %w", err)
 	}
 	if err := revokeBrowserSessionsByCredentialTx(ctx, tx, existingCredentials, pair.SessionID, now); err != nil {

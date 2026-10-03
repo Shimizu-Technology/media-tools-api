@@ -31,6 +31,7 @@ struct SettingsView: View {
     @State private var deviceAccountRetry = 0
     @State private var passkeyStatus: PasskeyStatus?
     @State private var passwordStatus: PasswordStatus?
+    @State private var passwordAuthAvailable = false
     @State private var showPasswordSetup = false
     @State private var newPassword = ""
     @State private var confirmPassword = ""
@@ -128,6 +129,13 @@ struct SettingsView: View {
             )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(isSavingPassword)
+        }
+        .onChange(of: showPasswordSetup) { _, isPresented in
+            guard !isPresented else { return }
+            newPassword = ""
+            confirmPassword = ""
+            passwordError = nil
         }
         .confirmationDialog(
             recoveryStatus?.remaining ?? 0 > 0 ? "Replace recovery codes?" : "Create recovery codes?",
@@ -423,31 +431,33 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                     .disabled(isEnrollingPasskey || isGeneratingRecoveryCodes)
 
-                    Divider().overlay(Theme.borderSubtle)
+                    if passwordAuthAvailable {
+                        Divider().overlay(Theme.borderSubtle)
 
-                    Button {
-                        passwordError = nil
-                        showPasswordSetup = true
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "lock.fill").foregroundStyle(Theme.brand400)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(passwordStatus?.configured == true ? "Change password" : "Create a password")
-                                    .font(Theme.body(14, weight: .semibold))
-                                    .foregroundStyle(Theme.textPrimary)
-                                Text(passwordStatus?.configured == true
-                                     ? "Sign in with your email on any device."
-                                     : "Add a password you control for email sign-in.")
-                                    .font(Theme.caption(12))
-                                    .foregroundStyle(Theme.textSecondary)
+                        Button {
+                            passwordError = nil
+                            showPasswordSetup = true
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "lock.fill").foregroundStyle(Theme.brand400)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(passwordStatus?.configured == true ? "Change password" : "Create a password")
+                                        .font(Theme.body(14, weight: .semibold))
+                                        .foregroundStyle(Theme.textPrimary)
+                                    Text(passwordStatus?.configured == true
+                                         ? "Sign in with your email on any device."
+                                         : "Add a password you control for email sign-in.")
+                                        .font(Theme.caption(12))
+                                        .foregroundStyle(Theme.textSecondary)
+                                }
+                                Spacer()
                             }
-                            Spacer()
+                            .frame(maxWidth: .infinity, minHeight: 52)
+                            .contentShape(Rectangle())
                         }
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("sign-in-security.password")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("sign-in-security.password")
 
                     Divider().overlay(Theme.borderSubtle)
 
@@ -891,16 +901,30 @@ struct SettingsView: View {
         do {
             async let loadedPasskeys = FirstPartyAuthService.shared.passkeyStatus()
             async let loadedRecovery = FirstPartyAuthService.shared.recoveryStatus()
-            async let loadedPassword = FirstPartyAuthService.shared.passwordStatus()
-            let (passkeys, recovery, password) = try await (loadedPasskeys, loadedRecovery, loadedPassword)
+            let (passkeys, recovery) = try await (loadedPasskeys, loadedRecovery)
             guard !Task.isCancelled else { return }
             passkeyStatus = passkeys
             recoveryStatus = recovery
-            passwordStatus = password
             securityStatusError = nil
         } catch {
             guard !Task.isCancelled else { return }
             securityStatusError = "Could not check sign-in security."
+        }
+        do {
+            let health: HealthResponse = try await APIClient.shared.getPublic("/health")
+            guard !Task.isCancelled else { return }
+            passwordAuthAvailable = health.passwordAuthEnabled == true
+            if passwordAuthAvailable {
+                passwordStatus = try await FirstPartyAuthService.shared.passwordStatus()
+            } else {
+                passwordStatus = nil
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            // Password rollout can be disabled independently. Keep passkey and
+            // recovery management usable if that capability is unavailable.
+            passwordAuthAvailable = false
+            passwordStatus = nil
         }
     }
 

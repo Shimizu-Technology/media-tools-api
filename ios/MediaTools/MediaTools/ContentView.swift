@@ -18,11 +18,13 @@ struct ContentView: View {
     @State private var showPasswordSignIn = false
     @State private var passwordEmail = ""
     @State private var passwordValue = ""
+    @State private var passwordAuthAvailable: Bool
     private let forceSignedOutForUITesting: Bool
     private let tokenSync = TokenSyncService.shared
 
     init(forceSignedOutForUITesting: Bool = false) {
         self.forceSignedOutForUITesting = forceSignedOutForUITesting
+        _passwordAuthAvailable = State(initialValue: forceSignedOutForUITesting)
     }
 
     private var activeUserID: String? {
@@ -74,8 +76,9 @@ struct ContentView: View {
                     recoveryCode: $recoveryCode,
                     passwordEmail: $passwordEmail,
                     passwordValue: $passwordValue,
+                    passwordAuthAvailable: passwordAuthAvailable,
                     nativeAuthOperation: nativeAuthOperation,
-                    nativeAuthError: nativeAuthError,
+                    nativeAuthError: $nativeAuthError,
                     onPasskeySignIn: { await completeNativeSignIn(.passkey) },
                     onPasswordSignIn: { await completeNativeSignIn(.password) },
                     onRecoveryCodeSignIn: { await completeNativeSignIn(.recoveryCode) }
@@ -161,6 +164,17 @@ struct ContentView: View {
                 isResolvingAccount = false
             }
         }
+        .task {
+            guard Configuration.firstPartyIOSAuthEnabled, !forceSignedOutForUITesting else { return }
+            do {
+                let health: HealthResponse = try await APIClient.shared.getPublic("/health")
+                guard !Task.isCancelled else { return }
+                passwordAuthAvailable = health.passwordAuthEnabled == true
+            } catch {
+                guard !Task.isCancelled else { return }
+                passwordAuthAvailable = false
+            }
+        }
         .sheet(isPresented: $showAuth) {
             AuthView()
         }
@@ -230,8 +244,9 @@ struct WelcomeView: View {
     @Binding var recoveryCode: String
     @Binding var passwordEmail: String
     @Binding var passwordValue: String
+    let passwordAuthAvailable: Bool
     let nativeAuthOperation: NativeAuthOperation?
-    let nativeAuthError: String?
+    @Binding var nativeAuthError: String?
     let onPasskeySignIn: () async -> Void
     let onPasswordSignIn: () async -> Void
     let onRecoveryCodeSignIn: () async -> Void
@@ -345,14 +360,17 @@ struct WelcomeView: View {
 
                     if Configuration.firstPartyIOSAuthEnabled {
                         VStack(spacing: 10) {
-                            Button {
-                                showPasswordSignIn = true
-                            } label: {
-                                Label("Sign in with email", systemImage: "envelope.fill")
-                                    .frame(maxWidth: .infinity)
+                            if passwordAuthAvailable {
+                                Button {
+                                    nativeAuthError = nil
+                                    showPasswordSignIn = true
+                                } label: {
+                                    Label("Sign in with email", systemImage: "envelope.fill")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .brandButtonStyle()
+                                .disabled(nativeAuthOperation != nil)
                             }
-                            .brandButtonStyle()
-                            .disabled(nativeAuthOperation != nil)
 
                             Button {
                                 Task { await onPasskeySignIn() }
@@ -454,6 +472,15 @@ struct WelcomeView: View {
             )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(nativeAuthOperation == .password)
+        }
+        .onChange(of: showPasswordSignIn) { _, isPresented in
+            if isPresented {
+                nativeAuthError = nil
+            } else {
+                passwordValue = ""
+                nativeAuthError = nil
+            }
         }
     }
 }

@@ -50,6 +50,29 @@ func TestPasswordHasherAcceptsAndUpgradesBcrypt(t *testing.T) {
 	}
 }
 
+func TestPasswordHasherPreservesLegacyBcryptBytesThenNormalizesUpgrade(t *testing.T) {
+	h, err := NewPasswordHasher(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decomposed := "legacy-password-e\u0301"
+	hash, err := bcrypt.GenerateFromPassword([]byte(decomposed), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	login, ok := NormalizePasswordForLogin(decomposed)
+	if !ok {
+		t.Fatal("legacy password rejected")
+	}
+	verified, err := h.Verify(context.Background(), string(hash), login)
+	if err != nil || !verified.Valid || !verified.NeedsRehash {
+		t.Fatalf("verify = %#v, %v", verified, err)
+	}
+	if got := NormalizeVerifiedPassword(login); got != "legacy-password-é" {
+		t.Fatalf("upgrade normalization = %q", got)
+	}
+}
+
 func TestPasswordHasherRejectsMalformedOrOversizedPHC(t *testing.T) {
 	h, err := NewPasswordHasher(1)
 	if err != nil {

@@ -50,6 +50,7 @@ type Handler struct {
 	ClerkAccountDeletionEnabled bool                           // Clerk Backend API deletion is configured
 	Passkeys                    *webauthn.WebAuthn             // Enabled only behind the first-party auth flag
 	Passwords                   *accountservice.PasswordHasher // Enabled only behind the first-party password flag
+	PasswordAuthEnabled         bool                           // Public capability used by clients during staged rollout
 	// Version is the build identifier reported by health endpoints.
 	Version          string
 	readinessChecker readinessChecker
@@ -114,5 +115,6 @@ func (h *Handler) healthResponse(status, databaseStatus string) models.HealthRes
 		Database:               databaseStatus,
 		Workers:                workers,
 		YtDlpCookiesConfigured: h.YtDlpCookiesConfigured,
+		PasswordAuthEnabled:    h.PasswordAuthEnabled,
 	}
 }

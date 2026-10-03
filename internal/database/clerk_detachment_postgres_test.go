@@ -49,7 +49,7 @@ func TestDetachClerkIdentityRequiresBothRecoveryFactors(t *testing.T) {
 	ctx := context.Background()
 	userID, clerkID := createClerkDetachmentFixture(t, db)
 
-	status, err := db.DetachClerkIdentity(ctx, userID)
+	status, err := db.DetachClerkIdentity(ctx, userID, true)
 	if !errors.Is(err, ErrClerkDetachmentNotReady) || status == nil || status.Ready || !status.Linked {
 		t.Fatalf("detach without factors = %#v, %v", status, err)
 	}
@@ -58,7 +58,7 @@ func TestDetachClerkIdentityRequiresBothRecoveryFactors(t *testing.T) {
 		VALUES ($1, $2, '{}')`, []byte("one-factor-"+uuid.NewString()), userID); err != nil {
 		t.Fatal(err)
 	}
-	status, err = db.DetachClerkIdentity(ctx, userID)
+	status, err = db.DetachClerkIdentity(ctx, userID, true)
 	if !errors.Is(err, ErrClerkDetachmentNotReady) || status.PasskeyCount != 1 || status.UnusedRecoveryCodes != 0 {
 		t.Fatalf("detach with passkey only = %#v, %v", status, err)
 	}
@@ -91,7 +91,11 @@ func TestDetachClerkIdentityAcceptsPasswordWithRecoveryCodes(t *testing.T) {
 	if _, err := db.ConfirmRecoveryCodeRotation(ctx, userID, rotation.ID); err != nil {
 		t.Fatal(err)
 	}
-	status, err := db.DetachClerkIdentity(ctx, userID)
+	disabled, err := db.DetachClerkIdentity(ctx, userID, false)
+	if !errors.Is(err, ErrClerkDetachmentNotReady) || disabled == nil || disabled.Ready || disabled.PasswordConfigured || !disabled.Linked {
+		t.Fatalf("password-disabled detachment = %#v, %v", disabled, err)
+	}
+	status, err := db.DetachClerkIdentity(ctx, userID, true)
 	if err != nil || status.Linked || !status.Ready || !status.PasswordConfigured || status.PasskeyCount != 0 {
 		t.Fatalf("password detachment = %#v, %v", status, err)
 	}
@@ -114,7 +118,7 @@ func TestDetachClerkIdentityIsConcurrentIdempotentAndPreservesSessions(t *testin
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			status, err := db.DetachClerkIdentity(context.Background(), userID)
+			status, err := db.DetachClerkIdentity(context.Background(), userID, true)
 			if err == nil && (status.Linked || !status.Ready) {
 				err = errors.New("successful detachment returned an invalid status")
 			}
@@ -173,7 +177,7 @@ func TestDetachClerkIdentityCannotRaceLegacyIdentityBackfill(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-start
-		_, err := db.DetachClerkIdentity(context.Background(), userID)
+		_, err := db.DetachClerkIdentity(context.Background(), userID, true)
 		results <- err
 	}()
 	close(start)
@@ -236,7 +240,7 @@ func TestClerkBootstrapAndDetachmentHaveDeterministicLinearization(t *testing.T)
 		}
 		detachResult := make(chan error, 1)
 		go func() {
-			_, err := db.DetachClerkIdentity(context.Background(), userID)
+			_, err := db.DetachClerkIdentity(context.Background(), userID, true)
 			detachResult <- err
 		}()
 		waitForClerkLockWaiter(t, db, "clerk-detachment-lock")
@@ -290,7 +294,7 @@ func TestClerkBootstrapAndDetachmentHaveDeterministicLinearization(t *testing.T)
 		waitForClerkLockWaiter(t, db, "clerk-bootstrap-lock")
 		detachResult := make(chan error, 1)
 		go func() {
-			_, err := db.DetachClerkIdentity(context.Background(), userID)
+			_, err := db.DetachClerkIdentity(context.Background(), userID, true)
 			detachResult <- err
 		}()
 		waitForClerkLockWaiter(t, db, "clerk-detachment-lock")

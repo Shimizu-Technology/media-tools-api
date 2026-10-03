@@ -95,7 +95,7 @@ func (h *Handler) createPasswordSession(ctx context.Context, email, rawPassword,
 	}
 	replacementHash := ""
 	if verified.NeedsRehash {
-		replacementHash, err = h.Passwords.Hash(ctx, password)
+		replacementHash, err = h.Passwords.Hash(ctx, accountservice.NormalizeVerifiedPassword(password))
 		if err != nil {
 			return nil, err
 		}

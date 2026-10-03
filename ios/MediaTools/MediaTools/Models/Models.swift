@@ -484,4 +484,5 @@ struct HealthResponse: Codable {
     let version: String
     let database: String
     let workers: Int
+    let passwordAuthEnabled: Bool?
 }

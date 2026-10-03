@@ -27,36 +27,32 @@ export async function signInWithPassword(email: string, password: string): Promi
     response = await execute();
   } catch (error) {
     try { response = await execute(); }
-    catch {
-      if (await committedPasswordSessionExists()) return;
-      throw error;
-    }
+    catch { throw error; }
   }
   if (response.status >= 500) {
     try { response = await execute(); }
     catch {
-      if (await committedPasswordSessionExists()) return;
       throw new PasswordError('Could not reach Media Tools. Check your connection and try again.', 'network_error');
     }
   }
   if (!response.ok) {
-    if (await committedPasswordSessionExists()) return;
     throw await responseError(response, 'Could not sign in.');
   }
   const metadata = await response.json() as Record<string, unknown>;
   if ('access_token' in metadata || 'refresh_token' in metadata) {
     throw new PasswordError('Password sign-in returned an unsafe response.', 'unsafe_response');
   }
-  if (!await committedPasswordSessionExists()) {
+  const committedUserID = typeof metadata.user_id === 'string' ? metadata.user_id : '';
+  if (metadata.authenticated !== true || !committedUserID || !await committedPasswordSessionExists(committedUserID)) {
     throw new PasswordError('Could not verify the new session.', 'authentication_unavailable');
   }
 }
 
-async function committedPasswordSessionExists(): Promise<boolean> {
+async function committedPasswordSessionExists(expectedUserID: string): Promise<boolean> {
   const status = await safeFetch('/api/v1/auth/web/session/status', { credentials: 'same-origin' }).catch(() => null);
   if (!status?.ok) return false;
   const restored = await status.json().catch(() => null) as WebSessionStatus | null;
-  if (!restored?.authenticated) return false;
+  if (!restored?.authenticated || restored.user_id !== expectedUserID) return false;
   setWebOnboardingRequired(restored.onboarding_required === true);
   setWebSessionActive(true);
   return true;

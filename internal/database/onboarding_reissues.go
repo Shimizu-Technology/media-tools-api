@@ -290,6 +290,7 @@ func onboardingRescueAllowedTx(ctx context.Context, tx interface {
 	var blocked bool
 	if err := tx.GetContext(ctx, &blocked, `
 		SELECT EXISTS (SELECT 1 FROM auth_passkey_credentials WHERE user_id = $1)
+		    OR EXISTS (SELECT 1 FROM auth_password_credentials WHERE user_id = $1)
 		    OR EXISTS (
 		        SELECT 1 FROM auth_recovery_codes
 		        WHERE user_id = $1 AND active AND consumed_at IS NULL

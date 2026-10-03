@@ -11,6 +11,11 @@ BEGIN
 END
 $$;
 
+-- Preserve the same canonical email identity for future Clerk and invited
+-- accounts, not only for rows that happen to enroll a password.
+CREATE UNIQUE INDEX users_email_normalized_unique
+    ON users ((lower(normalize(btrim(email), NFC))));
+
 CREATE TABLE auth_password_credentials (
     user_id                   UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     email_normalized          TEXT NOT NULL,

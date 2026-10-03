@@ -121,6 +121,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 				panic("initialize password authentication: " + err.Error())
 			}
 			h.Passwords = passwords
+			h.PasswordAuthEnabled = true
 			passwordLogin := r.Group("/api/v1/auth/password")
 			passwordLogin.Use(rateLimiter.RateLimitUnauthenticated("password", 20))
 			passwordLogin.POST("/login", h.LoginWithPassword)

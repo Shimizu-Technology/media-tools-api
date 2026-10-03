@@ -132,6 +132,31 @@ func TestOnboardingReissueRefusesAccountsWithRecoveryMethod(t *testing.T) {
 	}
 }
 
+func TestOnboardingReissueRefusesAccountWithPassword(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := insertOnboardingRescueTestUser(t, db)
+	_, token, err := db.CreateOnboardingReissue(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO auth_password_credentials (user_id, email_normalized, password_hash)
+		SELECT id, lower(email), $2 FROM users WHERE id = $1`, userID, "$2a$04$abcdefghijklmnopqrstuu8OcnTnO4oZ0JHf9w5k3XjY2v2lZ5o1a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.CreateOnboardingReissue(ctx, userID); !errors.Is(err, ErrOnboardingReissueNotAllowed) {
+		t.Fatalf("password-secured reissue creation = %v", err)
+	}
+	next, err := RandomFirstPartyRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RedeemOnboardingReissue(ctx, token, "ios", "Phone", next); !errors.Is(err, ErrOnboardingReissueNotAllowed) {
+		t.Fatalf("password-secured reissue redemption = %v", err)
+	}
+}
+
 func TestOnboardingReissueRejectsMalformedUserID(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
 	if _, _, err := db.CreateOnboardingReissue(context.Background(), "not-a-user-id"); !errors.Is(err, ErrOnboardingAccountNotFound) {

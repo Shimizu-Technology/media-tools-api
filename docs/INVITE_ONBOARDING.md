@@ -22,17 +22,18 @@ link replaces it. Both links cannot create accounts.
 ## Rescue an incomplete account
 
 An invitation can create the user and device session before the person finishes
-adding a passkey and recovery codes. If that browser or device is then lost, an
+adding a password or passkey and recovery codes. If that browser or device is then lost, an
 administrator can call `POST /api/v1/auth/onboarding/reissues` with the exact
 `users.id`. The server issues a 24-hour
 `https://media.shimizu-technology.com/join#onboarding=...` URL only when the
 account has:
 
 - zero passkeys; and
+- no configured password; and
 - zero active unused recovery codes.
 
 This is deliberately unavailable for a normally secured account. Its regular
-passkey or recovery-code flow must be used instead.
+password, passkey, or recovery-code flow must be used instead.
 
 The rescue token is one use, stored only as a SHA-256 hash, and replaces older
 unused rescue links for that user. On redemption, the client-generated refresh

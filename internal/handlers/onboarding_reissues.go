@@ -59,7 +59,7 @@ func (h *Handler) CreateOnboardingReissue(c *gin.Context) {
 	case errors.Is(err, database.ErrOnboardingAccountNotFound):
 		c.JSON(http.StatusNotFound, models.ErrorResponse{Error: "account_not_found", Message: "Account was not found", Code: http.StatusNotFound})
 	case errors.Is(err, database.ErrOnboardingReissueNotAllowed):
-		c.JSON(http.StatusConflict, models.ErrorResponse{Error: "account_already_secured", Message: "This account already has a passkey or active recovery code", Code: http.StatusConflict})
+		c.JSON(http.StatusConflict, models.ErrorResponse{Error: "account_already_secured", Message: "This account already has a password, passkey, or active recovery code", Code: http.StatusConflict})
 	default:
 		log.Printf("create onboarding rescue: %v", err)
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "onboarding_unavailable", Message: "Could not create onboarding rescue", Code: http.StatusServiceUnavailable})

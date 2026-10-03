@@ -18,7 +18,7 @@ implements it. Run `make ios-release-preflight` before an archive and again with
   stored on the device. Build 13 also keeps passkey sign-in
   and enrollment, recovery codes, device management, and recoverable account
   deletion. Clerk remains only as a migration bridge for an already-linked
-  account. Build 11 is the prior TestFlight baseline with the Share Extension.
+  account. Build 12 is the prior TestFlight baseline; build 11 introduced the Share Extension.
   Before installing build 13, production must enable `CLERK_MIGRATION_ONLY`,
   `FIRST_PARTY_AUTH_ENABLED`, and `FIRST_PARTY_PASSWORD_AUTH_ENABLED`; keep
   browser cookie auth disabled until its
@@ -88,9 +88,10 @@ Set:
 Before selecting a build for public review:
 
 1. Confirm the production API has the existing account's exact Clerk identity,
-   then enable `CLERK_MIGRATION_ONLY` before `FIRST_PARTY_AUTH_ENABLED`. Keep
-   `WEB_COOKIE_AUTH_ENABLED` off for the iOS-only rollout and verify readiness
-   after each change.
+   then keep `CLERK_MIGRATION_ONLY` and `FIRST_PARTY_AUTH_ENABLED` enabled.
+   Enable `FIRST_PARTY_PASSWORD_AUTH_ENABLED` before distributing build 13.
+   Keep `WEB_COOKIE_AUTH_ENABLED` off for the iOS-only rollout and verify
+   readiness after each change.
 2. Confirm the Clerk migration bridge still advertises Apple and Google and
    retains the iOS native-app mapping for this bundle ID. Update
    `native-auth-release.json` only after confirming the mapping in Clerk's

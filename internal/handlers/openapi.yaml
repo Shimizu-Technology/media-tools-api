@@ -365,6 +365,10 @@ components:
         yt_dlp_cookies_configured:
           type: boolean
           example: true
+        password_auth_enabled:
+          type: boolean
+          description: Whether first-party password enrollment and sign-in are available
+          example: true
 
 paths:
   /health:
@@ -386,6 +390,7 @@ paths:
                 database: "unchecked"
                 workers: 3
                 yt_dlp_cookies_configured: true
+                password_auth_enabled: true
 
   /ready:
     get:
