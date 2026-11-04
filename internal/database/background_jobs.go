@@ -13,7 +13,7 @@ import (
 )
 
 const backgroundJobColumns = `
-	id, job_type, resource_id, payload, status, attempts, max_attempts,
+	id, job_type, resource_id, payload, status, attempts, max_attempts, priority,
 	run_at, locked_by, locked_at, lease_expires_at, started_at,
 	completed_at, last_error, created_at, updated_at
 `
@@ -272,6 +272,12 @@ func (db *DB) ClaimBackgroundJob(ctx context.Context, workerID string, lease tim
 	}
 	defer tx.Rollback()
 
+	// A short global claim lock makes the single maintenance slot safe across
+	// processes. It is released before any media/provider work starts.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(606060)`); err != nil {
+		return nil, err
+	}
+
 	var exhausted []models.BackgroundJob
 	if err := tx.SelectContext(ctx, &exhausted, `UPDATE background_jobs SET status='failed', completed_at=NOW(), last_error='Worker lease expired too many times', locked_by=NULL, locked_at=NULL, lease_expires_at=NULL WHERE status='running' AND lease_expires_at < NOW() AND attempts >= max_attempts AND job_type <> 'account_deletion' RETURNING `+backgroundJobColumns); err != nil {
 		return nil, err
@@ -286,7 +292,7 @@ func (db *DB) ClaimBackgroundJob(ctx context.Context, workerID string, lease tim
 	err = tx.GetContext(ctx, &job, `
 		SELECT `+backgroundJobColumns+`
 		FROM background_jobs
-		WHERE (
+		WHERE (priority = 0 OR NOT EXISTS (SELECT 1 FROM background_jobs busy WHERE busy.priority > 0 AND busy.status='running' AND busy.lease_expires_at >= NOW())) AND ((
 			status = 'queued'
 			AND run_at <= NOW()
 			AND attempts < max_attempts
@@ -294,8 +300,8 @@ func (db *DB) ClaimBackgroundJob(ctx context.Context, workerID string, lease tim
 			status = 'running'
 			AND lease_expires_at < NOW()
  AND (attempts < max_attempts OR job_type = 'account_deletion')
-		)
-		ORDER BY
+		))
+		ORDER BY priority ASC,
 			CASE WHEN status = 'queued' THEN 0 ELSE 1 END,
 			run_at ASC,
 			created_at ASC
@@ -341,6 +347,7 @@ func (db *DB) NextBackgroundJobWake(ctx context.Context) (*time.Time, error) {
 			SELECT run_at AS wake_at
 			FROM background_jobs
 			WHERE status = 'queued' AND attempts < max_attempts
+ AND (priority=0 OR NOT EXISTS (SELECT 1 FROM background_jobs busy WHERE busy.priority>0 AND busy.status='running' AND busy.lease_expires_at >= NOW()))
 			UNION ALL
 			SELECT lease_expires_at AS wake_at
 			FROM background_jobs
@@ -494,6 +501,10 @@ func (db *DB) CountQueuedBackgroundJobs(ctx context.Context) (int, error) {
 func failJobResource(ctx context.Context, tx *sqlx.Tx, kind, id, message string) error {
 	var query string
 	switch kind {
+	case "admin_backfill":
+		query = `UPDATE backfill_runs SET dispatch_status='failed' WHERE id=$1 AND $2::text IS NOT NULL`
+	case "audio_waveform":
+		query = `UPDATE audio_transcriptions SET waveform_status='failed', waveform=NULL WHERE id=$1 AND $2::text IS NOT NULL`
 	case "audio_transcription":
 		query = `UPDATE audio_transcriptions SET status='failed', processing_stage='failed', processing_progress=100, error_message=$2 WHERE id=$1 AND status IN ('pending','processing','failed')`
 	case "transcript_extraction":

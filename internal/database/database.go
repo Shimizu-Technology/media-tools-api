@@ -628,6 +628,7 @@ func (db *DB) RevokeAPIKeyForActor(ctx context.Context, id string, userID, apiKe
 // --- Audio Transcription Operations (MTA-16) ---
 
 const audioTranscriptionSelectColumns = `
+ COALESCE(waveform::text,'')::bytea AS waveform, waveform_status,
 	id,
 	filename,
 	original_name,

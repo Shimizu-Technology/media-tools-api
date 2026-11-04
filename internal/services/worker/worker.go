@@ -59,6 +59,7 @@ const (
 	JobTranscriptExtraction  JobType = "transcript_extraction"
 	JobSummaryGeneration     JobType = "summary_generation"
 	JobAudioTranscription    JobType = "audio_transcription"
+	JobAudioWaveform         JobType = "audio_waveform"
 	JobAudioSummary          JobType = "audio_summary"
 	JobAudioTranscriptFormat JobType = "audio_transcript_formatting"
 	JobAccountDeletion       JobType = "account_deletion"
@@ -817,6 +818,7 @@ func nextClaimRetryDelay(current, maximum time.Duration) time.Duration {
 }
 
 func (p *Pool) runClaimedJob(workerNumber int, claimed *models.BackgroundJob) {
+	defer p.signalWorkers() // release the maintenance slot to sleepers
 	leaseRecovery := p.startLeaseRecoverySignal()
 	job := Job{
 		QueueID:   claimed.ID,
@@ -854,7 +856,7 @@ func (p *Pool) runClaimedJob(workerNumber int, claimed *models.BackgroundJob) {
 	markCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err != nil {
-		if isRetryableError(err) {
+		if isRetryableError(err) || job.Type == JobAudioWaveform {
 			delay := time.Duration(1<<min(claimed.Attempts, 8)) * time.Second
 			var whisperErr *audio.WhisperAPIError
 			if errors.As(err, &whisperErr) && whisperErr.RetryAfter > delay {
@@ -944,6 +946,10 @@ func (p *Pool) dispatchJob(job Job) (err error) {
 		return p.processSummary(job)
 	case JobAudioTranscription:
 		return p.processAudioTranscription(job)
+	case JobType("admin_backfill"):
+		return p.processBackfill(job)
+	case JobAudioWaveform:
+		return p.processAudioWaveform(job)
 	case JobAudioSummary:
 		return p.processAudioSummary(job)
 	case JobAudioTranscriptFormat:
@@ -1151,13 +1157,31 @@ func (p *Pool) processAudioSummary(job Job) error {
 	if err != nil {
 		return fmt.Errorf("audio summary item not found: %w", err)
 	}
-	if !payload.TitleOnly && (at.SummaryStatus == "completed" || (!payload.Automatic && at.SummaryStatus == "failed")) {
+	if !payload.TitleOnly && at.SummaryStatus == "completed" {
+		if payload.Automatic && payload.TitleSource != "" {
+			payload.TitleOnly = true
+		} else {
+			return nil
+		}
+	}
+	if !payload.Automatic && at.SummaryStatus == "failed" {
 		return nil
 	}
 	if at.Status != "completed" || strings.TrimSpace(at.TranscriptText) == "" {
 		return fmt.Errorf("audio transcription is not ready for summarization")
 	}
 	if payload.Automatic {
+		var enabled bool
+		if err := p.db.GetContext(ctx, &enabled, `SELECT COALESCE(p.automatic_summaries,true) FROM audio_transcriptions a LEFT JOIN api_keys k ON k.id=a.api_key_id LEFT JOIN processing_preferences p ON p.user_id=COALESCE(a.user_id,k.user_id) WHERE a.id=$1`, at.ID); err != nil {
+			return err
+		}
+		if !enabled && !payload.TitleOnly {
+			payload.TitleOnly = true
+			if _, err := p.db.ExecContext(ctx, `UPDATE audio_transcriptions SET summary_status='skipped',summary_error_message='Automatic summaries are disabled' WHERE id=$1 AND summary_status='pending'`, at.ID); err != nil {
+				return err
+			}
+		}
+
 		if p.summarizer == nil {
 			return fmt.Errorf("summary provider is not configured")
 		}
@@ -1186,6 +1210,9 @@ func (p *Pool) processAudioSummary(job Job) error {
 				// A title is a convenience, so a failed one must not cost the summary.
 				if err != nil {
 					log.Printf("⚠️  Automatic title failed for audio %s: %v", at.ID, err)
+					if payload.TitleOnly {
+						return err
+					}
 					title = ""
 				}
 				title = strings.Trim(strings.TrimSpace(title), "\"")

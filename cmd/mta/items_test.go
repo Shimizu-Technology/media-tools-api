@@ -488,3 +488,27 @@ func TestSyncRefusesToOverwriteAnUnrelatedNote(t *testing.T) {
 		t.Fatalf("unrelated note was overwritten: %q", note)
 	}
 }
+
+func TestLibraryAdditionsSurviveCLIJSON(t *testing.T) {
+	source := libraryItem{ID: "11111111-1111-4111-8111-111111111111", ItemType: "audio", Excerpt: "Plain preview", Waveform: make([]int, 32), Collections: []itemCollection{{ID: "c", Name: "Calls", Color: "teal"}}}
+	result, ok := summarizeLibraryItem(source)
+	if !ok {
+		t.Fatal("audio item rejected")
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]any
+	if err := json.Unmarshal(encoded, &value); err != nil {
+		t.Fatal(err)
+	}
+	if value["excerpt"] != "Plain preview" || len(value["waveform"].([]any)) != 32 || len(value["collections"].([]any)) != 1 {
+		t.Fatalf("JSON additions lost: %s", encoded)
+	}
+	legacy, _ := summarizeLibraryItem(libraryItem{ID: source.ID, ItemType: "audio"})
+	encoded, _ = json.Marshal(legacy)
+	if !bytes.Contains(encoded, []byte(`"collections":[]`)) || bytes.Contains(encoded, []byte(`"waveform"`)) {
+		t.Fatalf("legacy JSON %s", encoded)
+	}
+}

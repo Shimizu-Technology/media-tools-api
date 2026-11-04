@@ -2,7 +2,9 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/waveform"
 	"strings"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
@@ -54,7 +56,7 @@ const libraryItemsCTE = `
 		FROM audio_transcriptions a
 		LEFT JOIN media_item_preferences mip ON mip.item_type = 'audio' AND mip.item_id = a.id
 			AND (($1::uuid IS NOT NULL AND mip.user_id = $1) OR ($2::uuid IS NOT NULL AND mip.api_key_id = $2))
-		WHERE (($1::uuid IS NOT NULL AND a.user_id = $1) OR ($2::uuid IS NOT NULL AND a.api_key_id = $2))
+		WHERE (($1::uuid IS NOT NULL AND ` + audioAccountOwnership + `) OR ($2::uuid IS NOT NULL AND a.api_key_id = $2))
 
 		UNION ALL
 
@@ -123,7 +125,8 @@ func (db *DB) ListLibraryItems(ctx context.Context, params models.LibraryListPar
 
 	// UUID is a deterministic tie-breaker for rows that share a timestamp. Without
 	// it, offset pagination can repeat or skip items between adjacent pages.
-	query := libraryItemsCTE + ` SELECT ` + libraryItemColumns + ` FROM filtered ORDER BY created_at ` + params.SortDir + `, id ` + params.SortDir + ` LIMIT $10 OFFSET $11`
+	query := libraryPageQuery(params.SortDir)
+
 	args = append(args, params.PerPage, (params.Page-1)*params.PerPage)
 	var items []models.LibraryItem
 	if err := db.SelectContext(ctx, &items, query, args...); err != nil {
@@ -132,7 +135,48 @@ func (db *DB) ListLibraryItems(ctx context.Context, params models.LibraryListPar
 	if items == nil {
 		items = []models.LibraryItem{}
 	}
+	for i := range items {
+		items[i].Excerpt = plainExcerpt(items[i].Excerpt)
+		if items[i].Excerpt == "" {
+			items[i].Excerpt = plainExcerpt(items[i].ExcerptFallback)
+		}
+		if len(items[i].Waveform) > 0 {
+			var peaks []int
+			if err := json.Unmarshal(items[i].Waveform, &peaks); err != nil {
+				return nil, 0, fmt.Errorf("decode stored waveform: %w", err)
+			}
+			if len(peaks) == waveform.DetailPeaks {
+				items[i].Waveform, _ = json.Marshal(waveform.Reduce(peaks, 32))
+			} else {
+				items[i].Waveform = nil
+			}
+		}
+	}
+
 	return items, total, nil
+}
+
+// libraryPageQuery enriches only the selected page, with bounded text reads.
+func libraryPageQuery(sortDir string) string {
+	return libraryItemsCTE + `, paged AS (
+ SELECT ` + libraryItemColumns + ` FROM filtered ORDER BY created_at ` + sortDir + `, id ` + sortDir + ` LIMIT $10 OFFSET $11
+ ) SELECT page.*,
+ CASE page.item_type
+ WHEN 'audio' THEN (SELECT left(COALESCE(NULLIF(btrim(a.summary_text),''),a.transcript_text),4096) FROM audio_transcriptions a WHERE a.id=page.id)
+ WHEN 'pdf' THEN (SELECT left(p.text_content,4096) FROM pdf_extractions p WHERE p.id=page.id)
+ ELSE (SELECT left(COALESCE(NULLIF(btrim((SELECT s.summary_text FROM summaries s WHERE s.transcript_id=t.id AND s.status='completed' ORDER BY s.created_at DESC LIMIT 1)),''),t.transcript_text),4096) FROM transcripts t WHERE t.id=page.id)
+ END AS excerpt,
+ CASE page.item_type
+ WHEN 'audio' THEN (SELECT left(a.transcript_text,4096) FROM audio_transcriptions a WHERE a.id=page.id)
+ WHEN 'youtube' THEN (SELECT left(t.transcript_text,4096) FROM transcripts t WHERE t.id=page.id)
+ ELSE '' END AS excerpt_fallback,
+ COALESCE((SELECT a.waveform::text FROM audio_transcriptions a WHERE page.item_type='audio' AND a.id=page.id),'')::bytea AS waveform,
+ COALESCE((SELECT jsonb_agg(jsonb_build_object('id',c.id,'name',c.name,'color',c.color) ORDER BY c.created_at,c.id)
+ FROM collection_items ci JOIN collections c ON c.id=ci.collection_id
+ WHERE ci.item_id=page.id AND ci.item_type=CASE WHEN page.item_type='youtube' THEN 'transcript' ELSE page.item_type END
+ AND (($1::uuid IS NOT NULL AND (c.user_id=$1 OR (c.user_id IS NULL AND c.api_key_id IN (SELECT id FROM api_keys WHERE user_id=$1)))) OR ($2::uuid IS NOT NULL AND c.api_key_id=$2))),'[]'::jsonb) AS collections
+ FROM paged page ORDER BY page.created_at ` + sortDir + `,page.id ` + sortDir
+
 }
 
 // GetLibraryStats returns exact workspace-wide counts, independent of paging.
