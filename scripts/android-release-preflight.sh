@@ -40,6 +40,19 @@ if search_file 'READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STO
   exit 1
 fi
 
+# Media Tools owns Android sign-in. Fail if a third-party sign-in SDK returns, so
+# the Play data safety answers stay true.
+if grep -Eiq 'clerk' android/app/build.gradle.kts android/gradle/libs.versions.toml; then
+  echo "Android must not depend on a third-party sign-in SDK"
+  exit 1
+fi
+require_source 'media-tools-api\.onrender\.com/api/v1' android/app/build.gradle.kts \
+  "Android API_BASE_URL must be https://media-tools-api.onrender.com/api/v1"
+if search_file 'FIRST_PARTY_ANDROID_AUTH' android/app/build.gradle.kts; then
+  echo "Android first-party sign-in must be on in every build, not behind a flag"
+  exit 1
+fi
+
 for url in privacy terms support delete-account; do
   require_source "https://media\.shimizu-technology\.com/$url" \
     android/app/src/main/kotlin/com/shimizutechnology/mediatools/AppLinks.kt \
@@ -49,12 +62,6 @@ done
 if [[ "${1:-}" != "--release" ]]; then
   echo "Android source preflight passed"
   exit 0
-fi
-
-publishable_key="${MEDIA_TOOLS_CLERK_PUBLISHABLE_KEY:-}"
-if [[ "$publishable_key" != pk_live_* ]]; then
-  echo "Play release is blocked until MEDIA_TOOLS_CLERK_PUBLISHABLE_KEY uses the Clerk production instance"
-  exit 1
 fi
 
 required_release_variables=(
