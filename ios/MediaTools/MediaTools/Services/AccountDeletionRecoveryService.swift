@@ -1,4 +1,3 @@
-import ClerkKit
 import Foundation
 import Security
 
@@ -14,10 +13,12 @@ struct AccountDeletionReceiptResponse: Decodable, Equatable {
 struct AccountDeletionRequestBody: Encodable, Equatable {
     let confirmation: String
     let deletionReceiptToken: String
+    var currentPassword: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case confirmation
         case deletionReceiptToken = "deletion_receipt_token"
+        case currentPassword = "current_password"
     }
 }
 
@@ -30,7 +31,7 @@ struct AccountDeletionReceiptRequestBody: Encodable, Equatable {
 }
 
 protocol AccountDeletionAPI: Sendable {
-    func requestAccountDeletion(ownerID: String, receiptToken: String) async throws
+    func requestAccountDeletion(ownerID: String, receiptToken: String, currentPassword: String?) async throws
     func accountDeletionReceiptConfirmed(_ receiptToken: String) async throws -> Bool
 }
 
@@ -42,12 +43,15 @@ protocol AccountDeletionLocalDataRemoving: AnyObject {
 extension RecordingUploadCoordinator: AccountDeletionLocalDataRemoving {}
 
 extension APIClient: AccountDeletionAPI {
-    func requestAccountDeletion(ownerID: String, receiptToken: String) async throws {
+    func requestAccountDeletion(ownerID: String, receiptToken: String, currentPassword: String?) async throws {
+        // Encoded by the shared snake-case encoder, which leaves the explicit
+        // keys above untouched.
         try await delete(
             "/account",
             body: AccountDeletionRequestBody(
                 confirmation: "DELETE",
-                deletionReceiptToken: receiptToken
+                deletionReceiptToken: receiptToken,
+                currentPassword: currentPassword
             ),
             expectedOwnerID: ownerID
         )
@@ -73,6 +77,7 @@ enum AccountDeletionRecoveryError: LocalizedError, Equatable {
     case pendingForAnotherAccount
     case couldNotConfirm
     case couldNotCreateReceipt
+    case currentPasswordRejected
 
     var errorDescription: String? {
         switch self {
@@ -82,6 +87,8 @@ enum AccountDeletionRecoveryError: LocalizedError, Equatable {
             return "Media Tools could not confirm that deletion completed. Your account and recordings remain on this iPhone. Check your connection and try again."
         case .couldNotCreateReceipt:
             return "Media Tools could not secure this deletion request. Restart the app and try again."
+        case .currentPasswordRejected:
+            return "Your current password is incorrect. Your account was not deleted."
         }
     }
 }
@@ -127,12 +134,13 @@ final class AccountDeletionRecoveryService {
     /// A successful DELETE is proof that the transaction committed. For every
     /// thrown response, including 401 or 409, the public receipt is the only
     /// safe way to distinguish a rejected request from a lost success reply.
-    func requestDeletion(ownerID: String) async throws -> PendingAccountDeletion {
+    func requestDeletion(ownerID: String, currentPassword: String? = nil) async throws -> PendingAccountDeletion {
         let pending = try prepare(ownerID: ownerID)
         do {
             try await api.requestAccountDeletion(
                 ownerID: ownerID,
-                receiptToken: pending.receiptToken
+                receiptToken: pending.receiptToken,
+                currentPassword: currentPassword
             )
             return pending
         } catch let requestError {
@@ -145,7 +153,12 @@ final class AccountDeletionRecoveryService {
                 // later without a fresh user confirmation.
                 if Self.isDefinitiveRejection(requestError) {
                     journal.delete()
+                    if case APIError.httpError(_, "current_password_required", _) = requestError {
+                        throw AccountDeletionRecoveryError.currentPasswordRejected
+                    }
                 }
+            } catch let error as AccountDeletionRecoveryError {
+                throw error
             } catch {
                 // A failed receipt lookup leaves the outcome unknown. Keep the
                 // exact journal so the same request can be reconciled later.
@@ -166,9 +179,12 @@ final class AccountDeletionRecoveryService {
             return nil
         }
         do {
+            // The password is never saved, so a password account's retry is rejected
+            // and its journal cleared, leaving the account for a fresh confirmation.
             try await api.requestAccountDeletion(
                 ownerID: pending.ownerID,
-                receiptToken: pending.receiptToken
+                receiptToken: pending.receiptToken,
+                currentPassword: nil
             )
             return pending
         } catch let requestError {
@@ -207,61 +223,32 @@ final class AccountDeletionRecoveryService {
         uploadCoordinator: any AccountDeletionLocalDataRemoving,
         consent: AIProcessingConsentManager,
         deviceSession: DeviceSessionController,
-        tokenSync: TokenSyncService,
-        clerk: Clerk
+        shareKeys: ShareUploadKeyManager
     ) async throws {
         guard try journal.load() == pending else {
             throw AccountDeletionRecoveryError.couldNotConfirm
         }
 
         let ownerID = pending.ownerID
-        let migrationClerkID = deviceSession.verifiedMigration
+        let legacyOwnerID = deviceSession.verifiedMigration
             .flatMap { $0.userID == ownerID ? $0.clerkID : nil }
-        // Capture the exact provider identity before its local mapping is
-        // removed. Every decision about current auth state is made again after
-        // file cleanup, which can suspend while the user switches accounts.
-        let clerkIDBeforeCleanup = clerk.user?.id
-        let deletedClerkID: String?
-        if let clerkIDBeforeCleanup,
-           deviceSession.fallbackOwnerID(for: clerkIDBeforeCleanup) == ownerID {
-            deletedClerkID = clerkIDBeforeCleanup
-        } else {
-            deletedClerkID = migrationClerkID
-        }
 
+        // The server deleted this account's keys with it. Stopping the extension
+        // comes first, so a share made during cleanup is saved rather than sent.
+        shareKeys.accountDeleted(ownerID: ownerID)
         await uploadCoordinator.removeLocalAccountData(ownerID: ownerID)
         consent.removeConsent(ownerID: ownerID)
-        if let migrationClerkID {
-            consent.removeConsent(ownerID: migrationClerkID)
-        }
-        if let deletedClerkID {
-            // Keep the deleted provider blocked across relaunch until Clerk is
-            // actually gone locally. A failed sign-out must never reopen a
-            // fallback workspace under the deleted provider subject.
-            deviceSession.markLocallyDeletedClerkIdentity(deletedClerkID)
+        if let legacyOwnerID {
+            consent.removeConsent(ownerID: legacyOwnerID)
         }
         deviceSession.removeLocalOwnerMappings(ownerID: ownerID)
         journal.delete()
 
-        let shouldClearDeviceSession = deviceSession.storedUserID == ownerID
-            || deviceSession.activeUserID == ownerID
-        let shouldSignOutClerk = deletedClerkID != nil
-            && clerk.user?.id == deletedClerkID
-        guard shouldClearDeviceSession || shouldSignOutClerk else {
+        guard deviceSession.storedUserID == ownerID || deviceSession.activeUserID == ownerID else {
             return
         }
-        if shouldClearDeviceSession {
-            FirstPartyAuthService.shared.clearSessionScopedJournals()
-            deviceSession.clear()
-        }
-        tokenSync.stopSyncing()
-        tokenSync.clearToken()
-        if shouldSignOutClerk {
-            try? await clerk.auth.signOut()
-        }
-        if let deletedClerkID, clerk.user?.id != deletedClerkID {
-            deviceSession.clearLocallyDeletedClerkIdentity(deletedClerkID)
-        }
+        FirstPartyAuthService.shared.clearSessionScopedJournals()
+        deviceSession.clear()
     }
 
     static func randomReceiptToken() throws -> String {

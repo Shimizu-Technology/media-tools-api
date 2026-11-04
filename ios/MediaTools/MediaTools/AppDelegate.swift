@@ -23,5 +23,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             identifier: identifier,
             completionHandler: completionHandler
         )
+        // A finished share upload may be the first this app has heard of that
+        // share. Results are delivered on this queue, so this runs before them.
+        if ShareDirectUpload.isShareSession(identifier) {
+            MainActor.assumeIsolated {
+                RecordingUploadCoordinator.shared.processSharedItems()
+            }
+        }
     }
 }

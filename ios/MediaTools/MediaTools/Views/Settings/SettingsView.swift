@@ -1,18 +1,14 @@
 import SwiftUI
-import ClerkKit
 import UIKit
 import UniformTypeIdentifiers
 
 struct SettingsView: View {
-    @Environment(Clerk.self) private var clerk
     @Environment(RecordingUploadCoordinator.self) private var uploadCoordinator
     @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @Environment(DeviceSessionController.self) private var deviceSession
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
-
-    private let tokenSync = TokenSyncService.shared
 
     @State private var health: HealthResponse?
     @State private var healthError: String?
@@ -26,7 +22,8 @@ struct SettingsView: View {
     @State private var deletionConfirmation = ""
     @State private var isDeletingAccount = false
     @State private var deleteAccountError: String?
-    @State private var deviceAccount: DeviceAccount?
+    @State private var deleteAccountPassword = ""
+    @State private var deviceAccount: AccountProfile?
     @State private var isLoadingDeviceAccount = false
     @State private var deviceAccountError: String?
     @State private var deviceAccountRetry = 0
@@ -34,10 +31,10 @@ struct SettingsView: View {
     @State private var passwordStatus: PasswordStatus?
     @State private var passwordAuthAvailable = false
     @State private var showPasswordSetup = false
-    @State private var newPassword = ""
-    @State private var confirmPassword = ""
-    @State private var isSavingPassword = false
-    @State private var passwordError: String?
+    @State private var showChangeEmail = false
+    @State private var usage: AccountUsage?
+    @State private var usageError: String?
+    @State private var usageRetry = 0
     @State private var recoveryStatus: RecoveryCodeStatus?
     @State private var isLoadingRecoveryStatus = false
     @State private var isEnrollingPasskey = false
@@ -50,16 +47,12 @@ struct SettingsView: View {
     @State private var showReplaceRecoveryCodesConfirmation = false
     @State private var showRecoveryCodesSheet = false
     @State private var oneTimeRecoveryCodes: [String] = []
-    @State private var clerkDetachmentStatus: ClerkDetachmentStatus?
-    @State private var clerkDetachmentError: String?
-    @State private var isLoadingClerkDetachment = false
-    @State private var isDisconnectingClerk = false
-    @State private var showDisconnectClerkConfirmation = false
 
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
                 accountSection
+                usageSection
                 accountSecuritySection
                 preferencesSection
                 quickCaptureSection
@@ -75,15 +68,13 @@ struct SettingsView: View {
         .background(Theme.surface)
         .navigationTitle("Settings")
         .task { await refreshNotificationState() }
-        .task(id: "\(deviceSession.activeUserID ?? "")|\(clerk.user?.id ?? "")|\(deviceAccountRetry)") {
+        .task(id: "\(deviceSession.activeUserID ?? "")|\(deviceAccountRetry)") {
             deviceAccount = nil
             deviceAccountError = nil
-            guard Configuration.firstPartyIOSAuthEnabled,
-                  deviceSession.activeUserID != nil,
-                  clerk.user == nil else { return }
+            guard deviceSession.activeUserID != nil else { return }
             isLoadingDeviceAccount = true
             do {
-                let account: DeviceAccount = try await APIClient.shared.get("/auth/me")
+                let account = try await FirstPartyAuthService.shared.accountProfile()
                 guard !Task.isCancelled else { return }
                 deviceAccount = account
             } catch {
@@ -92,10 +83,11 @@ struct SettingsView: View {
             }
             isLoadingDeviceAccount = false
         }
-        .task(id: "security|\(deviceSession.activeUserID ?? "")|\(clerk.user?.id ?? "")") {
-            async let security: Void = loadRecoveryStatus()
-            async let migration: Void = loadClerkDetachmentStatus()
-            _ = await (security, migration)
+        .task(id: "security|\(deviceSession.activeUserID ?? "")") {
+            await loadRecoveryStatus()
+        }
+        .task(id: "usage|\(deviceSession.activeUserID ?? "")|\(usageRetry)") {
+            await loadUsage()
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
@@ -119,24 +111,36 @@ struct SettingsView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showPasswordSetup) {
-            PasswordSetupSheet(
+            PasswordManagementSheet(
                 configured: passwordStatus?.configured == true,
-                password: $newPassword,
-                confirmation: $confirmPassword,
-                isSaving: isSavingPassword,
-                errorMessage: passwordError,
-                onCancel: { showPasswordSetup = false; newPassword = ""; confirmPassword = "" },
-                onSave: { Task { await savePassword() } }
+                email: deviceAccount?.email ?? "",
+                emailVerified: deviceAccount?.emailVerified == true,
+                onSaved: { status in
+                    let wasConfigured = passwordStatus?.configured == true
+                    passwordStatus = status
+                    showPasswordSetup = false
+                    securityMessage = wasConfigured
+                        ? "Password changed. Other devices were signed out."
+                        : "Password created. You can now sign in with your email."
+                },
+                onEmailVerified: { deviceAccountRetry += 1 },
+                onCancel: { showPasswordSetup = false }
             )
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
-            .interactiveDismissDisabled(isSavingPassword)
         }
-        .onChange(of: showPasswordSetup) { _, isPresented in
-            guard !isPresented else { return }
-            newPassword = ""
-            confirmPassword = ""
-            passwordError = nil
+        .sheet(isPresented: $showChangeEmail) {
+            ChangeEmailSheet(
+                currentEmail: deviceAccount?.email ?? "",
+                onFinished: {
+                    showChangeEmail = false
+                    securityMessage = "Email changed. Other devices were signed out."
+                    deviceAccountRetry += 1
+                },
+                onCancel: { showChangeEmail = false }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .confirmationDialog(
             recoveryStatus?.remaining ?? 0 > 0 ? "Replace recovery codes?" : "Create recovery codes?",
@@ -153,18 +157,6 @@ struct SettingsView: View {
             } else {
                 Text("Save these codes somewhere private. They are shown once and each code can be used one time.")
             }
-        }
-        .confirmationDialog(
-            "Finish moving off Clerk?",
-            isPresented: $showDisconnectClerkConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Disconnect Clerk", role: .destructive) {
-                Task { await disconnectClerk() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Your recordings and current device session stay in Media Tools. Future sign-ins will use your password, passkey, or a recovery code.")
         }
     }
 
@@ -237,36 +229,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var accountSection: some View {
-        if let user = clerk.user {
-            VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(text: "Account", icon: "person.circle")
-
-                HStack(spacing: 12) {
-                    Text(initials(for: user))
-                        .font(Theme.body(16, weight: .bold))
-                        .foregroundStyle(Theme.surface)
-                        .frame(width: 48, height: 48)
-                        .background(Theme.brand400, in: Circle())
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(displayName(for: user))
-                            .font(Theme.body(16, weight: .semibold))
-                            .foregroundStyle(Theme.textPrimary)
-
-                        if let email = user.primaryEmailAddress?.emailAddress {
-                            Text(email)
-                                .font(Theme.caption(13))
-                                .foregroundStyle(Theme.textSecondary)
-                                .lineLimit(1)
-                        }
-                    }
-
-                    Spacer()
-                }
-                .cardStyle()
-            }
-        } else if Configuration.firstPartyIOSAuthEnabled,
-                  deviceSession.activeUserID != nil {
+        if deviceSession.activeUserID != nil {
             VStack(alignment: .leading, spacing: 8) {
                 SectionHeader(text: "Account", icon: "person.circle")
                 VStack(alignment: .leading, spacing: 8) {
@@ -277,6 +240,20 @@ struct SettingsView: View {
                         Text(deviceAccount.email)
                             .font(Theme.caption(13))
                             .foregroundStyle(Theme.textSecondary)
+                            .accessibilityIdentifier("settings.account-email")
+                        if passwordAuthAvailable {
+                            Button {
+                                securityMessage = nil
+                                showChangeEmail = true
+                            } label: {
+                                Label("Change email", systemImage: "envelope")
+                                    .font(Theme.body(14, weight: .semibold))
+                                    .foregroundStyle(Theme.brand400)
+                                    .frame(minHeight: 44)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("settings.change-email")
+                        }
                     } else if isLoadingDeviceAccount {
                         ProgressView("Loading account…")
                     } else if let deviceAccountError {
@@ -289,6 +266,28 @@ struct SettingsView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .cardStyle()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var usageSection: some View {
+        if deviceSession.activeUserID != nil, usage != nil || usageError != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionHeader(text: "This month", icon: "chart.bar.fill")
+                VStack(alignment: .leading, spacing: 8) {
+                    if let usage {
+                        UsageSummaryView(usage: usage)
+                    } else if let usageError {
+                        Text(usageError)
+                            .font(Theme.caption(13))
+                            .foregroundStyle(Theme.error)
+                        Button("Try again") { usageRetry += 1 }
+                            .frame(minHeight: 44)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cardStyle(padding: 14)
             }
         }
     }
@@ -308,6 +307,7 @@ struct SettingsView: View {
 
                 Button(role: .destructive) {
                     deletionConfirmation = ""
+                    deleteAccountPassword = ""
                     deleteAccountError = nil
                     showDeleteAccount = true
                 } label: {
@@ -362,6 +362,13 @@ struct SettingsView: View {
                             }
                     }
 
+                    if passwordStatus?.configured == true {
+                        SecureField("Current password", text: $deleteAccountPassword)
+                            .textContentType(.password)
+                            .authFieldStyle()
+                            .accessibilityIdentifier("delete-account.password")
+                    }
+
                     if let deleteAccountError {
                         Text(deleteAccountError)
                             .font(Theme.caption(13))
@@ -379,11 +386,11 @@ struct SettingsView: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity, minHeight: 50)
                         .background(
-                            deletionConfirmation == "DELETE" ? Theme.error : Theme.textMuted,
+                            canSubmitDeletion ? Theme.error : Theme.textMuted,
                             in: RoundedRectangle(cornerRadius: Theme.radiusMedium)
                         )
                     }
-                    .disabled(deletionConfirmation != "DELETE" || isDeletingAccount)
+                    .disabled(!canSubmitDeletion || isDeletingAccount)
                 }
                 .padding(20)
             }
@@ -399,9 +406,14 @@ struct SettingsView: View {
         }
     }
 
+    private var canSubmitDeletion: Bool {
+        deletionConfirmation == "DELETE"
+            && (passwordStatus?.configured != true || !deleteAccountPassword.isEmpty)
+    }
+
     @ViewBuilder
     private var accountSecuritySection: some View {
-        if Configuration.firstPartyIOSAuthEnabled, (deviceSession.activeUserID != nil || clerk.user != nil) {
+        if deviceSession.activeUserID != nil {
             VStack(alignment: .leading, spacing: 8) {
                 SectionHeader(text: "Sign-in security", icon: "key.fill")
 
@@ -436,7 +448,7 @@ struct SettingsView: View {
                         Divider().overlay(Theme.borderSubtle)
 
                         Button {
-                            passwordError = nil
+                            securityMessage = nil
                             showPasswordSetup = true
                         } label: {
                             HStack(spacing: 10) {
@@ -457,6 +469,8 @@ struct SettingsView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        // The sheet needs the account's email for AutoFill and proof.
+                        .disabled(deviceAccount == nil)
                         .accessibilityIdentifier("sign-in-security.password")
                     }
 
@@ -502,6 +516,32 @@ struct SettingsView: View {
                         .disabled(isGeneratingRecoveryCodes || isEnrollingPasskey)
                     }
 
+                    Divider().overlay(Theme.borderSubtle)
+
+                    NavigationLink {
+                        DevicesListView(currentSessionID: deviceSession.currentSessionID)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "iphone.gen3").foregroundStyle(Theme.brand400)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Devices")
+                                    .font(Theme.body(14, weight: .semibold))
+                                    .foregroundStyle(Theme.textPrimary)
+                                Text("See where you are signed in, and sign out a device.")
+                                    .font(Theme.caption(12))
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(Theme.textMuted)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("sign-in-security.devices")
+
                     if let securityStatusError {
                         SecurityStatusRetryBanner(
                             message: securityStatusError,
@@ -525,23 +565,6 @@ struct SettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    if let status = clerkDetachmentStatus {
-                        Divider().overlay(Theme.borderSubtle)
-                        ClerkMigrationCard(
-                            status: status,
-                            isDisconnecting: isDisconnectingClerk,
-                            errorMessage: clerkDetachmentError,
-                            onDisconnect: { showDisconnectClerkConfirmation = true },
-                            onRetry: { Task { await loadClerkDetachmentStatus() } }
-                        )
-                    } else if let clerkDetachmentError {
-                        SecurityStatusRetryBanner(
-                            message: clerkDetachmentError,
-                            isRetrying: isLoadingClerkDetachment
-                        ) {
-                            Task { await loadClerkDetachmentStatus() }
-                        }
-                    }
                 }
                 .cardStyle(padding: 14)
             }
@@ -884,17 +907,6 @@ struct SettingsView: View {
         }
     }
 
-    private func displayName(for user: User) -> String {
-        let name = [user.firstName, user.lastName].compactMap { $0 }.joined(separator: " ")
-        return name.isEmpty ? "Media Tools account" : name
-    }
-
-    private func initials(for user: User) -> String {
-        let characters = [user.firstName, user.lastName]
-            .compactMap { $0?.first }
-        return characters.isEmpty ? "MT" : String(characters.prefix(2))
-    }
-
     private func settingsLink(
         title: String,
         detail: String,
@@ -944,9 +956,25 @@ struct SettingsView: View {
         }
     }
 
+    private func loadUsage() async {
+        guard deviceSession.activeUserID != nil else {
+            usage = nil
+            usageError = nil
+            return
+        }
+        do {
+            let loaded = try await FirstPartyAuthService.shared.usage()
+            guard !Task.isCancelled else { return }
+            usage = loaded
+            usageError = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            if usage == nil { usageError = "Could not load this month's usage." }
+        }
+    }
+
     private func loadRecoveryStatus() async {
-        guard Configuration.firstPartyIOSAuthEnabled,
-              (deviceSession.activeUserID != nil || clerk.user != nil) else {
+        guard deviceSession.activeUserID != nil else {
             recoveryStatus = nil
             return
         }
@@ -982,102 +1010,6 @@ struct SettingsView: View {
         }
     }
 
-    private func savePassword() async {
-        guard !isSavingPassword else { return }
-        guard newPassword == confirmPassword else {
-            passwordError = "The passwords do not match."
-            return
-        }
-        isSavingPassword = true
-        passwordError = nil
-        defer { isSavingPassword = false }
-        do {
-            let wasConfigured = passwordStatus?.configured == true
-            passwordStatus = try await FirstPartyAuthService.shared.setPassword(newPassword)
-            newPassword = ""
-            confirmPassword = ""
-            showPasswordSetup = false
-            securityMessage = wasConfigured
-                ? "Password changed. Other devices were signed out."
-                : "Password created. You can now sign in with your email."
-            await loadClerkDetachmentStatus()
-        } catch {
-            passwordError = error.localizedDescription.isEmpty
-                ? "Could not save the password. Please try again."
-                : error.localizedDescription
-        }
-    }
-
-    private func loadClerkDetachmentStatus() async {
-        guard Configuration.firstPartyIOSAuthEnabled,
-              let ownerID = deviceSession.activeUserID else {
-            clerkDetachmentStatus = nil
-            clerkDetachmentError = nil
-            return
-        }
-        isLoadingClerkDetachment = true
-        defer { isLoadingClerkDetachment = false }
-        do {
-            let status = try await FirstPartyAuthService.shared.clerkDetachmentStatus(
-                expectedOwnerID: ownerID
-            )
-            if !status.linked {
-                try await finishLocalClerkDetachment(expectedOwnerID: ownerID)
-            }
-            clerkDetachmentStatus = status
-            clerkDetachmentError = nil
-        } catch {
-            guard !Task.isCancelled else { return }
-            clerkDetachmentError = "Could not check the Clerk migration status."
-        }
-    }
-
-    private func disconnectClerk() async {
-        guard !isDisconnectingClerk,
-              let ownerID = deviceSession.activeUserID else { return }
-        isDisconnectingClerk = true
-        clerkDetachmentError = nil
-        securityMessage = nil
-        defer { isDisconnectingClerk = false }
-
-        do {
-            let status = try await FirstPartyAuthService.shared.detachClerk(
-                expectedOwnerID: ownerID
-            )
-            guard !status.linked else { throw APIError.invalidResponse }
-            securityMessage = "Media Tools sign-in is ready. Clerk is disconnected."
-            try await finishLocalClerkDetachment(expectedOwnerID: ownerID)
-            clerkDetachmentStatus = status
-        } catch {
-            clerkDetachmentError = error.localizedDescription.isEmpty
-                ? "Could not disconnect Clerk. Please try again."
-                : error.localizedDescription
-            await loadClerkDetachmentStatus()
-        }
-    }
-
-    private func finishLocalClerkDetachment(expectedOwnerID: String) async throws {
-        // Validate and commit against the initiating stable account before
-        // touching Share Extension auth for whichever account is now active.
-        let detachedClerkID = deviceSession.clerkIDForFallbackOwner(expectedOwnerID)
-        try deviceSession.markClerkDetached(expectedOwnerID: expectedOwnerID)
-        if let detachedClerkID {
-            deviceSession.markLocallyDeletedClerkIdentity(detachedClerkID)
-        }
-        tokenSync.stopSyncing()
-        tokenSync.clearToken()
-        if clerk.user != nil {
-            do {
-                try await clerk.auth.signOut()
-            } catch {
-                securityMessage = "Clerk is disconnected. Media Tools will finish clearing the old local sign-in automatically."
-            }
-        }
-        if let detachedClerkID, clerk.user?.id != detachedClerkID {
-            deviceSession.clearLocallyDeletedClerkIdentity(detachedClerkID)
-        }
-    }
-
     private func enrollPasskey() async {
         isEnrollingPasskey = true
         securityMessage = nil
@@ -1086,7 +1018,6 @@ struct SettingsView: View {
         do {
             try await FirstPartyAuthService.shared.enrollPasskey()
             passkeyStatus = try? await FirstPartyAuthService.shared.passkeyStatus()
-            await loadClerkDetachmentStatus()
             securityStatusError = nil
             securityMessage = "Passkey added. You can use it the next time you sign in."
         } catch {
@@ -1122,7 +1053,6 @@ struct SettingsView: View {
         do {
             let status = try await FirstPartyAuthService.shared.confirmRecoveryCodeRotation()
             recoveryStatus = status
-            await loadClerkDetachmentStatus()
             securityMessage = "Recovery codes saved. The old set no longer works."
             securityStatusError = nil
             showRecoveryCodesSheet = false
@@ -1144,212 +1074,49 @@ struct SettingsView: View {
         signOutError = nil
         defer { isSigningOut = false }
 
-        let signingOutClerkID = clerk.user?.id
-        if let signingOutClerkID {
-            // Preserve the local sign-out intent if Clerk cannot remove its
-            // cached session while offline. Activation blocks only this exact
-            // provider subject until Clerk confirms it is gone locally.
-            deviceSession.markLocallyDeletedClerkIdentity(signingOutClerkID)
-        }
-        // Stop every local workspace and background-upload path as soon as the
-        // sign-out intent is durable. Server or Clerk cleanup can safely retry
-        // without letting the old account continue work in the meantime.
+        // Stop every local workspace and background-upload path first. Server
+        // cleanup can safely retry without letting the old account continue work
+        // in the meantime. Recordings stay here under their owner.
         await uploadCoordinator.setActiveOwnerID(nil)
         aiProcessingConsent.setActiveOwnerID(nil)
-        tokenSync.stopSyncing()
-        tokenSync.clearToken()
+        // The share extension stops here, whether or not the server can be reached.
+        ShareUploadKeyManager.shared.endCredential()
 
         do {
             try await deviceSession.revokeOrSuspend()
             FirstPartyAuthService.shared.clearSessionScopedJournals()
-            if clerk.user != nil {
-                try await clerk.auth.signOut()
-            }
-            if let signingOutClerkID, clerk.user?.id != signingOutClerkID {
-                deviceSession.clearLocallyDeletedClerkIdentity(signingOutClerkID)
-            }
         } catch {
             signOutError = "Couldn’t sign out. Please try again."
         }
     }
 
     private func deleteAccount() async {
-        guard deletionConfirmation == "DELETE",
-              let ownerID = deviceSession.activeUserID ?? clerk.user?.id else { return }
+        guard canSubmitDeletion,
+              let ownerID = deviceSession.activeUserID else { return }
         isDeletingAccount = true
         deleteAccountError = nil
         defer { isDeletingAccount = false }
 
         do {
             let pending = try await AccountDeletionRecoveryService.shared.requestDeletion(
-                ownerID: ownerID
+                ownerID: ownerID,
+                currentPassword: passwordStatus?.configured == true ? deleteAccountPassword : nil
             )
             try await AccountDeletionRecoveryService.shared.finishLocalDeletion(
                 pending,
                 uploadCoordinator: uploadCoordinator,
                 consent: aiProcessingConsent,
                 deviceSession: deviceSession,
-                tokenSync: tokenSync,
-                clerk: clerk
+                shareKeys: .shared
             )
         } catch {
             deleteAccountError = error.localizedDescription
             return
         }
+        deleteAccountPassword = ""
         showDeleteAccount = false
     }
 
-}
-
-private struct PasswordSetupSheet: View {
-    let configured: Bool
-    @Binding var password: String
-    @Binding var confirmation: String
-    let isSaving: Bool
-    let errorMessage: String?
-    let onCancel: () -> Void
-    let onSave: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(configured ? "Change password" : "Create a password")
-                            .font(Theme.heading(24))
-                            .foregroundStyle(Theme.textPrimary)
-                        Text(configured
-                             ? "Changing your password signs out your other devices. This iPhone stays signed in."
-                             : "Use this password with your account email on iPhone and web.")
-                            .font(Theme.body(14))
-                            .foregroundStyle(Theme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    SecureField("New password", text: $password)
-                        .textContentType(.newPassword)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 50)
-                        .background(Theme.surfaceCard)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-                    SecureField("Confirm password", text: $confirmation)
-                        .textContentType(.newPassword)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 50)
-                        .background(Theme.surfaceCard)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-                    Text("Use at least 15 characters. Spaces and password managers are supported.")
-                        .font(Theme.caption(12))
-                        .foregroundStyle(Theme.textMuted)
-                    if let errorMessage {
-                        Text(errorMessage).font(Theme.caption(13)).foregroundStyle(Theme.error)
-                    }
-                    Button { onSave() } label: {
-                        HStack(spacing: 8) {
-                            if isSaving { ProgressView().tint(.white) }
-                            Text(isSaving ? "Saving…" : configured ? "Change password" : "Create password")
-                        }
-                        .font(Theme.body(15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .background(Theme.brand500, in: RoundedRectangle(cornerRadius: Theme.radiusMedium))
-                    }
-                    .disabled(isSaving || password.count < 15 || confirmation.count < 15)
-                    .accessibilityIdentifier("password-setup.save")
-                }
-                .padding(20)
-            }
-            .background(Theme.surface)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { onCancel() }.disabled(isSaving) } }
-        }
-    }
-}
-
-private struct ClerkMigrationCard: View {
-    let status: ClerkDetachmentStatus
-    let isDisconnecting: Bool
-    let errorMessage: String?
-    let onDisconnect: () -> Void
-    let onRetry: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(
-                status.linked ? "Finish moving off Clerk" : "Media Tools sign-in active",
-                systemImage: status.linked ? "arrow.right.circle.fill" : "checkmark.shield.fill"
-            )
-            .font(Theme.body(14, weight: .semibold))
-            .foregroundStyle(status.linked ? Theme.textPrimary : Theme.success)
-
-            if status.linked {
-                Text("Disconnect Clerk after a password or passkey is ready and recovery codes are saved. Your account, recordings, and this device session stay in Media Tools.")
-                    .font(Theme.caption(12))
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                readinessRow(
-                    title: "Password or passkey",
-                    isReady: status.passwordConfigured || status.passkeyCount > 0,
-                    detail: status.passwordConfigured
-                        ? "Password ready"
-                        : status.passkeyCount > 0 ? "Passkey ready" : "Add one above"
-                )
-                readinessRow(
-                    title: "Recovery codes",
-                    isReady: status.unusedRecoveryCodes > 0,
-                    detail: status.unusedRecoveryCodes > 0
-                        ? "\(status.unusedRecoveryCodes) available"
-                        : "Create and save them above"
-                )
-
-                if status.ready {
-                    Button(role: .destructive, action: onDisconnect) {
-                        HStack(spacing: 8) {
-                            if isDisconnecting { ProgressView().tint(.white) }
-                            Text(isDisconnecting ? "Disconnecting…" : "Disconnect Clerk")
-                        }
-                        .font(Theme.body(14, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Theme.error, in: RoundedRectangle(cornerRadius: Theme.radiusMedium))
-                    }
-                    .disabled(isDisconnecting)
-                    .accessibilityIdentifier("clerk-migration.disconnect")
-                }
-            } else {
-                Text("Use your password, passkey, or a recovery code whenever you need to sign in again.")
-                    .font(Theme.caption(12))
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(Theme.caption(12))
-                    .foregroundStyle(Theme.error)
-                Button("Check again", action: onRetry)
-                    .font(Theme.body(14, weight: .semibold))
-                    .foregroundStyle(Theme.brand400)
-                    .frame(minHeight: 44)
-            }
-        }
-        // Without this the card's identifier replaces the Disconnect button's.
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("clerk-migration.card")
-    }
-
-    private func readinessRow(title: String, isReady: Bool, detail: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: isReady ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(isReady ? Theme.success : Theme.textMuted)
-            Text(title)
-                .font(Theme.caption(12, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-            Spacer()
-            Text(detail)
-                .font(Theme.caption(12))
-                .foregroundStyle(Theme.textSecondary)
-        }
-    }
 }
 
 private struct SecurityStatusRetryBanner: View {
@@ -1543,59 +1310,6 @@ struct RecoveryCodesOneTimePreviewHost: View {
                 .presentationDragIndicator(.visible)
             }
     }
-}
-
-struct ClerkMigrationPreviewHost: View {
-    @State private var status = ClerkDetachmentStatus(
-        linked: true,
-        ready: true,
-        passkeyCount: 1,
-        passwordConfigured: true,
-        unusedRecoveryCodes: 8
-    )
-    @State private var showConfirmation = false
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                ClerkMigrationCard(
-                    status: status,
-                    isDisconnecting: false,
-                    errorMessage: nil,
-                    onDisconnect: { showConfirmation = true },
-                    onRetry: {}
-                )
-                .cardStyle(padding: 14)
-                .padding(16)
-            }
-            .background(Theme.surface)
-            .navigationTitle("Sign-in security")
-        }
-        .confirmationDialog(
-            "Finish moving off Clerk?",
-            isPresented: $showConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Disconnect Clerk", role: .destructive) {
-                status = ClerkDetachmentStatus(
-                    linked: false,
-                    ready: true,
-                    passkeyCount: 1,
-                    passwordConfigured: true,
-                    unusedRecoveryCodes: 8
-                )
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Your recordings and current device session stay in Media Tools. Future sign-ins will use your password, passkey, or a recovery code.")
-        }
-    }
-}
-
-private struct DeviceAccount: Decodable {
-    let id: String
-    let email: String
-    let name: String
 }
 
 private struct SettingsActionRow: View {

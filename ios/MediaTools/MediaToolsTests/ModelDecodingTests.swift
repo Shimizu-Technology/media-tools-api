@@ -1313,15 +1313,6 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertTrue(QuickRecordIntent.openAppWhenRun)
     }
 
-    func testShippingClientConfigurationIncludesClerk() {
-        XCTAssertTrue(Configuration.clerkPublishableKey.hasPrefix("pk_"))
-        XCTAssertFalse(Configuration.clerkPublishableKey.isEmpty)
-    }
-
-    func testShippingClientConfigurationEnablesFirstPartyIOSAuthForQA() {
-        XCTAssertTrue(Configuration.firstPartyIOSAuthEnabled)
-    }
-
     @MainActor
     func testSystemQuickCaptureDoesNotRecordWithoutLiveActivities() async throws {
         let directory = FileManager.default.temporaryDirectory

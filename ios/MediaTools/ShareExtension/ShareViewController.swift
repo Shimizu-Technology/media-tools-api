@@ -1,8 +1,10 @@
 import UIKit
 import UniformTypeIdentifiers
 
-/// Saves shared files and links on-device, then closes itself. The main app
-/// handles account selection, AI processing consent, upload, and retry.
+/// Saves shared files and links on-device, then closes itself. Audio also starts
+/// uploading from here when the app has left a capture key and permission for it,
+/// and iOS wakes the app to finish. Without those, or if anything goes wrong, the
+/// saved share waits for the app, which handles everything as it always has.
 final class ShareViewController: UIViewController {
     private let symbol = UIImageView(image: UIImage(systemName: "waveform.circle.fill"))
     private let statusLabel = UILabel()
@@ -89,13 +91,15 @@ final class ShareViewController: UIViewController {
         let group = DispatchGroup()
         let lock = NSLock()
         var saved = 0
+        var uploading = 0
         var failure: String?
-        let record: (Result<Void, Error>) -> Void = { result in
+        let record: (Result<ShareDirectUploader.Outcome?, Error>) -> Void = { result in
             lock.lock()
             defer { lock.unlock() }
             switch result {
-            case .success:
+            case .success(let outcome):
                 saved += 1
+                if outcome == .uploading { uploading += 1 }
             case .failure(let error):
                 failure = error.localizedDescription
             }
@@ -114,7 +118,7 @@ final class ShareViewController: UIViewController {
         } else if let link = links.first {
             group.enter()
             saveLink(from: link) { result in
-                record(result)
+                record(result.map { nil })
                 group.leave()
             }
         } else {
@@ -128,7 +132,7 @@ final class ShareViewController: UIViewController {
             } else if let failure {
                 self?.finish(failure: "Saved \(saved). One item could not be saved: \(failure)")
             } else {
-                self?.finishSuccessfully()
+                self?.finishSuccessfully(uploadStarted: uploading > 0)
             }
         }
     }
@@ -146,7 +150,7 @@ final class ShareViewController: UIViewController {
     private func saveFile(
         from provider: NSItemProvider,
         typeIdentifier: String,
-        completion: @escaping (Result<Void, Error>) -> Void
+        completion: @escaping (Result<ShareDirectUploader.Outcome?, Error>) -> Void
     ) {
         provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { temporaryURL, error in
             guard let temporaryURL else {
@@ -155,14 +159,54 @@ final class ShareViewController: UIViewController {
             }
             // File representations are temporary. Copy before returning from
             // this callback and before telling iOS the share is done.
-            completion(Result {
-                _ = try ShareInboxStore().stageFile(
+            do {
+                let inbox = try ShareInboxStore()
+                let uploader = Self.directUploader(inbox: inbox)
+                let item = try inbox.stageFile(
                     from: temporaryURL,
                     originalName: provider.suggestedName ?? temporaryURL.lastPathComponent,
-                    contentTypeExtension: UTType(typeIdentifier)?.preferredFilenameExtension
+                    contentTypeExtension: UTType(typeIdentifier)?.preferredFilenameExtension,
+                    reservingDirectUploadFor: uploader?.eligibleOwnerID()
                 )
-            })
+                guard let uploader, item.directUpload != nil else {
+                    completion(.success(nil))
+                    return
+                }
+                // The share is already safe, so nothing below can fail it.
+                Task {
+                    completion(.success(await uploader.start(item)))
+                }
+            } catch {
+                completion(.failure(error))
+            }
         }
+    }
+
+    private static func directUploader(inbox: ShareInboxStore) -> ShareDirectUploader? {
+        guard let policy = try? ShareUploadPolicyFileStore() else { return nil }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = ShareDirectUpload.presignTimeout
+        configuration.timeoutIntervalForResource = ShareDirectUpload.presignTimeout
+        let http = URLSession(configuration: configuration)
+        let credentials = ShareUploadKeychainStore()
+        return ShareDirectUploader(
+            inbox: inbox,
+            credentials: credentials,
+            policy: policy,
+            http: http,
+            starter: ShareBackgroundUploadStarter { metadata, statusCode in
+                guard let inbox = try? ShareInboxStore(),
+                      let policy = try? ShareUploadPolicyFileStore()
+                else { return }
+                await ShareDirectUploader(
+                    inbox: inbox,
+                    credentials: credentials,
+                    policy: policy,
+                    http: http,
+                    starter: ShareInertUploadStarter()
+                ).finishTransfer(metadata, statusCode: statusCode)
+            }
+        )
     }
 
     private func saveLink(
@@ -180,11 +224,11 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    private func finishSuccessfully() {
+    private func finishSuccessfully(uploadStarted: Bool) {
         activity.stopAnimating()
         symbol.image = UIImage(systemName: "checkmark.circle.fill")
         symbol.tintColor = .systemGreen
-        statusLabel.text = "Saved to Media Tools"
+        statusLabel.text = uploadStarted ? "Saved. Uploading to Media Tools." : "Saved to Media Tools"
         UIAccessibility.post(notification: .announcement, argument: statusLabel.text)
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.successDismissDelay) { [weak self] in
             self?.done()
@@ -201,4 +245,9 @@ final class ShareViewController: UIViewController {
         statusLabel.textColor = .systemRed
         doneButton.isHidden = false
     }
+}
+
+/// Nothing starts while finishing a transfer. The uploader only needs a value here.
+private struct ShareInertUploadStarter: ShareBackgroundUploadStarting {
+    func start(fileURL: URL, uploadURL: URL, metadata: BackgroundUploadMetadata, sessionIdentifier: String) throws {}
 }

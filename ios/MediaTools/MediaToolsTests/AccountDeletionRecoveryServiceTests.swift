@@ -1,4 +1,3 @@
-import ClerkKit
 import XCTest
 @testable import MediaTools
 
@@ -34,7 +33,7 @@ private actor MockAccountDeletionAPI: AccountDeletionAPI {
         self.receiptResult = receiptResult
     }
 
-    func requestAccountDeletion(ownerID: String, receiptToken: String) async throws {
+    func requestAccountDeletion(ownerID: String, receiptToken: String, currentPassword: String?) async throws {
         requested.append((ownerID, receiptToken))
         switch requestResult {
         case .success:
@@ -89,9 +88,6 @@ private final class AccountDeletionDeviceSessionStore: DeviceSessionStoring {
     func load() -> StoredDeviceSession? { value }
     func save(_ value: StoredDeviceSession) throws { self.value = value }
     func delete() { value = nil }
-    func loadPendingBootstrap() throws -> PendingDeviceSessionBootstrap? { nil }
-    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws {}
-    func deletePendingBootstrap() {}
     func localOwnerID(for clerkID: String) -> String? { mappings[clerkID] }
     func clerkID(forLocalOwnerID ownerID: String) -> String? {
         mappings.first(where: { $0.value == ownerID })?.key
@@ -101,6 +97,34 @@ private final class AccountDeletionDeviceSessionStore: DeviceSessionStoring {
 }
 
 final class AccountDeletionRecoveryServiceTests: XCTestCase {
+    @MainActor
+    func testAWrongPasswordSaysSoAndLeavesNothingPending() async throws {
+        let journal = MemoryAccountDeletionJournal()
+        let service = AccountDeletionRecoveryService(
+            api: PasswordRejectingDeletionAPI(),
+            journal: journal
+        )
+        do {
+            _ = try await service.requestDeletion(ownerID: "owner-a", currentPassword: "wrong")
+            XCTFail("Expected rejection")
+        } catch AccountDeletionRecoveryError.currentPasswordRejected {
+            XCTAssertNil(journal.value, "Nothing was deleted, so nothing may retry")
+        }
+    }
+
+    func testDeletionBodyCarriesTheCurrentPasswordOnlyWhenGiven() throws {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let withPassword = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(
+            AccountDeletionRequestBody(confirmation: "DELETE", deletionReceiptToken: "t", currentPassword: "p")
+        )) as? [String: Any])
+        XCTAssertEqual(withPassword["current_password"] as? String, "p")
+        let without = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(
+            AccountDeletionRequestBody(confirmation: "DELETE", deletionReceiptToken: "t")
+        )) as? [String: Any])
+        XCTAssertNil(without["current_password"])
+    }
+
     @MainActor
     func testPreparePersistsAndReusesExactOwnerBoundReceipt() throws {
         let journal = MemoryAccountDeletionJournal()
@@ -341,8 +365,7 @@ final class AccountDeletionRecoveryServiceTests: XCTestCase {
         )
         let deviceSession = DeviceSessionController(
             transport: DisabledSessionTransportForDeletionTests(),
-            store: store,
-            enabled: true
+            store: store
         )
         try deviceSession.saveSession(pair: ownerA, source: .passkey)
 
@@ -369,8 +392,11 @@ final class AccountDeletionRecoveryServiceTests: XCTestCase {
             uploadCoordinator: cleaner,
             consent: AIProcessingConsentManager(defaults: defaults),
             deviceSession: deviceSession,
-            tokenSync: TokenSyncService(),
-            clerk: Clerk.shared
+            shareKeys: ShareUploadKeyManager(
+                credentials: EmptyShareUploadCredentialStore(),
+                api: UnusedShareUploadKeyAPI(),
+                defaults: defaults
+            )
         )
 
         XCTAssertEqual(deviceSession.storedUserID, "owner-b")
@@ -383,4 +409,26 @@ private actor DisabledSessionTransportForDeletionTests: DeviceSessionTransport {
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         throw URLError(.notConnectedToInternet)
     }
+}
+
+private struct EmptyShareUploadCredentialStore: ShareUploadCredentialStoring {
+    func load() -> ShareUploadCredentialLoadResult { .missing }
+    func save(_ credential: ShareUploadCredential) throws {}
+    func delete() {}
+}
+
+private struct UnusedShareUploadKeyAPI: ShareUploadKeyAPI {
+    func createShareUploadKey(name: String, ownerID: String) async throws -> ShareUploadKeyResponse {
+        throw APIError.invalidResponse
+    }
+    func listAPIKeys(ownerID: String) async throws -> [ListedAPIKey] { [] }
+    func revokeAPIKey(id: String, ownerID: String) async throws {}
+    func revokeAPIKey(id: String, bearerToken: String) async throws {}
+}
+
+private struct PasswordRejectingDeletionAPI: AccountDeletionAPI {
+    func requestAccountDeletion(ownerID: String, receiptToken: String, currentPassword: String?) async throws {
+        throw APIError.httpError(statusCode: 401, code: "current_password_required", message: "Enter your current password")
+    }
+    func accountDeletionReceiptConfirmed(_ receiptToken: String) async throws -> Bool { false }
 }

@@ -181,7 +181,7 @@ final class RecordingCoordinator {
         }
     }
 
-    /// The server verified that a Clerk subject resolves to this users.id.
+    /// The server verified that a provider subject resolves to this users.id.
     /// Rewrite only that exact subject; another account's recordings stay put.
     func migrateOwnerID(from clerkID: String, to userID: String) throws {
         guard clerkID != userID else { return }
@@ -230,6 +230,15 @@ final class RecordingCoordinator {
         store?.fileURL(for: recording)
     }
 
+    /// Provider IDs still owning work on this device. Server IDs are UUIDs, so
+    /// these can only be left over from before first-party sign-in.
+    var legacyProviderOwnerIDs: Set<String> {
+        let owners = pendingRecordings.map(\.ownerID) + pendingSharedItems.map(\.ownerID)
+        return Set(owners.compactMap { owner in
+            owner?.hasPrefix("user_") == true ? owner : nil
+        })
+    }
+
     func recording(withID id: UUID) -> LocalRecording? {
         pendingRecordings.first { $0.id == id }
     }
@@ -238,32 +247,94 @@ final class RecordingCoordinator {
     /// queue used by Files and Quick Record. Never upload here: the upload
     /// coordinator checks account ownership and AI processing consent. PDFs and
     /// links have no recording, so they stay in the inbox until it sends them.
+    ///
+    /// The share's ID becomes the recording's ID, which is what keeps a share the
+    /// extension is already uploading from being uploaded again. Its source stays
+    /// in the inbox until that transfer ends, because iOS may still be reading it.
     func importSharedItems() {
         retryRestorationIfNeeded()
         do {
             let inbox = try resolvedShareInbox()
             var errors = pendingSharedErrors
             for item in try inbox.pendingItems() where item.resolvedKind == .audio {
+                // The extension is still presigning. It either starts the upload
+                // or releases this share within a few seconds.
+                if item.directUpload?.isReservationActive() == true { continue }
                 do {
-                    _ = try importRecording(
-                        from: inbox.fileURL(for: item),
-                        contentType: "general",
-                        shareID: item.id,
-                        originalName: item.originalName,
-                        autoTranscribe: autoTranscribeEnabledForNewRecordings
-                    )
+                    var recording = try importShare(item, from: inbox)
+                    // The extension learned the bytes arrived after this share was
+                    // imported. They must not be sent a second time.
+                    if item.directUpload?.uploadFinished == true, recording.state == .uploading {
+                        markUploadFinalizing(item.id)
+                        recording = self.recording(withID: item.id) ?? recording
+                    }
+                    if recording.state == .uploading,
+                       recording.shareUploadSessionIdentifier == item.directUpload?.sessionIdentifier,
+                       recording.shareUploadSessionIdentifier != nil {
+                        continue
+                    }
                     try inbox.remove(item)
                     errors[item.id] = nil
                 } catch {
                     errors[item.id] = error.localizedDescription
                 }
             }
-            pendingSharedItems = try inbox.pendingItems()
+            pendingSharedItems = try inbox.pendingItems().filter { item in
+                item.directUpload?.isReservationActive() != true && recording(withID: item.id) == nil
+            }
             pendingSharedErrors = errors
             onSavedRecordingsChanged?()
         } catch {
             errorMessage = "Shared files are unavailable. Restart Media Tools to try again."
         }
+    }
+
+    private func importShare(
+        _ item: ShareInboxStore.Item,
+        from inbox: ShareInboxStore
+    ) throws -> LocalRecording {
+        // A direct upload belongs to the account whose key started it, whoever is
+        // signed in by now. Any other share is claimed the usual way.
+        let ownerID = item.ownerID ?? activeOwnerID
+        let autoTranscribe = AutoTranscribePreference(defaults: localAccountDefaults)
+            .isEnabled(ownerID: ownerID)
+        // If the setting went off after the share started, the transfer is ignored
+        // when it ends, and the recording waits here for a deliberate tap.
+        let directUpload = autoTranscribe && item.directUpload?.isStarted == true
+            ? item.directUpload
+            : nil
+        return try importRecording(
+            from: inbox.fileURL(for: item),
+            contentType: ShareDirectUpload.contentType,
+            shareID: item.id,
+            originalName: item.originalName,
+            autoTranscribe: autoTranscribe,
+            ownerID: ownerID,
+            directUpload: directUpload
+        )
+    }
+
+    /// True while the extension may still release a share, so the coordinator
+    /// knows to look once more instead of waiting for the next foreground.
+    var hasShareReservations: Bool {
+        guard let inbox = try? resolvedShareInbox(),
+              let items = try? inbox.pendingItems() else { return false }
+        return items.contains { $0.directUpload?.isReservationActive() == true }
+    }
+
+    /// Every extension upload that may still report back, for any account. A
+    /// session must be attached before its tasks can be seen or cancelled.
+    var shareUploadSessionIdentifiers: Set<String> {
+        Set(pendingRecordings.lazy.filter { $0.state == .uploading }
+            .compactMap(\.shareUploadSessionIdentifier))
+    }
+
+    /// The transfer has ended, so its source no longer needs to stay in the inbox.
+    /// The recording store holds its own copy.
+    func releaseShareSource(recordingID: UUID) {
+        guard let recording = recording(withID: recordingID), recording.state != .uploading,
+              let inbox = try? resolvedShareInbox() else { return }
+        try? inbox.removeItem(id: recordingID)
     }
 
     private func resolvedShareInbox() throws -> ShareInboxStore {
@@ -368,6 +439,7 @@ final class RecordingCoordinator {
 
     private func deleteSharedDocuments(ownedBy ownerID: String) throws {
         guard let inbox = try shareInboxIfAvailable() else { return }
+        // Includes audio that carries a direct upload, which has an owner too.
         for item in try inbox.pendingItems() where item.ownerID == ownerID {
             try inbox.remove(item)
             pendingSharedItems.removeAll { $0.id == item.id }
@@ -696,7 +768,9 @@ final class RecordingCoordinator {
         contentType: String,
         shareID: UUID? = nil,
         originalName: String? = nil,
-        autoTranscribe: Bool = false
+        autoTranscribe: Bool = false,
+        ownerID: String? = nil,
+        directUpload: ShareInboxStore.DirectUpload? = nil
     ) throws -> LocalRecording {
         guard let store else {
             throw RecordingCoordinatorError.storageUnavailable
@@ -704,10 +778,10 @@ final class RecordingCoordinator {
         if let shareID, let existing = pendingRecordings.first(where: { $0.id == shareID }) {
             return existing
         }
-        let recording = try store.importRecording(
+        var recording = try store.importRecording(
             from: sourceURL,
             contentType: contentType,
-            ownerID: activeOwnerID,
+            ownerID: ownerID ?? activeOwnerID,
             id: shareID ?? UUID(),
             originalName: originalName,
             autoTranscribeRequested: autoTranscribe
@@ -719,6 +793,14 @@ final class RecordingCoordinator {
             throw RecordingCoordinatorError.invalidRecording(
                 validationError.errorDescription ?? "The selected audio file is invalid."
             )
+        }
+        if let directUpload {
+            recording.state = directUpload.uploadFinished == true ? .finalizingUpload : .uploading
+            recording.uploadProgress = 0
+            recording.uploadObjectKey = directUpload.objectKey
+            recording.uploadSizeBytes = directUpload.sizeBytes
+            recording.uploadMimeType = directUpload.mimeType
+            recording.shareUploadSessionIdentifier = directUpload.sessionIdentifier
         }
         pendingRecordings.insert(recording, at: 0)
         do {
@@ -737,6 +819,7 @@ final class RecordingCoordinator {
             recording.lastError = message
             recording.uploadProgress = nil
             recording.uploadTaskIdentifier = nil
+            recording.shareUploadSessionIdentifier = nil
         }
     }
 
@@ -748,6 +831,7 @@ final class RecordingCoordinator {
             recording.lastError = nil
             recording.uploadProgress = nil
             recording.uploadTaskIdentifier = nil
+            recording.shareUploadSessionIdentifier = nil
             recording.autoTranscribeRequested = false
         }
     }
@@ -770,6 +854,7 @@ final class RecordingCoordinator {
             recording.uploadSizeBytes = sizeBytes
             recording.uploadMimeType = mimeType
             recording.uploadTaskIdentifier = taskIdentifier
+            recording.shareUploadSessionIdentifier = nil
         }
     }
 

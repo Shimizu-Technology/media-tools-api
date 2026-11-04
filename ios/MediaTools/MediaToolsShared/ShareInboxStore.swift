@@ -54,8 +54,36 @@ struct ShareInboxStore {
         /// Set when "Automatically transcribe" was on as the account claimed this
         /// share. A link claimed with it off keeps waiting for a deliberate tap.
         var autoTranscribeRequested: Bool? = nil
+        /// Set when the extension is sending this audio itself. `ownerID` is then
+        /// the account whose capture key it used.
+        var directUpload: DirectUpload? = nil
 
         var resolvedKind: Kind { kind ?? .audio }
+    }
+
+    /// Tells the app not to upload a share a second time. It starts as a
+    /// reservation while the extension presigns, and gains the upload's details
+    /// the moment the transfer is about to start.
+    struct DirectUpload: Codable, Equatable {
+        /// An extension that died mid-presign must not hold its share forever.
+        static let reservationLifetime: TimeInterval = 60
+
+        let reservedAt: Date
+        var sessionIdentifier: String? = nil
+        var objectKey: String? = nil
+        var sizeBytes: Int64? = nil
+        var mimeType: String? = nil
+        /// The extension was still running when the bytes arrived, so iOS told it
+        /// rather than waking the app. A later import must not send them again.
+        var uploadFinished: Bool? = nil
+
+        var isStarted: Bool {
+            sessionIdentifier != nil && objectKey != nil && sizeBytes != nil && mimeType != nil
+        }
+
+        func isReservationActive(now: Date = Date()) -> Bool {
+            !isStarted && abs(now.timeIntervalSince(reservedAt)) < Self.reservationLifetime
+        }
     }
 
     let rootURL: URL
@@ -67,7 +95,7 @@ struct ShareInboxStore {
             self.rootURL = rootURL
         } else {
             guard let container = fileManager.containerURL(
-                forSecurityApplicationGroupIdentifier: "group.com.shimizu-technology.media-tools"
+                forSecurityApplicationGroupIdentifier: ShareDirectUpload.appGroupIdentifier
             ) else {
                 throw CocoaError(.fileNoSuchFile)
             }
@@ -106,7 +134,9 @@ struct ShareInboxStore {
     func stageFile(
         from sourceURL: URL,
         originalName: String,
-        contentTypeExtension: String? = nil
+        contentTypeExtension: String? = nil,
+        reservingDirectUploadFor directUploadOwnerID: String? = nil,
+        now: Date = Date()
     ) throws -> Item {
         let id = UUID()
         let directory = directoryURL(for: id)
@@ -132,8 +162,12 @@ struct ShareInboxStore {
             id: id,
             originalName: Self.displayName(safeName, fileExtension: fileExtension, fallback: storedName),
             storedName: storedName,
-            createdAt: Date(),
-            kind: kind
+            createdAt: now,
+            kind: kind,
+            ownerID: kind == .audio ? directUploadOwnerID : nil,
+            directUpload: kind == .audio && directUploadOwnerID != nil
+                ? DirectUpload(reservedAt: now)
+                : nil
         )
 
         try fileManager.createDirectory(
@@ -217,6 +251,13 @@ struct ShareInboxStore {
     /// share to whichever account happens to be signed in next.
     func update(_ item: Item) throws {
         try writeManifest(item, in: directoryURL(for: item.id))
+    }
+
+    /// Forgets a share by ID once the upload it fed has finished.
+    func removeItem(id: UUID) throws {
+        let directory = directoryURL(for: id)
+        guard fileManager.fileExists(atPath: directory.path) else { return }
+        try fileManager.removeItem(at: directory)
     }
 
     private func isComplete(_ item: Item) -> Bool {

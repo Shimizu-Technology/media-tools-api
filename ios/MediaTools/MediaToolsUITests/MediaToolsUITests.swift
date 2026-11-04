@@ -60,27 +60,89 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(nextButton.isHittable)
     }
 
-    func testWelcomeMakesEquivalentAuthenticationOptionsDiscoverable() {
+    func testWelcomeOffersSignInCreateAccountAndForgotPassword() {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-test-welcome"]
         app.launch()
 
-        XCTAssertTrue(app.buttons["Continue with passkey"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["Sign in with email"].exists)
-        XCTAssertTrue(app.buttons["Use a recovery code"].exists)
-        XCTAssertTrue(app.buttons["Move an existing Clerk account"].exists)
-        let options = app.staticTexts["welcome.authentication.options"]
-        XCTAssertTrue(options.exists)
-        XCTAssertEqual(
-            options.label,
-            "Apple, Google, and Clerk email sign-in are available only to move an existing account into Media Tools."
-        )
+        XCTAssertTrue(app.buttons["welcome.sign-in"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["welcome.create-account"].exists)
+        XCTAssertTrue(app.buttons["welcome.forgot-password"].exists)
+        // Available, but no longer the first thing offered.
+        XCTAssertTrue(app.buttons["welcome.passkey"].exists)
+        XCTAssertTrue(app.buttons["welcome.recovery-code"].exists)
+        XCTAssertLessThan(app.buttons["welcome.sign-in"].frame.minY, app.buttons["welcome.passkey"].frame.minY)
+        XCTAssertTrue(app.staticTexts["welcome.authentication.options"].exists)
+        let thirdParty = NSPredicate(format: "label CONTAINS[c] 'Clerk' OR label CONTAINS[c] 'Apple' OR label CONTAINS[c] 'Google'")
+        XCTAssertFalse(app.buttons.matching(thirdParty).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts.matching(thirdParty).firstMatch.exists)
 
-        app.buttons["Sign in with email"].tap()
-        XCTAssertTrue(app.staticTexts["Sign in with email"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.textFields["password-sign-in.email"].exists)
+        app.buttons["welcome.sign-in"].tap()
+        XCTAssertTrue(app.textFields["password-sign-in.email"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.secureTextFields["password-sign-in.password"].exists)
         XCTAssertTrue(app.buttons["password-sign-in.continue"].exists)
+        XCTAssertFalse(app.buttons["password-sign-in.continue"].isEnabled, "Nothing to submit yet")
+
+        // A recovery path sits right where a failed sign-in leaves the person.
+        app.buttons["password-sign-in.forgot-password"].tap()
+        XCTAssertTrue(app.textFields["reset.email"].waitForExistence(timeout: 5))
+    }
+
+    func testCreateAccountShowsTheGenericReceiptAndAsksForCodeAndPassword() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-test-welcome", "-ui-test-auth-api"]
+        app.launch()
+
+        let create = app.buttons["welcome.create-account"]
+        XCTAssertTrue(create.waitForExistence(timeout: 10))
+        create.tap()
+
+        let email = app.textFields["sign-up.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.secureTextFields["sign-up.password"].exists, "No password before the email is proved")
+        email.tap()
+        email.typeText("new.person@example.com")
+        app.buttons["sign-up.send-code"].tap()
+
+        let receipt = app.staticTexts["sign-up.receipt"]
+        XCTAssertTrue(receipt.waitForExistence(timeout: 5))
+        XCTAssertTrue(receipt.label.hasPrefix("If this request is eligible, an email will arrive shortly"))
+        XCTAssertTrue(app.textFields["sign-up.code"].exists)
+        XCTAssertTrue(app.secureTextFields["sign-up.password"].exists)
+        XCTAssertTrue(app.secureTextFields["sign-up.confirm-password"].exists)
+        XCTAssertFalse(app.buttons["sign-up.resend"].isEnabled, "The server spaces out resends")
+    }
+
+    func testAShortPasswordIsCaughtWithoutLosingTheForm() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-test-welcome", "-ui-test-auth-api"]
+        app.launch()
+
+        let forgot = app.buttons["welcome.forgot-password"]
+        XCTAssertTrue(forgot.waitForExistence(timeout: 10))
+        forgot.tap()
+        let email = app.textFields["reset.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 5))
+        email.tap()
+        email.typeText("person@example.com")
+        app.buttons["reset.send-code"].tap()
+
+        let code = app.textFields["reset.code"]
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        code.tap()
+        code.typeText("123456")
+        let password = app.secureTextFields["reset.password"]
+        password.tap()
+        password.typeText("short")
+        let confirmation = app.secureTextFields["reset.confirm-password"]
+        confirmation.tap()
+        confirmation.typeText("short")
+        app.buttons["reset.submit"].tap()
+
+        let error = app.staticTexts["reset.error"]
+        XCTAssertTrue(error.waitForExistence(timeout: 5))
+        XCTAssertEqual(error.label, "Use a password of 12 to 128 characters.")
+        XCTAssertEqual(code.value as? String, "123456")
     }
 
     func testMainWorkspaceConnectsCaptureAndOrganizationDestinations() {
@@ -141,30 +203,6 @@ final class MediaToolsUITests: XCTestCase {
         retry.tap()
         XCTAssertTrue(app.staticTexts["Security status refreshed"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Could not check sign-in security."].exists)
-    }
-
-    func testClerkMigrationRequiresExplicitConfirmationAndKeepsWorkspaceCopy() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-ui-test-clerk-migration"]
-        app.launch()
-
-        XCTAssertTrue(app.staticTexts["Finish moving off Clerk"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Password or passkey"].exists)
-        XCTAssertTrue(app.staticTexts["Recovery codes"].exists)
-
-        app.buttons["clerk-migration.disconnect"].tap()
-        // The card's own button has the same label as the dialog's.
-        let confirm = app.buttons.matching(
-            NSPredicate(format: "label == 'Disconnect Clerk' AND identifier != 'clerk-migration.disconnect'")
-        ).firstMatch
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
-        XCTAssertTrue(
-            app.staticTexts.matching(
-                NSPredicate(format: "label CONTAINS 'Future sign-ins will use your password, passkey, or a recovery code.'")
-            ).firstMatch.exists
-        )
-        confirm.tap()
-        XCTAssertTrue(app.staticTexts["Media Tools sign-in active"].waitForExistence(timeout: 5))
     }
 
     func testRecoveryCodeOneTimeDisplayRequiresExplicitSavedConfirmation() {
@@ -549,7 +587,7 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(stop.waitForExistence(timeout: 10))
         XCTAssertTrue(app.tabBars.buttons["Record"].isSelected)
 
-        // Clerk finishes hydrating a few seconds after launch. That used to
+        // Account resolution finishes a few seconds after launch. That used to
         // rebuild the tabs and silently land on the default tab mid-recording.
         XCTAssertFalse(app.tabBars.buttons["Library"].waitForSelection(timeout: 6))
         XCTAssertTrue(app.tabBars.buttons["Record"].isSelected)

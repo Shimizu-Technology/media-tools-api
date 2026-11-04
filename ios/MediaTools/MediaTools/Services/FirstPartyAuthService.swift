@@ -19,12 +19,48 @@ struct PasswordStatus: Decodable, Equatable {
     let updatedAt: Date?
 }
 
-struct ClerkDetachmentStatus: Decodable, Equatable {
-    let linked: Bool
-    let ready: Bool
-    let passkeyCount: Int
-    let passwordConfigured: Bool
-    let unusedRecoveryCodes: Int
+struct EmailAuthReceipt: Decodable, Equatable {
+    let message: String
+}
+
+struct EmailProofResult: Decodable, Equatable {
+    let verified: Bool
+    let signInRequired: Bool
+}
+
+struct AccountProfile: Decodable, Equatable {
+    let id: String
+    let email: String
+    let name: String
+    var clerkId: String? = nil
+    var emailVerified: Bool? = nil
+}
+
+struct AccountUsage: Decodable, Equatable {
+    let month: Date
+    let transcriptionSeconds: Int
+    let transcriptionLimitSeconds: Int
+    let aiRequests: Int
+    let aiRequestLimit: Int
+    let exempt: Bool
+}
+
+struct DeviceSessionSummary: Decodable, Equatable, Identifiable {
+    let id: String
+    let clientType: String
+    let deviceName: String?
+    let createdAt: Date
+    let lastUsedAt: Date?
+    let inactiveExpiresAt: Date
+    let revokedAt: Date?
+
+    var isUsable: Bool {
+        revokedAt == nil && inactiveExpiresAt > Date()
+    }
+}
+
+struct DeviceSessionListResponse: Decodable, Equatable {
+    let sessions: [DeviceSessionSummary]
 }
 
 struct RecoveryCodeResponse: Decodable, Equatable {
@@ -214,6 +250,9 @@ enum FirstPartyAuthError: LocalizedError, Equatable {
     case invalidCredential
     case invalidServerOptions
     case ceremonyInProgress
+    /// The code and new password were accepted. Only the sign-in afterward failed,
+    /// so the person should sign in rather than repeat a used code.
+    case signInNeededAfterProof
 
     var errorDescription: String? {
         switch self {
@@ -227,11 +266,14 @@ enum FirstPartyAuthError: LocalizedError, Equatable {
             return "The server sent passkey options this iPhone could not use."
         case .ceremonyInProgress:
             return "Finish the current passkey prompt before starting another."
+        case .signInNeededAfterProof:
+            return "Your password is saved. Sign in to continue."
         }
     }
 }
 
 protocol FirstPartyAuthAPI: Sendable {
+    func delete(_ path: String) async throws
     func get<T: Decodable>(_ path: String, expectedOwnerID: String?) async throws -> T
     func post<T: Decodable, B: Encodable>(_ path: String, body: B, expectedOwnerID: String?) async throws -> T
     func postPublic<T: Decodable, B: Encodable>(_ path: String, body: B) async throws -> T
@@ -239,6 +281,75 @@ protocol FirstPartyAuthAPI: Sendable {
 }
 
 extension APIClient: FirstPartyAuthAPI {}
+
+/// What a person reads when an auth request fails. Nothing here may say whether an
+/// account exists; the sign-in and email responses are generic for that reason.
+enum AuthCopy {
+    /// Also what the server returns. Shown for every address, known or not.
+    static let emailReceipt = "If this request is eligible, an email will arrive shortly"
+    /// The server stops checking passwords after repeated failures and allows one
+    /// check every 30 seconds, answering the rest as incorrect, even a correct one.
+    static let incorrectPassword =
+        "Email or password is incorrect. After several tries, wait 30 seconds between attempts, even with the right password."
+    static let tooManySignInAttempts =
+        "Too many unsuccessful attempts. Wait 30 seconds, then try your correct password, or use Forgot password."
+
+    static func message(for error: Error, fallback: String) -> String {
+        switch error {
+        case let error as FirstPartyAuthError:
+            return error.errorDescription ?? fallback
+        case let error as URLError where error.code != .cancelled:
+            return "Could not reach Media Tools. Check your connection and try again."
+        case APIError.authenticationRequired(let message),
+             APIError.authenticationTemporarilyUnavailable(let message):
+            return message
+        case APIError.rateLimited(let retryAfter, _):
+            return rateLimitMessage(retryAfter: retryAfter)
+        case APIError.httpError(_, let code, let message):
+            return copy(forCode: code) ?? (message.isEmpty ? fallback : message)
+        default:
+            return fallback
+        }
+    }
+
+    private static func copy(forCode code: String?) -> String? {
+        switch code {
+        case "weak_password":
+            return "Use a password of 12 to 128 characters."
+        case "password_compromised":
+            return "That password has appeared in a data breach. Choose a different one."
+        case "invalid_code":
+            return "That code did not work. It may have expired or already been used. Send a new code and try again."
+        case "invalid_credentials":
+            return incorrectPassword
+        case "current_password_required":
+            return "Your current password is incorrect."
+        case "email_verification_required":
+            return "Verify your email before setting a password."
+        case "signup_disabled":
+            return "Sign-up is not available right now."
+        case "password_required":
+            return "Set a password before changing your email."
+        case "credential_changed":
+            return "Your password changed on another device. Sign in again."
+        case "authentication_unavailable", "usage_unavailable":
+            return "Media Tools could not finish this right now. Try again shortly."
+        default:
+            return nil
+        }
+    }
+
+    private static func rateLimitMessage(retryAfter: TimeInterval?) -> String {
+        guard let retryAfter, retryAfter > 0 else {
+            return "Too many attempts. Wait a little while and try again."
+        }
+        let minutes = Int((retryAfter / 60).rounded(.up))
+        if minutes <= 1 {
+            return "Too many attempts. Try again in a minute."
+        }
+        return "Too many attempts. Try again in \(minutes) minutes."
+    }
+}
 
 private enum ActivePasskeyCeremony {
     case signIn
@@ -288,6 +399,8 @@ final class FirstPartyAuthService {
     private var authorizationController: ASAuthorizationController?
     private var delegate: PasskeyAuthorizationDelegate?
     private var activePasskeyCeremony: ActivePasskeyCeremony?
+    /// Proof requests whose last attempt ended with no answer from the server.
+    private var unconfirmedProofPaths: Set<String> = []
 #if DEBUG
     private(set) var authorizationRequestStartCountForTesting = 0
 #endif
@@ -413,12 +526,170 @@ final class FirstPartyAuthService {
         try await api.get("/auth/password", expectedOwnerID: nil)
     }
 
-    func setPassword(_ password: String) async throws -> PasswordStatus {
+    /// `currentPassword` is required once a password exists. The first password on
+    /// an account takes none, but its email must have been proved first.
+    func setPassword(_ password: String, currentPassword: String? = nil) async throws -> PasswordStatus {
         try await api.post(
             "/auth/password",
-            body: SetPasswordRequest(password: password),
+            body: SetPasswordRequest(password: password, currentPassword: currentPassword),
             expectedOwnerID: activeRecoveryOwnerID()
         )
+    }
+
+    func accountProfile() async throws -> AccountProfile {
+        try await api.get("/auth/me", expectedOwnerID: nil)
+    }
+
+    func usage() async throws -> AccountUsage {
+        try await api.get("/auth/usage", expectedOwnerID: nil)
+    }
+
+    func deviceSessions() async throws -> [DeviceSessionSummary] {
+        let response: DeviceSessionListResponse = try await api.get("/auth/sessions", expectedOwnerID: nil)
+        return response.sessions
+    }
+
+    func revokeDeviceSession(id: String) async throws {
+        try await api.delete("/auth/sessions/\(id)")
+    }
+
+    // MARK: - Email proof
+
+    /// The response is the same for any address, so the caller shows a fixed receipt.
+    func beginSignUp(email: String, name: String?) async throws {
+        let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let _: EmailAuthReceipt = try await api.postPublic(
+            "/auth/signup",
+            body: SignUpRequest(
+                email: Self.normalized(email),
+                name: trimmedName?.isEmpty == false ? trimmedName : nil
+            )
+        )
+    }
+
+    func finishSignUp(email: String, code: String, password: String) async throws {
+        try await finishSignedOutProof(
+            "/auth/signup/verify",
+            email: Self.normalized(email),
+            code: code,
+            password: password
+        )
+    }
+
+    func beginPasswordReset(email: String) async throws {
+        let _: EmailAuthReceipt = try await api.postPublic(
+            "/auth/password/forgot",
+            body: EmailOnlyRequest(email: Self.normalized(email))
+        )
+    }
+
+    func finishPasswordReset(email: String, code: String, password: String) async throws {
+        try await finishSignedOutProof(
+            "/auth/password/reset",
+            email: Self.normalized(email),
+            code: code,
+            password: password
+        )
+    }
+
+    /// A proof response can be lost after the server committed it, and repeating
+    /// the code then gets `invalid_code`. The new password is what tells them apart.
+    private func finishSignedOutProof(_ path: String, email: String, code: String, password: String) async throws {
+        do {
+            let _: EmailProofResult = try await api.postPublic(
+                path,
+                body: EmailProofRequest(email: email, code: code, password: password)
+            )
+            unconfirmedProofPaths.remove(path)
+        } catch {
+            if Self.isConnectionFailure(error) {
+                unconfirmedProofPaths.insert(path)
+                throw error
+            }
+            guard Self.isInvalidCode(error), unconfirmedProofPaths.remove(path) != nil else { throw error }
+            do {
+                try await signInWithPassword(email: email, password: password)
+                return
+            } catch {
+                throw APIError.httpError(statusCode: 400, code: "invalid_code", message: "")
+            }
+        }
+        try await signInAfterProof(email: email, password: password)
+    }
+
+    private func signInAfterProof(email: String, password: String) async throws {
+        do {
+            try await signInWithPassword(email: email, password: password)
+        } catch {
+            throw FirstPartyAuthError.signInNeededAfterProof
+        }
+    }
+
+    func beginEmailVerification(email: String) async throws {
+        let _: EmailAuthReceipt = try await api.post(
+            "/auth/email/verify",
+            body: EmailOnlyRequest(email: Self.normalized(email)),
+            expectedOwnerID: activeRecoveryOwnerID()
+        )
+    }
+
+    func confirmEmailVerification(email: String, code: String) async throws {
+        let _: EmailProofResult = try await api.post(
+            "/auth/email/verify/confirm",
+            body: EmailCodeRequest(email: Self.normalized(email), code: code),
+            expectedOwnerID: activeRecoveryOwnerID()
+        )
+    }
+
+    func beginEmailChange(newEmail: String, currentPassword: String) async throws {
+        let _: EmailAuthReceipt = try await api.post(
+            "/auth/email/change",
+            body: EmailChangeRequest(email: Self.normalized(newEmail), currentPassword: currentPassword),
+            expectedOwnerID: activeRecoveryOwnerID()
+        )
+    }
+
+    /// Changing email revokes every session and key on the account, including this
+    /// one. Signing straight back in keeps the person where they were, and the same
+    /// account ID means their recordings never change hands.
+    func finishEmailChange(newEmail: String, code: String, currentPassword: String) async throws {
+        let email = Self.normalized(newEmail)
+        let path = "/auth/email/change/verify"
+        do {
+            let _: EmailProofResult = try await api.post(
+                path,
+                body: EmailCodeRequest(email: email, code: code),
+                expectedOwnerID: activeRecoveryOwnerID()
+            )
+            unconfirmedProofPaths.remove(path)
+        } catch {
+            if Self.isConnectionFailure(error) {
+                unconfirmedProofPaths.insert(path)
+                throw error
+            }
+            // A lost success already revoked this session, so the retry comes back
+            // as a rejected credential rather than a used code.
+            guard Self.isInvalidCode(error) || Self.isAuthenticationFailure(error),
+                  unconfirmedProofPaths.remove(path) != nil else { throw error }
+        }
+        try await signInAfterProof(email: email, password: currentPassword)
+    }
+
+    private static func normalized(_ email: String) -> String {
+        email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func isConnectionFailure(_ error: Error) -> Bool {
+        error is URLError
+    }
+
+    private static func isInvalidCode(_ error: Error) -> Bool {
+        if case APIError.httpError(_, "invalid_code", _) = error { return true }
+        return false
+    }
+
+    private static func isAuthenticationFailure(_ error: Error) -> Bool {
+        RecordingUploadCoordinator.isAuthenticationFailure(error)
     }
 
     func signInWithPassword(email: String, password: String) async throws {
@@ -450,7 +721,7 @@ final class FirstPartyAuthService {
             )
             let pair = response.pair
             guard pair.refreshToken == pending.nextRefreshToken else { throw APIError.invalidResponse }
-            // Build 12 understands .passkey and .recoveryCode only. Reusing
+            // Builds 12 and 13 understand .passkey and .recoveryCode only. Reusing
             // .passkey keeps a downgraded app from discarding this session.
             try await installFirstPartySession(pair: pair, nextRefreshToken: pending.nextRefreshToken, source: .passkey)
             passwordLoginJournal.delete()
@@ -458,32 +729,13 @@ final class FirstPartyAuthService {
             if statusCode == 400 { passwordLoginJournal.delete() }
             throw APIError.authenticationRequired(
                 message: code == "invalid_credentials"
-                    ? "Email or password is incorrect."
+                    ? AuthCopy.incorrectPassword
                     : "Could not use that saved sign-in. Try again."
             )
-        }
-    }
-
-    func clerkDetachmentStatus(expectedOwnerID: String) async throws -> ClerkDetachmentStatus {
-        try await api.get("/auth/clerk-detachment", expectedOwnerID: expectedOwnerID)
-    }
-
-    /// Clerk detachment is idempotent on the server. If the POST response is
-    /// lost, a status read proves whether the provider link was removed before
-    /// the app changes any local authentication state.
-    func detachClerk(expectedOwnerID: String) async throws -> ClerkDetachmentStatus {
-        do {
-            return try await api.post(
-                "/auth/clerk-detachment",
-                body: EmptyRequest(),
-                expectedOwnerID: expectedOwnerID
-            )
-        } catch {
-            if let status = try? await clerkDetachmentStatus(expectedOwnerID: expectedOwnerID),
-               !status.linked {
-                return status
-            }
-            throw error
+        } catch APIError.rateLimited {
+            // Retry-After here is the failure window, not a lockout. A correct
+            // password still gets through 30 seconds after the last attempt.
+            throw APIError.authenticationRequired(message: AuthCopy.tooManySignInAttempts)
         }
     }
 
@@ -769,6 +1021,32 @@ struct PasswordLoginRequest: Encodable, Equatable {
 
 struct SetPasswordRequest: Encodable, Equatable {
     let password: String
+    var currentPassword: String? = nil
+}
+
+struct SignUpRequest: Encodable, Equatable {
+    let email: String
+    let name: String?
+}
+
+struct EmailOnlyRequest: Encodable, Equatable {
+    let email: String
+}
+
+struct EmailProofRequest: Encodable, Equatable {
+    let email: String
+    let code: String
+    let password: String
+}
+
+struct EmailCodeRequest: Encodable, Equatable {
+    let email: String
+    let code: String
+}
+
+struct EmailChangeRequest: Encodable, Equatable {
+    let email: String
+    let currentPassword: String
 }
 
 struct RecoveryCodeRedeemRequest: Encodable, Equatable {

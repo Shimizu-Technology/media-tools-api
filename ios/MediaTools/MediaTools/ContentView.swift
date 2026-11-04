@@ -1,51 +1,36 @@
 import SwiftUI
-import ClerkKit
-import ClerkKitUI
 
 struct ContentView: View {
-    @Environment(Clerk.self) private var clerk
+    @Environment(RecordingCoordinator.self) private var recorder
     @Environment(RecordingUploadCoordinator.self) private var uploadCoordinator
     @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @Environment(DeviceSessionController.self) private var deviceSession
     @Environment(\.scenePhase) private var scenePhase
-    @State private var showAuth = false
-    @State private var isResolvingAccount = Configuration.firstPartyIOSAuthEnabled
+    @State private var isResolvingAccount = true
     @State private var isReconcilingDeletion: Bool
     @State private var migrationFailed = false
     @State private var migrationRetry = 0
     @State private var nativeAuthOperation: NativeAuthOperation?
     @State private var nativeAuthError: String?
     @State private var recoveryCode = ""
-    @State private var showRecoveryCode = false
-    @State private var showPasswordSignIn = false
+    @State private var activeSheet: WelcomeSheet?
     @State private var passwordEmail = ""
     @State private var passwordValue = ""
-    @State private var passwordAuthAvailable: Bool?
-    @State private var passwordCapabilityRetry = 0
+    @State private var authAvailability: AuthAvailability
+    @State private var authAvailabilityRetry = 0
     private let forceSignedOutForUITesting: Bool
-    private let tokenSync = TokenSyncService.shared
 
     init(forceSignedOutForUITesting: Bool = false) {
         self.forceSignedOutForUITesting = forceSignedOutForUITesting
-        _passwordAuthAvailable = State(initialValue: forceSignedOutForUITesting ? true : nil)
+        _authAvailability = State(initialValue: forceSignedOutForUITesting ? .uiTestSignedOut : .unknown)
         _isReconcilingDeletion = State(
             initialValue: !forceSignedOutForUITesting
-                && Configuration.firstPartyIOSAuthEnabled
                 && AccountDeletionRecoveryService.shared.hasPendingDeletion
         )
     }
 
     private var activeUserID: String? {
-        if forceSignedOutForUITesting { return nil }
-        guard Configuration.firstPartyIOSAuthEnabled else {
-            return deviceSession.fallbackOwnerID(for: clerk.user?.id)
-        }
-        if let clerkID = clerk.user?.id,
-           let migration = deviceSession.verifiedMigration,
-           migration.clerkID != clerkID {
-            return nil
-        }
-        return deviceSession.activeUserID
+        forceSignedOutForUITesting ? nil : deviceSession.activeUserID
     }
 
     var body: some View {
@@ -81,135 +66,83 @@ struct ContentView: View {
                     // A different account gets fresh tabs and library state. A
                     // background refresh of the same account never rebuilds them.
                     .id(activeUserID)
-                    .onAppear {
-                        if deviceSession.hasNativeFirstPartySession {
-                            tokenSync.stopSyncing()
-                            tokenSync.clearToken()
-                        } else {
-                            tokenSync.startSyncing()
-                        }
-                    }
-                    .onDisappear {
-                        tokenSync.stopSyncing()
-                    }
             } else {
                 WelcomeView(
-                    showAuth: $showAuth,
-                    showRecoveryCode: $showRecoveryCode,
-                    showPasswordSignIn: $showPasswordSignIn,
+                    activeSheet: $activeSheet,
                     recoveryCode: $recoveryCode,
                     passwordEmail: $passwordEmail,
                     passwordValue: $passwordValue,
-                    passwordAuthAvailable: passwordAuthAvailable,
+                    availability: authAvailability,
                     nativeAuthOperation: nativeAuthOperation,
                     nativeAuthError: $nativeAuthError,
-                    onRetryPasswordCapability: { passwordCapabilityRetry += 1 },
+                    onRetryAvailability: { authAvailabilityRetry += 1 },
                     onPasskeySignIn: { await completeNativeSignIn(.passkey) },
                     onPasswordSignIn: { await completeNativeSignIn(.password) },
                     onRecoveryCodeSignIn: { await completeNativeSignIn(.recoveryCode) }
                 )
-                .onAppear {
-                    tokenSync.clearToken()
-                }
             }
-        }
-        .onChange(of: clerk.isLoaded) { _, isLoaded in
-            guard isLoaded, !forceSignedOutForUITesting else { return }
-            deviceSession.clerkFinishedLoading(clerkID: clerk.user?.id)
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             deviceSession.reloadStoredSessionIfUnavailable()
+            startShareKeySetup()
         }
-        .task(id: "\(clerk.user?.id ?? "signed-out")|\(deviceSession.needsSignIn)|\(deviceSession.sessionRevision)|\(migrationRetry)") {
-            let clerkID = forceSignedOutForUITesting ? nil : clerk.user?.id
-            if Configuration.firstPartyIOSAuthEnabled && !forceSignedOutForUITesting {
-                isResolvingAccount = true
-                migrationFailed = false
-                // Open a stored workspace before any network request: a slow or
-                // absent connection must not stand between Leon and his library
-                // or a recording. Everything below keeps running in the background.
-                if !isReconcilingDeletion, let openOwnerID = activeUserID {
-                    guard await applyVerifiedMigration() else { return }
-                    aiProcessingConsent.setActiveOwnerID(openOwnerID)
-                    await uploadCoordinator.setActiveOwnerID(openOwnerID)
-                    guard !Task.isCancelled else { return }
-                    isResolvingAccount = false
-                }
-                let retryDeletionOwnerID = deviceSession.storedUserID
-                    ?? deviceSession.fallbackOwnerID(for: clerk.user?.id)
-                if let pending = try? await AccountDeletionRecoveryService.shared.confirmedPendingDeletion(
-                    retryOwnerID: retryDeletionOwnerID
-                ) {
-                    try? await AccountDeletionRecoveryService.shared.finishLocalDeletion(
-                        pending,
-                        uploadCoordinator: uploadCoordinator,
-                        consent: aiProcessingConsent,
-                        deviceSession: deviceSession,
-                        tokenSync: tokenSync,
-                        clerk: clerk
-                    )
-                }
-                guard !Task.isCancelled else { return }
-                isReconcilingDeletion = false
-                let clerkID = clerk.user?.id
-                let ownerID = await deviceSession.activate(
-                    clerkID: clerkID,
-                    clerkIsLoaded: clerk.isLoaded
-                )
-                guard !Task.isCancelled else { return }
-                guard await applyVerifiedMigration() else { return }
-                if ownerID != nil, deviceSession.hasNativeFirstPartySession, clerk.user != nil {
-                    do {
-                        try await clerk.auth.signOut()
-                        tokenSync.clearToken()
-                    } catch {
-                        // The first-party session remains authoritative; try
-                        // clearing Clerk again on the next foreground task.
-                    }
-                }
-                aiProcessingConsent.setActiveOwnerID(ownerID)
-                await uploadCoordinator.setActiveOwnerID(ownerID)
+        .onChange(of: deviceSession.activeUserID) { _, ownerID in
+            // A sign-up or reset finishes inside its own sheet.
+            if ownerID != nil { activeSheet = nil }
+        }
+        .task(id: "\(deviceSession.needsSignIn)|\(deviceSession.sessionRevision)|\(migrationRetry)") {
+            guard !forceSignedOutForUITesting else {
+                aiProcessingConsent.setActiveOwnerID(nil)
+                await uploadCoordinator.setActiveOwnerID(nil)
                 isResolvingAccount = false
-            } else {
-                let ownerID: String?
-                if forceSignedOutForUITesting {
-                    ownerID = nil
-                } else {
-                    ownerID = await deviceSession.activate(
-                        clerkID: clerkID,
-                        clerkIsLoaded: clerk.isLoaded
-                    )
-                }
-                // The consent owner comes first: resuming work may need to ask.
-                aiProcessingConsent.setActiveOwnerID(ownerID)
-                await uploadCoordinator.setActiveOwnerID(ownerID)
+                return
+            }
+            isResolvingAccount = true
+            migrationFailed = false
+            // Open a stored workspace before any network request: a slow or
+            // absent connection must not stand between Leon and his library
+            // or a recording. Everything below keeps running in the background.
+            if !isReconcilingDeletion, let openOwnerID = activeUserID {
+                guard await applyVerifiedMigration() else { return }
+                aiProcessingConsent.setActiveOwnerID(openOwnerID)
+                await uploadCoordinator.setActiveOwnerID(openOwnerID)
                 guard !Task.isCancelled else { return }
                 isResolvingAccount = false
             }
+            if let pending = try? await AccountDeletionRecoveryService.shared.confirmedPendingDeletion(
+                retryOwnerID: deviceSession.storedUserID
+            ) {
+                try? await AccountDeletionRecoveryService.shared.finishLocalDeletion(
+                    pending,
+                    uploadCoordinator: uploadCoordinator,
+                    consent: aiProcessingConsent,
+                    deviceSession: deviceSession,
+                    shareKeys: .shared
+                )
+            }
+            guard !Task.isCancelled else { return }
+            isReconcilingDeletion = false
+            let ownerID = await deviceSession.activate()
+            guard !Task.isCancelled else { return }
+            guard await applyVerifiedMigration() else { return }
+            aiProcessingConsent.setActiveOwnerID(ownerID)
+            await uploadCoordinator.setActiveOwnerID(ownerID)
+            isResolvingAccount = false
+            startShareKeySetup()
+            if let ownerID { await reconnectLegacyRecordings(ownerID: ownerID) }
         }
-        .task(id: "password-capability|\(scenePhase)|\(activeUserID ?? "signed-out")|\(passwordCapabilityRetry)") {
-            guard Configuration.firstPartyIOSAuthEnabled,
-                  !forceSignedOutForUITesting,
+        .task(id: "auth-availability|\(scenePhase)|\(activeUserID ?? "signed-out")|\(authAvailabilityRetry)") {
+            guard !forceSignedOutForUITesting,
                   scenePhase == .active,
                   activeUserID == nil else { return }
             do {
                 let health: HealthResponse = try await APIClient.shared.getPublic("/health")
                 guard !Task.isCancelled else { return }
-                passwordAuthAvailable = health.passwordAuthEnabled == true
+                authAvailability = AuthAvailability(health: health)
             } catch {
                 guard !Task.isCancelled else { return }
-                passwordAuthAvailable = nil
-            }
-        }
-        .sheet(isPresented: $showAuth) {
-            AuthView()
-        }
-        .onChange(of: showRecoveryCode) { _, isPresented in
-            if isPresented {
-                // A passkey-specific failure should not appear inside the
-                // recovery-code sheet before the user submits a code.
-                nativeAuthError = nil
+                authAvailability = .unknown
             }
         }
     }
@@ -217,11 +150,36 @@ struct ContentView: View {
     /// A background refresh must not cover an open workspace with a spinner:
     /// that destroys the tabs and any route the Action Button just requested.
     private var isBlockedOnAccountResolution: Bool {
-        isResolvingAccount && Configuration.firstPartyIOSAuthEnabled && activeUserID == nil
+        isResolvingAccount && activeUserID == nil
+    }
+
+    /// Never awaited by anything the person is waiting on. Without a key, a share
+    /// simply waits for this app, so a failure here has no visible effect.
+    private func startShareKeySetup() {
+        guard !forceSignedOutForUITesting, let ownerID = activeUserID,
+              deviceSession.hasNativeFirstPartySession else { return }
+        Task { await ShareUploadKeyManager.shared.ensureKey(ownerID: ownerID) }
+    }
+
+    /// A build that ran on the retired provider without a device session saved
+    /// recordings under a provider ID, with no local record of whose it was. The
+    /// server knows, so it is asked only when such a recording is actually here.
+    private func reconnectLegacyRecordings(ownerID: String) async {
+        let legacyOwners = recorder.legacyProviderOwnerIDs
+        guard !legacyOwners.isEmpty,
+              let profile = try? await FirstPartyAuthService.shared.accountProfile(),
+              profile.id == ownerID,
+              let clerkID = profile.clerkId,
+              legacyOwners.contains(clerkID),
+              !Task.isCancelled
+        else { return }
+        deviceSession.adoptServerVerifiedLegacyIdentity(clerkID, ownerID: ownerID)
+        migrationRetry += 1
     }
 
     /// Returns false when the workspace must stay closed. A partial migration
-    /// is repeatable, but opening here could hide Clerk-owned recordings.
+    /// is repeatable, but opening here could hide recordings saved under the
+    /// provider ID this account used before.
     private func applyVerifiedMigration() async -> Bool {
         guard let migration = deviceSession.verifiedMigration else { return true }
         do {
@@ -260,30 +218,21 @@ struct ContentView: View {
                     password: passwordValue
                 )
                 passwordValue = ""
-                showPasswordSignIn = false
+                activeSheet = nil
             case .recoveryCode:
                 try await FirstPartyAuthService.shared.redeemRecoveryCode(recoveryCode)
                 recoveryCode = ""
-                showRecoveryCode = false
-            }
-            tokenSync.stopSyncing()
-            tokenSync.clearToken()
-            if clerk.user != nil {
-                do {
-                    try await clerk.auth.signOut()
-                } catch {
-                    nativeAuthError = "You are signed in. Media Tools will finish clearing the old sign-in when the app refreshes."
-                }
+                activeSheet = nil
             }
             migrationRetry += 1
         } catch {
             guard !FirstPartyAuthService.isCancellation(error) else { return }
-            nativeAuthError = error.localizedDescription.isEmpty
-                ? "Could not sign in. Please try again."
-                : error.localizedDescription
+            nativeAuthError = AuthCopy.message(
+                for: error,
+                fallback: "Could not sign in. Please try again."
+            )
         }
     }
-
 }
 
 enum NativeAuthOperation {
@@ -292,19 +241,49 @@ enum NativeAuthOperation {
     case recoveryCode
 }
 
+enum WelcomeSheet: String, Identifiable {
+    case signIn
+    case createAccount
+    case forgotPassword
+    case recoveryCode
+
+    var id: String { rawValue }
+}
+
+/// What the server offers. Unknown means it could not be reached, in which case
+/// signing in still shows: an existing account must never look unavailable.
+struct AuthAvailability: Equatable {
+    var passwordAuth: Bool?
+    var signup: Bool
+    var passwordReset: Bool?
+
+    static let unknown = AuthAvailability(passwordAuth: nil, signup: false, passwordReset: nil)
+    static let uiTestSignedOut = AuthAvailability(passwordAuth: true, signup: true, passwordReset: true)
+
+    init(passwordAuth: Bool?, signup: Bool, passwordReset: Bool?) {
+        self.passwordAuth = passwordAuth
+        self.signup = signup
+        self.passwordReset = passwordReset
+    }
+
+    init(health: HealthResponse) {
+        passwordAuth = health.passwordAuthEnabled == true
+        signup = health.signupEnabled == true
+        passwordReset = health.authCapabilities?.passwordReset == true
+    }
+}
+
 // MARK: - Welcome (unauthenticated)
 
 struct WelcomeView: View {
-    @Binding var showAuth: Bool
-    @Binding var showRecoveryCode: Bool
-    @Binding var showPasswordSignIn: Bool
+    @Binding var activeSheet: WelcomeSheet?
     @Binding var recoveryCode: String
     @Binding var passwordEmail: String
     @Binding var passwordValue: String
-    let passwordAuthAvailable: Bool?
+    let availability: AuthAvailability
     let nativeAuthOperation: NativeAuthOperation?
     @Binding var nativeAuthError: String?
-    let onRetryPasswordCapability: () -> Void
+    let onRetryAvailability: () -> Void
     let onPasskeySignIn: () async -> Void
     let onPasswordSignIn: () async -> Void
     let onRecoveryCodeSignIn: () async -> Void
@@ -427,49 +406,26 @@ struct WelcomeView: View {
                         .clipShape(RoundedRectangle(cornerRadius: Theme.radiusLarge))
                     }
 
-                    if Configuration.firstPartyIOSAuthEnabled {
-                        VStack(spacing: 10) {
-                            if passwordAuthAvailable == true {
-                                Button {
-                                    nativeAuthError = nil
-                                    showPasswordSignIn = true
-                                } label: {
-                                    Label("Sign in with email", systemImage: "envelope.fill")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .brandButtonStyle()
-                                .disabled(nativeAuthOperation != nil)
-                            } else if passwordAuthAvailable == nil {
-                                Button {
-                                    onRetryPasswordCapability()
-                                } label: {
-                                    Label("Check email sign-in", systemImage: "arrow.clockwise")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .secondaryButtonStyle()
-                                .disabled(nativeAuthOperation != nil)
-                            }
-
+                    VStack(spacing: 10) {
+                        if availability.passwordAuth != false {
                             Button {
-                                Task { await onPasskeySignIn() }
+                                nativeAuthError = nil
+                                activeSheet = .signIn
                             } label: {
-                                HStack(spacing: 8) {
-                                    if nativeAuthOperation == .passkey {
-                                        ProgressView().tint(.white)
-                                    } else {
-                                        Image(systemName: "key.fill")
-                                    }
-                                    Text(nativeAuthOperation == .passkey ? "Checking passkey…" : "Continue with passkey")
-                                }
-                                .frame(maxWidth: .infinity)
+                                Label("Sign in", systemImage: "envelope.fill")
+                                    .frame(maxWidth: .infinity)
                             }
                             .brandButtonStyle()
                             .disabled(nativeAuthOperation != nil)
+                            .accessibilityIdentifier("welcome.sign-in")
+                        }
 
+                        if availability.signup {
                             Button {
-                                showRecoveryCode = true
+                                nativeAuthError = nil
+                                activeSheet = .createAccount
                             } label: {
-                                Label("Use a recovery code", systemImage: "lifepreserver")
+                                Label("Create account", systemImage: "person.badge.plus")
                                     .font(Theme.body(15, weight: .semibold))
                                     .foregroundStyle(Theme.brand400)
                                     .frame(maxWidth: .infinity, minHeight: 48)
@@ -477,46 +433,74 @@ struct WelcomeView: View {
                                     .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
                             }
                             .disabled(nativeAuthOperation != nil)
+                            .accessibilityIdentifier("welcome.create-account")
+                        }
 
-                            if let nativeAuthError {
-                                Text(nativeAuthError)
-                                    .font(Theme.caption(12))
-                                    .foregroundStyle(Theme.error)
-                                    .multilineTextAlignment(.center)
-                                    .fixedSize(horizontal: false, vertical: true)
+                        if availability.passwordReset != false, availability.passwordAuth != false {
+                            Button {
+                                nativeAuthError = nil
+                                activeSheet = .forgotPassword
+                            } label: {
+                                Text("Forgot password?")
+                                    .font(Theme.body(15, weight: .semibold))
+                                    .foregroundStyle(Theme.brand400)
+                                    .frame(maxWidth: .infinity, minHeight: 44)
                             }
-                        }
+                            .buttonStyle(.plain)
+                            .disabled(nativeAuthOperation != nil)
+                            .accessibilityIdentifier("welcome.forgot-password")
 
-                        HStack(spacing: 12) {
-                            Rectangle().fill(Theme.borderSubtle).frame(height: 1)
-                            Text("More sign-in options")
-                                .font(Theme.caption(12, weight: .semibold))
+                            Text("Never set a password? Use Forgot password with your account email.")
+                                .font(Theme.caption(12))
                                 .foregroundStyle(Theme.textMuted)
-                            Rectangle().fill(Theme.borderSubtle).frame(height: 1)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("welcome.authentication.options")
+                        }
+
+                        if availability.passwordAuth == nil {
+                            Button("Check connection", action: onRetryAvailability)
+                                .font(Theme.caption(13, weight: .semibold))
+                                .foregroundStyle(Theme.textSecondary)
+                                .frame(minHeight: 44)
+                                .disabled(nativeAuthOperation != nil)
+                        }
+
+                        if let nativeAuthError, activeSheet == nil {
+                            Text(nativeAuthError)
+                                .font(Theme.caption(12))
+                                .foregroundStyle(Theme.error)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
 
-                    Button {
-                        showAuth = true
-                    } label: {
-                        Label(
-                            Configuration.firstPartyIOSAuthEnabled
-                                ? "Move an existing Clerk account"
-                                : "Sign in or create account",
-                            systemImage: "arrow.right"
-                        )
-                        .frame(maxWidth: .infinity)
+                    HStack(spacing: 12) {
+                        Rectangle().fill(Theme.borderSubtle).frame(height: 1)
+                        Text("Other ways to sign in")
+                            .font(Theme.caption(12, weight: .semibold))
+                            .foregroundStyle(Theme.textMuted)
+                            .fixedSize()
+                        Rectangle().fill(Theme.borderSubtle).frame(height: 1)
                     }
-                    .brandButtonStyle()
-                    .disabled(nativeAuthOperation != nil)
 
-                    Text(Configuration.firstPartyIOSAuthEnabled
-                         ? "Apple, Google, and Clerk email sign-in are available only to move an existing account into Media Tools."
-                         : "Continue with Apple, Google, or email. Apple lets you keep your email private.")
-                        .font(Theme.caption(12))
-                        .foregroundStyle(Theme.textMuted)
-                        .multilineTextAlignment(.center)
-                        .accessibilityIdentifier("welcome.authentication.options")
+                    VStack(spacing: 4) {
+                        secondarySignInButton(
+                            title: nativeAuthOperation == .passkey ? "Checking passkey…" : "Continue with passkey",
+                            icon: "key.fill",
+                            identifier: "welcome.passkey"
+                        ) {
+                            Task { await onPasskeySignIn() }
+                        }
+                        secondarySignInButton(
+                            title: "Use a recovery code",
+                            icon: "lifepreserver",
+                            identifier: "welcome.recovery-code"
+                        ) {
+                            nativeAuthError = nil
+                            activeSheet = .recoveryCode
+                        }
+                    }
 
                     Text("Powered by Shimizu Technology")
                         .font(Theme.caption(11))
@@ -528,37 +512,67 @@ struct WelcomeView: View {
             }
             .scrollIndicators(.hidden)
         }
-        .sheet(isPresented: $showRecoveryCode) {
-            RecoveryCodeSignInSheet(
-                code: $recoveryCode,
-                isSigningIn: nativeAuthOperation == .recoveryCode,
-                errorMessage: nativeAuthError,
-                onCancel: { showRecoveryCode = false },
-                onContinue: { Task { await onRecoveryCodeSignIn() } }
-            )
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
+        .sheet(item: $activeSheet, onDismiss: { passwordValue = "" }) { sheet in
+            sheetContent(sheet)
+                .presentationDetents(sheet == .recoveryCode ? [.medium, .large] : [.large])
+                .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled(nativeAuthOperation != nil)
         }
-        .sheet(isPresented: $showPasswordSignIn) {
+    }
+
+    private func secondarySignInButton(
+        title: String,
+        icon: String,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(Theme.body(14, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .disabled(nativeAuthOperation != nil)
+        .accessibilityIdentifier(identifier)
+    }
+
+    @ViewBuilder
+    private func sheetContent(_ sheet: WelcomeSheet) -> some View {
+        switch sheet {
+        case .signIn:
             PasswordSignInSheet(
                 email: $passwordEmail,
                 password: $passwordValue,
                 isSigningIn: nativeAuthOperation == .password,
                 errorMessage: nativeAuthError,
-                onCancel: { showPasswordSignIn = false; passwordValue = "" },
+                showsForgotPassword: availability.passwordReset != false,
+                onForgotPassword: {
+                    nativeAuthError = nil
+                    activeSheet = .forgotPassword
+                },
+                onCancel: { nativeAuthError = nil; activeSheet = nil },
                 onContinue: { Task { await onPasswordSignIn() } }
             )
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-            .interactiveDismissDisabled(nativeAuthOperation == .password)
-        }
-        .onChange(of: showPasswordSignIn) { _, isPresented in
-            if isPresented {
-                nativeAuthError = nil
-            } else {
-                passwordValue = ""
-                nativeAuthError = nil
-            }
+        case .createAccount, .forgotPassword:
+            EmailPasswordFlowView(
+                purpose: sheet == .createAccount ? .createAccount : .resetPassword,
+                initialEmail: passwordEmail,
+                onSignInNeeded: { email in
+                    passwordEmail = email
+                    nativeAuthError = "Your password is saved. Sign in to continue."
+                    activeSheet = .signIn
+                },
+                onCancel: { activeSheet = nil }
+            )
+        case .recoveryCode:
+            RecoveryCodeSignInSheet(
+                code: $recoveryCode,
+                isSigningIn: nativeAuthOperation == .recoveryCode,
+                errorMessage: nativeAuthError,
+                onCancel: { nativeAuthError = nil; activeSheet = nil },
+                onContinue: { Task { await onRecoveryCodeSignIn() } }
+            )
         }
     }
 }
@@ -568,64 +582,74 @@ private struct PasswordSignInSheet: View {
     @Binding var password: String
     let isSigningIn: Bool
     let errorMessage: String?
+    let showsForgotPassword: Bool
+    let onForgotPassword: () -> Void
     let onCancel: () -> Void
     let onContinue: () -> Void
+
+    private var canSubmit: Bool {
+        !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Sign in with email")
+                        Text("Sign in")
                             .font(Theme.heading(24))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("Use your Media Tools password. This iPhone stays signed in until you sign out or revoke it.")
+                        Text("Use your Media Tools email and password. This iPhone stays signed in until you sign out or revoke it.")
                             .font(Theme.body(14))
                             .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     TextField("Email", text: $email)
                         .keyboardType(.emailAddress)
                         .textContentType(.username)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .textFieldCardStyle()
+                        .authFieldStyle()
                         .accessibilityIdentifier("password-sign-in.email")
                     SecureField("Password", text: $password)
                         .textContentType(.password)
-                        .textFieldCardStyle()
+                        .submitLabel(.go)
+                        .onSubmit {
+                            guard !isSigningIn, canSubmit else { return }
+                            onContinue()
+                        }
+                        .authFieldStyle()
                         .accessibilityIdentifier("password-sign-in.password")
                     if let errorMessage {
-                        Text(errorMessage).font(Theme.caption(13)).foregroundStyle(Theme.error)
+                        Text(errorMessage)
+                            .font(Theme.caption(13))
+                            .foregroundStyle(Theme.error)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("password-sign-in.error")
                     }
-                    Button { onContinue() } label: {
-                        HStack(spacing: 8) {
-                            if isSigningIn { ProgressView().tint(.white) }
-                            Text(isSigningIn ? "Signing in…" : "Sign in")
-                        }
-                        .font(Theme.body(15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .background(Theme.brand500, in: RoundedRectangle(cornerRadius: Theme.radiusMedium))
+                    AuthPrimaryButton(
+                        title: "Sign in",
+                        busyTitle: "Signing in…",
+                        isBusy: isSigningIn,
+                        isEnabled: canSubmit,
+                        identifier: "password-sign-in.continue",
+                        action: onContinue
+                    )
+                    if showsForgotPassword {
+                        Button("Forgot password?", action: onForgotPassword)
+                            .font(Theme.body(14, weight: .semibold))
+                            .foregroundStyle(Theme.brand400)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .disabled(isSigningIn)
+                            .accessibilityIdentifier("password-sign-in.forgot-password")
                     }
-                    .disabled(isSigningIn || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
-                    .accessibilityIdentifier("password-sign-in.continue")
                 }
                 .padding(20)
             }
+            .scrollDismissesKeyboard(.interactively)
             .background(Theme.surface)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { onCancel() }.disabled(isSigningIn) } }
         }
-    }
-}
-
-private extension View {
-    func textFieldCardStyle() -> some View {
-        self
-            .padding(.horizontal, 14)
-            .frame(minHeight: 50)
-            .background(Theme.surfaceCard)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-            .overlay { RoundedRectangle(cornerRadius: Theme.radiusMedium).stroke(Theme.borderSubtle, lineWidth: 1) }
     }
 }
 
@@ -748,7 +772,6 @@ struct FeatureRow: View {
 
 #Preview {
     ContentView()
-        .environment(Clerk.shared)
         .environment(RecordingUploadCoordinator.shared)
         .preferredColorScheme(.dark)
 }

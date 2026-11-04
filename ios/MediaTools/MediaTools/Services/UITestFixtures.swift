@@ -51,9 +51,6 @@ private final class UITestDeviceSessionStore: DeviceSessionStoring {
     func load() -> StoredDeviceSession? { stored }
     func save(_ value: StoredDeviceSession) throws { stored = value }
     func delete() { stored = nil }
-    func loadPendingBootstrap() throws -> PendingDeviceSessionBootstrap? { nil }
-    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws {}
-    func deletePendingBootstrap() {}
     func localOwnerID(for clerkID: String) -> String? { localOwners[clerkID] }
     func clerkID(forLocalOwnerID ownerID: String) -> String? {
         localOwners.first { $0.value == ownerID }?.key
@@ -117,7 +114,9 @@ final class UITestAPIProtocol: URLProtocol {
     override func startLoading() {
         guard let url = request.url else { return fail() }
         let path = url.path
-        if path.hasSuffix("/library/items") {
+        if path.hasSuffix("/auth/signup") || path.hasSuffix("/auth/password/forgot") {
+            respond(["message": "If this request is eligible, an email will arrive shortly"])
+        } else if path.hasSuffix("/library/items") {
             respond(libraryList())
         } else if path.hasSuffix("/preferences") {
             respond(["favorite": false, "archived": false, "tags": []])

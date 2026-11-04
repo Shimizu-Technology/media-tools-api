@@ -104,12 +104,14 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     private var watchTasks: [String: Task<Void, Never>] = [:]
     private var retryAttempts: [UUID: Int] = [:]
     private var hasReconciledTransfers = false
+    private var attachedShareSessions: Set<String> = []
     /// Handles callbacks already queued by iOS while task descriptions change.
     private var verifiedOwnerAliases: [String: String] = [:]
     private let simulatesUpload: Bool
     private let isForeground: @MainActor () -> Bool
     private var sharedDocumentSends: [UUID: SharedDocumentSend] = [:]
     private var rejectedSharedDocuments: Set<UUID> = []
+    private var reservationRecheck: Task<Void, Never>?
 
     /// `token` lets a cancelled send finish without clearing the send that
     /// replaced it after the same account signed back in.
@@ -259,6 +261,17 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     /// so it waits for `retrySharedItem` from the Retry button.
     func processSharedItems() {
         recorder.importSharedItems()
+        attachShareUploads()
+        // The extension may hand a reserved share back with no later event from
+        // iOS, so look once more rather than waiting for the next foreground.
+        if recorder.hasShareReservations, reservationRecheck == nil {
+            reservationRecheck = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(15))
+                guard let self else { return }
+                self.reservationRecheck = nil
+                self.processSharedItems()
+            }
+        }
         guard let ownerID = recorder.activeOwnerID,
               !hasPendingLocalAccountDeletion(ownerID: ownerID)
         else { return }
@@ -415,13 +428,14 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         }
     }
 
-    /// Keeps upload/finalization credentials aligned with the signed-in Clerk
-    /// account. Work owned by another account is paused instead of ever being
-    /// finalized with the new account's bearer token.
+    /// Keeps upload/finalization credentials aligned with the signed-in account.
+    /// Work owned by another account is paused instead of ever being finalized
+    /// with the new account's bearer token.
     func setActiveOwnerID(_ ownerID: String?) async {
         cancelSharedDocumentSends { $0 != ownerID }
         await retryPendingLocalAccountDeletions()
         recorder.setActiveOwnerID(ownerID)
+        attachShareUploads()
         if let ownerID {
             for index in watches.indices where watches[index].ownerID == nil {
                 if let recordingID = watches[index].recordingID,
@@ -457,8 +471,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         }
     }
 
-    /// Called only with a Clerk subject and users.id returned by the verified
-    /// bootstrap for that same account. This is safe to repeat after a crash.
+    /// Called only with a provider subject and the users.id the server verified
+    /// for that same account. This is safe to repeat after a crash.
     func migrateOwnerID(from clerkID: String, to userID: String) async throws {
         guard clerkID != userID else { return }
         verifiedOwnerAliases[clerkID] = userID
@@ -528,6 +542,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             retryAttempts[recordingID] = nil
         }
         await transport.cancel(recordingIDs: recordingIDs)
+        await transport.cancelUploads(ownedBy: ownerID)
         cancelSharedDocumentSends { $0 == ownerID }
         let removedWatches = watches.filter {
             $0.ownerID == ownerID || $0.recordingID.map(recordingIDs.contains) == true
@@ -593,6 +608,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
 
     func resumePendingWork() {
         transport.receiver = self
+        attachShareUploads()
         reconcileQueuedWorkWithConsent()
         for recording in recorder.availableRecordings
         where recording.state == .serverProcessing {
@@ -633,6 +649,12 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             guard let self else { return }
             let activeIDs = await self.transport.activeRecordingIDs()
             guard self.recorder.activeOwnerID == reconciledOwnerID else { return }
+            // A finished share has no task left. Its inbox entry is what says so.
+            self.recorder.importSharedItems()
+            for recording in self.recorder.availableRecordings
+            where recording.state == .finalizingUpload {
+                self.finalize(recordingID: recording.id)
+            }
             for recording in self.recorder.availableRecordings
             where recording.state == .uploading && !activeIDs.contains(recording.id) {
                 guard self.isActiveOwner(
@@ -664,19 +686,55 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         returnQueuedWorkAfterRevocation()
     }
 
+    /// An attached session reports the moment the app connects to it, so its
+    /// recording must exist first. Reconciliation then treats it like any other.
+    private func attachShareUploads() {
+        let identifiers = recorder.shareUploadSessionIdentifiers
+        guard !identifiers.isSubset(of: attachedShareSessions) else { return }
+        attachedShareSessions.formUnion(identifiers)
+        hasReconciledTransfers = false
+        transport.attachShareSessions(identifiers)
+    }
+
     func receiveBackgroundUploadEvent(_ event: BackgroundUploadEvent) {
         let metadata: BackgroundUploadMetadata
         switch event {
         case .progress(let value, _), .completed(let value), .failed(let value, _, _):
             metadata = value
         }
+        // The extension's upload can finish before this app has seen the share.
+        if recorder.recording(withID: metadata.recordingID) == nil {
+            recorder.importSharedItems()
+        }
+        defer {
+            if case .progress = event {} else {
+                recorder.releaseShareSource(recordingID: metadata.recordingID)
+            }
+        }
+        // A retry presigns a new object. A task still reporting on the old one has
+        // nothing to say about this recording, and completing with it would create
+        // a second transcription.
+        if let recording = recorder.recording(withID: metadata.recordingID),
+           recording.uploadObjectKey != metadata.objectKey {
+            return
+        }
         guard let rawOwnerID = metadata.ownerID
-                ?? recorder.recording(withID: metadata.recordingID)?.ownerID,
-              isActiveOwner(
-                recordingID: metadata.recordingID,
-                expectedOwnerID: verifiedOwnerAliases[rawOwnerID] ?? rawOwnerID
-              )
+                ?? recorder.recording(withID: metadata.recordingID)?.ownerID
         else { return }
+        let resolvedOwnerID = verifiedOwnerAliases[rawOwnerID] ?? rawOwnerID
+        guard isActiveOwner(recordingID: metadata.recordingID, expectedOwnerID: resolvedOwnerID) else {
+            // An upload this app started is cancelled when its account signs out,
+            // and a late result is ignored. The extension's upload was never this
+            // app's to cancel, so its bytes can arrive with that account signed out.
+            // Remembering that uses no credential, and spares a second upload.
+            if case .completed = event,
+               let recording = recorder.recording(withID: metadata.recordingID),
+               recording.ownerID == resolvedOwnerID,
+               recording.shareUploadSessionIdentifier != nil {
+                recorder.markUploadFinalizing(metadata.recordingID)
+            }
+            return
+        }
 
         // A background launch can deliver this before any scene resumes work.
         reconcileQueuedWorkWithConsent()
@@ -1165,13 +1223,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     }
 
     static func mimeType(for url: URL) -> String {
-        if url.pathExtension.caseInsensitiveCompare("caf") == .orderedSame {
-            // UniformTypeIdentifiers does not consistently publish a CAF MIME
-            // mapping across supported iOS/macOS SDKs.
-            return "audio/x-caf"
-        }
-        return UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
-            ?? "application/octet-stream"
+        ShareDirectUpload.mimeType(for: url)
     }
 
     private func simulateUpload(recording: LocalRecording, ownerID: String) async {

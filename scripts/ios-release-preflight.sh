@@ -31,7 +31,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-for command_name in xcodebuild xcrun plutil ruby sips codesign security unzip curl; do
+for command_name in xcodebuild xcrun plutil ruby sips codesign security unzip; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "Missing required command: $command_name"
     exit 1
@@ -43,13 +43,12 @@ scheme="MediaTools"
 info_plist="ios/MediaTools/MediaTools/Info.plist"
 privacy_manifest="ios/MediaTools/MediaTools/PrivacyInfo.xcprivacy"
 entitlements_path="ios/MediaTools/MediaTools/MediaTools.entitlements"
+share_entitlements_path="ios/MediaTools/ShareExtension/ShareExtension.entitlements"
 metadata_path="ios/app-store/en-US"
-native_auth_release_path="ios/app-store/native-auth-release.json"
 export_options_path="ios/app-store/ExportOptions.plist"
-native_auth_validator_path="scripts/validate-ios-native-auth-release.rb"
-native_auth_validator_test_path="scripts/validate-ios-native-auth-release_test.rb"
+app_group="group.com.shimizu-technology.media-tools"
 
-for required_path in "$project_path" "$info_plist" "$privacy_manifest" "$entitlements_path" "$metadata_path" "$native_auth_release_path" "$export_options_path" "$native_auth_validator_path" "$native_auth_validator_test_path"; do
+for required_path in "$project_path" "$info_plist" "$privacy_manifest" "$entitlements_path" "$share_entitlements_path" "$metadata_path" "$export_options_path"; do
   if [[ ! -e "$required_path" ]]; then
     echo "Missing release input: $required_path"
     exit 1
@@ -87,8 +86,6 @@ team_id="$(build_setting DEVELOPMENT_TEAM)"
 marketing_version="$(build_setting MARKETING_VERSION)"
 build_number="$(build_setting CURRENT_PROJECT_VERSION)"
 configured_entitlements="$(build_setting CODE_SIGN_ENTITLEMENTS)"
-clerk_key="$(build_setting CLERK_PUBLISHABLE_KEY)"
-first_party_ios_auth_enabled="$(build_setting FIRST_PARTY_IOS_AUTH_ENABLED)"
 
 [[ "$bundle_id" == "com.ShimizuTechnology.MediaTools" ]] || { echo "Unexpected bundle ID: $bundle_id"; exit 1; }
 [[ "$team_id" == "4T358A5S74" ]] || { echo "Unexpected Apple team: $team_id"; exit 1; }
@@ -96,15 +93,37 @@ first_party_ios_auth_enabled="$(build_setting FIRST_PARTY_IOS_AUTH_ENABLED)"
 [[ "$build_number" =~ ^[0-9]+$ ]] || { echo "Build number is not numeric: $build_number"; exit 1; }
 (( build_number >= 10 )) || { echo "Build number must be 10 or later; found $build_number"; exit 1; }
 [[ "$configured_entitlements" == "MediaTools/MediaTools.entitlements" ]] || { echo "Unexpected entitlements setting: $configured_entitlements"; exit 1; }
-[[ -n "$clerk_key" ]] || { echo "Release build is missing CLERK_PUBLISHABLE_KEY"; exit 1; }
-[[ "$first_party_ios_auth_enabled" == "YES" ]] || {
-  echo "Release build must enable FIRST_PARTY_IOS_AUTH_ENABLED=YES while Clerk remains the migration fallback"
-  exit 1
-}
 
-if [[ "$clerk_key" == pk_test_* ]]; then
-  echo "Notice: the Release target uses the owner-approved Clerk development instance"
+# Media Tools owns its sign-in. The only thing left of the retired provider is the
+# ability to read a session an older build stored, so these checks are specific:
+# `case clerk`, verifiedClerkID, and the owner mapping must keep compiling.
+if [[ -n "$(build_setting CLERK_PUBLISHABLE_KEY)" || -n "$(build_setting FIRST_PARTY_IOS_AUTH_ENABLED)" ]]; then
+  echo "A retired auth build setting returned"
+  exit 1
 fi
+IOS_ROOT="ios/MediaTools" ruby <<'RUBY'
+root = ENV.fetch("IOS_ROOT")
+sources = Dir.glob(File.join(root, "**", "*.swift"))
+offenders = sources.filter do |path|
+  File.read(path, encoding: "UTF-8").match?(/^\s*import\s+Clerk|\bClerk\.shared\b|\bAuthView\b|\bClerkKit\b/)
+end
+abort "Clerk SDK use returned: #{offenders.join(', ')}" unless offenders.empty?
+
+project = File.read(File.join(root, "MediaTools.xcodeproj", "project.pbxproj"), encoding: "UTF-8")
+abort "A Clerk package reference returned to the Xcode project" if project.match?(/clerk-ios|ClerkKit|CLERK_PUBLISHABLE_KEY|FIRST_PARTY_IOS_AUTH_ENABLED/i)
+
+resolved = Dir.glob(File.join(root, "**", "Package.resolved"))
+abort "A Clerk package pin returned: #{resolved.join(', ')}" if resolved.any? { |path| File.read(path).match?(/clerk/i) }
+
+copy = Dir.glob("ios/app-store/en-US/*.txt")
+offending_copy = copy.filter { |path| File.read(path, encoding: "UTF-8").match?(/clerk|sign in with apple/i) }
+abort "Store copy still mentions a removed sign-in: #{offending_copy.join(', ')}" unless offending_copy.empty?
+
+%w[signup/verify password/forgot password/reset].each do |route|
+  service = File.read(File.join(root, "MediaTools", "Services", "FirstPartyAuthService.swift"), encoding: "UTF-8")
+  abort "Sign-in no longer covers /auth/#{route}" unless service.include?("/auth/#{route}")
+end
+RUBY
 
 IOS_SOURCE_ROOT="ios/MediaTools/MediaTools" IOS_INFO_PLIST="$info_plist" ruby <<'RUBY'
 root = ENV.fetch("IOS_SOURCE_ROOT")
@@ -117,45 +136,24 @@ end
 abort "Permission education must use neutral action labels such as Continue or Next: #{offenders.join(', ')}" unless offenders.empty?
 RUBY
 
-clerk_frontend_api="$(CLERK_KEY="$clerk_key" ruby <<'RUBY'
-require "base64"
-key = ENV.fetch("CLERK_KEY")
-encoded = key.sub(/\Apk_(?:test|live)_/, "")
-decoded = Base64.urlsafe_decode64(encoded).delete_suffix("$")
-abort "Invalid Clerk publishable key payload" unless decoded.match?(/\A[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\z/i)
-puts "https://#{decoded}"
-RUBY
-)"
-
-# This public host identifies the Clerk instance that is configured for this
-# app's API and native Apple registration. Pinning it prevents a different
-# development tenant with superficially similar providers from being shipped.
-approved_clerk_frontend_api="https://welcomed-earwig-86.clerk.accounts.dev"
-[[ "$clerk_frontend_api" == "$approved_clerk_frontend_api" ]] || {
-  echo "Release build uses an unapproved Clerk tenant: $clerk_frontend_api"
-  exit 1
-}
-
-ruby "$native_auth_validator_test_path"
-CLERK_FRONTEND_API="$clerk_frontend_api" \
-APPLE_TEAM_ID="$team_id" \
-APP_BUNDLE_ID="$bundle_id" \
-ruby "$native_auth_validator_path" "$native_auth_release_path"
-
-clerk_environment="$(curl --fail --silent --show-error --max-time 15 "$clerk_frontend_api/v1/environment")"
-CLERK_ENVIRONMENT="$clerk_environment" ruby <<'RUBY'
-require "json"
-environment = JSON.parse(ENV.fetch("CLERK_ENVIRONMENT"))
-strategies = environment.fetch("auth_config").fetch("identification_strategies")
-abort "Shipping Clerk environment does not offer Sign in with Apple" unless strategies.include?("oauth_apple")
-abort "Shipping Clerk environment unexpectedly dropped Google sign-in" unless strategies.include?("oauth_google")
-RUBY
-
-if ! apple_sign_in_mode="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.applesignin:0' "$entitlements_path" 2>/dev/null)"; then
-  echo "Sign in with Apple entitlement is missing"
+if /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.applesignin' "$entitlements_path" >/dev/null 2>&1; then
+  echo "The Sign in with Apple entitlement returned; the app offers no third-party sign-in"
   exit 1
 fi
-[[ "$apple_sign_in_mode" == "Default" ]] || { echo "Unexpected Sign in with Apple mode: $apple_sign_in_mode"; exit 1; }
+# The capture key is shared through the App Group, which iOS also treats as a
+# Keychain access group. A keychain-access-groups entitlement would change the
+# default group for new items, and the device session must stay out of the
+# group the extension can read.
+for checked_entitlements in "$entitlements_path" "$share_entitlements_path"; do
+  if /usr/libexec/PlistBuddy -c 'Print :keychain-access-groups' "$checked_entitlements" >/dev/null 2>&1; then
+    echo "$checked_entitlements must not declare keychain-access-groups; the device session would become shareable"
+    exit 1
+  fi
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "$checked_entitlements")" == "$app_group" ]] || {
+    echo "$checked_entitlements is missing the shared App Group"
+    exit 1
+  }
+done
 passkey_domain="webcredentials:media.shimizu-technology.com"
 configured_passkey_domain="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.associated-domains:0' "$entitlements_path")"
 [[ "$configured_passkey_domain" == "$passkey_domain" ]] || { echo "Unexpected passkey associated domain: $configured_passkey_domain"; exit 1; }
@@ -167,7 +165,14 @@ background_mode="$(/usr/libexec/PlistBuddy -c 'Print :UIBackgroundModes:0' "$inf
 [[ -n "$microphone_copy" ]] || { echo "Microphone usage description is empty"; exit 1; }
 [[ "$background_mode" == "audio" ]] || { echo "The recording app must declare the audio background mode"; exit 1; }
 
-plutil -lint "$info_plist" "$privacy_manifest" "$entitlements_path" "$export_options_path" >/dev/null
+plutil -lint "$info_plist" "$privacy_manifest" "ios/MediaTools/ShareExtension/PrivacyInfo.xcprivacy" "$entitlements_path" "$share_entitlements_path" "$export_options_path" >/dev/null
+
+for retired_key in CLERK_PUBLISHABLE_KEY FIRST_PARTY_IOS_AUTH_ENABLED; do
+  if /usr/libexec/PlistBuddy -c "Print :$retired_key" "$info_plist" >/dev/null 2>&1; then
+    echo "Info.plist still declares $retired_key"
+    exit 1
+  fi
+done
 
 [[ "$(plutil -extract destination raw "$export_options_path")" == "export" ]] || { echo "Export options must create a local artifact for preflight"; exit 1; }
 [[ "$(plutil -extract manageAppVersionAndBuildNumber raw "$export_options_path")" == "false" ]] || { echo "Export options must preserve the reviewed build number"; exit 1; }
@@ -245,20 +250,26 @@ if [[ -n "$archive_path" ]]; then
   [[ "$(plutil -extract CFBundleIdentifier raw "$app_info")" == "$bundle_id" ]] || { echo "Archived bundle ID does not match"; exit 1; }
   [[ "$(plutil -extract CFBundleShortVersionString raw "$app_info")" == "$marketing_version" ]] || { echo "Archived marketing version does not match"; exit 1; }
   [[ "$(plutil -extract CFBundleVersion raw "$app_info")" == "$build_number" ]] || { echo "Archived build number does not match"; exit 1; }
-  [[ "$(plutil -extract FIRST_PARTY_IOS_AUTH_ENABLED raw "$app_info")" == "YES" ]] || { echo "Archive has FIRST_PARTY_IOS_AUTH_ENABLED disabled"; exit 1; }
   archived_sdk="$(plutil -extract DTSDKName raw "$app_info")"
   [[ "$archived_sdk" == iphoneos26.* ]] || { echo "Archive was not built with the iOS 26 SDK: $archived_sdk"; exit 1; }
   [[ -f "$app_path/PrivacyInfo.xcprivacy" ]] || { echo "Archive is missing PrivacyInfo.xcprivacy"; exit 1; }
+  [[ -f "$app_path/PlugIns/ShareExtension.appex/PrivacyInfo.xcprivacy" ]] || { echo "Share Extension is missing PrivacyInfo.xcprivacy"; exit 1; }
 
   preflight_tmp="$(mktemp -d)"
   trap 'rm -rf "$preflight_tmp"' EXIT
   codesign -d --entitlements :- "$app_path" >"$preflight_tmp/app-entitlements.plist" 2>/dev/null
-  archived_apple_mode="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.applesignin:0' "$preflight_tmp/app-entitlements.plist")"
-  [[ "$archived_apple_mode" == "Default" ]] || { echo "Signed archive is missing Sign in with Apple"; exit 1; }
+  if /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.applesignin' "$preflight_tmp/app-entitlements.plist" >/dev/null 2>&1; then
+    echo "Signed archive still has Sign in with Apple"
+    exit 1
+  fi
+  if [[ -d "$app_path/Frameworks/ClerkKit.framework" ]] || grep -rlq "welcomed-earwig-86" "$app_info" 2>/dev/null; then
+    echo "Archive still embeds Clerk"
+    exit 1
+  fi
   archived_passkey_domain="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.associated-domains:0' "$preflight_tmp/app-entitlements.plist")"
   [[ "$archived_passkey_domain" == "$passkey_domain" ]] || { echo "Signed archive is missing the passkey associated domain"; exit 1; }
   archived_app_group="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "$preflight_tmp/app-entitlements.plist")"
-  [[ "$archived_app_group" == "group.com.shimizu-technology.media-tools" ]] || { echo "Signed archive is missing the share App Group"; exit 1; }
+  [[ "$archived_app_group" == "$app_group" ]] || { echo "Signed archive is missing the share App Group"; exit 1; }
 
   share_extension_path="$app_path/PlugIns/ShareExtension.appex"
   [[ -d "$share_extension_path" ]] || { echo "Archive is missing ShareExtension.appex"; exit 1; }
@@ -266,6 +277,12 @@ if [[ -n "$archive_path" ]]; then
   codesign -d --entitlements :- "$share_extension_path" >"$preflight_tmp/share-entitlements.plist" 2>/dev/null
   archived_share_id="$(/usr/libexec/PlistBuddy -c 'Print :application-identifier' "$preflight_tmp/share-entitlements.plist")"
   archived_share_group="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "$preflight_tmp/share-entitlements.plist")"
+  if /usr/libexec/PlistBuddy -c 'Print :keychain-access-groups' "$preflight_tmp/share-entitlements.plist" >/dev/null 2>&1 \
+    && [[ "$(/usr/libexec/PlistBuddy -c 'Print :keychain-access-groups' "$preflight_tmp/share-entitlements.plist")" == *"$bundle_id"* ]] \
+    && [[ "$(/usr/libexec/PlistBuddy -c 'Print :keychain-access-groups' "$preflight_tmp/share-entitlements.plist")" != *"$bundle_id.ShareExtension"* ]]; then
+    echo "Share Extension could read the app's Keychain group"
+    exit 1
+  fi
   [[ "$archived_share_id" == "$team_id.$bundle_id.ShareExtension" ]] || { echo "Share Extension signed identifier does not match"; exit 1; }
   [[ "$archived_share_group" == "$archived_app_group" ]] || { echo "Share Extension App Group does not match the app"; exit 1; }
 
@@ -297,7 +314,6 @@ if [[ -n "$export_path" ]]; then
   exported_version="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:versionNumber" "$distribution_summary")"
   exported_app_id="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:entitlements:application-identifier" "$distribution_summary")"
   exported_get_task_allow="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:entitlements:get-task-allow" "$distribution_summary")"
-  exported_apple_mode="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:entitlements:com.apple.developer.applesignin:0" "$distribution_summary")"
   exported_passkey_domain="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:entitlements:com.apple.developer.associated-domains:0" "$distribution_summary")"
   exported_certificate="$(/usr/libexec/PlistBuddy -c "Print ${summary_root}:certificate:type" "$distribution_summary")"
   embedded_indexes="$(plutil -convert json -o - "$distribution_summary" | ruby -rjson -e '
@@ -321,13 +337,16 @@ if [[ -n "$export_path" ]]; then
   [[ "$exported_version" == "$marketing_version" ]] || { echo "Exported marketing version does not match"; exit 1; }
   [[ "$exported_app_id" == "$team_id.$bundle_id" ]] || { echo "Exported application identifier does not match"; exit 1; }
   [[ "$exported_get_task_allow" == "false" ]] || { echo "App Store export is debuggable"; exit 1; }
-  [[ "$exported_apple_mode" == "Default" ]] || { echo "App Store export is missing Sign in with Apple"; exit 1; }
+  if /usr/libexec/PlistBuddy -c "Print ${summary_root}:entitlements:com.apple.developer.applesignin" "$distribution_summary" >/dev/null 2>&1; then
+    echo "App Store export still has Sign in with Apple"
+    exit 1
+  fi
   [[ "$exported_passkey_domain" == "$passkey_domain" ]] || { echo "App Store export is missing the passkey associated domain"; exit 1; }
   [[ "$exported_certificate" == *"Apple Distribution"* ]] || { echo "App Store export is not distribution-signed: $exported_certificate"; exit 1; }
   [[ "$widget_build" == "$build_number" ]] || { echo "Widget build number does not match the app"; exit 1; }
   [[ "$widget_id" == "$team_id.$bundle_id.Widget" ]] || { echo "Exported widget identity does not match"; exit 1; }
   [[ "$widget_get_task_allow" == "false" ]] || { echo "Exported widget is debuggable"; exit 1; }
-  [[ "$exported_app_group" == "group.com.shimizu-technology.media-tools" ]] || { echo "Exported app is missing the share App Group"; exit 1; }
+  [[ "$exported_app_group" == "$app_group" ]] || { echo "Exported app is missing the share App Group"; exit 1; }
   [[ "$share_build" == "$build_number" ]] || { echo "Exported Share Extension has the wrong build number"; exit 1; }
   [[ "$share_id" == "$team_id.$bundle_id.ShareExtension" && "$share_group" == "$exported_app_group" ]] || { echo "Exported Share Extension identity or App Group does not match"; exit 1; }
   [[ "$share_get_task_allow" == "false" ]] || { echo "Exported Share Extension is debuggable"; exit 1; }

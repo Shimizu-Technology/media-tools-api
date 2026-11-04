@@ -1,14 +1,18 @@
 Media Tools requires an account because recordings, transcripts, PDFs, chats, and collections are private, account-scoped workspace data.
 
-Sign in: Returning accounts can use their Media Tools email and password, Continue with passkey, or a saved recovery code. During migration, an existing linked account can tap Move an existing Clerk account; that sheet presents Apple alongside Google and Clerk email/password. The native Apple flow requests only name and email and supports Hide My Email. App Review may use the non-expiring review account supplied in App Review Information.
+Sign in: Media Tools has its own accounts and no third-party or social login. Open the app and use Sign in with an email and password, Create account to register with an emailed code, or Forgot password to reset one. Continue with passkey and Use a recovery code are also available. App Review may use the non-expiring review account supplied in App Review Information.
+
+Resolved from the September 2 review: Guideline 4.8 no longer applies because the app offers no third-party login. Guideline 5.1.1(iv): the microphone education screen now uses the neutral Continue label before iOS presents its system permission dialog. Notification education uses the same neutral wording. The prior Allow microphone and Enable completion alerts labels have been removed.
 
 Resolved from the September 2 review: The microphone education screen now uses the neutral Continue label before iOS presents its system permission dialog. Notification education uses the same neutral wording. The prior Allow microphone and Enable completion alerts labels have been removed.
 
 Recording: Open Record and tap the microphone. A red recording card, elapsed timer, waveform, system microphone indicator, and Live Activity remain visible while recording. Locking the phone or switching apps intentionally keeps the user-started recording active. Pause/Resume stops and restarts capture without finalizing the file. Stop & Save finalizes it on the device.
 
-AI disclosure: Before the first transcription, readable-format, summary, or chat request, the app explains that content is sent to OpenAI and, for text features, OpenRouter/model providers. Declining leaves recording, recovery, library browsing, playback, export, and non-AI extraction available.
+AI disclosure: Before the first transcription, readable-format, summary, or chat request, the app explains that content is sent to OpenAI and, for text features, OpenRouter/model providers. Declining leaves recording, recovery, library browsing, playback, export, and non-AI extraction available. New recordings and shared audio transcribe automatically only after this permission is given, and Settings > AI processing turns that off.
 
-Account deletion: Settings > Account > Delete Account. The app confirms the destructive action, purges account-owned application data, queues durable provider cleanup, removes device recordings owned by that account, and signs out.
+Share Extension: Sharing audio saves it on the device. If AI processing permission and automatic transcription are on, the upload starts in the background without opening the app, using a credential limited to uploading recordings. Otherwise the file waits in the app.
+
+Account deletion: Settings > Danger zone > Delete account and data. The app confirms the destructive action and asks for the current password when one is set, purges account-owned application data, queues durable storage cleanup, removes device recordings owned by that account, and signs out.
 
 AI safety report: Open an item with a generated summary or chat response and use Report summary or Report response. The report includes the selected output, category, and optional note; it does not attach another copy of the source media.
 

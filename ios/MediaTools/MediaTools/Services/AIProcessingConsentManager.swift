@@ -57,7 +57,9 @@ struct AutoTranscribePreference {
 @MainActor
 @Observable
 final class AIProcessingConsentManager {
-    static let shared = AIProcessingConsentManager()
+    static let shared = AIProcessingConsentManager(
+        sharePolicy: try? ShareUploadPolicyFileStore()
+    )
 
     private static let consentedOwnersKey = "aiProcessingConsentedOwnerIDs.v1"
     /// Accounts that saw the disclosure saying new recordings are sent when they
@@ -68,6 +70,8 @@ final class AIProcessingConsentManager {
 
     private let defaults: UserDefaults
     private let autoTranscribePreference: AutoTranscribePreference
+    private let sharePolicy: (any ShareUploadPolicyStoring)?
+    private let apiBaseURL: String
     private var pendingContinuations: [CheckedContinuation<Bool, Never>] = []
 
     private(set) var activeOwnerID: String?
@@ -78,9 +82,15 @@ final class AIProcessingConsentManager {
     /// Lets the upload coordinator react without the views knowing about it.
     var onAutomaticTranscriptionStateChanged: (() -> Void)?
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        sharePolicy: (any ShareUploadPolicyStoring)? = nil,
+        apiBaseURL: String = Configuration.apiBaseURL
+    ) {
         self.defaults = defaults
         autoTranscribePreference = AutoTranscribePreference(defaults: defaults)
+        self.sharePolicy = sharePolicy
+        self.apiBaseURL = apiBaseURL
     }
 
     var hasConsent: Bool {
@@ -148,6 +158,28 @@ final class AIProcessingConsentManager {
         guard activeOwnerID != ownerID else { return }
         decline()
         activeOwnerID = ownerID
+        publishSharePolicy()
+    }
+
+    /// The extension can only read what is published here. Each change republishes
+    /// its answer, and an unknown owner or a failed write leaves no permission at
+    /// all, so a share falls back to waiting for the app.
+    private func publishSharePolicy() {
+        guard let sharePolicy else { return }
+        guard let activeOwnerID else {
+            sharePolicy.clear()
+            return
+        }
+        do {
+            try sharePolicy.save(ShareUploadPolicy(
+                ownerID: activeOwnerID,
+                mayUploadAutomatically: hasAutomaticConsent(ownerID: activeOwnerID)
+                    && autoTranscribePreference.isEnabled(ownerID: activeOwnerID),
+                apiBaseURL: apiBaseURL
+            ))
+        } catch {
+            sharePolicy.clear()
+        }
     }
 
     func requestPermission() async -> Bool {
@@ -177,6 +209,8 @@ final class AIProcessingConsentManager {
 
     func revoke() {
         guard let activeOwnerID else { return }
+        // First, so a crash partway through can only leave too little permission.
+        sharePolicy?.clear()
         remove(activeOwnerID, forKey: Self.consentedOwnersKey)
         remove(activeOwnerID, forKey: Self.automaticOwnersKey)
         // Revoking is the answer. The next saved recording must not ask again.
@@ -192,9 +226,8 @@ final class AIProcessingConsentManager {
         didChangeAutomaticTranscriptionState()
     }
 
-    /// Only call after a server-verified Clerk bootstrap for this exact user.
+    /// Only call with a provider ID the server verified for this exact user.
     /// Move the grant so a later activation cannot restore revoked permission.
-    /// Rollback uses the verified server owner ID for local consent as well.
     func migrateConsent(from clerkID: String, to userID: String) {
         guard clerkID != userID else { return }
         for key in [Self.consentedOwnersKey, Self.automaticOwnersKey, Self.promptedOwnersKey]
@@ -232,6 +265,7 @@ final class AIProcessingConsentManager {
 
     private func didChangeAutomaticTranscriptionState() {
         stateRevision += 1
+        publishSharePolicy()
         onAutomaticTranscriptionStateChanged?()
     }
 

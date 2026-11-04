@@ -135,35 +135,6 @@ final class FirstPartyAuthServiceTests: XCTestCase {
         XCTAssertEqual(object["next_refresh_token"] as? String, "mta_rt_successor")
     }
 
-    func testClerkDetachmentStatusDecodesServerShape() throws {
-        let data = Data("""
-        {"linked":true,"ready":true,"passkey_count":2,"password_configured":true,"unused_recovery_codes":7}
-        """.utf8)
-        let status = try APIClient.makeDecoder().decode(ClerkDetachmentStatus.self, from: data)
-        XCTAssertTrue(status.linked)
-        XCTAssertTrue(status.ready)
-        XCTAssertEqual(status.passkeyCount, 2)
-        XCTAssertTrue(status.passwordConfigured)
-        XCTAssertEqual(status.unusedRecoveryCodes, 7)
-    }
-
-    @MainActor
-    func testClerkDetachmentRecoversLostPostResponseFromStatus() async throws {
-        let api = LostClerkDetachmentResponseAPI()
-        let service = FirstPartyAuthService(api: api)
-
-        let status = try await service.detachClerk(expectedOwnerID: "server-user")
-        let paths = await api.recordedPaths()
-
-        XCTAssertFalse(status.linked)
-        XCTAssertTrue(status.ready)
-        XCTAssertEqual(paths, [
-            "POST /auth/clerk-detachment server-user",
-            "GET /auth/clerk-detachment server-user",
-        ])
-    }
-
-
     @MainActor
     func testPasskeyLoginJournalExtractsExactSuccessorFromFinishBody() throws {
         let credential = PasskeyAssertionCredential.make(
@@ -260,7 +231,7 @@ final class FirstPartyAuthServiceTests: XCTestCase {
                     code: "invalid_challenge",
                     message: "passkey finish rejected"
                 )),
-                deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil), enabled: true),
+                deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil)),
                 passkeyLoginJournal: journal
             )
 
@@ -281,7 +252,7 @@ final class FirstPartyAuthServiceTests: XCTestCase {
         let store = TestDeviceSessionStore(nil)
         let service = FirstPartyAuthService(
             api: SuccessfulPairFirstPartyAuthAPI(),
-            deviceSession: DeviceSessionController(store: store, enabled: true),
+            deviceSession: DeviceSessionController(store: store),
             passkeyLoginJournal: journal
         )
 
@@ -300,7 +271,7 @@ final class FirstPartyAuthServiceTests: XCTestCase {
         let journal = InMemoryRecoveryCodeRedeemJournal(nil)
         let service = FirstPartyAuthService(
             api: SuccessfulPairFirstPartyAuthAPI(),
-            deviceSession: DeviceSessionController(store: store, enabled: true),
+            deviceSession: DeviceSessionController(store: store),
             recoveryRedeemJournal: journal
         )
 
@@ -319,7 +290,7 @@ final class FirstPartyAuthServiceTests: XCTestCase {
         let journal = InMemoryPasswordLoginJournal(nil)
         let service = FirstPartyAuthService(
             api: SuccessfulPairFirstPartyAuthAPI(),
-            deviceSession: DeviceSessionController(store: store, enabled: true),
+            deviceSession: DeviceSessionController(store: store),
             passwordLoginJournal: journal
         )
 
@@ -344,7 +315,7 @@ final class FirstPartyAuthServiceTests: XCTestCase {
                     code: "invalid_challenge",
                     message: "passkey finish rejected"
                 )),
-                deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil), enabled: true),
+                deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil)),
                 passkeyLoginJournal: journal
             )
 
@@ -371,7 +342,7 @@ final class FirstPartyAuthServiceTests: XCTestCase {
             let journal = InMemoryPasskeyLoginFinishJournal(pending)
             let service = FirstPartyAuthService(
                 api: PasskeyFinishFailingAPI(error: error),
-                deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil), enabled: true),
+                deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil)),
                 passkeyLoginJournal: journal
             )
 
@@ -418,8 +389,7 @@ final class FirstPartyAuthServiceTests: XCTestCase {
         return DeviceSessionController(
             transport: FailingRevocationTransport(),
             baseURL: URL(string: "https://example.test/api/v1")!,
-            store: TestDeviceSessionStore(StoredDeviceSession(pair: pair, source: .passkey)),
-            enabled: true
+            store: TestDeviceSessionStore(StoredDeviceSession(pair: pair, source: .passkey))
         )
     }
 
@@ -539,7 +509,7 @@ final class FirstPartyAuthServiceTests: XCTestCase {
         let journal = InMemoryRecoveryCodeRotationJournal(pending)
         let service = FirstPartyAuthService(
             api: RecordingFirstPartyAuthAPI(),
-            deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil), enabled: true),
+            deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil)),
             recoveryRotationJournal: journal
         )
 
@@ -559,10 +529,9 @@ final class FirstPartyAuthServiceTests: XCTestCase {
             inactiveExpiresAt: .distantFuture
         )
         let controller = DeviceSessionController(
-            store: TestDeviceSessionStore(StoredDeviceSession(pair: pair, source: .passkey)),
-            enabled: true
+            store: TestDeviceSessionStore(StoredDeviceSession(pair: pair, source: .passkey))
         )
-        _ = await controller.activate(clerkID: nil)
+        _ = await controller.activate()
         return controller
     }
 
@@ -570,7 +539,7 @@ final class FirstPartyAuthServiceTests: XCTestCase {
     func testPreCanceledAuthorizationDoesNotStartController() async throws {
         let service = FirstPartyAuthService(
             api: RecordingFirstPartyAuthAPI(),
-            deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil), enabled: true)
+            deviceSession: DeviceSessionController(store: TestDeviceSessionStore(nil))
         )
         let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(
             relyingPartyIdentifier: "media.shimizu-technology.com"
@@ -633,7 +602,6 @@ final class FirstPartyAuthServiceTests: XCTestCase {
 @MainActor
 private final class TestDeviceSessionStore: DeviceSessionStoring {
     var value: StoredDeviceSession?
-    var pendingBootstrap: PendingDeviceSessionBootstrap?
     private var ownerMappings: [String: String] = [:]
 
     init(_ value: StoredDeviceSession?) { self.value = value }
@@ -641,9 +609,6 @@ private final class TestDeviceSessionStore: DeviceSessionStoring {
     func load() -> StoredDeviceSession? { value }
     func save(_ value: StoredDeviceSession) throws { self.value = value }
     func delete() { value = nil }
-    func loadPendingBootstrap() throws -> PendingDeviceSessionBootstrap? { pendingBootstrap }
-    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws { pendingBootstrap = value }
-    func deletePendingBootstrap() { pendingBootstrap = nil }
     func localOwnerID(for clerkID: String) -> String? { ownerMappings[clerkID] }
     func clerkID(forLocalOwnerID ownerID: String) -> String? { ownerMappings.first(where: { $0.value == ownerID })?.key }
     func saveLocalOwnerID(_ ownerID: String, for clerkID: String) { ownerMappings[clerkID] = ownerID }
@@ -715,6 +680,8 @@ private actor FailingRevocationTransport: DeviceSessionTransport {
 }
 
 private actor RecordingFirstPartyAuthAPI: FirstPartyAuthAPI {
+    func delete(_ path: String) async throws {}
+
     private var paths: [String] = []
 
     func recordedPaths() -> [String] { paths }
@@ -740,39 +707,10 @@ private actor RecordingFirstPartyAuthAPI: FirstPartyAuthAPI {
     }
 }
 
-private actor LostClerkDetachmentResponseAPI: FirstPartyAuthAPI {
-    private var paths: [String] = []
-
-    func recordedPaths() -> [String] { paths }
-
-    func get<T>(_ path: String, expectedOwnerID: String?) async throws -> T where T: Decodable {
-        paths.append("GET \(path) \(expectedOwnerID ?? "nil")")
-        let status = ClerkDetachmentStatus(
-            linked: false,
-            ready: true,
-            passkeyCount: 1,
-            passwordConfigured: true,
-            unusedRecoveryCodes: 8
-        )
-        guard let typed = status as? T else { throw APIError.invalidResponse }
-        return typed
-    }
-
-    func post<T, B>(_ path: String, body: B, expectedOwnerID: String?) async throws -> T where T: Decodable, B: Encodable {
-        paths.append("POST \(path) \(expectedOwnerID ?? "nil")")
-        throw URLError(.timedOut)
-    }
-
-    func postPublic<T, B>(_ path: String, body: B) async throws -> T where T: Decodable, B: Encodable {
-        throw APIError.invalidResponse
-    }
-
-    func postJSON<T>(_ path: String, bodyData: Data, authenticated: Bool) async throws -> T where T: Decodable {
-        throw APIError.invalidResponse
-    }
-}
 
 private actor StatusFailingFirstPartyAuthAPI: FirstPartyAuthAPI {
+    func delete(_ path: String) async throws {}
+
     let statusCode: Int
 
     init(statusCode: Int) { self.statusCode = statusCode }
@@ -795,6 +733,8 @@ private actor StatusFailingFirstPartyAuthAPI: FirstPartyAuthAPI {
 }
 
 private actor PasskeyFinishFailingAPI: FirstPartyAuthAPI {
+    func delete(_ path: String) async throws {}
+
     let error: APIError
 
     init(error: APIError) { self.error = error }
@@ -817,6 +757,8 @@ private actor PasskeyFinishFailingAPI: FirstPartyAuthAPI {
 }
 
 private actor SuccessfulPairFirstPartyAuthAPI: FirstPartyAuthAPI {
+    func delete(_ path: String) async throws {}
+
     func get<T>(_ path: String, expectedOwnerID: String?) async throws -> T where T: Decodable {
         throw APIError.invalidResponse
     }

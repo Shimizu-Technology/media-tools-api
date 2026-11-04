@@ -1,8 +1,6 @@
 import Foundation
-import ClerkKit
 
-/// HTTP client for the Media Tools API.
-/// Uses a staged first-party device session when available, otherwise Clerk.
+/// HTTP client for the Media Tools API, authenticated by the device session.
 actor APIClient {
     static let shared = APIClient()
 
@@ -14,7 +12,8 @@ actor APIClient {
     private init() {
         self.baseURL = Configuration.apiBaseURL + "/api/v1"
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-ui-test-signed-in") {
+        if ProcessInfo.processInfo.arguments.contains("-ui-test-signed-in")
+            || ProcessInfo.processInfo.arguments.contains("-ui-test-auth-api") {
             // The fixture session must never reach a real server.
             let configuration = URLSessionConfiguration.ephemeral
             configuration.protocolClasses = [UITestAPIProtocol.self]
@@ -56,97 +55,30 @@ actor APIClient {
 
     private func authHeaders(
         forceRefresh: Bool = false,
-        expectedOwnerID: String? = nil,
-        skipDeviceSession: Bool = false
+        expectedOwnerID: String? = nil
     ) async throws -> [String: String] {
-        var headers: [String: String] = [
+        guard let token = try await DeviceSessionController.shared.accessToken(
+            expectedOwnerID: expectedOwnerID,
+            forceRefresh: forceRefresh
+        ) else {
+            throw APIError.authenticationRequired(message: "Sign in to continue.")
+        }
+        return [
             "Content-Type": "application/json",
-            "Accept": "application/json"
+            "Accept": "application/json",
+            "Authorization": "Bearer \(token)"
         ]
-
-        if !skipDeviceSession {
-            if let token = try await DeviceSessionController.shared.accessToken(
-                expectedOwnerID: expectedOwnerID,
-                forceRefresh: forceRefresh
-            ) {
-                headers["Authorization"] = "Bearer \(token)"
-                return headers
-            }
-        }
-
-        guard !Configuration.clerkPublishableKey.isEmpty else {
-            throw APIError.authenticationRequired(
-                message: "Media Tools authentication is not configured in this build."
-            )
-        }
-        guard let session = await Clerk.shared.session else {
-            throw APIError.authenticationRequired(message: "Sign in to continue.")
-        }
-        guard let clerkID = session.user?.id,
-              await DeviceSessionController.shared.canFallbackToClerk(
-                clerkID: clerkID,
-                expectedOwnerID: expectedOwnerID
-              ) else {
-            throw APIError.authenticationRequired(message: "Sign in to continue.")
-        }
-        let expectedClerkID: String?
-        if let expectedOwnerID {
-            expectedClerkID = await DeviceSessionController.shared
-                .clerkIDForFallbackOwner(expectedOwnerID) ?? expectedOwnerID
-        } else {
-            expectedClerkID = nil
-        }
-        if let expectedClerkID, session.user?.id != expectedClerkID {
-            throw APIError.authenticationRequired(
-                message: "The signed-in account changed. Switch back to continue this upload."
-            )
-        }
-        let sessionID = session.id
-        let options = Session.GetTokenOptions(skipCache: forceRefresh)
-        let token: String?
-        do {
-            token = try await session.getToken(options)
-        } catch {
-            // Clerk can fail token refresh because its API or the network is
-            // temporarily unavailable. Only pause for sign-in if Clerk has
-            // actually removed the session; otherwise preserve automatic
-            // upload backoff for the transient service failure.
-            if await Clerk.shared.session == nil {
-                throw APIError.authenticationRequired(message: "Sign in to continue.")
-            }
-            throw APIError.authenticationTemporarilyUnavailable(
-                message: "The sign-in service is temporarily unavailable. Media Tools will retry."
-            )
-        }
-        guard let token, !token.isEmpty else {
-            throw APIError.authenticationRequired(
-                message: "Your sign-in session could not be refreshed. Sign out and sign in again."
-            )
-        }
-        guard let currentSession = await Clerk.shared.session,
-              currentSession.id == sessionID,
-              expectedClerkID == nil || currentSession.user?.id == expectedClerkID
-        else {
-            throw APIError.authenticationRequired(
-                message: "The signed-in account changed. Switch back to continue this upload."
-            )
-        }
-        headers["Authorization"] = "Bearer \(token)"
-
-        return headers
     }
 
     private func authenticatedRequest(
         from originalRequest: URLRequest,
         forceRefresh: Bool = false,
-        expectedOwnerID: String? = nil,
-        skipDeviceSession: Bool = false
+        expectedOwnerID: String? = nil
     ) async throws -> URLRequest {
         var request = originalRequest
         for (key, value) in try await authHeaders(
             forceRefresh: forceRefresh,
-            expectedOwnerID: expectedOwnerID,
-            skipDeviceSession: skipDeviceSession
+            expectedOwnerID: expectedOwnerID
         ) {
             // Multipart requests carry their boundary in Content-Type; never
             // replace it with the JSON default while applying auth headers.
@@ -171,12 +103,13 @@ actor APIClient {
             expectedOwnerID: expectedOwnerID
         )
         let firstResponse = try await session.data(for: request)
-        guard (firstResponse.1 as? HTTPURLResponse)?.statusCode == 401 else {
+        guard Self.isSessionRejection(firstResponse) else {
             return firstResponse
         }
 
-        let retryRequest = try await retryAuthenticatedRequest(
+        let retryRequest = try await authenticatedRequest(
             from: originalRequest,
+            forceRefresh: true,
             expectedOwnerID: expectedOwnerID
         )
         return try await session.data(for: retryRequest)
@@ -192,41 +125,25 @@ actor APIClient {
             expectedOwnerID: expectedOwnerID
         )
         let firstResponse = try await session.upload(for: request, fromFile: fileURL)
-        guard (firstResponse.1 as? HTTPURLResponse)?.statusCode == 401 else {
+        guard Self.isSessionRejection(firstResponse) else {
             return firstResponse
         }
 
-        let retryRequest = try await retryAuthenticatedRequest(
+        let retryRequest = try await authenticatedRequest(
             from: originalRequest,
+            forceRefresh: true,
             expectedOwnerID: expectedOwnerID
         )
         return try await session.upload(for: retryRequest, fromFile: fileURL)
     }
 
-    /// A rejected first-party credential can mean the staged server path was
-    /// rolled back. Prefer the still-present Clerk session for the one allowed
-    /// retry; native-only accounts continue through first-party refresh because
-    /// they have no Clerk credential to fall back to.
-    private func retryAuthenticatedRequest(
-        from originalRequest: URLRequest,
-        expectedOwnerID: String?
-    ) async throws -> URLRequest {
-        let clerkID = await Clerk.shared.user?.id
-        let hasClerkFallback: Bool
-        if let clerkID {
-            hasClerkFallback = await DeviceSessionController.shared.canFallbackToClerk(
-                clerkID: clerkID,
-                expectedOwnerID: expectedOwnerID
-            )
-        } else {
-            hasClerkFallback = false
-        }
-        return try await authenticatedRequest(
-            from: originalRequest,
-            forceRefresh: true,
-            expectedOwnerID: expectedOwnerID,
-            skipDeviceSession: hasClerkFallback
-        )
+    /// A 401 that rejects a typed password says nothing about the session, so a
+    /// refresh cannot help. Sending the same wrong password again would also spend
+    /// another guess against the account's failure budget.
+    static func isSessionRejection(_ response: (Data, URLResponse)) -> Bool {
+        guard (response.1 as? HTTPURLResponse)?.statusCode == 401 else { return false }
+        let code = (try? JSONDecoder().decode(ErrorResponse.self, from: response.0))?.error
+        return code != "current_password_required" && code != "invalid_credentials"
     }
 
     // MARK: - HTTP Methods
@@ -328,6 +245,16 @@ actor APIClient {
         let (data, response) = try await data(for: request)
         try validateResponse(response, data: data)
         return try decoder.decode(T.self, from: data)
+    }
+
+    /// For a key revocation that must run while a session is being revoked, when
+    /// `authHeaders` would no longer hand out its token.
+    func delete(_ path: String, bearerToken: String) async throws {
+        var request = URLRequest(url: URL(string: baseURL + path)!)
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: request)
+        try validateResponse(response, data: data)
     }
 
     func delete(_ path: String) async throws {
@@ -439,7 +366,7 @@ actor APIClient {
     }
 
     /// Send a file to a presigned object-storage URL. Presigned uploads must not
-    /// include Clerk credentials because the URL itself grants scoped access.
+    /// include account credentials because the URL itself grants scoped access.
     func putFile(at fileURL: URL, to uploadURL: URL, mimeType: String) async throws {
         var request = URLRequest(url: uploadURL)
         request.httpMethod = "PUT"
@@ -500,6 +427,12 @@ actor APIClient {
             let message = errorResponse?.message
                 ?? String(data: data, encoding: .utf8)
                 ?? "Unknown error"
+            if http.statusCode == 429 {
+                throw APIError.rateLimited(
+                    retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init),
+                    message: message
+                )
+            }
             throw APIError.httpError(
                 statusCode: http.statusCode,
                 code: errorResponse?.error,
@@ -517,6 +450,8 @@ enum APIError: LocalizedError {
     case authenticationRequired(message: String)
     case authenticationTemporarilyUnavailable(message: String)
     case httpError(statusCode: Int, code: String? = nil, message: String)
+    /// A 429. `retryAfter` is the server's `Retry-After`, in seconds.
+    case rateLimited(retryAfter: TimeInterval?, message: String)
 
     var errorDescription: String? {
         switch self {
@@ -530,6 +465,8 @@ enum APIError: LocalizedError {
             return message
         case .httpError(let statusCode, _, let message):
             return "HTTP \(statusCode): \(message)"
+        case .rateLimited(_, let message):
+            return message
         }
     }
 
@@ -547,6 +484,8 @@ enum APIError: LocalizedError {
             return true
         case .httpError(let statusCode, _, _):
             return statusCode == 408 || statusCode == 429 || statusCode >= 500
+        case .rateLimited:
+            return true
         }
     }
 

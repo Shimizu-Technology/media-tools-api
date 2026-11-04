@@ -7,8 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		030BB98C2F47C7F600F89CFB /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 030BB98B2F47C7F600F89CFB /* ClerkKit */; };
-		030BB98E2F47C7FB00F89CFB /* ClerkKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = 030BB98D2F47C7FB00F89CFB /* ClerkKitUI */; };
 		A1000000000000000000000D /* MediaToolsWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* MediaToolsWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B2000000000000000000000D /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
@@ -150,8 +148,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				030BB98C2F47C7F600F89CFB /* ClerkKit in Frameworks */,
-				030BB98E2F47C7FB00F89CFB /* ClerkKitUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -243,8 +239,6 @@
 			);
 			name = MediaTools;
 			packageProductDependencies = (
-				030BB98B2F47C7F600F89CFB /* ClerkKit */,
-				030BB98D2F47C7FB00F89CFB /* ClerkKitUI */,
 			);
 			productName = MediaTools;
 			productReference = 030BB9152F4752E300F89CFB /* MediaTools.app */;
@@ -385,9 +379,6 @@
 			);
 			mainGroup = 030BB90C2F4752E300F89CFB;
 			minimizedProjectReferenceProxies = 1;
-			packageReferences = (
-				030BB9882F47C49200F89CFB /* XCRemoteSwiftPackageReference "clerk-ios" */,
-			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 030BB9162F4752E300F89CFB /* Products */;
 			projectDirPath = "";
@@ -628,13 +619,11 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CLERK_PUBLISHABLE_KEY = pk_test_d2VsY29tZWQtZWFyd2lnLTg2LmNsZXJrLmFjY291bnRzLmRldiQ;
 				CODE_SIGN_ENTITLEMENTS = MediaTools/MediaTools.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 13;
 				DEVELOPMENT_TEAM = 4T358A5S74;
 				ENABLE_PREVIEWS = YES;
-				FIRST_PARTY_IOS_AUTH_ENABLED = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MediaTools/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -660,13 +649,11 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CLERK_PUBLISHABLE_KEY = pk_test_d2VsY29tZWQtZWFyd2lnLTg2LmNsZXJrLmFjY291bnRzLmRldiQ;
 				CODE_SIGN_ENTITLEMENTS = MediaTools/MediaTools.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 13;
 				DEVELOPMENT_TEAM = 4T358A5S74;
 				ENABLE_PREVIEWS = YES;
-				FIRST_PARTY_IOS_AUTH_ENABLED = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MediaTools/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -924,29 +911,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		030BB9882F47C49200F89CFB /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/clerk/clerk-ios";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.0.1;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		030BB98B2F47C7F600F89CFB /* ClerkKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 030BB9882F47C49200F89CFB /* XCRemoteSwiftPackageReference "clerk-ios" */;
-			productName = ClerkKit;
-		};
-		030BB98D2F47C7FB00F89CFB /* ClerkKitUI */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 030BB9882F47C49200F89CFB /* XCRemoteSwiftPackageReference "clerk-ios" */;
-			productName = ClerkKitUI;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 030BB90D2F4752E300F89CFB /* Project object */;
 }

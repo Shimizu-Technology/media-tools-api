@@ -1,5 +1,4 @@
 import SwiftUI
-import ClerkKit
 
 @main
 struct MediaToolsApp: App {
@@ -12,7 +11,7 @@ struct MediaToolsApp: App {
     @State private var deviceSession = DeviceSessionController.shared
 
     init() {
-        Clerk.configure(publishableKey: Configuration.clerkPublishableKey)
+        ShareUploadKeyManager.shared.follow(DeviceSessionController.shared)
         MediaToolsAppShortcuts.updateAppShortcutParameters()
         #if DEBUG
         // Exercise the real cold-launch handoff in UI tests: publish the route
@@ -92,21 +91,17 @@ struct MediaToolsApp: App {
         if ProcessInfo.processInfo.arguments.contains("-ui-test-signed-in") {
             // The real signed-in path through ContentView, with a fixture session.
             ContentView()
-                .environment(Clerk.shared)
                 .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-onboarding") {
             OnboardingView(isComplete: .constant(false))
                 .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-welcome") {
-            // Clerk persists sessions in the Keychain. Force this one test
-            // route signed out so an earlier simulator login cannot bypass
-            // the welcome screen that App Review needs to discover.
+            // Force this one test route signed out so an earlier simulator login
+            // cannot bypass the welcome screen that App Review needs to discover.
             ContentView(forceSignedOutForUITesting: true)
-                .environment(Clerk.shared)
                 .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-main") {
             MainTabView()
-                .environment(Clerk.shared)
                 .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-library") {
             NavigationStack {
@@ -132,9 +127,6 @@ struct MediaToolsApp: App {
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-security-status-error") {
             SignInSecurityStatusFailurePreviewHost()
                 .preferredColorScheme(.dark)
-        } else if ProcessInfo.processInfo.arguments.contains("-ui-test-clerk-migration") {
-            ClerkMigrationPreviewHost()
-                .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-quick-capture") {
             NavigationStack {
                 RecordView()
@@ -155,7 +147,6 @@ struct MediaToolsApp: App {
     private var standardRoot: some View {
         if hasCompletedOnboarding {
             ContentView()
-                .environment(Clerk.shared)
                 .preferredColorScheme(.dark)
         } else {
             OnboardingView(isComplete: $hasCompletedOnboarding)
