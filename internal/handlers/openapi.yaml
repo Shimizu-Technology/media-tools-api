@@ -316,6 +316,12 @@ components:
         rate_limit:
           type: integer
           example: 100
+        scopes:
+          type: array
+          description: Empty for a classic key. Scoped agent keys list what they may do.
+          items:
+            type: string
+            enum: [library:read, library:write, library:delete, capture:upload]
         created_at:
           type: string
           format: date-time
@@ -1702,7 +1708,36 @@ paths:
     post:
       tags: [API Keys]
       summary: Create an account-owned developer key
-      responses: {"201": {description: API key created}}
+      description: |
+        Requires a signed-in user session; no API key can mint a key. Without
+        `scopes` this creates a classic key. With `scopes` it creates a scoped
+        agent key that acts as the account for the routes each scope allows
+        (library:read, library:write, library:delete, capture:upload) and is
+        denied everywhere else with 403. The raw key appears only in this response.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string, example: "Brain Dump agent"}
+                scopes:
+                  type: array
+                  items: {type: string, enum: [library:read, library:write, library:delete, capture:upload]}
+      responses:
+        "201": {description: API key created}
+        "400": {description: Invalid name or unknown scope}
+  /user/agent-activity:
+    get:
+      tags: [API Keys]
+      summary: Recent writes made with scoped agent keys
+      description: |
+        Signed-in user only. Lists method, route, item id, and status for each
+        scoped-key write or denied request. Never includes titles, transcripts, or queries.
+      parameters:
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses: {"200": {description: Agent activity, newest first}}
   /audio/transcribe:
     post:
       tags: [Audio]
@@ -1867,6 +1902,11 @@ paths:
       tags: [Library]
       summary: Search and paginate all media types
       parameters:
+        - name: since
+          in: query
+          required: false
+          description: Only items created at or after this RFC 3339 time or YYYY-MM-DD date
+          schema: {type: string}
         - name: status
           in: query
           required: false

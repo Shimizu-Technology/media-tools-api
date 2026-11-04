@@ -365,6 +365,32 @@ func (db *DB) GetSummariesByTranscript(ctx context.Context, transcriptID string)
 
 // --- Chat Operations (MTA-27) ---
 
+// FindChatSession returns the existing session or nil, and never writes. Read-only
+// credentials use this so looking at chat history cannot change the account.
+func (db *DB) FindChatSession(ctx context.Context, itemType, itemID string, userID, apiKeyID *string) (*models.TranscriptChatSession, error) {
+	var session models.TranscriptChatSession
+	var ownerClause string
+	var ownerArg string
+	if apiKeyID != nil {
+		ownerClause = "api_key_id = $3 AND user_id IS NULL"
+		ownerArg = *apiKeyID
+	} else if userID != nil {
+		ownerClause = "user_id = $3 AND api_key_id IS NULL"
+		ownerArg = *userID
+	} else {
+		return nil, fmt.Errorf("chat session owner is required")
+	}
+	query := fmt.Sprintf(`SELECT * FROM transcript_chat_sessions WHERE item_type = $1 AND item_id = $2 AND %s LIMIT 1`, ownerClause)
+	err := db.GetContext(ctx, &session, query, itemType, itemID, ownerArg)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch chat session: %w", err)
+	}
+	return &session, nil
+}
+
 // GetOrCreateChatSession finds or creates a chat session for an item.
 func (db *DB) GetOrCreateChatSession(ctx context.Context, itemType, itemID string, userID, apiKeyID *string) (*models.TranscriptChatSession, error) {
 	var session models.TranscriptChatSession
@@ -518,10 +544,11 @@ func (db *DB) CreateAPIKey(ctx context.Context, key *models.APIKey) error {
 func (db *DB) GetAPIKeyByHash(ctx context.Context, hash string) (*models.APIKey, error) {
 	var key models.APIKey
 	err := db.GetContext(ctx, &key,
-		`SELECT * FROM api_keys WHERE key_hash = $1 AND active = true`, hash)
+		apiKeySelect+` WHERE k.key_hash = $1 AND k.active = true`, hash)
 	if err != nil {
 		return nil, fmt.Errorf("invalid API key: %w", err)
 	}
+	hydrateAPIKeyScopes(&key)
 	return &key, nil
 }
 
@@ -537,13 +564,13 @@ func (db *DB) ListAPIKeysForActor(ctx context.Context, userID, apiKeyID *string)
 	switch {
 	case apiKeyID != nil:
 		err := db.SelectContext(ctx, &keys,
-			`SELECT * FROM api_keys WHERE id = $1 ORDER BY created_at DESC`, *apiKeyID)
+			apiKeySelect+` WHERE k.id = $1 ORDER BY k.created_at DESC`, *apiKeyID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list API keys: %w", err)
 		}
 	case userID != nil:
 		err := db.SelectContext(ctx, &keys,
-			`SELECT * FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC`, *userID)
+			apiKeySelect+` WHERE k.user_id = $1 ORDER BY k.created_at DESC`, *userID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list API keys: %w", err)
 		}
@@ -553,6 +580,9 @@ func (db *DB) ListAPIKeysForActor(ctx context.Context, userID, apiKeyID *string)
 
 	if keys == nil {
 		keys = []models.APIKey{}
+	}
+	for i := range keys {
+		hydrateAPIKeyScopes(&keys[i])
 	}
 	return keys, nil
 }

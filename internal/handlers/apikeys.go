@@ -163,9 +163,24 @@ func (h *Handler) CreateUserAPIKey(c *gin.Context) {
 		return
 	}
 
-	// Account-scoped keys use the standard public rate limit. Unlike the admin
-	// bootstrap endpoint, browser users cannot mint elevated-limit keys.
+	// Scopes are optional. Without them the key is a classic account key and
+	// keeps its exact-key read behavior; with them it is a scoped agent key.
+	scopes, unknown := models.NormalizeAPIKeyScopes(req.Scopes)
+	if unknown != "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_scope",
+			Message: "Unknown scope. Valid scopes: " + strings.Join(models.AllAPIKeyScopes(), ", "),
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	// Classic keys use the standard public rate limit; browser users cannot pick
+	// their own. Scoped agent keys get a fixed higher budget for bulk reads.
 	rateLimit := 100
+	if len(scopes) > 0 {
+		rateLimit = models.ScopedKeyRateLimit
+	}
 
 	key := &models.APIKey{
 		KeyHash:   middleware.HashAPIKey(rawKey),
@@ -176,7 +191,13 @@ func (h *Handler) CreateUserAPIKey(c *gin.Context) {
 		UserID:    actor.UserID,
 	}
 
-	if err := h.DB.CreateAPIKey(c.Request.Context(), key); err != nil {
+	var createErr error
+	if len(scopes) > 0 {
+		createErr = h.DB.CreateScopedAPIKey(c.Request.Context(), key, scopes)
+	} else {
+		createErr = h.DB.CreateAPIKey(c.Request.Context(), key)
+	}
+	if err := createErr; err != nil {
 		log.Printf("❌ Failed to create user API key: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",
@@ -186,6 +207,11 @@ func (h *Handler) CreateUserAPIKey(c *gin.Context) {
 		return
 	}
 
+	if key.Scopes == nil {
+		key.Scopes = []string{}
+	}
+	// The raw key appears in this one response and nowhere else.
+	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusCreated, models.CreateAPIKeyResponse{
 		APIKey: *key,
 		RawKey: rawKey,

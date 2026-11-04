@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	evidenceservice "github.com/Shimizu-Technology/media-tools-api/internal/services/evidence"
 	pdfservice "github.com/Shimizu-Technology/media-tools-api/internal/services/pdf"
@@ -179,6 +180,7 @@ func (h *Handler) ExtractPDF(c *gin.Context) {
 	}
 	h.Worker.NotifyWebhook("pdf.completed", pe.UserID, pe.APIKeyID, pe)
 
+	middleware.SetActivityItem(c, "pdf", pe.ID)
 	c.JSON(http.StatusOK, pe)
 }
 

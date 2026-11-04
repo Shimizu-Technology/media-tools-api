@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	evidenceservice "github.com/Shimizu-Technology/media-tools-api/internal/services/evidence"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
@@ -111,8 +112,22 @@ func (h *Handler) loadPDFChatTarget(c *gin.Context) (*chatTarget, *models.ErrorR
 	}, nil, 0
 }
 
+// chatSessionForRead keeps a scoped key's GET from creating a session. Browser and
+// native clients keep their existing get-or-create behavior.
+func (h *Handler) chatSessionForRead(c *gin.Context, itemType, itemID string, userID, apiKeyID *string) (*models.TranscriptChatSession, error) {
+	apiKey := middleware.GetAPIKey(c)
+	if apiKey == nil || !apiKey.IsScoped() {
+		return h.DB.GetOrCreateChatSession(c.Request.Context(), itemType, itemID, userID, apiKeyID)
+	}
+	session, err := h.DB.FindChatSession(c.Request.Context(), itemType, itemID, userID, apiKeyID)
+	if err != nil || session != nil {
+		return session, err
+	}
+	return &models.TranscriptChatSession{ItemType: itemType, ItemID: itemID}, nil
+}
+
 func (h *Handler) getChatResponse(c *gin.Context, target *chatTarget) {
-	session, err := h.DB.GetOrCreateChatSession(c.Request.Context(), target.ItemType, target.ItemID, target.UserID, target.APIKeyID)
+	session, err := h.chatSessionForRead(c, target.ItemType, target.ItemID, target.UserID, target.APIKeyID)
 	if err != nil {
 		log.Printf("Chat session load failed (%s:%s): %v", target.ItemType, target.ItemID, err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -120,6 +135,11 @@ func (h *Handler) getChatResponse(c *gin.Context, target *chatTarget) {
 			Message: "Failed to load chat session",
 			Code:    http.StatusInternalServerError,
 		})
+		return
+	}
+
+	if session.ID == "" {
+		c.JSON(http.StatusOK, models.ChatResponse{Session: *session, Messages: []models.TranscriptChatMessage{}})
 		return
 	}
 

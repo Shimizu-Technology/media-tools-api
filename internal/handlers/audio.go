@@ -24,6 +24,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
+	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
@@ -290,6 +291,7 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	log.Printf("📤 Audio transcription job queued: %s (%s, %.1f MB)",
 		at.ID, "[recording]", float64(header.Size)/(1024*1024))
 
+	middleware.SetActivityItem(c, "audio", at.ID)
 	// Return 202 Accepted — frontend should poll for completion
 	c.JSON(http.StatusAccepted, at)
 }
@@ -558,6 +560,7 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		log.Printf("Direct audio upload %s queued durably; payload refresh failed and recovery was signaled: %v", at.ID, err)
 	}
 
+	middleware.SetActivityItem(c, "audio", at.ID)
 	c.JSON(http.StatusAccepted, at)
 }
 

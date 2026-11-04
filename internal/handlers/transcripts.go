@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
@@ -126,6 +127,7 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 		log.Printf("Transcript %s queued durably; payload refresh failed and recovery was signaled: %v", t.ID, err)
 	}
 
+	middleware.SetActivityItem(c, "transcript", t.ID)
 	// Return 202 Accepted — the work is happening in the background
 	c.JSON(http.StatusAccepted, t)
 }
@@ -311,6 +313,7 @@ func (h *Handler) CreateSummary(c *gin.Context) {
 		log.Printf("Summary %s queued durably; payload refresh failed and recovery was signaled: %v", summaryRecord.ID, err)
 	}
 
+	middleware.SetActivityItem(c, "transcript", req.TranscriptID)
 	c.JSON(http.StatusAccepted, gin.H{
 		"message":       "Summary generation started",
 		"summary_id":    summaryRecord.ID,

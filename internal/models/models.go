@@ -139,6 +139,11 @@ type APIKey struct {
 	UserID     *string    `json:"user_id,omitempty" db:"user_id"`
 	CreatedAt  time.Time  `json:"created_at" db:"created_at"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty" db:"last_used_at"`
+	// ScopeList is the comma-joined api_key_scopes rows, loaded by the key
+	// queries. Scopes is the decoded form that handlers and clients use; a
+	// classic key has none.
+	ScopeList string   `json:"-" db:"scope_list"`
+	Scopes    []string `json:"scopes" db:"-"`
 }
 
 // --- Request/Response DTOs ---
@@ -200,6 +205,9 @@ type UpdateAIContentReportRequest struct {
 type CreateAPIKeyRequest struct {
 	Name      string `json:"name" binding:"required"`
 	RateLimit int    `json:"rate_limit,omitempty"`
+	// Scopes is honored only by POST /user/keys. Omitted or empty creates a
+	// classic key; any value creates a scoped agent key.
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 type CreateAPIKeyResponse struct {
@@ -540,6 +548,9 @@ type LibraryListParams struct {
 	Favorite string `form:"favorite"`
 	Archive  string `form:"archive"`
 	Tag      string `form:"tag"`
+	// Since keeps items created at or after an RFC 3339 time or YYYY-MM-DD date.
+	Since    string     `form:"since"`
+	SinceAt  *time.Time `form:"-"`
 	UserID   *string
 	APIKeyID *string
 }

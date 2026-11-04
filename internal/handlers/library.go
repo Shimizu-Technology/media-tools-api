@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -45,6 +46,15 @@ func (h *Handler) ListLibraryItems(c *gin.Context) {
 		return
 	}
 
+	if params.Since != "" {
+		since, ok := parseLibrarySince(params.Since)
+		if !ok {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_query", Message: "since must be an RFC 3339 time or YYYY-MM-DD date", Code: http.StatusBadRequest})
+			return
+		}
+		params.SinceAt = &since
+	}
+
 	items, total, err := h.DB.ListLibraryItems(c.Request.Context(), params)
 	if err != nil {
 		log.Printf("Failed to load library items: %v", err)
@@ -55,6 +65,17 @@ func (h *Handler) ListLibraryItems(c *gin.Context) {
 		Data: items, Page: params.Page, PerPage: params.PerPage, TotalItems: total,
 		TotalPages: int(math.Ceil(float64(total) / float64(params.PerPage))),
 	})
+}
+
+// parseLibrarySince accepts a full timestamp or a bare date (start of that day, UTC).
+func parseLibrarySince(value string) (time.Time, bool) {
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed, true
+	}
+	if parsed, err := time.Parse("2006-01-02", value); err == nil {
+		return parsed, true
+	}
+	return time.Time{}, false
 }
 
 func validLibraryStatus(value string) bool {
