@@ -75,7 +75,47 @@ if [[ "$(uname -s)" == "Darwin" ]] && command -v xcodebuild >/dev/null 2>&1; the
   result_bundle="${TMPDIR:-/tmp}/media-tools-gate.xcresult"
   rm -rf "$derived_data" "$result_bundle"
 
-  xcrun simctl boot "$simulator_id" 2>/dev/null || true
+  simulator_state="$(xcrun simctl list devices available -j | ruby -rjson -e '
+    target = ARGV.fetch(0)
+    device = JSON.parse(STDIN.read).fetch("devices").values.flatten.find { |entry| entry["udid"] == target }
+    abort "Selected simulator is no longer available: #{target}" unless device
+    puts device.fetch("state")
+  ' "$simulator_id")"
+  started_simulator=false
+  claimed_simulator=false
+
+  cleanup_simulator() {
+    if [[ "$started_simulator" == "true" ]]; then
+      if xcrun simctl shutdown "$simulator_id" 2>/dev/null; then
+        started_simulator=false
+      else
+        printf 'Could not shut down owned simulator %s; keeping its lifecycle claim active.\n' "$simulator_id" >&2
+      fi
+    fi
+
+    if [[ "$claimed_simulator" == "true" && "$started_simulator" == "false" ]]; then
+      if dev-lifecycle release simulator "$simulator_id" \
+        --session "$SHIMIZU_DEV_SESSION_ID" >/dev/null 2>&1; then
+        claimed_simulator=false
+      else
+        printf 'Simulator %s is off, but its lifecycle claim could not be released.\n' "$simulator_id" >&2
+      fi
+    fi
+  }
+  trap cleanup_simulator EXIT
+
+  if [[ "$simulator_state" != "Booted" ]]; then
+    xcrun simctl boot "$simulator_id"
+    started_simulator=true
+
+    if [[ -n "${SHIMIZU_DEV_SESSION_ID:-}" ]] && command -v dev-lifecycle >/dev/null 2>&1; then
+      dev-lifecycle claim simulator "$simulator_id" \
+        --session "$SHIMIZU_DEV_SESSION_ID" \
+        --reason "Media Tools gate iOS verification"
+      claimed_simulator=true
+    fi
+  fi
+
   xcrun simctl bootstatus "$simulator_id" -b
 
   xcodebuild \
@@ -100,6 +140,12 @@ if [[ "$(uname -s)" == "Darwin" ]] && command -v xcodebuild >/dev/null 2>&1; the
   xcrun simctl install "$simulator_id" "$app_path"
   xcrun simctl launch --terminate-running-process "$simulator_id" "$bundle_id"
   xcrun simctl terminate "$simulator_id" "$bundle_id"
+  cleanup_simulator
+  if [[ "$started_simulator" == "true" || "$claimed_simulator" == "true" ]]; then
+    echo "Owned simulator cleanup did not complete; leaving the EXIT trap active for one retry." >&2
+    exit 1
+  fi
+  trap - EXIT
 else
   echo "Skipping iOS checks because this host does not provide Xcode"
 fi
