@@ -212,6 +212,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         }
         guard !queued.isEmpty else { return }
         let queuedIDs = Set(queued.map(\.id))
+        // If permission returns, a tap sends this again. The extension must not also
+        // finish its own copy in the meantime.
+        for recording in queued { _ = recorder.takeOverShareUpload(recording) }
         for recordingID in queuedIDs {
             uploadTasks[recordingID]?.cancel()
             uploadTasks[recordingID] = nil
@@ -661,11 +664,20 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                     recordingID: recording.id,
                     expectedOwnerID: reconciledOwnerID
                 ) else { continue }
-                self.recorder.markWaitingForUpload(
-                    recording.id,
-                    message: "The interrupted upload will resume automatically."
-                )
-                self.process(recordingID: recording.id)
+                switch self.recorder.takeOverShareUpload(recording) {
+                case .finishedByExtension:
+                    self.recorder.markUploadFinalizing(recording.id)
+                    self.finalize(recordingID: recording.id)
+                case .undetermined:
+                    // Nothing is sent until this is settled. The next foreground asks again.
+                    self.hasReconciledTransfers = false
+                case .takenOver:
+                    self.recorder.markWaitingForUpload(
+                        recording.id,
+                        message: "The interrupted upload will resume automatically."
+                    )
+                    self.process(recordingID: recording.id)
+                }
             }
         }
     }

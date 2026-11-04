@@ -917,6 +917,66 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertFalse(app.buttons["library-row-audio:audio-1"].isHittable)
     }
 
+    /// Build 13 lost the response to its bootstrap, so only the journal exists.
+    func testALostBootstrapResponseWaitsAndRecoversWithoutShowingSignIn() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + ["-ui-test-pending-bootstrap", "-ui-test-reset-recordings"]
+        app.launch()
+
+        let message = app.staticTexts["session-recovery.message"]
+        XCTAssertTrue(message.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["welcome.sign-in"].exists, "This person never signed out")
+        XCTAssertGreaterThanOrEqual(app.buttons["session-recovery.retry"].frame.height, 44)
+
+        app.buttons["session-recovery.retry"].tap()
+
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(message.exists)
+        XCTAssertFalse(app.buttons["welcome.sign-in"].exists)
+    }
+
+    func testALostBootstrapResponseRecoversOnForeground() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + ["-ui-test-pending-bootstrap", "-ui-test-reset-recordings"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["session-recovery.message"].waitForExistence(timeout: 10))
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 10))
+    }
+
+    func testRecordingsThatCouldNotReconnectSayWhyAndRetry() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + ["-ui-test-legacy-owned-share", "-ui-test-reset-recordings"]
+        app.launch()
+
+        let retry = app.buttons["legacy-reconnect.retry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10), "An offline check must be visible")
+        XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
+
+        retry.tap()
+
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: retry)
+        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 10), .completed)
+        XCTAssertFalse(app.staticTexts["legacy-reconnect.message"].exists)
+    }
+
+    func testRecordingsThatCouldNotReconnectRetryOnForeground() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + ["-ui-test-legacy-owned-share", "-ui-test-reset-recordings"]
+        app.launch()
+        let retry = app.buttons["legacy-reconnect.retry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: retry)
+        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 10), .completed)
+    }
+
     /// The real launch path through `ContentView`, with a Debug-only session and
     /// API stub in place of Keychain and network.
     private var signedInFixture: [String] { ["-ui-test-signed-in"] }

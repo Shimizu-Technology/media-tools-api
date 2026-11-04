@@ -20,6 +20,7 @@ struct CreateShareUploadKeyRequest: Encodable, Equatable {
 protocol ShareUploadKeyAPI: Sendable {
     func createShareUploadKey(name: String, ownerID: String) async throws -> ShareUploadKeyResponse
     func listAPIKeys(ownerID: String) async throws -> [ListedAPIKey]
+    func listAPIKeys(bearerToken: String) async throws -> [ListedAPIKey]
     func revokeAPIKey(id: String, ownerID: String) async throws
     func revokeAPIKey(id: String, bearerToken: String) async throws
 }
@@ -35,6 +36,10 @@ extension APIClient: ShareUploadKeyAPI {
 
     func listAPIKeys(ownerID: String) async throws -> [ListedAPIKey] {
         try await get("/keys", expectedOwnerID: ownerID)
+    }
+
+    func listAPIKeys(bearerToken: String) async throws -> [ListedAPIKey] {
+        try await get("/keys", bearerToken: bearerToken)
     }
 
     func revokeAPIKey(id: String, ownerID: String) async throws {
@@ -64,6 +69,8 @@ final class ShareUploadKeyManager {
 
     private static let pendingRevocationsKey = "shareUploadKeyPendingRevocations.v1"
     private static let installIDKey = "shareUploadKeyInstallID.v1"
+    /// The key for which this install is known to hold no other active key.
+    private static let reconciledKeyIDKey = "shareUploadKeyReconciledKeyID.v1"
     private static let maximumPendingRevocations = 16
 
     private let credentials: any ShareUploadCredentialStoring
@@ -104,6 +111,7 @@ final class ShareUploadKeyManager {
         await flushPendingRevocations(ownerID: ownerID)
         switch credentials.load() {
         case .found(let credential) where credential.ownerID == ownerID:
+            await reconcileInstallKeys(keeping: credential.keyID, ownerID: ownerID)
             return
         case .found:
             endCredential()
@@ -132,7 +140,7 @@ final class ShareUploadKeyManager {
                 await flushPendingRevocations(ownerID: ownerID)
                 return
             }
-            await revokeOrphans(named: name, keeping: key.id, ownerID: ownerID)
+            await reconcileInstallKeys(keeping: key.id, ownerID: ownerID)
         } catch {
             // Offline, capped, or a server without scoped keys. Shares still save.
         }
@@ -148,6 +156,7 @@ final class ShareUploadKeyManager {
             )
         }
         credentials.delete()
+        defaults.removeObject(forKey: Self.reconciledKeyIDKey)
     }
 
     /// The server deletes an account's keys with the account, so there is nothing
@@ -156,13 +165,21 @@ final class ShareUploadKeyManager {
         generation += 1
         if case .found(let credential) = credentials.load(), credential.ownerID == ownerID {
             credentials.delete()
+            defaults.removeObject(forKey: Self.reconciledKeyIDKey)
         }
         savePendingRevocations(pendingRevocations.filter { $0.ownerID != ownerID })
     }
 
     private func revokeBeforeSessionEnds(bearerToken: String, ownerID: String) async {
+        var mayHaveOrphans = true
         if case .found(let credential) = credentials.load(), credential.ownerID == ownerID {
+            mayHaveOrphans = defaults.string(forKey: Self.reconciledKeyIDKey) != credential.keyID
             endCredential()
+        }
+        // This session is the last thing that can find an orphan's ID. If the list
+        // fails, the next session of this account reconciles from the name instead.
+        if mayHaveOrphans, let keys = try? await api.listAPIKeys(bearerToken: bearerToken) {
+            rememberInstallKeys(in: keys, keeping: nil, ownerID: ownerID)
         }
         for pending in pendingRevocations where pending.ownerID == ownerID {
             do {
@@ -191,10 +208,26 @@ final class ShareUploadKeyManager {
 
     /// A mint whose response was lost leaves a key no one holds. Its name is unique
     /// to this install, so that is the one thing it can safely be found by.
-    private func revokeOrphans(named name: String, keeping keptID: String, ownerID: String) async {
+    ///
+    /// A key found here joins the pending list, so its ID survives a failed revoke.
+    /// Nothing is marked done until the list is empty, so a failed list or revoke
+    /// repeats on the next launch even though the saved key is simply reused.
+    private func reconcileInstallKeys(keeping keptID: String, ownerID: String) async {
+        guard defaults.string(forKey: Self.reconciledKeyIDKey) != keptID else { return }
+        let startingGeneration = generation
         guard let keys = try? await api.listAPIKeys(ownerID: ownerID) else { return }
+        rememberInstallKeys(in: keys, keeping: keptID, ownerID: ownerID)
+        await flushPendingRevocations(ownerID: ownerID)
+        guard generation == startingGeneration,
+              !pendingRevocations.contains(where: { $0.ownerID == ownerID })
+        else { return }
+        defaults.set(keptID, forKey: Self.reconciledKeyIDKey)
+    }
+
+    private func rememberInstallKeys(in keys: [ListedAPIKey], keeping keptID: String?, ownerID: String) {
+        let name = keyName
         for key in keys where key.active && key.name == name && key.id != keptID {
-            try? await api.revokeAPIKey(id: key.id, ownerID: ownerID)
+            addPendingRevocation(PendingRevocation(keyID: key.id, ownerID: ownerID))
         }
     }
 

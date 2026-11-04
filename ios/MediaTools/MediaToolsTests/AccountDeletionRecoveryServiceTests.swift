@@ -422,6 +422,7 @@ private struct UnusedShareUploadKeyAPI: ShareUploadKeyAPI {
         throw APIError.invalidResponse
     }
     func listAPIKeys(ownerID: String) async throws -> [ListedAPIKey] { [] }
+    func listAPIKeys(bearerToken: String) async throws -> [ListedAPIKey] { [] }
     func revokeAPIKey(id: String, ownerID: String) async throws {}
     func revokeAPIKey(id: String, bearerToken: String) async throws {}
 }

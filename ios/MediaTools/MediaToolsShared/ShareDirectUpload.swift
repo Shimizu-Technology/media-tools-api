@@ -306,11 +306,11 @@ struct ShareDirectUploader {
         guard item.resolvedKind == .audio,
               item.directUpload != nil,
               let ownerID = item.ownerID,
-              let policy = policy.load(),
+              let startingPolicy = policy.load(),
               case .found(let credential) = credentials.load(),
               credential.ownerID == ownerID,
-              policy.ownerID == ownerID,
-              policy.mayUploadAutomatically
+              startingPolicy.ownerID == ownerID,
+              startingPolicy.mayUploadAutomatically
         else {
             return releaseReservation(item)
         }
@@ -327,7 +327,7 @@ struct ShareDirectUploader {
                 mimeType: mimeType,
                 sizeBytes: size,
                 credential: credential,
-                apiBaseURL: policy.apiBaseURL
+                apiBaseURL: startingPolicy.apiBaseURL
             )
             let sessionIdentifier = ShareDirectUpload.sessionIdentifier(for: item.id)
             var started = item
@@ -338,6 +338,15 @@ struct ShareDirectUploader {
             // Saved before the task exists: if the app sees a share with no running
             // task it uploads again, but it can never miss one that is running.
             try inbox.update(started)
+            // Presigning takes real time. In that time the person may have revoked
+            // permission, turned this off, or signed out, and the answer read earlier
+            // no longer speaks for them. The app may also have taken the share over.
+            guard policy.load() == startingPolicy,
+                  credentials.load() == .found(credential),
+                  inbox.transferClaim(shareID: item.id) == nil
+            else {
+                return releaseReservation(item)
+            }
             try starter.start(
                 fileURL: fileURL,
                 uploadURL: presign.uploadURL,
@@ -375,6 +384,15 @@ struct ShareDirectUploader {
             _ = releaseReservation(item)
             return
         }
+        // If the app already gave up on this transfer, it is sending its own copy, and
+        // completing this object too would create a second transcription.
+        guard let objectKey = item.directUpload?.objectKey,
+              case .held(.extensionFinished(let winner)) = inbox.claimTransfer(
+                  .extensionFinished(objectKey: objectKey),
+                  shareID: item.id
+              ),
+              winner == objectKey
+        else { return }
         item.directUpload?.uploadFinished = true
         try? inbox.update(item)
         guard let policy = policy.load(), policy.mayUploadAutomatically,

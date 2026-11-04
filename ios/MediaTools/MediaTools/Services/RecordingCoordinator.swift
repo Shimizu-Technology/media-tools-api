@@ -15,6 +15,12 @@ enum RecordingCaptureState: Equatable {
 /// This is what allows an active recording to survive tab changes, screen lock,
 /// and ordinary backgrounding. System controls and App Intents call this same
 /// coordinator so every entry point shares one recording lifecycle.
+enum ShareUploadTakeover: Equatable {
+    case takenOver
+    case finishedByExtension
+    case undetermined
+}
+
 @MainActor
 @Observable
 final class RecordingCoordinator {
@@ -327,6 +333,22 @@ final class RecordingCoordinator {
     var shareUploadSessionIdentifiers: Set<String> {
         Set(pendingRecordings.lazy.filter { $0.state == .uploading }
             .compactMap(\.shareUploadSessionIdentifier))
+    }
+
+    /// A share's task has gone quiet, which can also mean the extension's PUT just
+    /// finished and it has not yet said so. This settles it with the extension before
+    /// anything is sent again. Any other recording has no one to settle with.
+    func takeOverShareUpload(_ recording: LocalRecording) -> ShareUploadTakeover {
+        guard recording.shareUploadSessionIdentifier != nil else { return .takenOver }
+        guard let inbox = try? resolvedShareInbox() else { return .undetermined }
+        switch inbox.claimTransfer(.appTookOver, shareID: recording.id) {
+        case .held(.appTookOver), .shareGone:
+            return .takenOver
+        case .held(.extensionFinished):
+            return .finishedByExtension
+        case .undetermined:
+            return .undetermined
+        }
     }
 
     /// The transfer has ended, so its source no longer needs to stay in the inbox.

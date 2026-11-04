@@ -10,6 +10,8 @@ struct ContentView: View {
     @State private var isReconcilingDeletion: Bool
     @State private var migrationFailed = false
     @State private var migrationRetry = 0
+    @State private var legacyReconnect = LegacyRecordingReconnect.idle
+    @State private var legacyReconnectRetry = 0
     @State private var nativeAuthOperation: NativeAuthOperation?
     @State private var nativeAuthError: String?
     @State private var recoveryCode = ""
@@ -43,8 +45,21 @@ struct ContentView: View {
                 VStack(spacing: 16) {
                     Text("Unlock your iPhone to open Media Tools. Your recordings are safe.")
                         .multilineTextAlignment(.center)
-                    Button("Try again") { deviceSession.reloadStoredSessionIfUnavailable() }
-                        .frame(minHeight: 44)
+                    tryAgainButton { deviceSession.reloadStoredSessionIfUnavailable() }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .foregroundStyle(Theme.textPrimary)
+                .background(Theme.surface)
+            } else if deviceSession.isAwaitingSessionRecovery,
+                      activeUserID == nil,
+                      !forceSignedOutForUITesting {
+                VStack(spacing: 16) {
+                    Text("Reconnecting your account. Your recordings are safe on this iPhone.")
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("session-recovery.message")
+                    tryAgainButton { migrationRetry += 1 }
+                        .accessibilityIdentifier("session-recovery.retry")
                 }
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -54,8 +69,7 @@ struct ContentView: View {
                 VStack(spacing: 16) {
                     Text("Your local recordings could not be connected to this account.")
                         .multilineTextAlignment(.center)
-                    Button("Try again") { migrationRetry += 1 }
-                        .frame(minHeight: 44)
+                    tryAgainButton { migrationRetry += 1 }
                 }
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -66,6 +80,9 @@ struct ContentView: View {
                     // A different account gets fresh tabs and library state. A
                     // background refresh of the same account never rebuilds them.
                     .id(activeUserID)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if legacyReconnect != .idle { legacyReconnectBanner }
+                    }
             } else {
                 WelcomeView(
                     activeSheet: $activeSheet,
@@ -85,6 +102,8 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             deviceSession.reloadStoredSessionIfUnavailable()
+            // Launch reaches this while the first attempt is still on the wire.
+            if deviceSession.isAwaitingSessionRecovery, !isResolvingAccount { migrationRetry += 1 }
             startShareKeySetup()
         }
         .onChange(of: deviceSession.activeUserID) { _, ownerID in
@@ -130,7 +149,11 @@ struct ContentView: View {
             await uploadCoordinator.setActiveOwnerID(ownerID)
             isResolvingAccount = false
             startShareKeySetup()
-            if let ownerID { await reconnectLegacyRecordings(ownerID: ownerID) }
+        }
+        // Runs again on every foreground, on Try again, and whenever the list of
+        // waiting recordings changes, which includes a late manifest restore.
+        .task(id: legacyReconnectTrigger) {
+            await reconnectLegacyRecordings()
         }
         .task(id: "auth-availability|\(scenePhase)|\(activeUserID ?? "signed-out")|\(authAvailabilityRetry)") {
             guard !forceSignedOutForUITesting,
@@ -161,20 +184,72 @@ struct ContentView: View {
         Task { await ShareUploadKeyManager.shared.ensureKey(ownerID: ownerID) }
     }
 
+    private var legacyReconnectTrigger: String {
+        let owners = recorder.legacyProviderOwnerIDs.sorted().joined(separator: ",")
+        return "\(activeUserID ?? "")|\(scenePhase == .active)|\(isResolvingAccount)|\(owners)|\(legacyReconnectRetry)"
+    }
+
     /// A build that ran on the retired provider without a device session saved
     /// recordings under a provider ID, with no local record of whose it was. The
     /// server knows, so it is asked only when such a recording is actually here.
-    private func reconnectLegacyRecordings(ownerID: String) async {
+    private func reconnectLegacyRecordings() async {
         let legacyOwners = recorder.legacyProviderOwnerIDs
-        guard !legacyOwners.isEmpty,
-              let profile = try? await FirstPartyAuthService.shared.accountProfile(),
-              profile.id == ownerID,
-              let clerkID = profile.clerkId,
-              legacyOwners.contains(clerkID),
-              !Task.isCancelled
-        else { return }
-        deviceSession.adoptServerVerifiedLegacyIdentity(clerkID, ownerID: ownerID)
-        migrationRetry += 1
+        guard !forceSignedOutForUITesting, let ownerID = activeUserID, !legacyOwners.isEmpty else {
+            legacyReconnect = .idle
+            return
+        }
+        // Moved to the background or still opening. The next trigger tries again.
+        guard scenePhase == .active, !isResolvingAccount else { return }
+        legacyReconnect = .reconnecting
+        let outcome = await LegacyRecordingReconnect.run(
+            ownerID: ownerID,
+            legacyOwners: legacyOwners,
+            profile: { try await FirstPartyAuthService.shared.accountProfile() }
+        )
+        guard !Task.isCancelled else { return }
+        switch outcome {
+        case .belongsHere(let clerkID):
+            deviceSession.adoptServerVerifiedLegacyIdentity(clerkID, ownerID: ownerID)
+            legacyReconnect = .idle
+            migrationRetry += 1
+        case .belongsElsewhere:
+            // Another account's work stays hidden here, and is not a failure.
+            legacyReconnect = .idle
+        case .couldNotCheck:
+            legacyReconnect = .failed
+        }
+    }
+
+    /// The height goes on the label: on the button, it would not grow the tap area.
+    private func tryAgainButton(action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text("Try again")
+                .font(Theme.body(15, weight: .semibold))
+                .foregroundStyle(Theme.brand400)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var legacyReconnectBanner: some View {
+        HStack(spacing: 12) {
+            Text(legacyReconnect == .failed
+                ? "Some recordings on this iPhone aren't connected to your account yet. They're safe."
+                : "Reconnecting recordings saved on this iPhone…")
+                .font(Theme.caption(13))
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("legacy-reconnect.message")
+            if legacyReconnect == .failed {
+                tryAgainButton { legacyReconnectRetry += 1 }
+                    .accessibilityIdentifier("legacy-reconnect.retry")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Theme.surfaceCard)
     }
 
     /// Returns false when the workspace must stay closed. A partial migration
@@ -232,6 +307,30 @@ struct ContentView: View {
                 fallback: "Could not sign in. Please try again."
             )
         }
+    }
+}
+
+/// Recordings saved under a provider ID, while the server is asked whose they are.
+enum LegacyRecordingReconnect: Equatable {
+    case idle
+    case reconnecting
+    case failed
+
+    enum Outcome: Equatable {
+        case belongsHere(clerkID: String)
+        case belongsElsewhere
+        case couldNotCheck
+    }
+
+    /// Only an answer from the server for this exact account can move a recording.
+    static func run(
+        ownerID: String,
+        legacyOwners: Set<String>,
+        profile: () async throws -> AccountProfile
+    ) async -> Outcome {
+        guard let account = try? await profile(), account.id == ownerID else { return .couldNotCheck }
+        guard let clerkID = account.clerkId, legacyOwners.contains(clerkID) else { return .belongsElsewhere }
+        return .belongsHere(clerkID: clerkID)
     }
 }
 

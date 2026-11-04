@@ -216,7 +216,11 @@ Live Activity provides a visible Stop action.
   converted on load. The provider ID moves to a local owner mapping, which holds
   no credentials, because recordings and AI consent from that era are keyed by it.
   `migrateOwnerID` moves them to the server's user ID. The mapping is removed on
-  account deletion.
+  account deletion. Build 13 also saved a journal before asking for a first session.
+  If the response was lost, its token is the session's only copy, so with no stored
+  session the app refreshes with it before showing sign-in. Only a rejection from
+  the server ends it; offline, the app shows that it is reconnecting and retries.
+  A sign-out build 13 had not finished is recovered only to revoke it.
 - **Share uploads** — The extension never receives the device session. At sign-in,
   and on the first launch of a session that predates this, the app mints an API key
   with only `capture:upload` and stores it in the App Group's Keychain access group,
@@ -225,12 +229,23 @@ Live Activity provides a visible Stop action.
   file is presigned with that key and handed to a background `URLSession`, reading
   from the file so a large share stays inside the extension's memory limit. iOS
   wakes the app with `handleEventsForBackgroundURLSession` to finish it. The share's
-  ID becomes the recording's ID, so importing it never uploads twice. Without a
-  key or permission, or after any failure, the share waits in the inbox as before.
+  ID becomes the recording's ID, so importing it never uploads twice. Permission
+  and the key are read again after presigning, just before the transfer starts.
+  Without a key or permission, or after any failure, the share waits in the inbox
+  as before.
   Any end of the session removes the key from the iPhone at once, and it is revoked
   on the server when a session of that account can do so. A password reset revokes
   it on the server too; the extension's next 401 removes the local copy, and the app
-  mints another once signed in.
+  mints another once signed in. A key whose mint response was lost is found by this
+  install's key name. Until that check succeeds, it repeats on every launch and at
+  sign-out, even while the saved key is reused.
+- **Who finishes a share** — The server counts two objects as two uploads, so one
+  share may complete only one. When a transfer goes quiet, the extension (its bytes
+  arrived) and the app (it will send its own copy) race to create one claim file in
+  the share's App Group folder. The file is a hard link, so it appears complete or
+  not at all. The loser stands down: the app completes the extension's object, or
+  the extension abandons it. The claim lasts as long as the folder, and a share with
+  no folder has no competing upload.
 - **Keychain groups** — Do not add a `keychain-access-groups` entitlement. Its first
   entry would become the default for new items, and the device session, saved with
   no explicit group, would land where the extension can read it. iOS already treats

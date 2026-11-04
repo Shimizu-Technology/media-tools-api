@@ -249,6 +249,15 @@ actor APIClient {
 
     /// For a key revocation that must run while a session is being revoked, when
     /// `authHeaders` would no longer hand out its token.
+    func get<T: Decodable>(_ path: String, bearerToken: String) async throws -> T {
+        var request = URLRequest(url: URL(string: baseURL + path)!)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: request)
+        try validateResponse(response, data: data)
+        return try decoder.decode(T.self, from: data)
+    }
+
     func delete(_ path: String, bearerToken: String) async throws {
         var request = URLRequest(url: URL(string: baseURL + path)!)
         request.httpMethod = "DELETE"

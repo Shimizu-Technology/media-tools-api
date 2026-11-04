@@ -20,8 +20,11 @@ private final class ScriptedHTTP: ShareUploadHTTP, @unchecked Sendable {
     var status = 200
     var failure: Error?
     var requests: [URLRequest] = []
+    /// Runs while the request is on the wire, for what can change in that time.
+    var duringRequest: (() throws -> Void)?
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         requests.append(request)
+        try duringRequest?()
         if let failure { throw failure }
         let body = Data(#"{"upload_url":"https://bucket.test/put?sig=1","object_key":"audio/key-1.caf","stored_name":"key-1.caf","upload_id":"u","expires_in":"15m"}"#.utf8)
         return (body, HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
@@ -242,6 +245,157 @@ final class ShareDirectUploaderTests: XCTestCase {
         XCTAssertTrue(http.requests.isEmpty)
     }
 
+    private func assertStopsAfterPresign(
+        _ change: @escaping () throws -> Void,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws {
+        try allow()
+        let item = try stage(for: "owner-a")
+        http.duringRequest = change
+
+        let outcome = await uploader.start(item)
+
+        XCTAssertEqual(outcome, .savedForApp, file: file, line: line)
+        XCTAssertEqual(http.requests.count, 1, "The presign really went out", file: file, line: line)
+        XCTAssertTrue(starter.calls.isEmpty, "The audio must not leave this iPhone", file: file, line: line)
+        let saved = try XCTUnwrap(inbox.pendingItems().first(where: { $0.id == item.id }), file: file, line: line)
+        XCTAssertNil(saved.directUpload, "The app gets the share straight away", file: file, line: line)
+    }
+
+    func testRevokingPermissionDuringThePresignStopsTheTransfer() async throws {
+        try await assertStopsAfterPresign { [self] in
+            try policy.save(ShareUploadPolicy(ownerID: "owner-a", mayUploadAutomatically: false, apiBaseURL: "https://api.test"))
+        }
+    }
+
+    func testSigningOutDuringThePresignStopsTheTransfer() async throws {
+        try await assertStopsAfterPresign { [self] in
+            credentials.delete()
+            policy.clear()
+        }
+    }
+
+    func testLosingOnlyTheKeyDuringThePresignStopsTheTransfer() async throws {
+        try await assertStopsAfterPresign { [self] in
+            credentials.delete()
+        }
+    }
+
+    func testSwitchingAccountsDuringThePresignStopsTheTransfer() async throws {
+        try await assertStopsAfterPresign { [self] in
+            try allow(owner: "owner-b")
+        }
+    }
+
+    func testAReplacedKeyDuringThePresignStopsTheTransfer() async throws {
+        try await assertStopsAfterPresign { [self] in
+            credentials.result = .found(ShareUploadCredential(keyID: "k2", rawKey: "raw-2", ownerID: "owner-a"))
+        }
+    }
+
+    func testTheAppTakingOverDuringThePresignStopsTheTransfer() async throws {
+        try allow()
+        let item = try stage(for: "owner-a")
+        http.duringRequest = { [inbox] in
+            _ = inbox!.claimTransfer(.appTookOver, shareID: item.id)
+        }
+
+        let outcome = await uploader.start(item)
+
+        XCTAssertEqual(outcome, .savedForApp)
+        XCTAssertTrue(starter.calls.isEmpty)
+    }
+
+    // MARK: Who finishes the upload
+
+    func testExactlyOneClaimWinsAcrossRacingProcesses() throws {
+        let item = try stage(for: "owner-a")
+        let store = try XCTUnwrap(inbox)
+        let results = NSLock()
+        var seen: [ShareInboxStore.TransferClaimResult] = []
+        DispatchQueue.concurrentPerform(iterations: 64) { index in
+            let claim: ShareInboxStore.TransferClaim = index.isMultiple(of: 2)
+                ? .appTookOver
+                : .extensionFinished(objectKey: "audio/key-1.caf")
+            let result = store.claimTransfer(claim, shareID: item.id)
+            results.lock()
+            seen.append(result)
+            results.unlock()
+        }
+        XCTAssertEqual(seen.count, 64)
+        XCTAssertEqual(Set(seen.map { String(describing: $0) }).count, 1, "Everyone must see the same winner")
+        guard case .held(let winner) = seen[0] else { return XCTFail("Expected a winner") }
+        XCTAssertEqual(store.transferClaim(shareID: item.id), winner)
+        let leftovers = try FileManager.default.contentsOfDirectory(
+            at: inbox.fileURL(for: item).deletingLastPathComponent(),
+            includingPropertiesForKeys: nil
+        ).map(\.lastPathComponent).filter { $0.hasSuffix(".tmp") }
+        XCTAssertEqual(leftovers, [], "A losing attempt leaves nothing behind")
+    }
+
+    func testAClaimOutlivesTheProcessThatMadeIt() throws {
+        let item = try stage(for: "owner-a")
+        XCTAssertEqual(inbox.claimTransfer(.appTookOver, shareID: item.id), .held(.appTookOver))
+
+        let relaunched = try ShareInboxStore(rootURL: inbox.rootURL)
+
+        XCTAssertEqual(
+            relaunched.claimTransfer(.extensionFinished(objectKey: "audio/key-1.caf"), shareID: item.id),
+            .held(.appTookOver)
+        )
+    }
+
+    func testAClaimOnARemovedShareSaysSo() throws {
+        let item = try stage(for: "owner-a")
+        try inbox.remove(item)
+        XCTAssertEqual(inbox.claimTransfer(.appTookOver, shareID: item.id), .shareGone)
+    }
+
+    func testATransferTheAppGaveUpOnIsNeverCompleted() async throws {
+        try allow()
+        let item = try stage(for: "owner-a")
+        _ = await uploader.start(item)
+        let metadata = try XCTUnwrap(starter.calls.first?.metadata)
+        XCTAssertEqual(inbox.claimTransfer(.appTookOver, shareID: item.id), .held(.appTookOver))
+        http.requests = []
+
+        await uploader.finishTransfer(metadata, statusCode: 200)
+
+        XCTAssertTrue(http.requests.isEmpty, "Completing this object too would be a second transcription")
+        XCTAssertNil(try inbox.pendingItems().first?.directUpload?.uploadFinished)
+    }
+
+    func testARemovedShareIsNeverCompleted() async throws {
+        try allow()
+        let item = try stage(for: "owner-a")
+        _ = await uploader.start(item)
+        let metadata = try XCTUnwrap(starter.calls.first?.metadata)
+        try inbox.remove(item)
+        http.requests = []
+
+        await uploader.finishTransfer(metadata, statusCode: 200)
+
+        XCTAssertTrue(http.requests.isEmpty)
+    }
+
+    func testAFinishedTransferRecordsItsClaimBeforeCompleting() async throws {
+        try allow()
+        let item = try stage(for: "owner-a")
+        _ = await uploader.start(item)
+        let metadata = try XCTUnwrap(starter.calls.first?.metadata)
+        http.requests = []
+        var claimDuringComplete: ShareInboxStore.TransferClaim?
+        http.duringRequest = { [inbox] in
+            claimDuringComplete = inbox!.transferClaim(shareID: item.id)
+        }
+
+        await uploader.finishTransfer(metadata, statusCode: 200)
+
+        XCTAssertEqual(http.requests.count, 1)
+        XCTAssertEqual(claimDuringComplete, .extensionFinished(objectKey: metadata.objectKey))
+    }
+
     func testPDFsAreNeverReservedOrSent() async throws {
         try allow()
         let pdf = directory.appendingPathComponent("doc.pdf")
@@ -290,7 +444,10 @@ final class ShareDirectUploaderTests: XCTestCase {
 private actor ScriptedKeyAPI: ShareUploadKeyAPI {
     var mintFailure: Error?
     var revokeFailure: Error?
+    var listFailure: Error?
     var listed: [ListedAPIKey] = []
+    private(set) var listCalls = 0
+    private(set) var listCallsWithBearer = 0
     private(set) var minted: [String] = []
     private(set) var revokedWithSession: [String] = []
     private(set) var revokedWithBearer: [String] = []
@@ -303,6 +460,7 @@ private actor ScriptedKeyAPI: ShareUploadKeyAPI {
     }
 
     func set(listed: [ListedAPIKey]) { self.listed = listed }
+    func set(listFailure: Error?) { self.listFailure = listFailure }
     func holdNextMint() { holdsMint = true }
 
     func releaseMint() {
@@ -324,7 +482,22 @@ private actor ScriptedKeyAPI: ShareUploadKeyAPI {
         return ShareUploadKeyResponse(id: "key-\(minted.count)", rawKey: "raw-\(minted.count)")
     }
 
-    func listAPIKeys(ownerID: String) async throws -> [ListedAPIKey] { listed }
+    func listAPIKeys(ownerID: String) async throws -> [ListedAPIKey] {
+        listCalls += 1
+        if let listFailure { throw listFailure }
+        return stillActive
+    }
+
+    func listAPIKeys(bearerToken: String) async throws -> [ListedAPIKey] {
+        listCallsWithBearer += 1
+        if let listFailure { throw listFailure }
+        return stillActive
+    }
+
+    /// As the server does, a list stops showing a key once it is revoked.
+    private var stillActive: [ListedAPIKey] {
+        listed.filter { !revokedWithSession.contains($0.id) && !revokedWithBearer.contains($0.id) }
+    }
 
     func revokeAPIKey(id: String, ownerID: String) async throws {
         if let revokeFailure { throw revokeFailure }
@@ -486,6 +659,137 @@ final class ShareUploadKeyManagerTests: XCTestCase {
 
         let revoked = await api.revokedWithSession
         XCTAssertEqual(revoked, [first.keyID], "The new key and every other key stay")
+    }
+
+    /// One lost mint, then a key saved under a new ID, as the server sees it.
+    private func mintWithAnOrphan() async throws -> (name: String, saved: String) {
+        await api.set(listFailure: URLError(.notConnectedToInternet))
+        await manager.ensureKey(ownerID: "owner-a")
+        guard case .found(let saved) = credentials.result else { throw CocoaError(.fileReadUnknown) }
+        let name = await api.minted[0]
+        await api.set(listed: [
+            ListedAPIKey(id: "orphan", name: name, active: true, scopes: ["capture:upload"]),
+            ListedAPIKey(id: saved.keyID, name: name, active: true, scopes: ["capture:upload"]),
+        ])
+        return (name, saved.keyID)
+    }
+
+    func testAFailedOrphanListIsRetriedWhileReusingTheSavedKey() async throws {
+        let (_, saved) = try await mintWithAnOrphan()
+        await api.set(listFailure: nil)
+        let minted = await api.minted.count
+
+        await manager.ensureKey(ownerID: "owner-a")
+
+        let revoked = await api.revokedWithSession
+        let mintedAfter = await api.minted.count
+        XCTAssertEqual(revoked, ["orphan"])
+        XCTAssertEqual(mintedAfter, minted, "The saved key is reused")
+        XCTAssertEqual(credentials.result, .found(ShareUploadCredential(keyID: saved, rawKey: "raw-1", ownerID: "owner-a")))
+    }
+
+    func testAFailedOrphanRevokeIsRetriedOnALaterLaunch() async throws {
+        _ = try await mintWithAnOrphan()
+        await api.set(listFailure: nil)
+        await api.set(revokeFailure: URLError(.timedOut))
+        await manager.ensureKey(ownerID: "owner-a")
+        var revoked = await api.revokedWithSession
+        XCTAssertEqual(revoked, [])
+
+        await api.set(revokeFailure: nil)
+        let relaunched = ShareUploadKeyManager(credentials: credentials, api: api, defaults: defaults)
+        await relaunched.ensureKey(ownerID: "owner-a")
+
+        revoked = await api.revokedWithSession
+        XCTAssertEqual(revoked, ["orphan"])
+    }
+
+    func testReconcilingStopsOnceItHasSucceeded() async throws {
+        _ = try await mintWithAnOrphan()
+        await api.set(listFailure: nil)
+        await manager.ensureKey(ownerID: "owner-a")
+        let callsAfterSuccess = await api.listCalls
+
+        await manager.ensureKey(ownerID: "owner-a")
+        await manager.ensureKey(ownerID: "owner-a")
+
+        let calls = await api.listCalls
+        XCTAssertEqual(calls, callsAfterSuccess, "No request on every foreground once there is nothing to find")
+    }
+
+    func testAFailedRevokeNeverCountsAsReconciled() async throws {
+        _ = try await mintWithAnOrphan()
+        await api.set(listFailure: nil)
+        await api.set(revokeFailure: URLError(.timedOut))
+        await manager.ensureKey(ownerID: "owner-a")
+        let callsAfterFailure = await api.listCalls
+
+        await manager.ensureKey(ownerID: "owner-a")
+
+        let calls = await api.listCalls
+        XCTAssertEqual(calls, callsAfterFailure + 1)
+    }
+
+    private func signedInSession(_ store: UpdateSessionStore) -> DeviceSessionController {
+        let session = DeviceSessionController(
+            transport: AcceptAllTransport(),
+            baseURL: URL(string: "https://example.test/api/v1")!,
+            store: store,
+            retiredLegacyIdentities: UpdateRetiredIdentities()
+        )
+        manager.follow(session)
+        return session
+    }
+
+    private func sessionStore() -> UpdateSessionStore {
+        UpdateSessionStore(StoredDeviceSession(
+            pair: DeviceSessionPair(
+                sessionID: "session-a", userID: "owner-a", accessToken: "access",
+                accessExpiresAt: .distantFuture, refreshToken: "refresh", inactiveExpiresAt: .distantFuture
+            ),
+            source: .passkey
+        ))
+    }
+
+    func testSignOutFindsAnOrphanWhoseIDWasNeverLearned() async throws {
+        let (_, saved) = try await mintWithAnOrphan()
+        await api.set(listFailure: nil)
+        let session = signedInSession(sessionStore())
+
+        try await session.revokeOrSuspend()
+
+        let revoked = await api.revokedWithBearer
+        XCTAssertEqual(Set(revoked), ["orphan", saved], "Nothing of this install's outlives its session")
+    }
+
+    func testSignOutSkipsTheListOnceReconciled() async throws {
+        await manager.ensureKey(ownerID: "owner-a")
+        let session = signedInSession(sessionStore())
+
+        try await session.revokeOrSuspend()
+
+        let calls = await api.listCallsWithBearer
+        let revoked = await api.revokedWithBearer
+        XCTAssertEqual(calls, 0)
+        XCTAssertEqual(revoked, ["key-1"])
+    }
+
+    func testAFailedListNeverBlocksSignOutAndTheNextSessionReconciles() async throws {
+        let (_, saved) = try await mintWithAnOrphan()
+        let store = sessionStore()
+        let session = signedInSession(store)
+
+        try await session.revokeOrSuspend()
+
+        XCTAssertNil(store.value, "Signing out still finished")
+        let revoked = await api.revokedWithBearer
+        XCTAssertEqual(revoked, [saved])
+
+        await api.set(listFailure: nil)
+        await manager.ensureKey(ownerID: "owner-a")
+
+        let later = await api.revokedWithSession
+        XCTAssertTrue(later.contains("orphan"))
     }
 
     func testAccountDeletionForgetsTheKeyWithNothingLeftToRevoke() async throws {
@@ -841,6 +1145,114 @@ final class ShareUploadImportTests: XCTestCase {
 
         XCTAssertEqual(recorder.recording(withID: item.id)?.state, .finalizingUpload)
         XCTAssertEqual(recorder.recording(withID: item.id)?.uploadObjectKey, "audio/share.caf")
+    }
+
+    private func waitPastReconciliation() async throws {
+        try await Task.sleep(for: .seconds(1.3))
+        await settle { false }
+    }
+
+    /// The app looks while the PUT has just ended and the extension has not yet said
+    /// so. Whichever way this resolves, the server must hear about one object.
+    func testAppTakingOverFirstMeansTheExtensionNeverCompletes() async throws {
+        await signIn("owner-a")
+        let item = try stage(owner: "owner-a", started: true)
+        uploader.processSharedItems()
+        XCTAssertEqual(recorder.recording(withID: item.id)?.state, .uploading)
+
+        uploader.resumePendingWork()
+        try await waitPastReconciliation()
+
+        XCTAssertEqual(service.presigns.count, 1, "No task and no finish: the app sends it")
+        let completions = try await extensionCompletions(finishing: item)
+        XCTAssertEqual(completions, 0, "The extension's late result must not create a second job")
+    }
+
+    /// A takeover leaves either the claim or no share folder. The extension must
+    /// stand down for both, with its key and permission still valid.
+    private func extensionCompletions(finishing item: ShareInboxStore.Item) async throws -> Int {
+        let http = ScriptedHTTP()
+        let credentials = MemoryCredentials()
+        credentials.result = .found(ShareUploadCredential(keyID: "k", rawKey: "raw", ownerID: "owner-a"))
+        let policy = try ShareUploadPolicyFileStore(directoryURL: directory)
+        try policy.save(ShareUploadPolicy(ownerID: "owner-a", mayUploadAutomatically: true, apiBaseURL: "https://api.test"))
+        await ShareDirectUploader(
+            inbox: inbox, credentials: credentials, policy: policy, http: http, starter: RecordingStarter()
+        ).finishTransfer(metadata(item), statusCode: 200)
+        return http.requests.count
+    }
+
+    func testAnUntouchedShareStillLetsTheExtensionComplete() async throws {
+        await signIn("owner-a")
+        let item = try stage(owner: "owner-a", started: true)
+        let completions = try await extensionCompletions(finishing: item)
+        XCTAssertEqual(completions, 1, "Otherwise the two tests above would prove nothing")
+    }
+
+    func testExtensionFinishingFirstMeansTheAppCompletesThatObjectAndSendsNothing() async throws {
+        await signIn("owner-a")
+        let item = try stage(owner: "owner-a", started: true)
+        uploader.processSharedItems()
+        // The claim is durable before the manifest says anything about it.
+        XCTAssertEqual(
+            inbox.claimTransfer(.extensionFinished(objectKey: "audio/share.caf"), shareID: item.id),
+            .held(.extensionFinished(objectKey: "audio/share.caf"))
+        )
+
+        uploader.resumePendingWork()
+        try await waitPastReconciliation()
+
+        XCTAssertTrue(service.presigns.isEmpty, "These bytes already arrived")
+        XCTAssertEqual(service.completions.map(\.request.objectKey), ["audio/share.caf"])
+    }
+
+    func testAClaimThatCannotBeSettledSendsNothingAndAsksAgain() async throws {
+        await signIn("owner-a")
+        let item = try stage(owner: "owner-a", started: true)
+        uploader.processSharedItems()
+        let folder = inbox.fileURL(for: item).deletingLastPathComponent()
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: folder.path)
+        addTeardownBlock {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        }
+
+        uploader.resumePendingWork()
+        try await waitPastReconciliation()
+
+        XCTAssertTrue(service.presigns.isEmpty, "Sending now could create a second transcription")
+        XCTAssertEqual(recorder.recording(withID: item.id)?.state, .uploading, "Nothing is lost or given up on")
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        uploader.resumePendingWork()
+        try await waitPastReconciliation()
+
+        XCTAssertEqual(service.presigns.count, 1)
+    }
+
+    func testARelaunchKeepsTheTakeover() async throws {
+        await signIn("owner-a")
+        let item = try stage(owner: "owner-a", started: true)
+        XCTAssertEqual(inbox.claimTransfer(.appTookOver, shareID: item.id), .held(.appTookOver))
+        uploader.processSharedItems()
+
+        uploader.resumePendingWork()
+        try await waitPastReconciliation()
+
+        XCTAssertEqual(service.presigns.count, 1, "The earlier run's takeover still stands")
+        XCTAssertTrue(service.completions.isEmpty)
+    }
+
+    func testRevokingPermissionAlsoStopsTheExtensionFromCompleting() async throws {
+        await signIn("owner-a")
+        let item = try stage(owner: "owner-a", started: true)
+        uploader.processSharedItems()
+
+        consent.revoke()
+        // Permission came back before the extension finished.
+        let completions = try await extensionCompletions(finishing: item)
+
+        XCTAssertEqual(completions, 0, "A tap would send this again, so its first copy is abandoned")
+        XCTAssertEqual(recorder.recording(withID: item.id)?.state, .ready)
     }
 
     func testAReservedShareWaitsForTheExtension() async throws {

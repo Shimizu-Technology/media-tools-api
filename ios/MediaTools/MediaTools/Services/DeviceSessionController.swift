@@ -90,6 +90,23 @@ struct StoredDeviceSession: Codable, Equatable {
     }
 }
 
+/// Build 13 saved this before asking the server for a first session. `nextRefreshToken`
+/// is the session's first refresh credential, so if the response was lost, this is
+/// the only copy of a session the server already created. Nothing writes a new one.
+struct PendingDeviceSessionBootstrap: Codable, Equatable {
+    let verifiedClerkID: String
+    let nextRefreshToken: String
+    /// Written before recovery refreshes, so a second lost response repeats the same
+    /// rotation. Older builds ignore this key.
+    var recoverySuccessorToken: String? = nil
+}
+
+enum PendingBootstrapLoadResult: Equatable {
+    case found(PendingDeviceSessionBootstrap)
+    case missing
+    case unavailable
+}
+
 /// App-only Keychain item. The Share Extension never receives this credential;
 /// it has its own capture-only key. See `ShareUploadCredential`.
 /// A Keychain read has three real outcomes. "Unavailable" usually means the
@@ -111,19 +128,26 @@ protocol DeviceSessionStoring {
     func clerkID(forLocalOwnerID ownerID: String) -> String?
     func saveLocalOwnerID(_ ownerID: String, for clerkID: String)
     func removeLocalOwnerID(for clerkID: String)
+    func loadPendingBootstrap() -> PendingBootstrapLoadResult
+    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws
+    func deletePendingBootstrap()
 }
 
 extension DeviceSessionStoring {
     func loadResult() -> DeviceSessionLoadResult {
         load().map(DeviceSessionLoadResult.found) ?? .missing
     }
+
+    func loadPendingBootstrap() -> PendingBootstrapLoadResult { .missing }
+    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws {}
+    func deletePendingBootstrap() {}
 }
 
 struct DeviceSessionKeychainStore: DeviceSessionStoring {
     private let service = "com.shimizu-technology.media-tools.device-session"
     private let account: String
-    /// Build 13's bootstrap journal. Nothing writes it now; removed at sign-out.
-    private let legacyBootstrapAccount = "first-party-ios-bootstrap-v1"
+    /// Build 13's bootstrap journal, under this same service.
+    private let pendingBootstrapAccount = "first-party-ios-bootstrap-v1"
     private let ownerMappingsKey = "verifiedLocalOwnerMappings.v1"
 
     init(account: String = "first-party-ios-v1") {
@@ -193,7 +217,36 @@ struct DeviceSessionKeychainStore: DeviceSessionStoring {
 
     func delete() {
         SecItemDelete(baseQuery(account: account) as CFDictionary)
-        SecItemDelete(baseQuery(account: legacyBootstrapAccount) as CFDictionary)
+        deletePendingBootstrap()
+    }
+
+    func loadPendingBootstrap() -> PendingBootstrapLoadResult {
+        var query = baseQuery(account: pendingBootstrapAccount)
+        query[kSecReturnData as String] = true
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return .missing }
+        #if targetEnvironment(simulator)
+        if status == errSecMissingEntitlement { return .missing }
+        #endif
+        guard status == errSecSuccess, let data = result as? Data else { return .unavailable }
+        guard let value = try? JSONDecoder().decode(PendingDeviceSessionBootstrap.self, from: data) else {
+            return .missing
+        }
+        return .found(value)
+    }
+
+    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws {
+        let data = try JSONEncoder().encode(value)
+        let status = SecItemUpdate(
+            baseQuery(account: pendingBootstrapAccount) as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary
+        )
+        guard status == errSecSuccess else { throw KeychainFailure(status: status) }
+    }
+
+    func deletePendingBootstrap() {
+        SecItemDelete(baseQuery(account: pendingBootstrapAccount) as CFDictionary)
     }
 
     private func baseQuery(account: String) -> [String: Any] {
@@ -265,6 +318,7 @@ final class DeviceSessionController {
     private let retiredLegacyIdentities: any RetiredLegacyIdentityStoring
     private var stored: StoredDeviceSession?
     private var refreshTask: Task<DeviceSessionPair, Error>?
+    private var pendingBootstrapRecovery: Task<Void, Never>?
     private var generation = 0
 
     private(set) var activeUserID: String?
@@ -272,6 +326,9 @@ final class DeviceSessionController {
     private(set) var sessionRevision = 0
     /// The Keychain could not answer, so "no session" is not actually known yet.
     private(set) var isSessionStoreUnavailable = false
+    /// Build 13 may have left a session here that only the server can confirm, and
+    /// the server could not be reached. Asking this person to sign in would be wrong.
+    private(set) var isAwaitingSessionRecovery = false
 
     /// Called whenever this credential stops being usable, however that happened.
     /// The share extension's key must not outlive the session that minted it.
@@ -299,6 +356,9 @@ final class DeviceSessionController {
         case .found(let session):
             let current = convertedFromLegacySource(session)
             stored = current
+            // Build 13 saved the session, then ended before removing its journal.
+            // That token may have rotated since, and reusing one revokes the device.
+            store.deletePendingBootstrap()
             isSessionStoreUnavailable = false
             if current.pendingRevocation != true {
                 activeUserID = current.pair.userID
@@ -379,6 +439,13 @@ final class DeviceSessionController {
         // The session may still be in the locked Keychain. Nothing is known yet,
         // and the local recordings stay exactly where they are.
         if isSessionStoreUnavailable { return nil }
+        if stored == nil {
+            await recoverPendingBootstrap()
+            if isSessionStoreUnavailable || isAwaitingSessionRecovery {
+                activeUserID = nil
+                return nil
+            }
+        }
         if let stored, stored.pendingRevocation == true {
             do {
                 try await revokeAndClear()
@@ -429,6 +496,7 @@ final class DeviceSessionController {
         stored = nil
         activeUserID = nil
         needsSignIn = false
+        isAwaitingSessionRecovery = false
         store.delete()
         sessionRevision += 1
         onCredentialEnded?()
@@ -477,6 +545,8 @@ final class DeviceSessionController {
             pendingRevocation: nil
         )
         try store.save(value)
+        store.deletePendingBootstrap()
+        isAwaitingSessionRecovery = false
         stored = value
         activeUserID = pair.userID
         needsSignIn = false
@@ -568,6 +638,85 @@ final class DeviceSessionController {
             let errorBody = try? JSONDecoder().decode(ErrorResponse.self, from: data)
             throw APIError.httpError(statusCode: http.statusCode, code: errorBody?.error,
                                      message: errorBody?.message ?? "Could not revoke this device")
+        }
+    }
+
+    /// Not tied to the caller, because cancelling the request would leave a rotation
+    /// unconfirmed for no reason. Concurrent activations share one recovery.
+    private func recoverPendingBootstrap() async {
+        if let pendingBootstrapRecovery {
+            await pendingBootstrapRecovery.value
+            return
+        }
+        let task = Task { await recoverPendingBootstrapOnce() }
+        pendingBootstrapRecovery = task
+        await task.value
+        pendingBootstrapRecovery = nil
+    }
+
+    /// The server may have committed build 13's bootstrap and lost the response. The
+    /// journal's token is then this session's live refresh credential, and refreshing
+    /// is the only way to learn its account. A token the server never saw gets a 401,
+    /// which is the one answer that means there is no session to recover.
+    private func recoverPendingBootstrapOnce() async {
+        guard stored == nil else { return }
+        var journal: PendingDeviceSessionBootstrap
+        switch store.loadPendingBootstrap() {
+        case .missing:
+            isAwaitingSessionRecovery = false
+            return
+        case .unavailable:
+            isSessionStoreUnavailable = true
+            return
+        case .found(let value):
+            journal = value
+        }
+        // A sign-out or deletion build 13 had not finished stays finished: the session
+        // is recovered only so that it can be revoked, and never opens a workspace.
+        let signOutIntended = retiredLegacyIdentities.contains(journal.verifiedClerkID)
+        isAwaitingSessionRecovery = !signOutIntended
+        let startingGeneration = generation
+        do {
+            if journal.recoverySuccessorToken == nil {
+                journal.recoverySuccessorToken = try Self.randomRefreshToken()
+                try store.savePendingBootstrap(journal)
+            }
+            guard let next = journal.recoverySuccessorToken else { throw APIError.invalidResponse }
+            var request = URLRequest(url: baseURL.appendingPathComponent("auth/session/refresh"))
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "refresh_token": journal.nextRefreshToken,
+                "next_refresh_token": next,
+            ])
+            let pair = try await sendPairRequest(request)
+            guard startingGeneration == generation, stored == nil else { return }
+            guard !pair.userID.isEmpty, !pair.sessionID.isEmpty, !pair.accessToken.isEmpty,
+                  pair.refreshToken == next else { throw APIError.invalidResponse }
+            let value = StoredDeviceSession(
+                pair: pair,
+                source: .passkey,
+                pendingRevocation: signOutIntended ? true : nil
+            )
+            // Kept until the session is saved: a failed save repeats this same rotation.
+            try store.save(value)
+            store.saveLocalOwnerID(pair.userID, for: journal.verifiedClerkID)
+            store.deletePendingBootstrap()
+            stored = value
+            isAwaitingSessionRecovery = false
+            if signOutIntended {
+                retiredLegacyIdentities.removeAll()
+            } else {
+                activeUserID = pair.userID
+            }
+        } catch APIError.httpError(let status, _, _) where [400, 401, 409].contains(status) {
+            // Unknown, revoked, or already rotated elsewhere. No retry can recover it.
+            guard startingGeneration == generation else { return }
+            store.deletePendingBootstrap()
+            isAwaitingSessionRecovery = false
+            if signOutIntended { retiredLegacyIdentities.removeAll() }
+        } catch {
+            // Offline or a server fault says nothing about the session. The journal stays.
         }
     }
 

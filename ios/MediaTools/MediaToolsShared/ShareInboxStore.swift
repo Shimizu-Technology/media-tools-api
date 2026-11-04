@@ -86,6 +86,24 @@ struct ShareInboxStore {
         }
     }
 
+    /// Who finishes a direct upload. The extension and the app can each decide at the
+    /// same moment, and the server treats two objects as two uploads, so exactly one
+    /// of these is ever recorded for a share. It lasts as long as the share's folder,
+    /// across relaunches and retries. A share with no folder has no competing upload.
+    enum TransferClaim: Codable, Equatable {
+        /// The extension's bytes arrived. This object is the one to complete.
+        case extensionFinished(objectKey: String)
+        /// The app is sending the share itself. The extension's object is abandoned.
+        case appTookOver
+    }
+
+    enum TransferClaimResult: Equatable {
+        case held(TransferClaim)
+        case shareGone
+        /// Nothing could be read or written, such as before the first unlock.
+        case undetermined
+    }
+
     let rootURL: URL
     private let fileManager: FileManager
 
@@ -258,6 +276,39 @@ struct ShareInboxStore {
         let directory = directoryURL(for: id)
         guard fileManager.fileExists(atPath: directory.path) else { return }
         try fileManager.removeItem(at: directory)
+    }
+
+    /// Returns whichever claim won, which may not be the one asked for.
+    ///
+    /// A hard link either appears complete or fails because a claim already exists,
+    /// including against another process. A plain exclusive create could be read half
+    /// written, and a process dying there would leave a claim no one can read.
+    func claimTransfer(_ claim: TransferClaim, shareID: UUID) -> TransferClaimResult {
+        let directory = directoryURL(for: shareID)
+        let manifest = directory.appendingPathComponent("item.json")
+        guard fileManager.fileExists(atPath: manifest.path) else { return .shareGone }
+        let candidate = directory.appendingPathComponent("transfer-claim.\(UUID().uuidString).tmp")
+        defer { try? fileManager.removeItem(at: candidate) }
+        do {
+            try JSONEncoder().encode(claim).write(
+                to: candidate,
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            )
+            try fileManager.linkItem(at: candidate, to: claimURL(for: shareID))
+            return .held(claim)
+        } catch {
+            if let winner = transferClaim(shareID: shareID) { return .held(winner) }
+            return fileManager.fileExists(atPath: manifest.path) ? .undetermined : .shareGone
+        }
+    }
+
+    func transferClaim(shareID: UUID) -> TransferClaim? {
+        guard let data = try? Data(contentsOf: claimURL(for: shareID)) else { return nil }
+        return try? JSONDecoder().decode(TransferClaim.self, from: data)
+    }
+
+    private func claimURL(for id: UUID) -> URL {
+        directoryURL(for: id).appendingPathComponent("transfer-claim.json")
     }
 
     private func isComplete(_ item: Item) -> Bool {

@@ -217,6 +217,236 @@ final class AuthUpdateMigrationTests: XCTestCase {
         XCTAssertEqual(session.verifiedMigration?.clerkID, clerkOwnerID)
     }
 
+    // MARK: Build 13's bootstrap journal
+
+    /// Exactly what build 13 wrote before its bootstrap request.
+    private func build13Journal() throws -> PendingDeviceSessionBootstrap {
+        try JSONDecoder().decode(
+            PendingDeviceSessionBootstrap.self,
+            from: Data(#"{"verifiedClerkID":"user_2abcLegacy","nextRefreshToken":"mta_rt_journaled"}"#.utf8)
+        )
+    }
+
+    func testALostBootstrapResponseRecoversInsteadOfSigningOut() async throws {
+        let store = UpdateSessionStore(nil)
+        store.journal = try build13Journal()
+        let transport = ScriptedSessionTransport()
+        let session = controller(store: store, transport: transport)
+        XCTAssertNil(session.activeUserID, "Nothing is known until the server answers")
+
+        let owner = await session.activate()
+
+        XCTAssertEqual(owner, serverOwnerID)
+        XCTAssertFalse(session.isAwaitingSessionRecovery)
+        let sent = try XCTUnwrap(transport.bodies.first)
+        XCTAssertEqual(transport.paths, ["/api/v1/auth/session/refresh"])
+        XCTAssertEqual(sent["refresh_token"], "mta_rt_journaled")
+        XCTAssertEqual(store.value?.pair.refreshToken, sent["next_refresh_token"])
+        XCTAssertEqual(store.value?.source, .passkey, "A value older builds can read")
+        XCTAssertNil(store.value?.pendingRevocation)
+        XCTAssertNil(store.journal, "Used once, and now the session has moved on")
+        XCTAssertEqual(store.localOwnerID(for: clerkOwnerID), serverOwnerID)
+        XCTAssertEqual(session.verifiedMigration?.clerkID, clerkOwnerID, "Recordings under the old ID still connect")
+    }
+
+    func testRecoveryOfflineDoesNotShowSignInAndRepeatsTheSameRotation() async throws {
+        let store = UpdateSessionStore(nil)
+        store.journal = try build13Journal()
+        let transport = ScriptedSessionTransport()
+        transport.script = [.failure(URLError(.notConnectedToInternet))]
+        let session = controller(store: store, transport: transport)
+
+        let offline = await session.activate()
+
+        XCTAssertNil(offline)
+        XCTAssertTrue(session.isAwaitingSessionRecovery, "This must not read as signed out")
+        XCTAssertFalse(session.needsSignIn)
+        XCTAssertEqual(store.journal?.nextRefreshToken, "mta_rt_journaled")
+        let successor = try XCTUnwrap(store.journal?.recoverySuccessorToken)
+
+        let online = await session.activate()
+
+        XCTAssertEqual(online, serverOwnerID)
+        XCTAssertEqual(transport.bodies.count, 2)
+        XCTAssertEqual(transport.bodies[1]["refresh_token"], "mta_rt_journaled")
+        XCTAssertEqual(transport.bodies[1]["next_refresh_token"], successor, "A lost response must retry the same pair")
+        XCTAssertFalse(session.isAwaitingSessionRecovery)
+    }
+
+    func testAServerFaultDuringRecoveryIsNotASignOut() async throws {
+        let store = UpdateSessionStore(nil)
+        store.journal = try build13Journal()
+        let transport = ScriptedSessionTransport()
+        transport.script = [.status(503)]
+        let session = controller(store: store, transport: transport)
+
+        let owner = await session.activate()
+
+        XCTAssertNil(owner)
+        XCTAssertTrue(session.isAwaitingSessionRecovery)
+        XCTAssertNotNil(store.journal)
+    }
+
+    func testAJournalTheServerNeverCommittedEndsAtSignIn() async throws {
+        for status in [400, 401, 409] {
+            let store = UpdateSessionStore(nil)
+            store.journal = try build13Journal()
+            let transport = ScriptedSessionTransport()
+            transport.script = [.status(status)]
+            let session = controller(store: store, transport: transport)
+
+            let owner = await session.activate()
+
+            XCTAssertNil(owner)
+            XCTAssertFalse(session.isAwaitingSessionRecovery, "HTTP \(status) leaves nothing to wait for")
+            XCTAssertNil(store.journal)
+            XCTAssertNil(store.value)
+        }
+    }
+
+    func testAJournalIsNeverSentWhenASessionExists() async throws {
+        let store = UpdateSessionStore(try build13Session())
+        store.journal = try build13Journal()
+
+        // The transport would fail this test if startup used the journal: its token
+        // may have rotated already, and the server revokes a device for reuse.
+        let transport = ScriptedSessionTransport()
+        let session = controller(store: store, transport: transport)
+
+        XCTAssertEqual(session.activeUserID, serverOwnerID)
+        XCTAssertNil(store.journal)
+        XCTAssertTrue(transport.bodies.isEmpty)
+    }
+
+    func testRecordedSignOutIntentRecoversOnlyToRevoke() async throws {
+        let store = UpdateSessionStore(nil)
+        store.journal = try build13Journal()
+        let retired = UpdateRetiredIdentities()
+        retired.values = [clerkOwnerID]
+        let transport = ScriptedSessionTransport()
+        let session = controller(store: store, transport: transport, retired: retired)
+
+        let owner = await session.activate()
+
+        XCTAssertNil(owner, "A sign-out build 13 started must not reopen a workspace")
+        XCTAssertNil(session.activeUserID)
+        XCTAssertFalse(session.isAwaitingSessionRecovery, "Sign-in is exactly what this person should see")
+        XCTAssertEqual(transport.paths.last, "/api/v1/auth/sessions/session-a", "The recovered session is revoked")
+        XCTAssertNil(store.value)
+        XCTAssertNil(store.journal)
+        XCTAssertTrue(retired.values.isEmpty)
+    }
+
+    func testRecordedSignOutIntentOfflineShowsSignInAndKeepsTheJournalToRevokeLater() async throws {
+        let store = UpdateSessionStore(nil)
+        store.journal = try build13Journal()
+        let retired = UpdateRetiredIdentities()
+        retired.values = [clerkOwnerID]
+        let transport = ScriptedSessionTransport()
+        transport.script = [.failure(URLError(.notConnectedToInternet))]
+        let session = controller(store: store, transport: transport, retired: retired)
+
+        let owner = await session.activate()
+
+        XCTAssertNil(owner)
+        XCTAssertFalse(session.isAwaitingSessionRecovery)
+        XCTAssertNotNil(store.journal)
+        XCTAssertEqual(retired.values, [clerkOwnerID])
+    }
+
+    func testASaveThatFailsDuringRecoveryKeepsTheCredentialAndRetries() async throws {
+        let store = UpdateSessionStore(nil)
+        store.journal = try build13Journal()
+        store.failsSaves = true
+        let transport = ScriptedSessionTransport()
+        let session = controller(store: store, transport: transport)
+
+        let failed = await session.activate()
+
+        XCTAssertNil(failed)
+        XCTAssertTrue(session.isAwaitingSessionRecovery)
+        let successor = try XCTUnwrap(store.journal?.recoverySuccessorToken, "This is now the only copy of the session")
+
+        store.failsSaves = false
+        let owner = await session.activate()
+
+        XCTAssertEqual(owner, serverOwnerID)
+        XCTAssertEqual(transport.bodies.last?["next_refresh_token"], successor)
+        XCTAssertEqual(store.value?.pair.refreshToken, successor)
+    }
+
+    func testALockedJournalIsNotASignOut() async throws {
+        let store = UpdateSessionStore(nil)
+        store.journalIsLocked = true
+        let transport = ScriptedSessionTransport()
+        let session = controller(store: store, transport: transport)
+
+        let owner = await session.activate()
+
+        XCTAssertNil(owner)
+        XCTAssertTrue(session.isSessionStoreUnavailable)
+        XCTAssertTrue(transport.bodies.isEmpty)
+    }
+
+    func testSigningInWhileAJournalWaitsReplacesIt() async throws {
+        let store = UpdateSessionStore(nil)
+        store.journal = try build13Journal()
+        let session = controller(store: store, transport: FailingTransport())
+        _ = await session.activate()
+        XCTAssertTrue(session.isAwaitingSessionRecovery)
+
+        try session.saveSession(
+            pair: DeviceSessionPair(
+                sessionID: "session-b", userID: serverOwnerID, accessToken: "access",
+                accessExpiresAt: .distantFuture, refreshToken: "refresh", inactiveExpiresAt: .distantFuture
+            ),
+            source: .passkey
+        )
+
+        XCTAssertNil(store.journal)
+        XCTAssertFalse(session.isAwaitingSessionRecovery)
+        XCTAssertEqual(session.activeUserID, serverOwnerID)
+    }
+
+    // MARK: Recordings saved under the retired provider
+
+    func testReconnectOnlyMovesRecordingsTheServerSaysAreThisAccounts() async throws {
+        func profile(id: String, clerkID: String?) -> AccountProfile {
+            AccountProfile(id: id, email: "owner@example.com", name: "Owner", clerkId: clerkID)
+        }
+        let owners: Set<String> = [clerkOwnerID]
+
+        let matched = await LegacyRecordingReconnect.run(
+            ownerID: serverOwnerID, legacyOwners: owners,
+            profile: { profile(id: serverOwnerID, clerkID: clerkOwnerID) }
+        )
+        XCTAssertEqual(matched, .belongsHere(clerkID: clerkOwnerID))
+
+        let otherProvider = await LegacyRecordingReconnect.run(
+            ownerID: serverOwnerID, legacyOwners: owners,
+            profile: { profile(id: serverOwnerID, clerkID: "user_someoneElse") }
+        )
+        XCTAssertEqual(otherProvider, .belongsElsewhere, "Another account's work is not a failure to report")
+
+        let noProvider = await LegacyRecordingReconnect.run(
+            ownerID: serverOwnerID, legacyOwners: owners,
+            profile: { profile(id: serverOwnerID, clerkID: nil) }
+        )
+        XCTAssertEqual(noProvider, .belongsElsewhere)
+
+        let wrongAccount = await LegacyRecordingReconnect.run(
+            ownerID: serverOwnerID, legacyOwners: owners,
+            profile: { profile(id: "someone-else", clerkID: clerkOwnerID) }
+        )
+        XCTAssertEqual(wrongAccount, .couldNotCheck)
+
+        let offline = await LegacyRecordingReconnect.run(
+            ownerID: serverOwnerID, legacyOwners: owners,
+            profile: { throw URLError(.notConnectedToInternet) }
+        )
+        XCTAssertEqual(offline, .couldNotCheck, "Offline must be shown and retried, never dropped")
+    }
+
     func testMissingKeychainItemOnlyMeansSignedOutWhenTrulyMissing() {
         let session = controller(store: UpdateSessionStore(nil), transport: FailingTransport())
         XCTAssertNil(session.activeUserID)
@@ -228,6 +458,8 @@ final class AuthUpdateMigrationTests: XCTestCase {
 final class UpdateSessionStore: DeviceSessionStoring {
     var value: StoredDeviceSession?
     var failsSaves = false
+    var journal: PendingDeviceSessionBootstrap?
+    var journalIsLocked = false
     private var ownerMappings: [String: String] = [:]
 
     init(_ value: StoredDeviceSession?) { self.value = value }
@@ -236,7 +468,16 @@ final class UpdateSessionStore: DeviceSessionStoring {
         if failsSaves { throw CocoaError(.fileWriteUnknown) }
         self.value = value
     }
-    func delete() { value = nil }
+    func delete() {
+        value = nil
+        journal = nil
+    }
+    func loadPendingBootstrap() -> PendingBootstrapLoadResult {
+        if journalIsLocked { return .unavailable }
+        return journal.map(PendingBootstrapLoadResult.found) ?? .missing
+    }
+    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws { journal = value }
+    func deletePendingBootstrap() { journal = nil }
     func localOwnerID(for clerkID: String) -> String? { ownerMappings[clerkID] }
     func clerkID(forLocalOwnerID ownerID: String) -> String? {
         ownerMappings.first { $0.value == ownerID }?.key
@@ -250,6 +491,38 @@ final class UpdateRetiredIdentities: RetiredLegacyIdentityStoring {
     var values: Set<String> = []
     func contains(_ clerkID: String) -> Bool { values.contains(clerkID) }
     func removeAll() { values.removeAll() }
+}
+
+/// Answers each refresh as the server would, unless told otherwise for that attempt.
+private final class ScriptedSessionTransport: DeviceSessionTransport, @unchecked Sendable {
+    enum Step {
+        case failure(Error)
+        case status(Int)
+    }
+
+    var script: [Step] = []
+    private(set) var bodies: [[String: String]] = []
+    private(set) var paths: [String] = []
+
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        paths.append(request.url?.path ?? "")
+        guard request.url?.path.hasSuffix("/auth/session/refresh") == true else {
+            return (Data(), HTTPURLResponse(url: request.url!, statusCode: 204, httpVersion: nil, headerFields: nil)!)
+        }
+        let values = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try XCTUnwrap(request.httpBody)) as? [String: String]
+        )
+        bodies.append(values)
+        if !script.isEmpty {
+            switch script.removeFirst() {
+            case .failure(let error):
+                throw error
+            case .status(let status):
+                return (Data(), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+            }
+        }
+        return try refreshResponse(for: request, next: values["next_refresh_token"] ?? "")
+    }
 }
 
 private struct FailingTransport: DeviceSessionTransport {

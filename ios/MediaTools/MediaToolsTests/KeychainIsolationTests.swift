@@ -55,6 +55,38 @@ final class KeychainIsolationTests: XCTestCase {
         XCTAssertEqual(session.pair.userID, "server-a")
     }
 
+    /// The account, service, and format build 13's store actually used.
+    func testAJournalBuild13WroteLoadsThroughTheRealStore() throws {
+        try requireKeychain()
+        let journalAccount = "first-party-ios-bootstrap-v1"
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: sessionService,
+            kSecAttrAccount as String: journalAccount,
+        ]
+        SecItemDelete(query as CFDictionary)
+        var attributes = query
+        attributes[kSecValueData as String] = Data(#"{"verifiedClerkID":"user_2abc","nextRefreshToken":"mta_rt_x"}"#.utf8)
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        XCTAssertEqual(SecItemAdd(attributes as CFDictionary, nil), errSecSuccess)
+        addTeardownBlock { SecItemDelete(query as CFDictionary) }
+
+        let store = DeviceSessionKeychainStore(account: account)
+        guard case .found(var journal) = store.loadPendingBootstrap() else {
+            return XCTFail("A journal holding a live credential must not read as missing")
+        }
+        XCTAssertEqual(journal.verifiedClerkID, "user_2abc")
+        XCTAssertEqual(journal.nextRefreshToken, "mta_rt_x")
+        XCTAssertNil(journal.recoverySuccessorToken)
+
+        journal.recoverySuccessorToken = "mta_rt_y"
+        try store.savePendingBootstrap(journal)
+        XCTAssertEqual(store.loadPendingBootstrap(), .found(journal))
+
+        store.delete()
+        XCTAssertEqual(store.loadPendingBootstrap(), .missing)
+    }
+
     /// The whole reason not to add a `keychain-access-groups` entitlement.
     func testTheDeviceSessionIsNotReadableFromTheSharedGroup() throws {
         try requireKeychain()
