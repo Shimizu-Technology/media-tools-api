@@ -52,16 +52,16 @@ a Clerk development instance, and App Review rejected build 9.
 
 | ID | Workstream | Depends on | Status |
 | --- | --- | --- | --- |
-| A | iOS capture and results flow | none | Not started |
-| B | Agent access: scoped keys and CLI | none | Not started |
-| C | Pipeline reliability, auto title and summary | none | Not started |
-| D | Auth backend: email, sign-up, reset, hardening, quotas | none | Not started |
-| E | Web auth and durable sessions | D | Not started |
-| F | iOS auth, share upload credential, Clerk removal on iOS | B, D, A | Not started |
-| G | Android auth parity | D | Not started |
-| H | Design system and redesign, iOS and web | A, E, F | Not started |
-| I | Server Clerk removal and cleanup | E, F, G, production verification | Not started |
-| J | Release: TestFlight build and QA | everything above | Not started |
+| A | iOS capture and results flow | none | Merged (#103) |
+| B | Agent access: scoped keys and CLI | none | Merged (#101) |
+| C | Pipeline reliability, auto title and summary | none | Merged (#100) |
+| D | Auth backend: email, sign-up, reset, hardening, quotas | none | Merged (#102) |
+| E | Web auth and durable sessions | D | Merged (#105) |
+| F | iOS auth, share upload credential, Clerk removal on iOS | B, D, A | Merged (#106) |
+| G | Android auth parity | D | Merged (#104) |
+| H | Design system and redesign, iOS and web | A, E, F | Merged (#107, #111) |
+| I | Server Clerk removal and cleanup | E, F, G, production verification | Merged (#110) |
+| J | Release: TestFlight build and QA | everything above | In progress |
 
 ### A. iOS capture and results flow
 
@@ -278,13 +278,19 @@ archive and export, upload to TestFlight, verify processing, and run comprehensi
 
 Handled by the lead only.
 
-1. Set `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `EMAIL_DELIVERY=resend` after D
-   merges. Send a real test email.
-2. Set `WEB_COOKIE_AUTH_ENABLED` and the Netlify `VITE_WEB_COOKIE_AUTH_ENABLED`
-   after E merges and is verified.
-3. Set `PUBLIC_SIGNUP_ENABLED` once the cap and reset flows are verified in
+1. Done: `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `EMAIL_DELIVERY=resend`, with
+   a real test email accepted by Resend.
+2. Done: `WEB_COOKIE_AUTH_ENABLED`, `RENDER_CLIENT_IP_ENABLED`, `OWNER_USER_ID`,
+   and `NETLIFY_PROXY_SIGNATURE_SECRET` on Render and Netlify. The startup log
+   confirms the signature verifies.
+3. Done: `CLERK_*` removed from Render after #110 deployed.
+4. Open: set `PUBLIC_SIGNUP_ENABLED` once the cap and reset flows are verified in
    production.
-4. Rotate the production database password after this work settles.
+5. Open, needs Leon: rotate the production database password, rotate the HafaPass
+   Resend webhook secret, delete the Clerk application, and remove
+   `VITE_CLERK_PUBLISHABLE_KEY` and `VITE_API_URL` from Netlify.
+6. Later: a migration dropping `users.clerk_id`, `auth_identities` Clerk rows, and
+   `account_deletion_requests.clerk_*`, at least 30 days after #110 (2026-12-05).
 
 ## After Leon tests the TestFlight build
 
