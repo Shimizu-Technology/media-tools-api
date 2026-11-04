@@ -54,8 +54,54 @@ struct ShareInboxStore {
         /// Set when "Automatically transcribe" was on as the account claimed this
         /// share. A link claimed with it off keeps waiting for a deliberate tap.
         var autoTranscribeRequested: Bool? = nil
+        /// Set when the extension is sending this audio itself. `ownerID` is then
+        /// the account whose capture key it used.
+        var directUpload: DirectUpload? = nil
 
         var resolvedKind: Kind { kind ?? .audio }
+    }
+
+    /// Tells the app not to upload a share a second time. It starts as a
+    /// reservation while the extension presigns, and gains the upload's details
+    /// the moment the transfer is about to start.
+    struct DirectUpload: Codable, Equatable {
+        /// An extension that died mid-presign must not hold its share forever.
+        static let reservationLifetime: TimeInterval = 60
+
+        let reservedAt: Date
+        var sessionIdentifier: String? = nil
+        var objectKey: String? = nil
+        var sizeBytes: Int64? = nil
+        var mimeType: String? = nil
+        /// The extension was still running when the bytes arrived, so iOS told it
+        /// rather than waking the app. A later import must not send them again.
+        var uploadFinished: Bool? = nil
+
+        var isStarted: Bool {
+            sessionIdentifier != nil && objectKey != nil && sizeBytes != nil && mimeType != nil
+        }
+
+        func isReservationActive(now: Date = Date()) -> Bool {
+            !isStarted && abs(now.timeIntervalSince(reservedAt)) < Self.reservationLifetime
+        }
+    }
+
+    /// Who finishes a direct upload. The extension and the app can each decide at the
+    /// same moment, and the server treats two objects as two uploads, so exactly one
+    /// of these is ever recorded for a share. It lasts as long as the share's folder,
+    /// across relaunches and retries. A share with no folder has no competing upload.
+    enum TransferClaim: Codable, Equatable {
+        /// The extension's bytes arrived. This object is the one to complete.
+        case extensionFinished(objectKey: String)
+        /// The app is sending the share itself. The extension's object is abandoned.
+        case appTookOver
+    }
+
+    enum TransferClaimResult: Equatable {
+        case held(TransferClaim)
+        case shareGone
+        /// Nothing could be read or written, such as before the first unlock.
+        case undetermined
     }
 
     let rootURL: URL
@@ -67,7 +113,7 @@ struct ShareInboxStore {
             self.rootURL = rootURL
         } else {
             guard let container = fileManager.containerURL(
-                forSecurityApplicationGroupIdentifier: "group.com.shimizu-technology.media-tools"
+                forSecurityApplicationGroupIdentifier: ShareDirectUpload.appGroupIdentifier
             ) else {
                 throw CocoaError(.fileNoSuchFile)
             }
@@ -106,7 +152,9 @@ struct ShareInboxStore {
     func stageFile(
         from sourceURL: URL,
         originalName: String,
-        contentTypeExtension: String? = nil
+        contentTypeExtension: String? = nil,
+        reservingDirectUploadFor directUploadOwnerID: String? = nil,
+        now: Date = Date()
     ) throws -> Item {
         let id = UUID()
         let directory = directoryURL(for: id)
@@ -132,8 +180,12 @@ struct ShareInboxStore {
             id: id,
             originalName: Self.displayName(safeName, fileExtension: fileExtension, fallback: storedName),
             storedName: storedName,
-            createdAt: Date(),
-            kind: kind
+            createdAt: now,
+            kind: kind,
+            ownerID: kind == .audio ? directUploadOwnerID : nil,
+            directUpload: kind == .audio && directUploadOwnerID != nil
+                ? DirectUpload(reservedAt: now)
+                : nil
         )
 
         try fileManager.createDirectory(
@@ -217,6 +269,52 @@ struct ShareInboxStore {
     /// share to whichever account happens to be signed in next.
     func update(_ item: Item) throws {
         try writeManifest(item, in: directoryURL(for: item.id))
+    }
+
+    /// Forgets a share by ID once the upload it fed has finished.
+    func removeItem(id: UUID) throws {
+        let directory = directoryURL(for: id)
+        guard fileManager.fileExists(atPath: directory.path) else { return }
+        try fileManager.removeItem(at: directory)
+    }
+
+    /// Returns whichever claim won, which may not be the one asked for.
+    ///
+    /// A hard link either appears complete or fails because a claim already exists,
+    /// including against another process. A plain exclusive create could be read half
+    /// written, and a process dying there would leave a claim no one can read.
+    func claimTransfer(_ claim: TransferClaim, shareID: UUID) -> TransferClaimResult {
+        let directory = directoryURL(for: shareID)
+        let manifest = directory.appendingPathComponent("item.json")
+        guard fileManager.fileExists(atPath: manifest.path) else { return .shareGone }
+        let candidate = directory.appendingPathComponent("transfer-claim.\(UUID().uuidString).tmp")
+        defer { try? fileManager.removeItem(at: candidate) }
+        do {
+            try JSONEncoder().encode(claim).write(
+                to: candidate,
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            )
+            try fileManager.linkItem(at: candidate, to: claimURL(for: shareID))
+            return .held(claim)
+        } catch {
+            if let winner = transferClaim(shareID: shareID) { return .held(winner) }
+            return fileManager.fileExists(atPath: manifest.path) ? .undetermined : .shareGone
+        }
+    }
+
+    func transferClaim(shareID: UUID) -> TransferClaim? {
+        guard let data = try? Data(contentsOf: claimURL(for: shareID)) else { return nil }
+        return try? JSONDecoder().decode(TransferClaim.self, from: data)
+    }
+
+    /// True when a claim file exists, readable or not. A claim that cannot be read
+    /// or decoded still means the other side took the share.
+    func hasTransferClaim(shareID: UUID) -> Bool {
+        fileManager.fileExists(atPath: claimURL(for: shareID).path)
+    }
+
+    private func claimURL(for id: UUID) -> URL {
+        directoryURL(for: id).appendingPathComponent("transfer-claim.json")
     }
 
     private func isComplete(_ item: Item) -> Bool {

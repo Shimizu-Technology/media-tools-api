@@ -7,6 +7,9 @@ import Foundation
 /// `-ui-test-signed-in` gives a valid session. Adding `-ui-test-expired-session`
 /// forces the startup refresh, and `-ui-test-stalled-network` makes it hang, which
 /// proves the workspace opens without waiting for the network.
+///
+/// `-ui-test-pending-bootstrap` instead gives only the journal build 13 leaves when
+/// a response is lost. The first refresh fails, as if offline, and the next succeeds.
 @MainActor
 struct UITestDeviceSessionFixture {
     static let ownerID = "ui-test-owner"
@@ -16,6 +19,18 @@ struct UITestDeviceSessionFixture {
 
     static var current: UITestDeviceSessionFixture? {
         let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-ui-test-pending-bootstrap") {
+            return UITestDeviceSessionFixture(
+                store: UITestDeviceSessionStore(
+                    stored: nil,
+                    pendingBootstrap: PendingDeviceSessionBootstrap(
+                        verifiedClerkID: "user_uiTestLegacy",
+                        nextRefreshToken: "mta_rt_ui-test-journal"
+                    )
+                ),
+                transport: UITestPendingBootstrapTransport()
+            )
+        }
         guard arguments.contains("-ui-test-signed-in") else { return nil }
         let expiry = arguments.contains("-ui-test-expired-session")
             ? Date().addingTimeInterval(-60)
@@ -42,18 +57,25 @@ struct UITestDeviceSessionFixture {
 @MainActor
 private final class UITestDeviceSessionStore: DeviceSessionStoring {
     private var stored: StoredDeviceSession?
+    private var pendingBootstrap: PendingDeviceSessionBootstrap?
     private var localOwners: [String: String] = [:]
 
-    init(stored: StoredDeviceSession) {
+    init(stored: StoredDeviceSession?, pendingBootstrap: PendingDeviceSessionBootstrap? = nil) {
         self.stored = stored
+        self.pendingBootstrap = pendingBootstrap
     }
 
     func load() -> StoredDeviceSession? { stored }
     func save(_ value: StoredDeviceSession) throws { stored = value }
-    func delete() { stored = nil }
-    func loadPendingBootstrap() throws -> PendingDeviceSessionBootstrap? { nil }
-    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws {}
-    func deletePendingBootstrap() {}
+    func delete() {
+        stored = nil
+        pendingBootstrap = nil
+    }
+    func loadPendingBootstrap() -> PendingBootstrapLoadResult {
+        pendingBootstrap.map(PendingBootstrapLoadResult.found) ?? .missing
+    }
+    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws { pendingBootstrap = value }
+    func deletePendingBootstrap() { pendingBootstrap = nil }
     func localOwnerID(for clerkID: String) -> String? { localOwners[clerkID] }
     func clerkID(forLocalOwnerID ownerID: String) -> String? {
         localOwners.first { $0.value == ownerID }?.key
@@ -73,6 +95,30 @@ private struct UITestDeviceSessionTransport: DeviceSessionTransport {
     }
 }
 
+private actor UITestPendingBootstrapTransport: DeviceSessionTransport {
+    private var attempts = 0
+
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        attempts += 1
+        guard attempts > 1 else {
+            // Slow enough that launch finishes first, as a real timeout would.
+            try await Task.sleep(for: .seconds(1))
+            throw URLError(.notConnectedToInternet)
+        }
+        let sent = request.httpBody
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] }
+        let body = try JSONSerialization.data(withJSONObject: [
+            "session_id": "ui-test-session",
+            "user_id": UITestDeviceSessionFixture.ownerID,
+            "access_token": "ui-test-access",
+            "access_expires_at": "2099-01-01T00:00:00Z",
+            "refresh_token": sent?["next_refresh_token"] ?? "",
+            "inactive_expires_at": "2099-01-01T00:00:00Z",
+        ])
+        return (body, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
 /// Puts a share in the real inbox before launch finishes, as the extension would.
 enum UITestShareFixture {
     static let linkTitle = "Fixture shared video"
@@ -88,6 +134,13 @@ enum UITestShareFixture {
            let url = URL(string: "https://youtu.be/ui-test") {
             _ = try? inbox.stageLink(url, title: linkTitle)
         }
+        // Work a retired-provider account left on this iPhone. See `/auth/me` below.
+        if arguments.contains("-ui-test-legacy-owned-share"),
+           let url = URL(string: "https://youtu.be/ui-test-legacy"),
+           var item = try? inbox.stageLink(url, title: linkTitle) {
+            item.ownerID = UITestAPIProtocol.legacyProviderID
+            try? inbox.update(item)
+        }
     }
 }
 
@@ -95,8 +148,18 @@ enum UITestShareFixture {
 /// the simulated upload accepted, so a test can watch the Library update itself.
 final class UITestAPIProtocol: URLProtocol {
     static let audioID = "ui-test-audio"
+    static let legacyProviderID = "user_uiTestLegacy"
     private static let lock = NSLock()
     private nonisolated(unsafe) static var acceptedAudioTitle: String?
+    private nonisolated(unsafe) static var accountProfileRequests = 0
+
+    /// The first request fails, as if offline, so a test can watch the app recover.
+    private static func nextAccountProfileRequest() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        accountProfileRequests += 1
+        return accountProfileRequests
+    }
 
     static func acceptAudio(title: String) {
         lock.lock()
@@ -117,7 +180,17 @@ final class UITestAPIProtocol: URLProtocol {
     override func startLoading() {
         guard let url = request.url else { return fail() }
         let path = url.path
-        if path.hasSuffix("/library/items") {
+        if path.hasSuffix("/auth/signup") || path.hasSuffix("/auth/password/forgot") {
+            respond(["message": "If this request is eligible, an email will arrive shortly"])
+        } else if path.hasSuffix("/auth/me") {
+            guard Self.nextAccountProfileRequest() > 1 else { return fail() }
+            respond([
+                "id": UITestDeviceSessionFixture.ownerID,
+                "email": "owner@example.com",
+                "name": "Owner",
+                "clerk_id": Self.legacyProviderID,
+            ])
+        } else if path.hasSuffix("/library/items") {
             respond(libraryList())
         } else if path.hasSuffix("/preferences") {
             respond(["favorite": false, "archived": false, "tags": []])

@@ -3,17 +3,6 @@ import Foundation
 /// App-wide configuration. Values come from the Xcode build settings / Info.plist
 /// or fall back to defaults for development.
 enum Configuration {
-    /// Clerk publishable key — set via CLERK_PUBLISHABLE_KEY in xcconfig or Info.plist.
-    static let clerkPublishableKey: String = {
-        if let key = configuredValue("CLERK_PUBLISHABLE_KEY") {
-            return key
-        }
-        // Clerk publishable keys are public client configuration, not secrets.
-        // Keep a runtime fallback so an archive cannot silently ship unable to
-        // refresh authentication if an external build setting is omitted.
-        return "pk_test_d2VsY29tZWQtZWFyd2lnLTg2LmNsZXJrLmFjY291bnRzLmRldiQ"
-    }()
-
     /// Media Tools API base URL.
     static let apiBaseURL: String = {
         if let url = configuredValue("API_BASE_URL") {
@@ -31,17 +20,12 @@ enum Configuration {
         return "https://media.shimizu-technology.com"
     }()
 
-    /// Keychain access group shared between the main app and share extension.
-    static let keychainAccessGroup = "group.com.shimizu-technology.media-tools"
-
-    /// App Group identifier for sharing data with extensions.
-    static let appGroupIdentifier = "group.com.shimizu-technology.media-tools"
-
-    /// Staged rollout. The server must also enable FIRST_PARTY_AUTH_ENABLED.
-    /// Missing build settings leave the existing Clerk path in place.
-    static let firstPartyIOSAuthEnabled: Bool = {
-        configuredValue("FIRST_PARTY_IOS_AUTH_ENABLED") == "YES"
-    }()
+    /// App Group shared with the share extension. It doubles as the Keychain
+    /// access group for the capture key: iOS treats every App Group an app belongs
+    /// to as an access group. Adding a `keychain-access-groups` entitlement instead
+    /// would make its first entry the default for new items, and the device session
+    /// is saved with no explicit group, so it would land where the extension can read.
+    static let appGroupIdentifier = ShareDirectUpload.appGroupIdentifier
 
     static let privacyURL = URL(string: "\(webAppURL)/privacy")!
     static let termsURL = URL(string: "\(webAppURL)/terms")!

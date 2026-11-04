@@ -7,22 +7,25 @@ implements it. Run `make ios-release-preflight` before an archive and again with
 ## Current release status
 
 - Version: `1.0`
-- Next TestFlight build: `13`
+- Next TestFlight build: set by the release lead; this source has not bumped it
 - Bundle ID: `com.ShimizuTechnology.MediaTools`
 - Apple team: `4T358A5S74`
 - Minimum OS: iOS 18.5
 - Release compiler: Xcode 26.6 / iOS 26.5 SDK
-- TestFlight: build 13 adds first-party email/password sign-in and password
-  management on top of the durable device sessions introduced in build 12.
-  Passwords are hashed with Argon2id on the API; plaintext passwords are never
-  stored on the device. Build 13 also keeps passkey sign-in
-  and enrollment, recovery codes, device management, and recoverable account
-  deletion. Clerk remains only as a migration bridge for an already-linked
-  account. Build 12 is the prior TestFlight baseline; build 11 introduced the Share Extension.
-  Before installing build 13, production must enable `CLERK_MIGRATION_ONLY`,
-  `FIRST_PARTY_AUTH_ENABLED`, and `FIRST_PARTY_PASSWORD_AUTH_ENABLED`; keep
-  browser cookie auth disabled until its
-  separate rollout is tested.
+- Sign-in: Media Tools owns email and password accounts, with sign-up, email
+  verification, password reset, and email change. Passkeys and recovery codes
+  stay available as secondary methods. There is no third-party login. Passwords are hashed with Argon2id on the API;
+  plaintext passwords are never stored on the device.
+- Updating from build 13: a stored session stays signed in, and recordings and AI
+  consent saved under the previous sign-in's user ID move to the same account.
+- Share uploads: the Share Extension holds a key limited to `capture:upload`,
+  starts the upload itself when AI consent and automatic transcription are on,
+  and iOS wakes the app to finish it. Anything else leaves the share in the inbox.
+
+Production must have `FIRST_PARTY_AUTH_ENABLED` and
+`FIRST_PARTY_PASSWORD_AUTH_ENABLED` on before distributing this build, plus the
+email settings in `docs/AUTH_API.md`. Create account appears only while the API
+reports `signup_enabled`.
 
 Apple requires iOS uploads to use the iOS 26 SDK or later as of April 28, 2026.
 See [Submitting to the App Store](https://developer.apple.com/app-store/submitting/).
@@ -72,8 +75,8 @@ linked to the user, not used for tracking:
 
 Do not declare analytics, advertising, location, contacts, purchases, financial
 information, or health data unless the implementation begins collecting them.
-Re-audit Clerk, OpenAI, OpenRouter, storage, and any new SDK before changing the
-shipping binary. Apple requires the answers to include third-party partners and
+The app embeds no third-party SDK. Re-audit OpenAI, OpenRouter, storage, email
+delivery, and any new SDK before changing the shipping binary. Apple requires the answers to include third-party partners and
 to stay current; see [App Privacy Details](https://developer.apple.com/app-store/app-privacy-details/).
 
 Set:
@@ -87,23 +90,17 @@ Set:
 
 Before selecting a build for public review:
 
-1. Confirm the production API has the existing account's exact Clerk identity,
-   then keep `CLERK_MIGRATION_ONLY` and `FIRST_PARTY_AUTH_ENABLED` enabled.
-   Enable `FIRST_PARTY_PASSWORD_AUTH_ENABLED` before distributing build 13.
-   Keep `WEB_COOKIE_AUTH_ENABLED` off for the iOS-only rollout and verify
-   readiness after each change.
-2. Confirm the Clerk migration bridge still advertises Apple and Google and
-   retains the iOS native-app mapping for this bundle ID. Update
-   `native-auth-release.json` only after confirming the mapping in Clerk's
-   Native Applications dashboard; the accepted source breadcrumb is exactly
-   `Clerk Dashboard > Configure > Native applications`.
-3. On a physical device, migrate the existing account, enroll a passkey, save
-   recovery codes, sign out, sign in with the passkey and one recovery code,
-   refresh after access expiry, share from Voice Memos and Files, and verify
-   account deletion recovery.
-4. Create a dedicated reviewer account through invite-only onboarding, verify
-   its login and recovery factors, and supply its non-expiring credentials in
-   App Review Information. Keep credentials out of this repository.
+1. Keep `FIRST_PARTY_AUTH_ENABLED` and `FIRST_PARTY_PASSWORD_AUTH_ENABLED`
+   enabled, confirm email delivery works, and verify readiness after each change.
+2. Confirm the signed archive passes preflight, including no third-party sign-in
+   SDK or entitlement and the App Group on both the app and the Share Extension.
+3. On a physical device, install over the previous build and confirm it stays
+   signed in with its recordings. Then sign up, verify, reset a password, change
+   email, sign out, sign in with a password, passkey, and recovery code, refresh
+   after access expiry, share from Voice Memos and Files with the app closed, and
+   verify account deletion recovery.
+4. Create a dedicated reviewer account, verify its login, and supply its
+   non-expiring credentials in App Review Information. Keep credentials out of this repository.
 5. Complete the Digital Services Act trader declaration for the actual business
    and confirm the support page exposes the contact information required for the
    selected storefronts. Do not publish a private address or phone number from

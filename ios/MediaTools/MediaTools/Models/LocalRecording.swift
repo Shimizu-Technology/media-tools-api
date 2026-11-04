@@ -33,13 +33,17 @@ struct LocalRecording: Identifiable, Codable, Equatable, Sendable {
     var uploadMimeType: String?
     var uploadTaskIdentifier: Int?
     var remoteTranscriptionID: String? = nil
-    /// Clerk user ID that owns this device copy. Older manifests decode this
-    /// as nil and are claimed by the first signed-in account after migration.
+    /// Account that owns this device copy. Older manifests decode this as nil and
+    /// are claimed by the first signed-in account. A build before first-party
+    /// sign-in may have saved a provider ID here; `migrateOwnerID` rewrites it.
     var ownerID: String? = nil
     /// Set when "Automatically transcribe" was on as this recording was saved.
     /// Older manifests decode as nil: those recordings were saved under a promise
     /// that audio is sent only on request, so they keep their manual button.
     var autoTranscribeRequested: Bool? = nil
+    /// The session of an upload the share extension started. While this is set
+    /// and the state is `.uploading`, the transfer is running outside this app.
+    var shareUploadSessionIdentifier: String? = nil
 
     var displayTitle: String {
         if let originalFilename, !originalFilename.isEmpty {

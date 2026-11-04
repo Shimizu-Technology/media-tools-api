@@ -1,7 +1,6 @@
 import Foundation
 import Observation
 import Security
-import ClerkKit
 
 /// Credentials issued by the Media Tools API after a verified first-party sign-in.
 /// These are opaque server values, not JWTs to decode on the device.
@@ -24,6 +23,10 @@ struct DeviceSessionPair: Codable, Equatable {
 }
 
 enum DeviceSessionSource: String, Codable, Equatable {
+    /// Written by build 13 and earlier for a session bootstrapped through the
+    /// retired provider. Decoding it must keep working: this type is read with
+    /// `try?`, so dropping the case would sign that person out. It is converted
+    /// on load and never written again.
     case clerk
     case passkey
     case recoveryCode
@@ -32,6 +35,7 @@ enum DeviceSessionSource: String, Codable, Equatable {
 struct StoredDeviceSession: Codable, Equatable {
     var pair: DeviceSessionPair
     var source: DeviceSessionSource
+    /// Build 13 and earlier only. Converted into a local owner mapping on load.
     var verifiedClerkID: String?
     /// Written before refresh so a lost response can retry the same rotation.
     var pendingNextRefreshToken: String?
@@ -39,7 +43,7 @@ struct StoredDeviceSession: Codable, Equatable {
     var pendingRevocation: Bool?
 
     init(pair: DeviceSessionPair,
-         source: DeviceSessionSource = .clerk,
+         source: DeviceSessionSource = .passkey,
          verifiedClerkID: String? = nil,
          pendingNextRefreshToken: String? = nil,
          pendingRevocation: Bool? = nil) {
@@ -62,7 +66,10 @@ struct StoredDeviceSession: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         pair = try container.decode(DeviceSessionPair.self, forKey: .pair)
         verifiedClerkID = try container.decodeIfPresent(String.self, forKey: .verifiedClerkID)
-        source = try container.decodeIfPresent(DeviceSessionSource.self, forKey: .source)
+        // A source this build does not recognize must not read as "no session".
+        // The refresh token is what authenticates; the source is only a label.
+        let rawSource = try container.decodeIfPresent(String.self, forKey: .source)
+        source = rawSource.flatMap(DeviceSessionSource.init(rawValue:))
             ?? (verifiedClerkID == nil ? .passkey : .clerk)
         pendingNextRefreshToken = try container.decodeIfPresent(String.self, forKey: .pendingNextRefreshToken)
         pendingRevocation = try container.decodeIfPresent(Bool.self, forKey: .pendingRevocation)
@@ -77,22 +84,31 @@ struct StoredDeviceSession: Codable, Equatable {
         try container.encodeIfPresent(pendingRevocation, forKey: .pendingRevocation)
     }
 
-    var isClerkBacked: Bool {
-        source == .clerk && verifiedClerkID != nil
-    }
-
-    func belongs(to clerkID: String) -> Bool {
-        source == .clerk && verifiedClerkID == clerkID
+    /// Whether this value still carries anything from the retired provider.
+    var needsLegacyConversion: Bool {
+        source == .clerk || verifiedClerkID != nil
     }
 }
 
+/// Build 13 saved this before asking the server for a first session. `nextRefreshToken`
+/// is the session's first refresh credential, so if the response was lost, this is
+/// the only copy of a session the server already created. Nothing writes a new one.
 struct PendingDeviceSessionBootstrap: Codable, Equatable {
     let verifiedClerkID: String
     let nextRefreshToken: String
+    /// Written before recovery refreshes, so a second lost response repeats the same
+    /// rotation. Older builds ignore this key.
+    var recoverySuccessorToken: String? = nil
 }
 
-/// App-only Keychain item. The future Share Extension must not receive this
-/// credential; its signed-out capture route remains authentication-free.
+enum PendingBootstrapLoadResult: Equatable {
+    case found(PendingDeviceSessionBootstrap)
+    case missing
+    case unavailable
+}
+
+/// App-only Keychain item. The Share Extension never receives this credential;
+/// it has its own capture-only key. See `ShareUploadCredential`.
 /// A Keychain read has three real outcomes. "Unavailable" usually means the
 /// iPhone has not been unlocked since restart. Treating it like "missing" would
 /// sign a person out of a session that is still sitting safely in the Keychain.
@@ -108,26 +124,41 @@ protocol DeviceSessionStoring {
     func loadResult() -> DeviceSessionLoadResult
     func save(_ value: StoredDeviceSession) throws
     func delete()
-    func loadPendingBootstrap() throws -> PendingDeviceSessionBootstrap?
-    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws
-    func deletePendingBootstrap()
     func localOwnerID(for clerkID: String) -> String?
     func clerkID(forLocalOwnerID ownerID: String) -> String?
     func saveLocalOwnerID(_ ownerID: String, for clerkID: String)
     func removeLocalOwnerID(for clerkID: String)
+    func loadPendingBootstrap() -> PendingBootstrapLoadResult
+    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws
+    func deletePendingBootstrap()
 }
 
 extension DeviceSessionStoring {
     func loadResult() -> DeviceSessionLoadResult {
         load().map(DeviceSessionLoadResult.found) ?? .missing
     }
+
+    func loadPendingBootstrap() -> PendingBootstrapLoadResult { .missing }
+    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws {}
+    func deletePendingBootstrap() {}
 }
 
 struct DeviceSessionKeychainStore: DeviceSessionStoring {
     private let service = "com.shimizu-technology.media-tools.device-session"
-    private let account = "first-party-ios-v1"
-    private let pendingBootstrapAccount = "first-party-ios-bootstrap-v1"
+    private let account: String
+    /// Build 13's bootstrap journal, under this same service. A test supplies its
+    /// own account, so a run on a real device can never touch a pending journal.
+    static let defaultPendingBootstrapAccount = "first-party-ios-bootstrap-v1"
+    private let pendingBootstrapAccount: String
     private let ownerMappingsKey = "verifiedLocalOwnerMappings.v1"
+
+    init(
+        account: String = "first-party-ios-v1",
+        pendingBootstrapAccount: String = Self.defaultPendingBootstrapAccount
+    ) {
+        self.account = account
+        self.pendingBootstrapAccount = pendingBootstrapAccount
+    }
 
     // This metadata grants no API access. Keep it separate from credentials:
     // signing out must not disconnect recordings already migrated locally.
@@ -192,18 +223,23 @@ struct DeviceSessionKeychainStore: DeviceSessionStoring {
 
     func delete() {
         SecItemDelete(baseQuery(account: account) as CFDictionary)
+        deletePendingBootstrap()
     }
 
-    func loadPendingBootstrap() throws -> PendingDeviceSessionBootstrap? {
+    func loadPendingBootstrap() -> PendingBootstrapLoadResult {
         var query = baseQuery(account: pendingBootstrapAccount)
         query[kSecReturnData as String] = true
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let data = result as? Data else {
-            throw KeychainFailure(status: status)
+        if status == errSecItemNotFound { return .missing }
+        #if targetEnvironment(simulator)
+        if status == errSecMissingEntitlement { return .missing }
+        #endif
+        guard status == errSecSuccess, let data = result as? Data else { return .unavailable }
+        guard let value = try? JSONDecoder().decode(PendingDeviceSessionBootstrap.self, from: data) else {
+            return .missing
         }
-        return try JSONDecoder().decode(PendingDeviceSessionBootstrap.self, from: data)
+        return .found(value)
     }
 
     func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws {
@@ -212,13 +248,7 @@ struct DeviceSessionKeychainStore: DeviceSessionStoring {
             baseQuery(account: pendingBootstrapAccount) as CFDictionary,
             [kSecValueData as String: data] as CFDictionary
         )
-        if status == errSecSuccess { return }
-        guard status == errSecItemNotFound else { throw KeychainFailure(status: status) }
-        var attributes = baseQuery(account: pendingBootstrapAccount)
-        attributes[kSecValueData as String] = data
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let addStatus = SecItemAdd(attributes as CFDictionary, nil)
-        guard addStatus == errSecSuccess else { throw KeychainFailure(status: addStatus) }
+        guard status == errSecSuccess else { throw KeychainFailure(status: status) }
     }
 
     func deletePendingBootstrap() {
@@ -240,17 +270,17 @@ protocol DeviceSessionTransport {
 
 extension URLSession: DeviceSessionTransport {}
 
+/// Identities build 13 retired locally: a sign-out or deletion it could not finish
+/// against the provider. A stored session under one of these must not reopen.
 @MainActor
-protocol DeletedClerkIdentityStoring: AnyObject {
+protocol RetiredLegacyIdentityStoring: AnyObject {
     func contains(_ clerkID: String) -> Bool
-    func insert(_ clerkID: String)
-    func remove(_ clerkID: String)
-    func removeAll(except clerkID: String?)
+    func removeAll()
 }
 
 @MainActor
-final class DeletedClerkIdentityStore: DeletedClerkIdentityStoring {
-    static let shared = DeletedClerkIdentityStore()
+final class RetiredLegacyIdentityStore: RetiredLegacyIdentityStoring {
+    static let shared = RetiredLegacyIdentityStore()
 
     private let defaults: UserDefaults
     private let key = "locallyDeletedClerkIdentityIDs.v1"
@@ -259,38 +289,12 @@ final class DeletedClerkIdentityStore: DeletedClerkIdentityStoring {
         self.defaults = defaults
     }
 
-    func contains(_ clerkID: String) -> Bool { values.contains(clerkID) }
-
-    func insert(_ clerkID: String) {
-        var updated = values
-        updated.insert(clerkID)
-        defaults.set(updated.sorted(), forKey: key)
+    func contains(_ clerkID: String) -> Bool {
+        (defaults.stringArray(forKey: key) ?? []).contains(clerkID)
     }
 
-    func remove(_ clerkID: String) {
-        var updated = values
-        updated.remove(clerkID)
-        persist(updated)
-    }
-
-    func removeAll(except clerkID: String?) {
-        guard let clerkID else {
-            defaults.removeObject(forKey: key)
-            return
-        }
-        persist(values.contains(clerkID) ? [clerkID] : [])
-    }
-
-    private var values: Set<String> {
-        Set(defaults.stringArray(forKey: key) ?? [])
-    }
-
-    private func persist(_ values: Set<String>) {
-        if values.isEmpty {
-            defaults.removeObject(forKey: key)
-        } else {
-            defaults.set(values.sorted(), forKey: key)
-        }
+    func removeAll() {
+        defaults.removeObject(forKey: key)
     }
 }
 
@@ -307,8 +311,7 @@ final class DeviceSessionController {
         if let fixture = UITestDeviceSessionFixture.current {
             return DeviceSessionController(
                 transport: fixture.transport,
-                store: fixture.store,
-                enabled: true
+                store: fixture.store
             )
         }
         #endif
@@ -318,10 +321,10 @@ final class DeviceSessionController {
     private let store: any DeviceSessionStoring
     private let transport: any DeviceSessionTransport
     private let baseURL: URL
-    private let enabled: Bool
-    private let deletedClerkIdentities: any DeletedClerkIdentityStoring
+    private let retiredLegacyIdentities: any RetiredLegacyIdentityStoring
     private var stored: StoredDeviceSession?
     private var refreshTask: Task<DeviceSessionPair, Error>?
+    private var pendingBootstrapRecovery: Task<Void, Never>?
     private var generation = 0
 
     private(set) var activeUserID: String?
@@ -329,23 +332,26 @@ final class DeviceSessionController {
     private(set) var sessionRevision = 0
     /// The Keychain could not answer, so "no session" is not actually known yet.
     private(set) var isSessionStoreUnavailable = false
+    /// Build 13 may have left a session here that only the server can confirm, and
+    /// the server could not be reached. Asking this person to sign in would be wrong.
+    private(set) var isAwaitingSessionRecovery = false
+
+    /// Called whenever this credential stops being usable, however that happened.
+    /// The share extension's key must not outlive the session that minted it.
+    @ObservationIgnored var onCredentialEnded: (() -> Void)?
+    /// Runs while a session can still authenticate, just before it is revoked.
+    /// Keys can only be revoked by a session, so this is the last chance to.
+    @ObservationIgnored var beforeSessionRevocation: ((_ bearerToken: String, _ ownerID: String) async -> Void)?
 
     init(transport: any DeviceSessionTransport = URLSession.shared,
          baseURL: URL = URL(string: Configuration.apiBaseURL + "/api/v1")!,
          store: (any DeviceSessionStoring)? = nil,
-         deletedClerkIdentities: (any DeletedClerkIdentityStoring)? = nil,
-         enabled: Bool = Configuration.firstPartyIOSAuthEnabled) {
+         retiredLegacyIdentities: (any RetiredLegacyIdentityStoring)? = nil) {
         self.transport = transport
         self.baseURL = baseURL
         self.store = store ?? DeviceSessionKeychainStore()
-        self.deletedClerkIdentities = deletedClerkIdentities ?? DeletedClerkIdentityStore.shared
-        self.enabled = enabled
-        // Keep the verified local-owner mapping available during an iOS flag
-        // rollback without ever using its first-party bearer credential.
+        self.retiredLegacyIdentities = retiredLegacyIdentities ?? RetiredLegacyIdentityStore.shared
         applyStoreRead(self.store.loadResult())
-        if let stored, stored.source == .clerk, let clerkID = stored.verifiedClerkID {
-            self.store.saveLocalOwnerID(stored.pair.userID, for: clerkID)
-        }
     }
 
     /// Takes a stored session as the workspace owner without touching the
@@ -354,10 +360,14 @@ final class DeviceSessionController {
     private func applyStoreRead(_ result: DeviceSessionLoadResult) {
         switch result {
         case .found(let session):
-            stored = session
+            let current = convertedFromLegacySource(session)
+            stored = current
+            // Build 13 saved the session, then ended before removing its journal.
+            // That token may have rotated since, and reusing one revokes the device.
+            store.deletePendingBootstrap()
             isSessionStoreUnavailable = false
-            if enabled, session.pendingRevocation != true, !isRetired(session) {
-                activeUserID = session.pair.userID
+            if current.pendingRevocation != true {
+                activeUserID = current.pair.userID
             }
         case .missing:
             stored = nil
@@ -368,9 +378,29 @@ final class DeviceSessionController {
         }
     }
 
-    private func isRetired(_ session: StoredDeviceSession) -> Bool {
-        guard session.source == .clerk, let clerkID = session.verifiedClerkID else { return false }
-        return deletedClerkIdentities.contains(clerkID)
+    /// A session stored by build 13 through the retired provider keeps working
+    /// after the update: its refresh token is an ordinary first-party credential.
+    ///
+    /// The provider identity moves to the local owner mapping, because recordings
+    /// and consent saved under it are still keyed by that ID. `.passkey` is the
+    /// value older builds understand, so a rollback still decodes this session.
+    /// If the save fails the conversion runs again on the next read.
+    private func convertedFromLegacySource(_ session: StoredDeviceSession) -> StoredDeviceSession {
+        guard session.needsLegacyConversion else { return session }
+        var converted = session
+        if let clerkID = session.verifiedClerkID {
+            store.saveLocalOwnerID(session.pair.userID, for: clerkID)
+            // A sign-out or deletion build 13 had not finished stays finished.
+            if retiredLegacyIdentities.contains(clerkID) {
+                converted.pendingRevocation = true
+            }
+        }
+        converted.source = .passkey
+        converted.verifiedClerkID = nil
+        if (try? store.save(converted)) != nil {
+            retiredLegacyIdentities.removeAll()
+        }
+        return converted
     }
 
     /// Re-reads only after a failed read. Called on every foreground, because
@@ -383,145 +413,57 @@ final class DeviceSessionController {
         sessionRevision += 1
     }
 
-    /// Clerk's nil user can only be trusted after it finishes hydrating its
-    /// cache. Sign-out blocks are released here, without rebuilding the workspace.
-    func clerkFinishedLoading(clerkID: String?) {
-        deletedClerkIdentities.removeAll(except: clerkID)
+    /// Local recordings and consent that may still be keyed by the provider ID
+    /// this account used before. Moving them is repeatable and safe: the mapping
+    /// was verified by the server for exactly this account.
+    var verifiedMigration: (clerkID: String, userID: String)? {
+        guard let stored, stored.pendingRevocation != true,
+              let clerkID = store.clerkID(forLocalOwnerID: stored.pair.userID) else { return nil }
+        return (clerkID, stored.pair.userID)
     }
 
-    var verifiedMigration: (clerkID: String, userID: String)? {
-        guard let stored, stored.source == .clerk, let clerkID = stored.verifiedClerkID,
-              stored.pendingRevocation != true else { return nil }
-        return (clerkID, stored.pair.userID)
+    /// Saves a mapping from `GET /auth/me`, for a recording saved before this
+    /// iPhone ever had a device session. Only the server can say the two match.
+    func adoptServerVerifiedLegacyIdentity(_ clerkID: String, ownerID: String) {
+        guard stored?.pair.userID == ownerID, stored?.pendingRevocation != true else { return }
+        store.saveLocalOwnerID(ownerID, for: clerkID)
     }
 
     var storedUserID: String? { stored?.pair.userID }
 
+    /// Lets the devices list mark this iPhone and keep it from being revoked there.
+    var currentSessionID: String? { stored?.pair.sessionID }
+
     var hasNativeFirstPartySession: Bool {
-        guard let stored, stored.pendingRevocation != true else { return false }
-        return stored.source != .clerk
+        guard let stored else { return false }
+        return stored.pendingRevocation != true
     }
 
-    func clerkIDForFallbackOwner(_ ownerID: String) -> String? {
-        if let clerkID = Clerk.shared.user?.id,
-           store.localOwnerID(for: clerkID) == ownerID { return clerkID }
-        return store.clerkID(forLocalOwnerID: ownerID)
-    }
-
-    func markLocallyDeletedClerkIdentity(_ clerkID: String) {
-        deletedClerkIdentities.insert(clerkID)
-    }
-
-    func clearLocallyDeletedClerkIdentity(_ clerkID: String) {
-        deletedClerkIdentities.remove(clerkID)
-    }
-
-    func fallbackOwnerID(for clerkID: String?) -> String? {
-        guard let clerkID else { return nil }
-        return store.localOwnerID(for: clerkID) ?? clerkID
-    }
-
-    /// A 401 may retry through Clerk only when that Clerk account resolves to
-    /// the same stable owner as the rejected device credential or request.
-    func canFallbackToClerk(clerkID: String, expectedOwnerID: String?) -> Bool {
-        guard !deletedClerkIdentities.contains(clerkID) else { return false }
-        let requestOwnerID = expectedOwnerID ?? activeUserID ?? stored?.pair.userID
-        guard let requestOwnerID else { return true }
-        let clerkOwnerID = fallbackOwnerID(for: clerkID)
-        return requestOwnerID == clerkOwnerID || requestOwnerID == clerkID
-    }
-
-    /// Called before exposing an account workspace. A different Clerk account
-    /// suspends the old device credential rather than borrowing its local data.
-    func activate(clerkID: String?) async -> String? {
-        await activate(clerkID: clerkID, clerkIsLoaded: Clerk.shared.isLoaded)
-    }
-
-    func activate(clerkID: String?, clerkIsLoaded: Bool) async -> String? {
+    /// Called before exposing an account workspace.
+    func activate() async -> String? {
         reloadStoredSessionIfUnavailable()
-        // The session may still be in the locked Keychain. Bootstrapping now
-        // would replace it with a second session for the same device.
+        // The session may still be in the locked Keychain. Nothing is known yet,
+        // and the local recordings stay exactly where they are.
         if isSessionStoreUnavailable { return nil }
-
-        // A nil user is authoritative only after Clerk has finished hydrating
-        // its local cache. Preserve sign-out and deletion intent during the
-        // earlier nil state so a cached identity cannot reappear on relaunch.
-        if clerkID != nil || clerkIsLoaded {
-            deletedClerkIdentities.removeAll(except: clerkID)
-        }
-
-        let hasUsableNativeSession: Bool
-        if let stored {
-            hasUsableNativeSession = enabled
-                && stored.pendingRevocation != true
-                && stored.source != .clerk
-        } else {
-            hasUsableNativeSession = false
-        }
-
-        // A retired Clerk subject may remain cached during an outage. It can
-        // never bootstrap or reopen a fallback workspace. A durable native
-        // session remains authoritative after Clerk detachment, even while
-        // clearing that stale provider cache is temporarily unavailable.
-        if !hasUsableNativeSession,
-           await rejectRetiredClerkIdentity(clerkID) {
-            return nil
-        }
-        guard enabled else {
-            activeUserID = fallbackOwnerID(for: clerkID)
-            return activeUserID
+        if stored == nil {
+            await recoverPendingBootstrap()
+            if isSessionStoreUnavailable || isAwaitingSessionRecovery {
+                activeUserID = nil
+                return nil
+            }
         }
         if let stored, stored.pendingRevocation == true {
             do {
                 try await revokeAndClear()
             } catch {
                 // A suspended credential is never used for the workspace.
-                // Clerk can still serve a currently signed-in account.
-                let ownerID = clerkID.flatMap { stored.belongs(to: $0) ? stored.pair.userID : fallbackOwnerID(for: $0) }
-                activeUserID = ownerID
-                return ownerID
-            }
-        }
-        if needsSignIn {
-            guard clerkID != nil else {
                 activeUserID = nil
                 return nil
             }
-            clear()
-            if await rejectRetiredClerkIdentity(clerkID) { return nil }
         }
-        if let clerkID, let stored, stored.source == .clerk, !stored.belongs(to: clerkID) {
-            do {
-                try suspendForRevocation(stored)
-            } catch {
-                needsSignIn = true
-            }
-            activeUserID = fallbackOwnerID(for: clerkID)
-            return activeUserID
-        }
-        if stored == nil, let clerkID {
-            do {
-                try await bootstrap(verifiedClerkID: clerkID)
-            } catch {
-                // A missing route or temporary outage can use the verified
-                // migration fallback. Explicit identity rejection must fail
-                // closed because it also means the Clerk link was detached.
-                if Self.allowsClerkWorkspaceFallback(after: error),
-                   let verifiedOwnerID = store.localOwnerID(for: clerkID) {
-                    activeUserID = verifiedOwnerID
-                } else {
-                    activeUserID = nil
-                    if Self.shouldClearRejectedClerkSession(after: error),
-                       Clerk.shared.user?.id == clerkID {
-                        try? await Clerk.shared.auth.signOut()
-                    }
-                }
-                return activeUserID
-            }
-        }
-        guard let stored else {
-            activeUserID = fallbackOwnerID(for: clerkID)
-            return activeUserID
+        guard !needsSignIn, let stored else {
+            activeUserID = nil
+            return nil
         }
         if stored.pair.accessExpiresAt <= Date().addingTimeInterval(60) {
             do {
@@ -530,57 +472,20 @@ final class DeviceSessionController {
                 // Preserve the local session and recordings during a network
                 // outage. A later API request retries the same rotation.
                 if needsSignIn {
-                    if let clerkID {
-                        clear()
-                        if await rejectRetiredClerkIdentity(clerkID) { return nil }
-                        try? await bootstrap(verifiedClerkID: clerkID)
-                    } else {
-                        activeUserID = nil
-                        return nil
-                    }
+                    activeUserID = nil
+                    return nil
                 }
             }
         }
-        if self.stored == nil,
-           await rejectRetiredClerkIdentity(clerkID) {
-            return nil
-        }
-        activeUserID = self.stored?.pair.userID ?? fallbackOwnerID(for: clerkID)
+        activeUserID = self.stored?.pair.userID
         return activeUserID
     }
 
-    /// Prevent a locally retired provider identity from authenticating through
-    /// any Clerk bootstrap or fallback path. A successful local Clerk sign-out
-    /// releases ordinary sign-out blocks; deletion and detachment remain safe
-    /// because the server has already removed that provider link.
-    private func rejectRetiredClerkIdentity(_ clerkID: String?) async -> Bool {
-        guard let clerkID, deletedClerkIdentities.contains(clerkID) else {
-            return false
-        }
-        activeUserID = nil
-        if Clerk.shared.user?.id == clerkID {
-            try? await Clerk.shared.auth.signOut()
-            if Clerk.shared.user?.id != clerkID {
-                deletedClerkIdentities.remove(clerkID)
-            }
-        }
-        return true
-    }
-
-    /// Returns nil only when the staged client has no first-party credential.
+    /// Returns nil when this client has no first-party credential.
     func accessToken(expectedOwnerID: String?, forceRefresh: Bool,
                      forRevocation: Bool = false) async throws -> String? {
-        guard enabled, let stored else { return nil }
+        guard let stored else { return nil }
         if stored.pendingRevocation == true && !forRevocation { return nil }
-        if stored.source == .clerk,
-           let verifiedClerkID = stored.verifiedClerkID,
-           let currentClerkID = Clerk.shared.user?.id,
-           currentClerkID != verifiedClerkID,
-           !(forRevocation && stored.pendingRevocation == true) {
-            throw APIError.authenticationRequired(
-                message: "The signed-in account changed. Switch back to continue this upload."
-            )
-        }
         guard expectedOwnerID == nil || expectedOwnerID == stored.pair.userID else {
             throw APIError.authenticationRequired(message: "The signed-in account changed. Switch back to continue this upload.")
         }
@@ -597,13 +502,14 @@ final class DeviceSessionController {
         stored = nil
         activeUserID = nil
         needsSignIn = false
+        isAwaitingSessionRecovery = false
         store.delete()
-        store.deletePendingBootstrap()
         sessionRevision += 1
+        onCredentialEnded?()
     }
 
     func prepareForNewNativeSession() async throws {
-        guard enabled, stored != nil else { return }
+        guard stored != nil else { return }
         guard stored?.pendingRevocation != true else {
             throw APIError.authenticationRequired(message: "Finish signing out before switching accounts.")
         }
@@ -614,21 +520,18 @@ final class DeviceSessionController {
     }
 
     func replaceSession(pair: DeviceSessionPair,
-                        source: DeviceSessionSource,
-                        verifiedClerkID: String? = nil) async throws {
+                        source: DeviceSessionSource) async throws {
         if let stored, stored.pair.sessionID != pair.sessionID {
             guard stored.pendingRevocation != true else {
                 throw APIError.authenticationRequired(message: "Finish signing out before switching accounts.")
             }
             try await revokeAndClear()
         }
-        try saveSession(pair: pair, source: source, verifiedClerkID: verifiedClerkID)
+        try saveSession(pair: pair, source: source)
     }
 
     func saveSession(pair: DeviceSessionPair,
-                     source: DeviceSessionSource,
-                     verifiedClerkID: String? = nil) throws {
-        guard enabled else { return }
+                     source: DeviceSessionSource) throws {
         guard stored == nil || stored?.pair.sessionID == pair.sessionID else {
             throw APIError.authenticationRequired(message: "Sign out before switching accounts.")
         }
@@ -639,20 +542,17 @@ final class DeviceSessionController {
               !pair.accessToken.isEmpty, !pair.refreshToken.isEmpty else {
             throw APIError.invalidResponse
         }
-        guard source != .clerk || verifiedClerkID != nil else {
-            throw APIError.invalidResponse
-        }
+        guard source != .clerk else { throw APIError.invalidResponse }
         let value = StoredDeviceSession(
             pair: pair,
             source: source,
-            verifiedClerkID: verifiedClerkID,
+            verifiedClerkID: nil,
             pendingNextRefreshToken: nil,
             pendingRevocation: nil
         )
         try store.save(value)
-        if source == .clerk, let verifiedClerkID {
-            store.saveLocalOwnerID(pair.userID, for: verifiedClerkID)
-        }
+        store.deletePendingBootstrap()
+        isAwaitingSessionRecovery = false
         stored = value
         activeUserID = pair.userID
         needsSignIn = false
@@ -662,52 +562,10 @@ final class DeviceSessionController {
         refreshTask = nil
     }
 
-    func removeLocalOwnerMapping(clerkID: String) {
-        store.removeLocalOwnerID(for: clerkID)
-    }
-
     func removeLocalOwnerMappings(ownerID: String) {
         while let clerkID = store.clerkID(forLocalOwnerID: ownerID) {
             store.removeLocalOwnerID(for: clerkID)
         }
-    }
-
-    /// Preserve the device session while removing every local dependency on
-    /// Clerk after the server confirms its one-way provider detachment.
-    func markClerkDetached(expectedOwnerID: String) throws {
-        guard var value = stored, value.pendingRevocation != true else {
-            throw APIError.authenticationRequired(message: "Sign in again before disconnecting the old sign-in.")
-        }
-        guard value.pair.userID == expectedOwnerID else {
-            throw APIError.authenticationRequired(message: "The signed-in account changed. Switch back and try again.")
-        }
-        var changed = false
-        while let clerkID = store.clerkID(forLocalOwnerID: expectedOwnerID) {
-            store.removeLocalOwnerID(for: clerkID)
-            changed = true
-        }
-        if let clerkID = value.verifiedClerkID {
-            store.removeLocalOwnerID(for: clerkID)
-            changed = true
-        }
-        if value.source == .clerk {
-            // Detachment is permitted only after a passkey exists. Reuse the
-            // already-shipped passkey source value so a rollback build can
-            // still decode and use this durable device session.
-            value.source = .passkey
-            changed = true
-        }
-        if value.verifiedClerkID != nil {
-            value.verifiedClerkID = nil
-            changed = true
-        }
-        guard changed else { return }
-        if stored != value {
-            try store.save(value)
-            stored = value
-        }
-        generation += 1
-        sessionRevision += 1
     }
 
     func revokeAndClear() async throws {
@@ -765,6 +623,7 @@ final class DeviceSessionController {
         refreshTask = nil
         activeUserID = nil
         needsSignIn = false
+        onCredentialEnded?()
     }
 
     private func revoke(sessionID: String, forceRefresh: Bool) async throws {
@@ -772,6 +631,9 @@ final class DeviceSessionController {
                                                 forceRefresh: forceRefresh,
                                                 forRevocation: true) else {
             throw APIError.authenticationRequired(message: "Sign in to finish signing out.")
+        }
+        if let ownerID = stored?.pair.userID {
+            await beforeSessionRevocation?(token, ownerID)
         }
         var request = URLRequest(url: baseURL.appendingPathComponent("auth/sessions/\(sessionID)"))
         request.httpMethod = "DELETE"
@@ -785,111 +647,82 @@ final class DeviceSessionController {
         }
     }
 
-    private func bootstrap(verifiedClerkID: String) async throws {
-        guard let session = Clerk.shared.session,
-              session.user?.id == verifiedClerkID else {
-            throw APIError.authenticationRequired(message: "Sign in to connect this device.")
+    /// Not tied to the caller, because cancelling the request would leave a rotation
+    /// unconfirmed for no reason. Concurrent activations share one recovery.
+    private func recoverPendingBootstrap() async {
+        if let pendingBootstrapRecovery {
+            await pendingBootstrapRecovery.value
+            return
         }
-        let clerkToken: String?
-        do {
-            clerkToken = try await session.getToken()
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            if Clerk.shared.session?.id == session.id,
-               Clerk.shared.session?.user?.id == verifiedClerkID {
-                throw APIError.authenticationTemporarilyUnavailable(
-                    message: "The sign-in service is temporarily unavailable. Media Tools will retry."
-                )
-            }
-            throw APIError.authenticationRequired(message: "Sign in to connect this device.")
-        }
-        guard let clerkToken, !clerkToken.isEmpty,
-              Clerk.shared.session?.id == session.id,
-              Clerk.shared.session?.user?.id == verifiedClerkID else {
-            throw APIError.authenticationRequired(message: "Sign in to connect this device.")
-        }
-        try await bootstrap(
-            verifiedClerkID: verifiedClerkID,
-            clerkToken: clerkToken,
-            currentClerkID: { Clerk.shared.session?.user?.id }
-        )
+        let task = Task { await recoverPendingBootstrapOnce() }
+        pendingBootstrapRecovery = task
+        await task.value
+        pendingBootstrapRecovery = nil
     }
 
-    func bootstrapForTesting(verifiedClerkID: String, clerkToken: String) async throws {
-        try await bootstrap(
-            verifiedClerkID: verifiedClerkID,
-            clerkToken: clerkToken,
-            currentClerkID: { verifiedClerkID }
-        )
-    }
-
-    private func bootstrap(verifiedClerkID: String,
-                           clerkToken: String,
-                           currentClerkID: () -> String?) async throws {
+    /// The server may have committed build 13's bootstrap and lost the response. The
+    /// journal's token is then this session's live refresh credential, and refreshing
+    /// is the only way to learn its account. A token the server never saw gets a 401,
+    /// which is the one answer that means there is no session to recover.
+    private func recoverPendingBootstrapOnce() async {
+        guard stored == nil else { return }
+        var journal: PendingDeviceSessionBootstrap
+        switch store.loadPendingBootstrap() {
+        case .missing:
+            isAwaitingSessionRecovery = false
+            return
+        case .unavailable:
+            isSessionStoreUnavailable = true
+            return
+        case .found(let value):
+            journal = value
+        }
+        // A sign-out or deletion build 13 had not finished stays finished: the session
+        // is recovered only so that it can be revoked, and never opens a workspace.
+        let signOutIntended = retiredLegacyIdentities.contains(journal.verifiedClerkID)
+        isAwaitingSessionRecovery = !signOutIntended
         let startingGeneration = generation
-        var pending = try store.loadPendingBootstrap()
-        if pending?.verifiedClerkID != verifiedClerkID {
-            store.deletePendingBootstrap()
-            pending = nil
-        }
-        if pending == nil {
-            pending = PendingDeviceSessionBootstrap(
-                verifiedClerkID: verifiedClerkID,
-                nextRefreshToken: try Self.randomRefreshToken()
-            )
-            try store.savePendingBootstrap(pending!)
-        }
-        guard let pending else { throw APIError.invalidResponse }
-
-        var request = URLRequest(url: baseURL.appendingPathComponent("auth/session/bootstrap"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(clerkToken)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "client_type": "ios",
-            "device_name": "iPhone",
-            "next_refresh_token": pending.nextRefreshToken,
-        ])
-        let pair: DeviceSessionPair
         do {
-            pair = try await sendPairRequest(request)
-        } catch APIError.httpError(let status, _, _) where status == 400 || status == 401 {
+            if journal.recoverySuccessorToken == nil {
+                journal.recoverySuccessorToken = try Self.randomRefreshToken()
+                try store.savePendingBootstrap(journal)
+            }
+            guard let next = journal.recoverySuccessorToken else { throw APIError.invalidResponse }
+            var request = URLRequest(url: baseURL.appendingPathComponent("auth/session/refresh"))
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "refresh_token": journal.nextRefreshToken,
+                "next_refresh_token": next,
+            ])
+            let pair = try await sendPairRequest(request)
+            guard startingGeneration == generation, stored == nil else { return }
+            guard !pair.userID.isEmpty, !pair.sessionID.isEmpty, !pair.accessToken.isEmpty,
+                  pair.refreshToken == next else { throw APIError.invalidResponse }
+            let value = StoredDeviceSession(
+                pair: pair,
+                source: .passkey,
+                pendingRevocation: signOutIntended ? true : nil
+            )
+            // Kept until the session is saved: a failed save repeats this same rotation.
+            try store.save(value)
+            store.saveLocalOwnerID(pair.userID, for: journal.verifiedClerkID)
             store.deletePendingBootstrap()
-            throw APIError.authenticationRequired(message: "Sign in to connect this device.")
-        }
-        guard startingGeneration == generation,
-              currentClerkID() == verifiedClerkID,
-              !Task.isCancelled else { throw CancellationError() }
-        guard !pair.userID.isEmpty, !pair.sessionID.isEmpty,
-              !pair.accessToken.isEmpty, pair.refreshToken == pending.nextRefreshToken else {
-            throw APIError.invalidResponse
-        }
-        try saveSession(pair: pair, source: .clerk, verifiedClerkID: verifiedClerkID)
-        store.deletePendingBootstrap()
-    }
-
-    static func allowsClerkWorkspaceFallback(after error: Error) -> Bool {
-        switch error {
-        case APIError.httpError(let status, _, _):
-            return status == 404 || status >= 500
-        case APIError.authenticationTemporarilyUnavailable:
-            return true
-        case is URLError:
-            return true
-        default:
-            return false
-        }
-    }
-
-    static func shouldClearRejectedClerkSession(after error: Error) -> Bool {
-        switch error {
-        case APIError.authenticationRequired:
-            return true
-        case APIError.httpError(let status, _, _):
-            return status == 400 || status == 401 || status == 403 || status == 409
-        default:
-            return false
+            stored = value
+            isAwaitingSessionRecovery = false
+            if signOutIntended {
+                retiredLegacyIdentities.removeAll()
+            } else {
+                activeUserID = pair.userID
+            }
+        } catch APIError.httpError(let status, _, _) where [400, 401, 409].contains(status) {
+            // Unknown, revoked, or already rotated elsewhere. No retry can recover it.
+            guard startingGeneration == generation else { return }
+            store.deletePendingBootstrap()
+            isAwaitingSessionRecovery = false
+            if signOutIntended { retiredLegacyIdentities.removeAll() }
+        } catch {
+            // Offline or a server fault says nothing about the session. The journal stays.
         }
     }
 
@@ -929,15 +762,12 @@ final class DeviceSessionController {
             guard startingGeneration == generation else { throw CancellationError() }
             needsSignIn = true
             activeUserID = nil
+            onCredentialEnded?()
             throw APIError.authenticationRequired(message: "Sign in to continue.")
         }
         guard startingGeneration == generation,
               stored?.pair.sessionID == value.pair.sessionID,
               stored?.pendingNextRefreshToken == next,
-              value.source != .clerk
-                || Clerk.shared.user?.id == nil
-                || Clerk.shared.user?.id == value.verifiedClerkID
-                || value.pendingRevocation == true,
               !Task.isCancelled else { throw CancellationError() }
         guard pair.userID == value.pair.userID,
               pair.sessionID == value.pair.sessionID,

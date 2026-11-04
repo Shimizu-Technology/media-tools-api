@@ -16,9 +16,7 @@ Native SwiftUI app for Media Tools API — transcribe videos, record audio, mana
 Open `ios/MediaTools/MediaTools.xcodeproj`. The main app and unit/UI test
 targets are already configured.
 
-The checked-in project already includes `ClerkKit` and `ClerkKitUI` as Swift
-Package Manager dependencies. Xcode resolves them automatically; do not add a
-second package reference.
+The project has no third-party package dependencies.
 
 ### 2. Understand the Extension Targets
 
@@ -28,53 +26,12 @@ only App Intent and ActivityKit value types with the host app; the recording
 coordinator and protected audio store remain owned by the app process.
 
 The Share Extension target is embedded in the app. It copies supported audio
-and MP4 files into an App Group inbox; the app then imports them into its local
-recording queue. Upload still requires account ownership and AI processing
-consent. Verify App Group provisioning for both bundle IDs before TestFlight.
-Use that build to test Voice Memos and Files sharing on a physical iPhone
-before public release.
+and MP4 files into an App Group inbox, and when the app has published permission
+and a capture key, starts the upload itself. See [Auth](#auth). Verify App Group
+provisioning for both bundle IDs before TestFlight. Use that build to test Voice
+Memos and Files sharing on a physical iPhone before public release.
 
-### 3. Configure Clerk
-
-1. Go to [Clerk Dashboard](https://dashboard.clerk.com) → Configure → Native applications
-2. Enable **Native API**
-3. Add bundle ID `com.ShimizuTechnology.MediaTools`
-
-The checked-in Xcode build settings supply the public Clerk publishable key to
-both Debug and Release archives so Clerk remains available as the temporary
-migration fallback. `Configuration.swift` keeps the same public client value as
-a defensive runtime fallback. A Clerk publishable key is client configuration;
-never place `CLERK_SECRET_KEY`, AI keys, database credentials, or the Media
-Tools admin key in the iOS target. Before uploading a release, inspect the
-archived app's `Info.plist` and confirm `CLERK_PUBLISHABLE_KEY` is non-empty.
-
-### 4. Enable Sign in with Apple
-
-The app target includes the `com.apple.developer.applesignin` entitlement and
-uses Clerk's prebuilt native `AuthView`. Once Apple is enabled for the Clerk
-instance, Clerk presents the native Sign in with Apple option without a custom
-authentication screen.
-
-Before distributing a build that offers Google sign-in:
-
-1. In Apple Developer → Certificates, Identifiers & Profiles, enable **Sign in
-   with Apple** as the primary capability for
-   `com.ShimizuTechnology.MediaTools`.
-2. In Clerk Dashboard → SSO connections, add Apple for all users and enable it
-   for sign-up and sign-in.
-3. Add and keep a native application mapping for App ID prefix
-   `4T358A5S74` and bundle ID `com.ShimizuTechnology.MediaTools`.
-4. Archive with automatic signing and inspect the signed app. Its entitlements
-   must contain `com.apple.developer.applesignin = [Default]`.
-5. Test both a new Apple account and a returning account on a physical device,
-   including **Hide My Email**, sign-out, sign-in, and in-app account deletion.
-
-The checked-in Clerk key intentionally remains a development-instance key.
-Moving Clerk to production is a separate launch step that requires a controlled
-custom domain. Web Sign in with Apple also requires an Apple Services ID,
-verified website domain/return URL, private key, and private-email-relay setup;
-those web credentials are not required for this app's native flow and must not
-be committed to the repository.
+### 3. Point at an API
 
 `API_BASE_URL` can also be supplied as a build setting. It otherwise defaults
 to the production Render API. Use a local HTTP URL only for simulator
@@ -89,26 +46,24 @@ The app is prepared to use passkeys for
 `/.well-known/apple-app-site-association` with the verified app identifier
 `4T358A5S74.com.ShimizuTechnology.MediaTools`. Keep the web passkey relying
 party ID on this domain: changing it would require registering new passkeys.
-Build 12 uses this association for first-party passkey enrollment and sign-in.
-Clerk remains available only to bridge an already-linked account during the
-migration.
+The app uses this association for passkey enrollment and sign-in.
 
 Before distributing a passkey-enabled iOS build, verify that the production
 association URL responds with JSON and no redirect, that the Apple Developer
 App ID has Associated Domains enabled, and that the signed app and provisioning
 profile contain the entitlement. The Share Extension does not request passkeys.
 
-### 5. Generate App Icon (only when replacing it)
+### 4. Generate App Icon (only when replacing it)
 
 ```bash
 swift ios/scripts/generate-icon.swift
 ```
 
-### 6. Build & Run
+### 5. Build & Run
 
 Select your device or simulator and hit Run (⌘R).
 
-### 7. Run release preflight
+### 6. Run release preflight
 
 Apple requires iOS submissions to use the iOS 26 SDK or later. Validate the
 source configuration before archiving, then validate the signed archive itself:
@@ -122,19 +77,17 @@ make ios-release-preflight \
 ```
 
 The checked-in App Store copy, privacy-label mapping, review notes, export
-options, and remaining launch checks live in `ios/app-store/`. Clerk remains in
-the binary as a temporary bridge for accounts already linked to the stable Media
-Tools user. Release preflight verifies that bridge while passkeys and recovery
-codes provide the durable first-party path. Before App Review, create and verify
-a dedicated account through the invite-only onboarding flow and provide its
-non-expiring review credentials outside this repository.
+options, and remaining launch checks live in `ios/app-store/`. Preflight fails if
+a third-party sign-in SDK, its package reference, its build settings, or its
+entitlement return. Before App Review, create and verify a dedicated account
+and provide its non-expiring review credentials outside this repository.
 
 ## Architecture
 
 ```
 MediaTools/
-├── MediaToolsApp.swift              # Entry point, Clerk config, onboarding gate
-├── Configuration.swift              # API URL, Clerk key, keychain/app groups
+├── MediaToolsApp.swift              # Entry point, onboarding gate
+├── Configuration.swift              # API URL, app group
 ├── ContentView.swift                # Auth gate (welcome vs main tab view)
 ├── Info.plist                       # Permissions (mic), ATS config
 │
@@ -143,10 +96,11 @@ MediaTools/
 │   └── LocalRecording.swift         # Durable device-local capture metadata
 │
 ├── Services/
-│   ├── APIClient.swift              # HTTP client with Clerk JWT auth + multipart
+│   ├── APIClient.swift              # HTTP client with device-session auth + multipart
 │   ├── MediaToolsService.swift      # Domain service (CRUD for all item types)
-│   ├── KeychainService.swift        # Shared keychain for app ↔ extension auth
-│   ├── TokenSyncService.swift       # Syncs Clerk token to keychain every 50s
+│   ├── DeviceSessionController.swift # Stored device session, refresh, revocation
+│   ├── FirstPartyAuthService.swift  # Sign-up, sign-in, reset, email, passkeys
+│   ├── ShareUploadKeyManager.swift  # Capture key the Share Extension uploads with
 │   ├── NotificationService.swift    # Local notifications on completion
 │   ├── BackgroundUploadService.swift # Background URLSession for large files
 │   ├── RecordingCoordinator.swift   # App-level capture + interruption handling
@@ -169,7 +123,7 @@ MediaTools/
 │   ├── Collections/
 │   │   └── CollectionsListView.swift # CRUD + detail + collection chat
 │   └── Settings/
-│       └── SettingsView.swift       # Clerk profile, API health, about
+│       └── SettingsView.swift       # Account, usage, devices, security, deletion
 │
 ├── Components/
 │   └── AddToCollectionSheet.swift   # Modal for adding items to collections
@@ -249,31 +203,53 @@ has started, it continues through screen lock and normal app switching, and the
 Live Activity provides a visible Stop action.
 
 ### Auth
-- **Clerk iOS SDK v1** — Native sign-in/sign-up with prebuilt `AuthView`
-- **Staged device session** — Debug and Release set
-  `FIRST_PARTY_IOS_AUTH_ENABLED=YES` so simulator QA and archives exercise the
-  native path intentionally. The API still controls rollout with
-  `FIRST_PARTY_AUTH_ENABLED`; Clerk remains configured as the temporary
-  migration fallback. Enable the API flag for the controlled owner test before
-  distributing a Release archive that exposes these native controls. A current
-  Clerk sign-in bootstraps a session for the same server user. The app stores
-  its rotating refresh credential in the device-only Keychain and uses short
-  access credentials for API calls. If an upload was waiting when Clerk
-  expired, the app can finish it with the device session.
-- **Safe rollout** — If the server rejects a first-party credential while a
-  matching Clerk session is still present, the request retries once through
-  Clerk. Native-only passkey and recovery sessions require the server's
-  first-party route to remain enabled, so rollback disables new client entry
-  points before that server flag. A previously verified local owner ID remains
-  available for recordings, including after sign-out and relaunch. This local
-  mapping contains no credentials and is removed on account deletion. Migrated
-  AI consent moves to that owner so later activation cannot restore a revoked
-  grant. The Share Extension only copies files into the local inbox; it receives
-  no device-session credential. Signing out revokes and clears the credential.
-  If the API cannot confirm revocation, the app suspends device-session access,
-  signs out locally, and retains the Keychain item only to retry revocation
-  later. Account deletion clears it with local account data.
-- **Token Sync** — The existing Clerk token sync remains for the staged rollout.
+- **Accounts** — Email and password, owned by Media Tools. Sign-up emails a code,
+  and the password is chosen with that code. The API has the contract in
+  `docs/AUTH_API.md`. Passkeys and recovery codes are secondary. Create account
+  shows only while the API reports `signup_enabled`.
+- **Device session** — The app stores a rotating refresh credential in the
+  device-only Keychain and uses short access credentials for API calls. Signing
+  out revokes and clears it. If the API cannot confirm revocation, the app stops
+  using it, signs out locally, and keeps the Keychain item only to retry later.
+- **Sessions from older builds** — A session build 13 stored through the retired
+  provider carries that provider's source value and user ID. It keeps decoding and is
+  converted on load. The provider ID moves to a local owner mapping, which holds
+  no credentials, because recordings and AI consent from that era are keyed by it.
+  `migrateOwnerID` moves them to the server's user ID. The mapping is removed on
+  account deletion. Build 13 also saved a journal before asking for a first session.
+  If the response was lost, its token is the session's only copy, so with no stored
+  session the app refreshes with it before showing sign-in. Only a rejection from
+  the server ends it; offline, the app shows that it is reconnecting and retries.
+  A sign-out build 13 had not finished is recovered only to revoke it.
+- **Share uploads** — The extension never receives the device session. At sign-in,
+  and on the first launch of a session that predates this, the app mints an API key
+  with only `capture:upload` and stores it in the App Group's Keychain access group,
+  bound to its account. It also writes the account's AI consent and "Automatically
+  transcribe" answers to a file in the App Group. With both present, a shared audio
+  file is presigned with that key and handed to a background `URLSession`, reading
+  from the file so a large share stays inside the extension's memory limit. iOS
+  wakes the app with `handleEventsForBackgroundURLSession` to finish it. The share's
+  ID becomes the recording's ID, so importing it never uploads twice. Permission
+  and the key are read again after presigning, just before the transfer starts.
+  Without a key or permission, or after any failure, the share waits in the inbox
+  as before.
+  Any end of the session removes the key from the iPhone at once, and it is revoked
+  on the server when a session of that account can do so. A password reset revokes
+  it on the server too; the extension's next 401 removes the local copy, and the app
+  mints another once signed in. A key whose mint response was lost is found by this
+  install's key name. Until that check succeeds, it repeats on every launch and at
+  sign-out, even while the saved key is reused.
+- **Who finishes a share** — The server counts two objects as two uploads, so one
+  share may complete only one. When a transfer goes quiet, the extension (its bytes
+  arrived) and the app (it will send its own copy) race to create one claim file in
+  the share's App Group folder. The file is a hard link, so it appears complete or
+  not at all. The loser stands down: the app completes the extension's object, or
+  the extension abandons it. The claim lasts as long as the folder, and a share with
+  no folder has no competing upload.
+- **Keychain groups** — Do not add a `keychain-access-groups` entitlement. Its first
+  entry would become the default for new items, and the device session, saved with
+  no explicit group, would land where the extension can read it. iOS already treats
+  the App Group as an access group. Preflight enforces this.
 
 ### UX
 - **Onboarding** — 4-page walkthrough on first launch

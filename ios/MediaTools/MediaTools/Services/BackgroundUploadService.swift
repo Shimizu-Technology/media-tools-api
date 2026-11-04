@@ -1,33 +1,5 @@
 import Foundation
 
-struct BackgroundUploadMetadata: Codable, Equatable, Sendable {
-    let recordingID: UUID
-    let ownerID: String?
-    let filename: String
-    let objectKey: String
-    let sizeBytes: Int64
-    let mimeType: String
-    let contentType: String
-
-    init(
-        recordingID: UUID,
-        ownerID: String? = nil,
-        filename: String,
-        objectKey: String,
-        sizeBytes: Int64,
-        mimeType: String,
-        contentType: String
-    ) {
-        self.recordingID = recordingID
-        self.ownerID = ownerID
-        self.filename = filename
-        self.objectKey = objectKey
-        self.sizeBytes = sizeBytes
-        self.mimeType = mimeType
-        self.contentType = contentType
-    }
-}
-
 enum BackgroundUploadEvent: Sendable {
     case progress(metadata: BackgroundUploadMetadata, fractionCompleted: Double)
     case completed(metadata: BackgroundUploadMetadata)
@@ -39,18 +11,22 @@ protocol BackgroundUploadEventReceiving: AnyObject {
     func receiveBackgroundUploadEvent(_ event: BackgroundUploadEvent)
 }
 
-/// The low-level owner of the app's single background URLSession.
+/// The low-level owner of the app's background URLSessions: its own, plus one for
+/// each upload the share extension started.
 ///
 /// Authentication and API finalization intentionally live outside this type.
 /// The transfer itself is a PUT to a scoped presigned URL, so iOS can finish it
-/// after suspension without carrying a Clerk token that may expire mid-upload.
+/// after suspension without carrying a token that may expire mid-upload.
 final class BackgroundUploadService: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
     static let shared = BackgroundUploadService()
     static let sessionIdentifier = "com.shimizu-technology.media-tools.background-upload"
 
     @MainActor weak var receiver: (any BackgroundUploadEventReceiving)?
 
-    private var backgroundCompletionHandler: (() -> Void)?
+    /// Guards the two dictionaries below. iOS calls in on its own delegate queue.
+    private let stateLock = NSLock()
+    private var backgroundCompletionHandlers: [String: () -> Void] = [:]
+    private var shareSessions: [String: URLSession] = [:]
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.background(
             withIdentifier: Self.sessionIdentifier
@@ -97,58 +73,92 @@ final class BackgroundUploadService: NSObject, URLSessionDelegate, URLSessionTas
         identifier: String,
         completionHandler: @escaping () -> Void
     ) {
-        guard identifier == Self.sessionIdentifier else {
+        if identifier == Self.sessionIdentifier {
+            setCompletionHandler(completionHandler, for: identifier)
+            _ = session
+        } else if ShareDirectUpload.isShareSession(identifier) {
+            setCompletionHandler(completionHandler, for: identifier)
+            attachShareSessions([identifier])
+        } else {
             completionHandler()
-            return
         }
-        backgroundCompletionHandler = completionHandler
-        _ = session
+    }
+
+    /// Reconnects to uploads the extension started. A session recreated with the
+    /// same identifier receives their results, including ones that already finished.
+    func attachShareSessions(_ identifiers: Set<String>) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        for identifier in identifiers
+        where ShareDirectUpload.isShareSession(identifier) && shareSessions[identifier] == nil {
+            let configuration = URLSessionConfiguration.background(withIdentifier: identifier)
+            configuration.sharedContainerIdentifier = ShareDirectUpload.appGroupIdentifier
+            configuration.isDiscretionary = false
+            configuration.sessionSendsLaunchEvents = true
+            configuration.timeoutIntervalForResource = 7 * 24 * 60 * 60
+            shareSessions[identifier] = URLSession(
+                configuration: configuration,
+                delegate: self,
+                delegateQueue: nil
+            )
+        }
+    }
+
+    private func setCompletionHandler(_ handler: @escaping () -> Void, for identifier: String) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        backgroundCompletionHandlers[identifier] = handler
+    }
+
+    private func allTasks() async -> [URLSessionTask] {
+        stateLock.lock()
+        let sessions = [session] + Array(shareSessions.values)
+        stateLock.unlock()
+        var tasks: [URLSessionTask] = []
+        for session in sessions {
+            tasks += await withCheckedContinuation { continuation in
+                session.getAllTasks { continuation.resume(returning: $0) }
+            }
+        }
+        return tasks
     }
 
     func activeRecordingIDs() async -> Set<UUID> {
-        await withCheckedContinuation { continuation in
-            session.getAllTasks { tasks in
-                let identifiers = tasks.compactMap { Self.metadata(for: $0)?.recordingID }
-                continuation.resume(returning: Set(identifiers))
-            }
-        }
+        Set(await allTasks().compactMap { Self.metadata(for: $0)?.recordingID })
     }
 
     /// Update task descriptions after a verified owner-ID migration. S3 PUTs
     /// continue independently of app authentication, so they need not restart.
     func migrateOwnerID(from clerkID: String, to userID: String) async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            session.getAllTasks { tasks in
-                for task in tasks {
-                    guard let metadata = Self.metadata(for: task), metadata.ownerID == clerkID else { continue }
-                    let updated = BackgroundUploadMetadata(
-                        recordingID: metadata.recordingID,
-                        ownerID: userID,
-                        filename: metadata.filename,
-                        objectKey: metadata.objectKey,
-                        sizeBytes: metadata.sizeBytes,
-                        mimeType: metadata.mimeType,
-                        contentType: metadata.contentType
-                    )
-                    task.taskDescription = try? JSONEncoder().encode(updated).base64EncodedString()
-                }
-                continuation.resume()
-            }
+        for task in await allTasks() {
+            guard let metadata = Self.metadata(for: task), metadata.ownerID == clerkID else { continue }
+            let updated = BackgroundUploadMetadata(
+                recordingID: metadata.recordingID,
+                ownerID: userID,
+                filename: metadata.filename,
+                objectKey: metadata.objectKey,
+                sizeBytes: metadata.sizeBytes,
+                mimeType: metadata.mimeType,
+                contentType: metadata.contentType
+            )
+            task.taskDescription = try? JSONEncoder().encode(updated).base64EncodedString()
         }
     }
 
     func cancel(recordingIDs: Set<UUID>) async {
         guard !recordingIDs.isEmpty else { return }
-        await withCheckedContinuation { continuation in
-            session.getAllTasks { tasks in
-                for task in tasks {
-                    guard let recordingID = Self.metadata(for: task)?.recordingID,
-                          recordingIDs.contains(recordingID)
-                    else { continue }
-                    task.cancel()
-                }
-                continuation.resume()
-            }
+        for task in await allTasks() {
+            guard let recordingID = Self.metadata(for: task)?.recordingID,
+                  recordingIDs.contains(recordingID)
+            else { continue }
+            task.cancel()
+        }
+    }
+
+    /// Covers an extension upload whose share the app has not imported yet.
+    func cancelUploads(ownedBy ownerID: String) async {
+        for task in await allTasks() where Self.metadata(for: task)?.ownerID == ownerID {
+            task.cancel()
         }
     }
 
@@ -205,8 +215,14 @@ final class BackgroundUploadService: NSObject, URLSessionDelegate, URLSessionTas
     }
 
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
-        guard let completionHandler = backgroundCompletionHandler else { return }
-        backgroundCompletionHandler = nil
+        guard let identifier = session.configuration.identifier else { return }
+        stateLock.lock()
+        let completionHandler = backgroundCompletionHandlers.removeValue(forKey: identifier)
+        // A share session holds one transfer, and iOS has reported on it.
+        let finishedShareSession = shareSessions.removeValue(forKey: identifier)
+        stateLock.unlock()
+        finishedShareSession?.finishTasksAndInvalidate()
+        guard let completionHandler else { return }
         DispatchQueue.main.async {
             completionHandler()
         }

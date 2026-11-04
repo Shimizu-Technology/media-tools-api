@@ -1,12 +1,15 @@
-import ClerkKit
 import XCTest
 @testable import MediaTools
 
 @MainActor
 private final class MemoryAccountDeletionJournal: AccountDeletionJournaling {
     var value: PendingAccountDeletion?
+    var loadFails = false
 
-    func load() throws -> PendingAccountDeletion? { value }
+    func load() throws -> PendingAccountDeletion? {
+        if loadFails { throw AccountDeletionRecoveryError.couldNotCreateReceipt }
+        return value
+    }
     func save(_ value: PendingAccountDeletion) throws { self.value = value }
     func delete() { value = nil }
 }
@@ -34,7 +37,7 @@ private actor MockAccountDeletionAPI: AccountDeletionAPI {
         self.receiptResult = receiptResult
     }
 
-    func requestAccountDeletion(ownerID: String, receiptToken: String) async throws {
+    func requestAccountDeletion(ownerID: String, receiptToken: String, currentPassword: String?) async throws {
         requested.append((ownerID, receiptToken))
         switch requestResult {
         case .success:
@@ -67,6 +70,12 @@ private actor MockAccountDeletionAPI: AccountDeletionAPI {
 }
 
 @MainActor
+private final class RecordingDeletionCleaner: AccountDeletionLocalDataRemoving {
+    private(set) var removedOwners: [String] = []
+    func removeLocalAccountData(ownerID: String) async { removedOwners.append(ownerID) }
+}
+
+@MainActor
 private final class AccountSwitchingDeletionCleaner: AccountDeletionLocalDataRemoving {
     private let switchAccount: () -> Void
 
@@ -89,9 +98,6 @@ private final class AccountDeletionDeviceSessionStore: DeviceSessionStoring {
     func load() -> StoredDeviceSession? { value }
     func save(_ value: StoredDeviceSession) throws { self.value = value }
     func delete() { value = nil }
-    func loadPendingBootstrap() throws -> PendingDeviceSessionBootstrap? { nil }
-    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws {}
-    func deletePendingBootstrap() {}
     func localOwnerID(for clerkID: String) -> String? { mappings[clerkID] }
     func clerkID(forLocalOwnerID ownerID: String) -> String? {
         mappings.first(where: { $0.value == ownerID })?.key
@@ -101,6 +107,34 @@ private final class AccountDeletionDeviceSessionStore: DeviceSessionStoring {
 }
 
 final class AccountDeletionRecoveryServiceTests: XCTestCase {
+    @MainActor
+    func testAWrongPasswordSaysSoAndLeavesNothingPending() async throws {
+        let journal = MemoryAccountDeletionJournal()
+        let service = AccountDeletionRecoveryService(
+            api: PasswordRejectingDeletionAPI(),
+            journal: journal
+        )
+        do {
+            _ = try await service.requestDeletion(ownerID: "owner-a", currentPassword: "wrong")
+            XCTFail("Expected rejection")
+        } catch AccountDeletionRecoveryError.currentPasswordRejected {
+            XCTAssertNil(journal.value, "Nothing was deleted, so nothing may retry")
+        }
+    }
+
+    func testDeletionBodyCarriesTheCurrentPasswordOnlyWhenGiven() throws {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let withPassword = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(
+            AccountDeletionRequestBody(confirmation: "DELETE", deletionReceiptToken: "t", currentPassword: "p")
+        )) as? [String: Any])
+        XCTAssertEqual(withPassword["current_password"] as? String, "p")
+        let without = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(
+            AccountDeletionRequestBody(confirmation: "DELETE", deletionReceiptToken: "t")
+        )) as? [String: Any])
+        XCTAssertNil(without["current_password"])
+    }
+
     @MainActor
     func testPreparePersistsAndReusesExactOwnerBoundReceipt() throws {
         let journal = MemoryAccountDeletionJournal()
@@ -322,6 +356,176 @@ final class AccountDeletionRecoveryServiceTests: XCTestCase {
         XCTAssertEqual(requests.first?.receiptToken, pending.receiptToken)
     }
 
+    // MARK: - Launch resolution
+
+    private struct LaunchHarness {
+        let service: AccountDeletionRecoveryService
+        let journal: MemoryAccountDeletionJournal
+        let deviceSession: DeviceSessionController
+        let consent: AIProcessingConsentManager
+        let shareKeys: ShareUploadKeyManager
+        let cleaner: RecordingDeletionCleaner
+        let defaults: UserDefaults
+    }
+
+    @MainActor
+    private func launchHarness(
+        pending: PendingAccountDeletion?,
+        api: MockAccountDeletionAPI
+    ) throws -> LaunchHarness {
+        let pair = DeviceSessionPair(
+            sessionID: "session-a",
+            userID: "owner-a",
+            accessToken: "mta_at_a",
+            accessExpiresAt: Date().addingTimeInterval(3_600),
+            refreshToken: "mta_rt_a",
+            inactiveExpiresAt: Date().addingTimeInterval(86_400)
+        )
+        let deviceSession = DeviceSessionController(
+            transport: DisabledSessionTransportForDeletionTests(),
+            store: AccountDeletionDeviceSessionStore(StoredDeviceSession(pair: pair, source: .passkey))
+        )
+        let journal = MemoryAccountDeletionJournal()
+        journal.value = pending
+        let suiteName = "AccountDeletionRecoveryServiceTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suiteName) }
+        return LaunchHarness(
+            service: AccountDeletionRecoveryService(api: api, journal: journal),
+            journal: journal,
+            deviceSession: deviceSession,
+            consent: AIProcessingConsentManager(defaults: defaults),
+            shareKeys: ShareUploadKeyManager(
+                credentials: EmptyShareUploadCredentialStore(),
+                api: UnusedShareUploadKeyAPI(),
+                defaults: defaults
+            ),
+            cleaner: RecordingDeletionCleaner(),
+            defaults: defaults
+        )
+    }
+
+    @MainActor
+    private func resolve(_ harness: LaunchHarness, retryOwnerID: String?) async -> AccountDeletionRecoveryService.PendingDeletionResolution {
+        await harness.service.resolvePendingDeletion(
+            retryOwnerID: retryOwnerID,
+            uploadCoordinator: harness.cleaner,
+            consent: harness.consent,
+            deviceSession: harness.deviceSession,
+            shareKeys: harness.shareKeys
+        )
+    }
+
+    @MainActor
+    func testALaunchLookupThatCannotAnswerKeepsTheWorkspaceClosed() async throws {
+        let pending = PendingAccountDeletion(ownerID: "owner-a", receiptToken: "mta_del_" + String(repeating: "f", count: 43))
+        let harness = try launchHarness(
+            pending: pending,
+            api: MockAccountDeletionAPI(requestResult: .failure, receiptResult: .unavailable)
+        )
+
+        let resolution = await resolve(harness, retryOwnerID: "owner-a")
+
+        XCTAssertEqual(resolution, .unresolved)
+        XCTAssertEqual(harness.journal.value, pending, "The journal stays for the next try")
+        XCTAssertEqual(harness.deviceSession.storedUserID, "owner-a", "The owner is never signed out by a lookup that failed")
+        XCTAssertTrue(harness.cleaner.removedOwners.isEmpty, "No recording is removed without a confirmed deletion")
+    }
+
+    @MainActor
+    func testAnUnprovenRetryForTheSignedInOwnerKeepsTheWorkspaceClosed() async throws {
+        let pending = PendingAccountDeletion(ownerID: "owner-a", receiptToken: "mta_del_" + String(repeating: "g", count: 43))
+        let harness = try launchHarness(
+            pending: pending,
+            api: MockAccountDeletionAPI(requestResult: .ambiguousHTTPFailure, receiptResult: .unconfirmed)
+        )
+
+        let resolution = await resolve(harness, retryOwnerID: "owner-a")
+
+        XCTAssertEqual(resolution, .unresolved)
+        XCTAssertEqual(harness.journal.value, pending)
+        XCTAssertEqual(harness.deviceSession.storedUserID, "owner-a")
+    }
+
+    @MainActor
+    func testAJournalReadThatThrowsKeepsTheWorkspaceClosedThenRecovers() async throws {
+        let pending = PendingAccountDeletion(ownerID: "owner-a", receiptToken: "mta_del_" + String(repeating: "i", count: 43))
+        let harness = try launchHarness(
+            pending: pending,
+            api: MockAccountDeletionAPI(requestResult: .failure, receiptResult: .unavailable)
+        )
+        harness.journal.loadFails = true
+
+        XCTAssertTrue(harness.service.hasPendingDeletion, "An unreadable journal is treated as pending")
+        let blocked = await resolve(harness, retryOwnerID: "owner-a")
+        XCTAssertEqual(blocked, .unresolved)
+        XCTAssertEqual(harness.deviceSession.storedUserID, "owner-a", "A failed read never signs the owner out")
+        XCTAssertTrue(harness.cleaner.removedOwners.isEmpty)
+
+        // The next foreground reads again: with the Keychain readable and no
+        // journal, the workspace opens.
+        harness.journal.loadFails = false
+        harness.journal.value = nil
+        XCTAssertFalse(harness.service.hasPendingDeletion)
+        let recovered = await resolve(harness, retryOwnerID: "owner-a")
+        XCTAssertEqual(recovered, .none)
+    }
+
+    @MainActor
+    func testAJournalForAnotherAccountDoesNotBlockThisOne() async throws {
+        let pending = PendingAccountDeletion(ownerID: "owner-b", receiptToken: "mta_del_" + String(repeating: "h", count: 43))
+        let harness = try launchHarness(
+            pending: pending,
+            api: MockAccountDeletionAPI(requestResult: .failure, receiptResult: .unconfirmed)
+        )
+
+        let resolution = await resolve(harness, retryOwnerID: "owner-a")
+
+        XCTAssertEqual(resolution, .none)
+        XCTAssertEqual(harness.journal.value, pending)
+    }
+
+    @MainActor
+    func testNoJournalNeedsNoNetworkAndOpensTheWorkspace() async throws {
+        let harness = try launchHarness(
+            pending: nil,
+            api: MockAccountDeletionAPI(requestResult: .failure, receiptResult: .unavailable)
+        )
+        let resolution = await resolve(harness, retryOwnerID: "owner-a")
+        XCTAssertEqual(resolution, .none)
+    }
+
+    @MainActor
+    func testARejectedDeleteWithNoReceiptOpensTheWorkspaceAgain() async throws {
+        let pending = PendingAccountDeletion(ownerID: "owner-a", receiptToken: "mta_del_" + String(repeating: "i", count: 43))
+        let harness = try launchHarness(
+            pending: pending,
+            api: MockAccountDeletionAPI(requestResult: .definitiveHTTPFailure, receiptResult: .unconfirmed)
+        )
+
+        let resolution = await resolve(harness, retryOwnerID: "owner-a")
+
+        XCTAssertEqual(resolution, .none)
+        XCTAssertNil(harness.journal.value)
+        XCTAssertEqual(harness.deviceSession.storedUserID, "owner-a")
+    }
+
+    @MainActor
+    func testAConfirmedDeletionIsFinishedAndClosesTheAccount() async throws {
+        let pending = PendingAccountDeletion(ownerID: "owner-a", receiptToken: "mta_del_" + String(repeating: "j", count: 43))
+        let harness = try launchHarness(
+            pending: pending,
+            api: MockAccountDeletionAPI(requestResult: .success, receiptResult: .confirmed)
+        )
+
+        let resolution = await resolve(harness, retryOwnerID: "owner-a")
+
+        XCTAssertEqual(resolution, .completed)
+        XCTAssertNil(harness.journal.value)
+        XCTAssertEqual(harness.cleaner.removedOwners, ["owner-a"])
+        XCTAssertNil(harness.deviceSession.storedUserID)
+    }
+
     @MainActor
     func testAccountSwitchDuringLocalCleanupPreservesNewDeviceSession() async throws {
         func pair(ownerID: String, sessionID: String) -> DeviceSessionPair {
@@ -341,8 +545,7 @@ final class AccountDeletionRecoveryServiceTests: XCTestCase {
         )
         let deviceSession = DeviceSessionController(
             transport: DisabledSessionTransportForDeletionTests(),
-            store: store,
-            enabled: true
+            store: store
         )
         try deviceSession.saveSession(pair: ownerA, source: .passkey)
 
@@ -369,8 +572,11 @@ final class AccountDeletionRecoveryServiceTests: XCTestCase {
             uploadCoordinator: cleaner,
             consent: AIProcessingConsentManager(defaults: defaults),
             deviceSession: deviceSession,
-            tokenSync: TokenSyncService(),
-            clerk: Clerk.shared
+            shareKeys: ShareUploadKeyManager(
+                credentials: EmptyShareUploadCredentialStore(),
+                api: UnusedShareUploadKeyAPI(),
+                defaults: defaults
+            )
         )
 
         XCTAssertEqual(deviceSession.storedUserID, "owner-b")
@@ -383,4 +589,28 @@ private actor DisabledSessionTransportForDeletionTests: DeviceSessionTransport {
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         throw URLError(.notConnectedToInternet)
     }
+}
+
+private struct EmptyShareUploadCredentialStore: ShareUploadCredentialStoring {
+    func load() -> ShareUploadCredentialLoadResult { .missing }
+    func save(_ credential: ShareUploadCredential) throws {}
+    func delete() {}
+    func delete(ifKeyID keyID: String) {}
+}
+
+private struct UnusedShareUploadKeyAPI: ShareUploadKeyAPI {
+    func createShareUploadKey(name: String, ownerID: String) async throws -> ShareUploadKeyResponse {
+        throw APIError.invalidResponse
+    }
+    func listAPIKeys(ownerID: String) async throws -> [ListedAPIKey] { [] }
+    func listAPIKeys(bearerToken: String) async throws -> [ListedAPIKey] { [] }
+    func revokeAPIKey(id: String, ownerID: String) async throws {}
+    func revokeAPIKey(id: String, bearerToken: String) async throws {}
+}
+
+private struct PasswordRejectingDeletionAPI: AccountDeletionAPI {
+    func requestAccountDeletion(ownerID: String, receiptToken: String, currentPassword: String?) async throws {
+        throw APIError.httpError(statusCode: 401, code: "current_password_required", message: "Enter your current password")
+    }
+    func accountDeletionReceiptConfirmed(_ receiptToken: String) async throws -> Bool { false }
 }

@@ -104,12 +104,18 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     private var watchTasks: [String: Task<Void, Never>] = [:]
     private var retryAttempts: [UUID: Int] = [:]
     private var hasReconciledTransfers = false
+    private var attachedShareSessions: Set<String> = []
     /// Handles callbacks already queued by iOS while task descriptions change.
     private var verifiedOwnerAliases: [String: String] = [:]
     private let simulatesUpload: Bool
     private let isForeground: @MainActor () -> Bool
     private var sharedDocumentSends: [UUID: SharedDocumentSend] = [:]
     private var rejectedSharedDocuments: Set<UUID> = []
+    private var reservationRecheck: Task<Void, Never>?
+    private var undeterminedClaimRetry: Task<Void, Never>?
+    private var undeterminedClaimRetries = 0
+    private let undeterminedClaimRetryDelay: Duration
+    static let maximumUndeterminedClaimRetries = 5
 
     /// `token` lets a cancelled send finish without clearing the send that
     /// replaced it after the same account signed back in.
@@ -128,7 +134,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         aiProcessingConsent: AIProcessingConsentManager? = nil,
         isForeground: @escaping @MainActor () -> Bool = {
             UIApplication.shared.applicationState == .active
-        }
+        },
+        undeterminedClaimRetryDelay: Duration = .seconds(5)
     ) {
         self.recorder = recorder ?? .shared
         self.service = service
@@ -146,6 +153,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         simulatesUpload = false
         #endif
         self.isForeground = isForeground
+        self.undeterminedClaimRetryDelay = undeterminedClaimRetryDelay
         watches = (try? self.watchStore?.load()) ?? []
         transport.receiver = self
         self.recorder.onSavedRecordingsChanged = { [weak self] in
@@ -205,8 +213,14 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     /// neither uploaded nor discarded while marked as in progress.
     private func returnQueuedWorkAfterRevocation() {
         cancelLinkSendsAfterRevocation()
+        // If permission returns, a tap sends this again. The extension must not also
+        // finish its own copy in the meantime. A share the extension has already
+        // claimed, or whose claim cannot be settled, stays where it is: returning it
+        // to the manual queue could upload a second object. It finishes or resumes
+        // through reconciliation once permission is back.
         let queued = recorder.availableRecordings.filter {
             [.waitingForUpload, .uploading, .finalizingUpload].contains($0.state)
+                && recorder.takeOverShareUpload($0) == .takenOver
         }
         guard !queued.isEmpty else { return }
         let queuedIDs = Set(queued.map(\.id))
@@ -259,6 +273,17 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     /// so it waits for `retrySharedItem` from the Retry button.
     func processSharedItems() {
         recorder.importSharedItems()
+        attachShareUploads()
+        // The extension may hand a reserved share back with no later event from
+        // iOS, so look once more rather than waiting for the next foreground.
+        if recorder.hasShareReservations, reservationRecheck == nil {
+            reservationRecheck = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(15))
+                guard let self else { return }
+                self.reservationRecheck = nil
+                self.processSharedItems()
+            }
+        }
         guard let ownerID = recorder.activeOwnerID,
               !hasPendingLocalAccountDeletion(ownerID: ownerID)
         else { return }
@@ -415,13 +440,26 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         }
     }
 
-    /// Keeps upload/finalization credentials aligned with the signed-in Clerk
-    /// account. Work owned by another account is paused instead of ever being
-    /// finalized with the new account's bearer token.
+    /// A share upload goes straight to storage with its own presigned URL and
+    /// never carries the bearer token, so another account becoming active cannot
+    /// misuse it. Cancelling it would only force a new presign and a full re-upload
+    /// when its owner returns. A late completion is recorded without a credential,
+    /// and account deletion still cancels it by owner.
+    nonisolated static func transfersToCancelOnOwnerChange(
+        paused: Set<UUID>,
+        shareUploadRecordingIDs: Set<UUID>
+    ) -> Set<UUID> {
+        paused.subtracting(shareUploadRecordingIDs)
+    }
+
+    /// Keeps upload/finalization credentials aligned with the signed-in account.
+    /// Work owned by another account is paused instead of ever being finalized
+    /// with the new account's bearer token.
     func setActiveOwnerID(_ ownerID: String?) async {
         cancelSharedDocumentSends { $0 != ownerID }
         await retryPendingLocalAccountDeletions()
         recorder.setActiveOwnerID(ownerID)
+        attachShareUploads()
         if let ownerID {
             for index in watches.indices where watches[index].ownerID == nil {
                 if let recordingID = watches[index].recordingID,
@@ -442,7 +480,12 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             retryTasks[recordingID] = nil
             retryAttempts[recordingID] = nil
         }
-        await transport.cancel(recordingIDs: pausedRecordingIDs)
+        await transport.cancel(recordingIDs: Self.transfersToCancelOnOwnerChange(
+            paused: pausedRecordingIDs,
+            shareUploadRecordingIDs: Set(pausedRecordingIDs.filter {
+                recorder.recording(withID: $0)?.shareUploadSessionIdentifier != nil
+            })
+        ))
         hasReconciledTransfers = false
 
         for watch in watches where watch.ownerID != ownerID {
@@ -457,8 +500,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         }
     }
 
-    /// Called only with a Clerk subject and users.id returned by the verified
-    /// bootstrap for that same account. This is safe to repeat after a crash.
+    /// Called only with a provider subject and the users.id the server verified
+    /// for that same account. This is safe to repeat after a crash.
     func migrateOwnerID(from clerkID: String, to userID: String) async throws {
         guard clerkID != userID else { return }
         verifiedOwnerAliases[clerkID] = userID
@@ -528,6 +571,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             retryAttempts[recordingID] = nil
         }
         await transport.cancel(recordingIDs: recordingIDs)
+        await transport.cancelUploads(ownedBy: ownerID)
         cancelSharedDocumentSends { $0 == ownerID }
         let removedWatches = watches.filter {
             $0.ownerID == ownerID || $0.recordingID.map(recordingIDs.contains) == true
@@ -593,6 +637,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
 
     func resumePendingWork() {
         transport.receiver = self
+        attachShareUploads()
         reconcileQueuedWorkWithConsent()
         for recording in recorder.availableRecordings
         where recording.state == .serverProcessing {
@@ -633,18 +678,56 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             guard let self else { return }
             let activeIDs = await self.transport.activeRecordingIDs()
             guard self.recorder.activeOwnerID == reconciledOwnerID else { return }
+            // A finished share has no task left. Its inbox entry is what says so.
+            self.recorder.importSharedItems()
+            for recording in self.recorder.availableRecordings
+            where recording.state == .finalizingUpload {
+                self.finalize(recordingID: recording.id)
+            }
+            var sawUndetermined = false
             for recording in self.recorder.availableRecordings
             where recording.state == .uploading && !activeIDs.contains(recording.id) {
                 guard self.isActiveOwner(
                     recordingID: recording.id,
                     expectedOwnerID: reconciledOwnerID
                 ) else { continue }
-                self.recorder.markWaitingForUpload(
-                    recording.id,
-                    message: "The interrupted upload will resume automatically."
-                )
-                self.process(recordingID: recording.id)
+                switch self.recorder.takeOverShareUpload(recording) {
+                case .finishedByExtension:
+                    self.recorder.markUploadFinalizing(recording.id)
+                    self.finalize(recordingID: recording.id)
+                case .undetermined:
+                    // Nothing is sent until this is settled. The next foreground asks
+                    // again, and so does a short, bounded retry in case it stays active.
+                    self.hasReconciledTransfers = false
+                    sawUndetermined = true
+                case .takenOver:
+                    self.recorder.markWaitingForUpload(
+                        recording.id,
+                        message: "The interrupted upload will resume automatically."
+                    )
+                    self.process(recordingID: recording.id)
+                }
             }
+            if sawUndetermined {
+                self.scheduleUndeterminedClaimRetry()
+            } else {
+                self.undeterminedClaimRetries = 0
+            }
+        }
+    }
+
+    /// A claim that could not be read may become readable while the app stays
+    /// open, with no scene change to ask again. Each retry waits longer, and a
+    /// handful is all it gets: the next foreground still asks.
+    private func scheduleUndeterminedClaimRetry() {
+        guard undeterminedClaimRetries < Self.maximumUndeterminedClaimRetries else { return }
+        undeterminedClaimRetries += 1
+        undeterminedClaimRetry?.cancel()
+        let delay = undeterminedClaimRetryDelay * undeterminedClaimRetries
+        undeterminedClaimRetry = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self else { return }
+            self.resumePendingWork()
         }
     }
 
@@ -664,19 +747,55 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         returnQueuedWorkAfterRevocation()
     }
 
+    /// An attached session reports the moment the app connects to it, so its
+    /// recording must exist first. Reconciliation then treats it like any other.
+    private func attachShareUploads() {
+        let identifiers = recorder.shareUploadSessionIdentifiers
+        guard !identifiers.isSubset(of: attachedShareSessions) else { return }
+        attachedShareSessions.formUnion(identifiers)
+        hasReconciledTransfers = false
+        transport.attachShareSessions(identifiers)
+    }
+
     func receiveBackgroundUploadEvent(_ event: BackgroundUploadEvent) {
         let metadata: BackgroundUploadMetadata
         switch event {
         case .progress(let value, _), .completed(let value), .failed(let value, _, _):
             metadata = value
         }
+        // The extension's upload can finish before this app has seen the share.
+        if recorder.recording(withID: metadata.recordingID) == nil {
+            recorder.importSharedItems()
+        }
+        defer {
+            if case .progress = event {} else {
+                recorder.releaseShareSource(recordingID: metadata.recordingID)
+            }
+        }
+        // A retry presigns a new object. A task still reporting on the old one has
+        // nothing to say about this recording, and completing with it would create
+        // a second transcription.
+        if let recording = recorder.recording(withID: metadata.recordingID),
+           recording.uploadObjectKey != metadata.objectKey {
+            return
+        }
         guard let rawOwnerID = metadata.ownerID
-                ?? recorder.recording(withID: metadata.recordingID)?.ownerID,
-              isActiveOwner(
-                recordingID: metadata.recordingID,
-                expectedOwnerID: verifiedOwnerAliases[rawOwnerID] ?? rawOwnerID
-              )
+                ?? recorder.recording(withID: metadata.recordingID)?.ownerID
         else { return }
+        let resolvedOwnerID = verifiedOwnerAliases[rawOwnerID] ?? rawOwnerID
+        guard isActiveOwner(recordingID: metadata.recordingID, expectedOwnerID: resolvedOwnerID) else {
+            // An upload this app started is cancelled when its account signs out,
+            // and a late result is ignored. The extension's upload was never this
+            // app's to cancel, so its bytes can arrive with that account signed out.
+            // Remembering that uses no credential, and spares a second upload.
+            if case .completed = event,
+               let recording = recorder.recording(withID: metadata.recordingID),
+               recording.ownerID == resolvedOwnerID,
+               recording.shareUploadSessionIdentifier != nil {
+                recorder.markUploadFinalizing(metadata.recordingID)
+            }
+            return
+        }
 
         // A background launch can deliver this before any scene resumes work.
         reconcileQueuedWorkWithConsent()
@@ -865,7 +984,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                     self.pauseForAuthentication(recordingID: recordingID, finalizing: true)
                 } else if Self.isRetryable(error) {
                     self.statusMessage = "Upload is safe. Finishing will retry automatically."
-                    self.scheduleRetry(recordingID: recordingID, finalizing: true)
+                    self.scheduleRetry(recordingID: recordingID, finalizing: true, after: error)
                 } else {
                     self.recorder.markUploadFailed(recordingID, message: error.localizedDescription)
                     self.statusMessage = error.localizedDescription
@@ -983,7 +1102,10 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                         // The persisted watch must remain live while the app does.
                         // A short outage should delay status delivery, not silently
                         // disable it until the next scene activation.
-                        try? await Task.sleep(for: Self.watchRetryDelay(after: failures))
+                        try? await Task.sleep(for: Self.watchRetryDelay(
+                            after: failures,
+                            serverWait: Self.serverRequestedWait(error)
+                        ))
                     case .pauseForAuthentication:
                         let pausedWatch = self.recordAuthenticationPause(for: watch)
                         if Self.authenticationPauseHasExpired(pausedWatch) {
@@ -1071,7 +1193,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 recordingID,
                 message: "Waiting for a connection. Media Tools will retry automatically."
             )
-            scheduleRetry(recordingID: recordingID)
+            scheduleRetry(recordingID: recordingID, after: error)
         } else {
             recorder.markUploadFailed(recordingID, message: error.localizedDescription)
             statusMessage = error.localizedDescription
@@ -1094,11 +1216,13 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         statusMessage = message
     }
 
-    private func scheduleRetry(recordingID: UUID, finalizing: Bool = false) {
+    /// `error` is what made this retry necessary. A 429 says how long the server
+    /// wants to be left alone, and retrying before then only earns another 429.
+    private func scheduleRetry(recordingID: UUID, finalizing: Bool = false, after error: Error? = nil) {
         guard retryTasks[recordingID] == nil else { return }
         let attempt = (retryAttempts[recordingID] ?? 0) + 1
         retryAttempts[recordingID] = attempt
-        let delay = min(pow(2, Double(attempt - 1)) * 2, 60)
+        let delay = Self.retryDelay(attempt: attempt, serverWait: error.flatMap(Self.serverRequestedWait))
         retryTasks[recordingID] = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard let self, !Task.isCancelled else { return }
@@ -1129,8 +1253,24 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         return false
     }
 
-    static func watchRetryDelay(after failureCount: Int) -> Duration {
-        .seconds(min(max(failureCount, 1) * 5, 60))
+    static func watchRetryDelay(after failureCount: Int, serverWait: TimeInterval? = nil) -> Duration {
+        .seconds(max(Double(min(max(failureCount, 1) * 5, 60)), cappedServerWait(serverWait)))
+    }
+
+    /// Never sooner than the backoff, and never sooner than the server asked.
+    static func retryDelay(attempt: Int, serverWait: TimeInterval? = nil) -> TimeInterval {
+        max(min(pow(2, Double(max(attempt, 1) - 1)) * 2, 60), cappedServerWait(serverWait))
+    }
+
+    static func serverRequestedWait(_ error: Error) -> TimeInterval? {
+        if case APIError.rateLimited(let retryAfter, _) = error { return retryAfter }
+        return nil
+    }
+
+    /// A bad header must not park a recording for hours.
+    private static func cappedServerWait(_ wait: TimeInterval?) -> TimeInterval {
+        guard let wait, wait.isFinite, wait > 0 else { return 0 }
+        return min(wait, 15 * 60)
     }
 
     static func watchFailureDisposition(for error: Error) -> TranscriptionWatchFailureDisposition {
@@ -1165,13 +1305,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     }
 
     static func mimeType(for url: URL) -> String {
-        if url.pathExtension.caseInsensitiveCompare("caf") == .orderedSame {
-            // UniformTypeIdentifiers does not consistently publish a CAF MIME
-            // mapping across supported iOS/macOS SDKs.
-            return "audio/x-caf"
-        }
-        return UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
-            ?? "application/octet-stream"
+        ShareDirectUpload.mimeType(for: url)
     }
 
     private func simulateUpload(recording: LocalRecording, ownerID: String) async {
