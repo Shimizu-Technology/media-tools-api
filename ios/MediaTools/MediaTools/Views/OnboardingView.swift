@@ -64,7 +64,7 @@ struct OnboardingView: View {
                             color: microphoneState == .denied ? Theme.warning : Theme.audioColor,
                             title: "Prepare your microphone",
                             subtitle:
-                                "Media Tools only listens after you deliberately start a recording. Only record people when you have their permission and recording is lawful where you are. Audio is saved on this iPhone first, then uploaded when you choose Transcribe.",
+                                "Media Tools only listens after you deliberately start a recording. Only record people when you have their permission and recording is lawful where you are. Audio is saved on this iPhone first, then transcribed automatically once you allow AI processing.",
                             note: microphoneDetail
                         ) {
                             permissionButton(

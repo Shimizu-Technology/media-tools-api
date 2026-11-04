@@ -137,6 +137,13 @@ struct ChatView: View {
                 messages.append(contentsOf: response.messages)
             }
         } catch {
+            // Hand the message back so a failed send never loses what was typed.
+            withAnimation(Theme.springGentle) {
+                messages.removeAll { $0.id == tempId }
+            }
+            if input.isEmpty {
+                input = text
+            }
             self.error = error.localizedDescription
         }
 

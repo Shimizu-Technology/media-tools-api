@@ -179,24 +179,39 @@ struct CollectionDetailView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
 
                             ForEach(items) { item in
-                                HStack(spacing: 12) {
-                                    Image(systemName: iconForType(item.itemType))
-                                        .foregroundStyle(colorForType(item.itemType))
-                                        .frame(width: 24)
+                                NavigationLink {
+                                    LibraryDetailLoader(
+                                        reference: LibraryReference(
+                                            itemType: item.itemType,
+                                            itemId: item.itemId
+                                        )
+                                    )
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: iconForType(item.itemType))
+                                            .foregroundStyle(colorForType(item.itemType))
+                                            .frame(width: 24)
 
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(item.itemTitle ?? item.itemId)
-                                            .font(Theme.body(14, weight: .medium))
-                                            .foregroundStyle(Theme.textPrimary)
-                                            .lineLimit(2)
-                                        if let status = item.itemStatus {
-                                            StatusBadge(status: status)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.itemTitle ?? item.itemId)
+                                                .font(Theme.body(14, weight: .medium))
+                                                .foregroundStyle(Theme.textPrimary)
+                                                .lineLimit(2)
+                                                .multilineTextAlignment(.leading)
+                                            if let status = item.itemStatus {
+                                                StatusBadge(status: status)
+                                            }
                                         }
-                                    }
 
-                                    Spacer()
+                                        Spacer()
+
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundStyle(Theme.textMuted)
+                                    }
+                                    .cardStyle(padding: 12)
                                 }
-                                .cardStyle(padding: 12)
+                                .buttonStyle(.plain)
                             }
                         } else {
                             ContentUnavailableView(
@@ -234,16 +249,30 @@ struct CollectionDetailView: View {
                     }
                     .preferredColorScheme(.dark)
                 }
+            } else if let error {
+                ContentUnavailableView {
+                    Label("Couldn’t Open Collection", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Try Again") { Task { await load() } }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.brand500)
+                }
             } else {
                 ProgressView()
             }
         }
-        .task {
-            do {
-                collection = try await service.getCollection(collectionId)
-            } catch {
-                self.error = error.localizedDescription
-            }
+        .task { await load() }
+    }
+
+    private func load() async {
+        error = nil
+        do {
+            collection = try await service.getCollection(collectionId)
+        } catch {
+            guard !Task.isCancelled else { return }
+            self.error = error.localizedDescription
         }
     }
 

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 import UniformTypeIdentifiers
 
 enum TranscriptionWatchFailureDisposition: Equatable {
@@ -31,9 +32,37 @@ protocol RecordingUploadServicing: AnyObject {
         _ completion: AudioUploadCompleteRequest,
         expectedOwnerID: String?
     ) async throws -> AudioTranscription
+    func importSharedLink(_ link: String, expectedOwnerID: String?) async throws
+    func importSharedPDF(
+        fileURL: URL,
+        filename: String,
+        expectedOwnerID: String?
+    ) async throws
 }
 
 extension MediaToolsService: RecordingUploadServicing {}
+
+/// Finishing a request after the app leaves the foreground needs a little time
+/// from iOS. Without this, stopping from the lock screen or a Live Activity can
+/// suspend the app before the presigned request hands off to the background
+/// session. The recording stays safe either way; this only avoids waiting for
+/// the next time the app opens.
+@MainActor
+private final class BackgroundTimeLease {
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+
+    init(name: String) {
+        identifier = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            MainActor.assumeIsolated { self?.end() }
+        }
+    }
+
+    func end() {
+        guard identifier != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(identifier)
+        identifier = .invalid
+    }
+}
 
 /// Durable orchestration for recordings after capture finishes.
 ///
@@ -50,6 +79,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
 
     private(set) var latestItem: AudioTranscription?
     private(set) var statusMessage: String?
+    /// Lets the Library refresh after a shared PDF or link reaches the server.
+    private(set) var sharedDocumentImports = 0
 
     var latestItemSignature: String {
         guard let latestItem else { return "" }
@@ -76,6 +107,17 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     /// Handles callbacks already queued by iOS while task descriptions change.
     private var verifiedOwnerAliases: [String: String] = [:]
     private let simulatesUpload: Bool
+    private let isForeground: @MainActor () -> Bool
+    private var sharedDocumentSends: [UUID: SharedDocumentSend] = [:]
+    private var rejectedSharedDocuments: Set<UUID> = []
+
+    /// `token` lets a cancelled send finish without clearing the send that
+    /// replaced it after the same account signed back in.
+    private struct SharedDocumentSend {
+        let ownerID: String
+        let token: UUID
+        let task: Task<Void, Never>
+    }
 
     init(
         recorder: RecordingCoordinator? = nil,
@@ -83,7 +125,10 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         transport: BackgroundUploadService = .shared,
         watchStore: TranscriptionWatchStore? = nil,
         localAccountDefaults: UserDefaults = .standard,
-        aiProcessingConsent: AIProcessingConsentManager? = nil
+        aiProcessingConsent: AIProcessingConsentManager? = nil,
+        isForeground: @escaping @MainActor () -> Bool = {
+            UIApplication.shared.applicationState == .active
+        }
     ) {
         self.recorder = recorder ?? .shared
         self.service = service
@@ -100,8 +145,21 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         #else
         simulatesUpload = false
         #endif
+        self.isForeground = isForeground
         watches = (try? self.watchStore?.load()) ?? []
         transport.receiver = self
+        self.recorder.onSavedRecordingsChanged = { [weak self] in
+            self?.autoQueueEligibleRecordings()
+        }
+        self.recorder.onRecordingsRestored = { [weak self] in
+            guard let self else { return }
+            self.hasReconciledTransfers = false
+            self.resumePendingWork()
+            self.processSharedItems()
+        }
+        self.aiProcessingConsent.onAutomaticTranscriptionStateChanged = { [weak self] in
+            self?.automaticTranscriptionStateChanged()
+        }
     }
 
     func queue(_ recording: LocalRecording) {
@@ -115,10 +173,253 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         process(recordingID: recording.id)
     }
 
+    /// Sends every finished recording that was saved with automatic transcription
+    /// on. Safe to call repeatedly, because queueing moves a recording out of the
+    /// eligible states. Without consent the audio simply stays on this iPhone.
+    func autoQueueEligibleRecordings() {
+        guard let ownerID = recorder.activeOwnerID,
+              aiProcessingConsent.isAutoTranscribeEnabled(ownerID: ownerID),
+              !hasPendingLocalAccountDeletion(ownerID: ownerID)
+        else { return }
+        let eligible = recorder.availableRecordings.filter(\.isWaitingForAutomaticTranscription)
+        guard !eligible.isEmpty else { return }
+        if aiProcessingConsent.hasAutomaticConsent(ownerID: ownerID) {
+            eligible.forEach(queue)
+        } else if isForeground(),
+                  !recorder.isRecording,
+                  aiProcessingConsent.activeOwnerID == ownerID {
+            aiProcessingConsent.promptOnceForAutomaticTranscription()
+        }
+    }
+
+    private func automaticTranscriptionStateChanged() {
+        guard let ownerID = recorder.activeOwnerID else { return }
+        if !aiProcessingConsent.hasConsent(ownerID: ownerID) {
+            returnQueuedWorkAfterRevocation()
+        }
+        autoQueueEligibleRecordings()
+        processSharedItems()
+    }
+
+    /// Without this, a revoke would strand queued recordings: they could be
+    /// neither uploaded nor discarded while marked as in progress.
+    private func returnQueuedWorkAfterRevocation() {
+        cancelLinkSendsAfterRevocation()
+        let queued = recorder.availableRecordings.filter {
+            [.waitingForUpload, .uploading, .finalizingUpload].contains($0.state)
+        }
+        guard !queued.isEmpty else { return }
+        let queuedIDs = Set(queued.map(\.id))
+        for recordingID in queuedIDs {
+            uploadTasks[recordingID]?.cancel()
+            uploadTasks[recordingID] = nil
+            retryTasks[recordingID]?.cancel()
+            retryTasks[recordingID] = nil
+            retryAttempts[recordingID] = nil
+            recorder.markReadyAfterConsentRevoked(recordingID)
+        }
+        Task { [transport] in
+            await transport.cancel(recordingIDs: queuedIDs)
+        }
+    }
+
+    /// A link being sent can fall back to Whisper, so it stops with the rest.
+    private func cancelLinkSendsAfterRevocation() {
+        guard let ownerID = recorder.activeOwnerID else { return }
+        for item in recorder.sharedDocuments(ownedBy: ownerID) where item.resolvedKind == .link {
+            guard let send = sharedDocumentSends[item.id] else { continue }
+            send.task.cancel()
+            sharedDocumentSends[item.id] = nil
+            recorder.markSharedDocumentManual(item.id)
+        }
+    }
+
+    /// A queued recording may wait indefinitely for a connection. Automatic upload
+    /// must not take away the choice to delete it during that wait. Nothing has
+    /// reached the server yet, because an upload in flight is `.uploading`.
+    func discard(_ recording: LocalRecording) {
+        if recorder.recording(withID: recording.id)?.state == .waitingForUpload {
+            uploadTasks[recording.id]?.cancel()
+            uploadTasks[recording.id] = nil
+            retryTasks[recording.id]?.cancel()
+            retryTasks[recording.id] = nil
+            retryAttempts[recording.id] = nil
+            recorder.markReadyAfterConsentRevoked(recording.id)
+        }
+        guard let current = recorder.recording(withID: recording.id) else { return }
+        recorder.discard(current)
+    }
+
+    /// Imports whatever the share extension staged, then sends PDFs and links to
+    /// the server. Audio follows the same path as a finished recording.
+    ///
+    /// Each share belongs to the account that claimed it, so a failed share can
+    /// never retry into whichever account is signed in later. A rejected share,
+    /// such as a link with no video, would fail the same way on every foreground,
+    /// so it waits for `retrySharedItem` from the Retry button.
+    func processSharedItems() {
+        recorder.importSharedItems()
+        guard let ownerID = recorder.activeOwnerID,
+              !hasPendingLocalAccountDeletion(ownerID: ownerID)
+        else { return }
+        recorder.claimSharedDocuments()
+        var hasLinkWaitingForConsent = false
+        for item in recorder.sharedDocuments(ownedBy: ownerID)
+        where !rejectedSharedDocuments.contains(item.id) {
+            if item.resolvedKind == .link, !mayAutomaticallySendLink(item, ownerID: ownerID) {
+                hasLinkWaitingForConsent = hasLinkWaitingForConsent
+                    || item.autoTranscribeRequested == true
+                continue
+            }
+            sendSharedDocument(item, ownerID: ownerID)
+        }
+        if hasLinkWaitingForConsent,
+           aiProcessingConsent.isAutoTranscribeEnabled(ownerID: ownerID),
+           isForeground(),
+           !recorder.isRecording,
+           aiProcessingConsent.activeOwnerID == ownerID {
+            aiProcessingConsent.promptOnceForAutomaticTranscription()
+        }
+    }
+
+    /// Shares the Library and Record tab should offer an action for: anything the
+    /// recorder could not process, plus links held back for a deliberate tap.
+    var sharesNeedingAttention: [ShareInboxStore.Item] {
+        let unprocessed = Set(recorder.sharesNeedingAttention.map(\.id))
+        return recorder.availableSharedItems.filter {
+            unprocessed.contains($0.id) || isLinkWaitingForTap($0)
+        }
+    }
+
+    func shareStatusMessage(for item: ShareInboxStore.Item) -> String {
+        if let failure = recorder.pendingSharedErrors[item.id] { return failure }
+        guard isLinkWaitingForTap(item), let ownerID = item.ownerID else { return "" }
+        return aiProcessingConsent.hasConsent(ownerID: ownerID)
+            ? "Saved on this iPhone. Tap Transcribe to send it."
+            : "Saved on this iPhone. Allow AI processing to transcribe this link."
+    }
+
+    func shareActionTitle(for item: ShareInboxStore.Item) -> String {
+        isLinkWaitingForTap(item) ? "Transcribe" : "Retry"
+    }
+
+    /// A deliberate tap, so a link may ask for permission and goes out even with
+    /// "Automatically transcribe" off. It stays saved here if the person declines.
+    func retrySharedItem(_ item: ShareInboxStore.Item) async {
+        rejectedSharedDocuments.remove(item.id)
+        processSharedItems()
+        guard item.resolvedKind == .link,
+              let ownerID = recorder.activeOwnerID,
+              !hasPendingLocalAccountDeletion(ownerID: ownerID),
+              sharedDocumentSends[item.id] == nil,
+              await aiProcessingConsent.requestPermission(),
+              recorder.activeOwnerID == ownerID,
+              let current = recorder.sharedDocuments(ownedBy: ownerID)
+                .first(where: { $0.id == item.id })
+        else { return }
+        sendSharedDocument(current, ownerID: ownerID)
+    }
+
+    /// Only for a deliberate tap. Stops any send first, so a removed share cannot
+    /// still reach the server.
+    func discardSharedItem(_ item: ShareInboxStore.Item) {
+        sharedDocumentSends[item.id]?.task.cancel()
+        sharedDocumentSends[item.id] = nil
+        rejectedSharedDocuments.remove(item.id)
+        recorder.discardSharedItem(item)
+    }
+
+    /// Links post to `/transcripts`, whose extractor falls back to Whisper when a
+    /// video has no subtitles, so they need the same permission as a recording.
+    private func mayAutomaticallySendLink(
+        _ item: ShareInboxStore.Item,
+        ownerID: String
+    ) -> Bool {
+        item.autoTranscribeRequested == true
+            && aiProcessingConsent.isAutoTranscribeEnabled(ownerID: ownerID)
+            && aiProcessingConsent.hasAutomaticConsent(ownerID: ownerID)
+    }
+
+    private func isLinkWaitingForTap(_ item: ShareInboxStore.Item) -> Bool {
+        guard item.resolvedKind == .link,
+              let ownerID = recorder.activeOwnerID,
+              item.ownerID == ownerID,
+              recorder.pendingSharedErrors[item.id] == nil,
+              sharedDocumentSends[item.id] == nil
+        else { return false }
+        return !mayAutomaticallySendLink(item, ownerID: ownerID)
+    }
+
+    private func sendSharedDocument(_ item: ShareInboxStore.Item, ownerID: String) {
+        guard sharedDocumentSends[item.id] == nil, item.ownerID == ownerID else { return }
+        let lease = BackgroundTimeLease(name: "share-\(item.id.uuidString)")
+        let token = UUID()
+        let task = Task { [weak self] in
+            defer { lease.end() }
+            guard let self else { return }
+            defer {
+                if self.sharedDocumentSends[item.id]?.token == token {
+                    self.sharedDocumentSends[item.id] = nil
+                }
+            }
+            guard self.recorder.activeOwnerID == ownerID, !Task.isCancelled else { return }
+            do {
+                switch item.resolvedKind {
+                case .link:
+                    guard self.aiProcessingConsent.hasConsent(ownerID: ownerID) else { return }
+                    try await self.service.importSharedLink(
+                        item.link ?? "",
+                        expectedOwnerID: ownerID
+                    )
+                case .pdf:
+                    // No consent check: /pdf/extract reads the text layer on our
+                    // own server and calls no AI provider. Summaries and chat over
+                    // the result ask for permission when they are requested.
+                    guard let fileURL = self.recorder.sharedFileURL(for: item) else { return }
+                    try await self.service.importSharedPDF(
+                        fileURL: fileURL,
+                        filename: item.originalName,
+                        expectedOwnerID: ownerID
+                    )
+                case .audio:
+                    return
+                }
+                // The server has it under this owner, so keeping a copy would only
+                // create a duplicate when that account signs back in.
+                self.recorder.completeSharedDocument(item)
+                if self.recorder.activeOwnerID == ownerID {
+                    self.sharedDocumentImports += 1
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard self.recorder.activeOwnerID == ownerID, !Task.isCancelled else { return }
+                if !Self.isRetryable(error) {
+                    self.rejectedSharedDocuments.insert(item.id)
+                }
+                // The staged copy stays in the inbox, so foregrounding or
+                // Retry can send it again and nothing is lost.
+                self.recorder.failSharedDocument(
+                    item,
+                    message: error.localizedDescription
+                )
+            }
+        }
+        sharedDocumentSends[item.id] = SharedDocumentSend(ownerID: ownerID, token: token, task: task)
+    }
+
+    private func cancelSharedDocumentSends(where shouldCancel: (String) -> Bool) {
+        for (id, send) in sharedDocumentSends where shouldCancel(send.ownerID) {
+            send.task.cancel()
+            sharedDocumentSends[id] = nil
+        }
+    }
+
     /// Keeps upload/finalization credentials aligned with the signed-in Clerk
     /// account. Work owned by another account is paused instead of ever being
     /// finalized with the new account's bearer token.
     func setActiveOwnerID(_ ownerID: String?) async {
+        cancelSharedDocumentSends { $0 != ownerID }
         await retryPendingLocalAccountDeletions()
         recorder.setActiveOwnerID(ownerID)
         if let ownerID {
@@ -151,6 +452,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         persistWatches()
         if ownerID != nil {
             resumePendingWork()
+            // Shares staged while signed out have been waiting for this moment.
+            processSharedItems()
         }
     }
 
@@ -159,6 +462,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     func migrateOwnerID(from clerkID: String, to userID: String) async throws {
         guard clerkID != userID else { return }
         verifiedOwnerAliases[clerkID] = userID
+        cancelSharedDocumentSends { $0 == clerkID }
         let migratingIDs = recorder.recordingIDsOwned(by: clerkID)
         for recordingID in migratingIDs {
             uploadTasks[recordingID]?.cancel()
@@ -224,6 +528,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             retryAttempts[recordingID] = nil
         }
         await transport.cancel(recordingIDs: recordingIDs)
+        cancelSharedDocumentSends { $0 == ownerID }
         let removedWatches = watches.filter {
             $0.ownerID == ownerID || $0.recordingID.map(recordingIDs.contains) == true
         }
@@ -288,6 +593,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
 
     func resumePendingWork() {
         transport.receiver = self
+        reconcileQueuedWorkWithConsent()
         for recording in recorder.availableRecordings
         where recording.state == .serverProcessing {
             guard let remoteID = recording.remoteTranscriptionID,
@@ -317,6 +623,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 break
             }
         }
+        autoQueueEligibleRecordings()
 
         guard !hasReconciledTransfers else { return }
         hasReconciledTransfers = true
@@ -341,6 +648,22 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         }
     }
 
+    /// Revoking saves the new permission before it returns queued recordings. If
+    /// the app ends between those steps, or the state cannot be saved, a recording
+    /// would stay marked as in progress: unable to upload, finish, or be discarded.
+    private func reconcileQueuedWorkWithConsent() {
+        guard let ownerID = recorder.activeOwnerID,
+              !aiProcessingConsent.hasConsent(ownerID: ownerID)
+        else { return }
+        // Recordings move to a verified owner ID just before consent does. That
+        // gap is not a revocation, and an event can arrive during it.
+        let consentIsStillMigrating = verifiedOwnerAliases.contains {
+            $0.value == ownerID && aiProcessingConsent.hasConsent(ownerID: $0.key)
+        }
+        guard !consentIsStillMigrating else { return }
+        returnQueuedWorkAfterRevocation()
+    }
+
     func receiveBackgroundUploadEvent(_ event: BackgroundUploadEvent) {
         let metadata: BackgroundUploadMetadata
         switch event {
@@ -355,6 +678,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
               )
         else { return }
 
+        // A background launch can deliver this before any scene resumes work.
+        reconcileQueuedWorkWithConsent()
+
         switch event {
         case .progress(let metadata, let fractionCompleted):
             recorder.updateUploadProgress(metadata.recordingID, progress: fractionCompleted)
@@ -364,6 +690,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             recorder.markUploadFinalizing(metadata.recordingID)
             finalize(recordingID: metadata.recordingID)
         case .failed(let metadata, let message, let shouldRetry):
+            // Cancelling a revoked upload reports back here. The recording has
+            // already returned to the saved state, and must stay there.
+            guard recorder.recording(withID: metadata.recordingID)?.state != .ready else { return }
             if shouldRetry {
                 recorder.markWaitingForUpload(
                     metadata.recordingID,
@@ -387,7 +716,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
               let fileURL = recorder.fileURL(for: recording)
         else { return }
 
+        let lease = BackgroundTimeLease(name: "upload-\(recordingID.uuidString)")
         uploadTasks[recordingID] = Task { [weak self] in
+            defer { lease.end() }
             guard let self else { return }
             defer { self.uploadTasks[recordingID] = nil }
             guard self.isActiveOwner(
@@ -500,7 +831,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
               let sizeBytes = recording.uploadSizeBytes
         else { return }
 
+        let lease = BackgroundTimeLease(name: "finalize-\(recordingID.uuidString)")
         uploadTasks[recordingID] = Task { [weak self] in
+            defer { lease.end() }
             guard let self else { return }
             defer { self.uploadTasks[recordingID] = nil }
             guard self.isActiveOwner(
@@ -590,6 +923,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 }
                 self.removeWatch(id: watch.id)
                 self.statusMessage = "Transcription complete"
+                NotificationService.notifyAudioComplete(title: item.displayTitle, itemId: item.id)
                 return
             }
             var failures = 0
@@ -856,6 +1190,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         recorder.markUploadFinalizing(recording.id)
         try? await Task.sleep(for: .milliseconds(500))
         guard !Task.isCancelled else { return }
+        #if DEBUG
+        UITestAPIProtocol.acceptAudio(title: recording.displayTitle)
+        #endif
         guard let item = simulatedItem(
             id: "ui-test-audio",
             title: recording.displayTitle,

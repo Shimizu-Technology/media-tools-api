@@ -22,6 +22,27 @@ final class ShareInboxStoreTests: XCTestCase {
         XCTAssertTrue(try afterRelaunch.pendingItems().isEmpty)
     }
 
+    func testClaimSurvivesRelaunchAndOlderManifestsStartUnowned() throws {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        let inbox = try ShareInboxStore(rootURL: temp)
+        var item = try inbox.stageLink(try XCTUnwrap(URL(string: "https://youtu.be/abc")))
+        XCTAssertNil(try inbox.pendingItems().first?.ownerID)
+
+        item.ownerID = "owner-a"
+        item.autoTranscribeRequested = true
+        try inbox.update(item)
+
+        let afterRelaunch = try XCTUnwrap(ShareInboxStore(rootURL: temp).pendingItems().first)
+        XCTAssertEqual(afterRelaunch.ownerID, "owner-a")
+        XCTAssertEqual(afterRelaunch.autoTranscribeRequested, true)
+
+        let older = Data(#"{"id":"\#(item.id.uuidString)","originalName":"a","storedName":"link","createdAt":0}"#.utf8)
+        let decoded = try JSONDecoder().decode(ShareInboxStore.Item.self, from: older)
+        XCTAssertNil(decoded.ownerID)
+        XCTAssertNil(decoded.autoTranscribeRequested)
+    }
+
     func testIncompleteShareIsNeverPublished() throws {
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: temp) }
@@ -37,11 +58,11 @@ final class ShareInboxStoreTests: XCTestCase {
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: temp) }
         try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
-        let source = temp.appendingPathComponent("video.mov")
+        let source = temp.appendingPathComponent("video.avi")
         try Data(repeating: 0x42, count: 16).write(to: source)
         let inbox = try ShareInboxStore(rootURL: temp.appendingPathComponent("inbox"))
 
-        XCTAssertThrowsError(try inbox.stageFile(from: source, originalName: "video.mov"))
+        XCTAssertThrowsError(try inbox.stageFile(from: source, originalName: "video.avi"))
         XCTAssertTrue(try inbox.pendingItems().isEmpty)
     }
 
@@ -57,6 +78,137 @@ final class ShareInboxStoreTests: XCTestCase {
         XCTAssertEqual(item.originalName, "Voice Memo.m4a")
         XCTAssertEqual(item.storedName, "source.m4a")
         XCTAssertEqual(inbox.fileURL(for: item).pathExtension, "m4a")
+    }
+
+    private func makeTemporaryInbox() throws -> (temp: URL, inbox: ShareInboxStore) {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: temp) }
+        return (temp, try ShareInboxStore(rootURL: temp.appendingPathComponent("inbox")))
+    }
+
+    private func writeSource(_ name: String, in directory: URL) throws -> URL {
+        let source = directory.appendingPathComponent(name)
+        try Data(repeating: 0x42, count: 16).write(to: source)
+        return source
+    }
+
+    func testDottedDisplayNameDoesNotOverrideTheSourceExtension() throws {
+        let (temp, inbox) = try makeTemporaryInbox()
+        let source = try writeSource("provider.m4a", in: temp)
+
+        let item = try inbox.stageFile(from: source, originalName: "Call v2.1")
+
+        XCTAssertEqual(item.storedName, "source.m4a")
+        XCTAssertEqual(item.originalName, "Call v2.1.m4a")
+        XCTAssertEqual(item.resolvedKind, .audio)
+    }
+
+    func testSourceExtensionWinsOverAConflictingDisplayExtension() throws {
+        let (temp, inbox) = try makeTemporaryInbox()
+        let source = try writeSource("provider.m4a", in: temp)
+
+        let item = try inbox.stageFile(from: source, originalName: "Meeting.mp3")
+
+        XCTAssertEqual(item.storedName, "source.m4a")
+        XCTAssertEqual(item.originalName, "Meeting.m4a")
+    }
+
+    func testSharedTypeResolvesANameAndTemporaryFileWithNoUsefulExtension() throws {
+        let (temp, inbox) = try makeTemporaryInbox()
+        let source = try writeSource("provider.tmp", in: temp)
+
+        let item = try inbox.stageFile(
+            from: source,
+            originalName: "Call v2.1",
+            contentTypeExtension: "m4a"
+        )
+
+        XCTAssertEqual(item.storedName, "source.m4a")
+        XCTAssertEqual(item.originalName, "Call v2.1.m4a")
+    }
+
+    func testNoSupportedExtensionAnywhereIsRejected() throws {
+        let (temp, inbox) = try makeTemporaryInbox()
+        let source = try writeSource("provider.tmp", in: temp)
+
+        XCTAssertThrowsError(try inbox.stageFile(from: source, originalName: "Call v2.1"))
+        XCTAssertTrue(try inbox.pendingItems().isEmpty)
+    }
+
+    func testVoiceMemosAndQuickTimeFormatsAreAccepted() throws {
+        let (temp, inbox) = try makeTemporaryInbox()
+
+        for fileExtension in ["qta", "mov", "aac"] {
+            let source = try writeSource("memo.\(fileExtension)", in: temp)
+            let item = try inbox.stageFile(from: source, originalName: "New Recording 3")
+            XCTAssertEqual(item.storedName, "source.\(fileExtension)")
+            XCTAssertEqual(item.originalName, "New Recording 3.\(fileExtension)")
+            XCTAssertEqual(item.resolvedKind, .audio)
+        }
+    }
+
+    func testPDFIsStagedForTheAppToProcess() throws {
+        let (temp, inbox) = try makeTemporaryInbox()
+        let source = try writeSource("notes.pdf", in: temp)
+
+        let item = try inbox.stageFile(from: source, originalName: "Notes.pdf")
+
+        XCTAssertEqual(item.resolvedKind, .pdf)
+        XCTAssertEqual(try inbox.pendingItems().map(\.id), [item.id])
+    }
+
+    func testOversizedPDFIsRejected() throws {
+        let (temp, inbox) = try makeTemporaryInbox()
+        let source = temp.appendingPathComponent("large.pdf")
+        FileManager.default.createFile(atPath: source.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: source)
+        try handle.truncate(atOffset: 50 * 1_024 * 1_024 + 1)
+        try handle.close()
+
+        XCTAssertThrowsError(try inbox.stageFile(from: source, originalName: "large.pdf"))
+    }
+
+    func testWebLinkIsStagedAndSurvivesRelaunch() throws {
+        let (temp, inbox) = try makeTemporaryInbox()
+        let url = try XCTUnwrap(URL(string: "https://youtu.be/abc123"))
+
+        let item = try inbox.stageLink(url, title: "  A talk  ")
+
+        XCTAssertEqual(item.originalName, "A talk")
+        let relaunched = try ShareInboxStore(rootURL: temp.appendingPathComponent("inbox"))
+        let pending = try XCTUnwrap(relaunched.pendingItems().first)
+        XCTAssertEqual(pending.resolvedKind, .link)
+        XCTAssertEqual(pending.link, url.absoluteString)
+    }
+
+    func testNonWebLinkIsRejected() throws {
+        let (_, inbox) = try makeTemporaryInbox()
+
+        for link in ["file:///tmp/a.m4a", "mailto:a@example.com", "https://"] {
+            let url = try XCTUnwrap(URL(string: link))
+            XCTAssertThrowsError(try inbox.stageLink(url), link)
+        }
+        XCTAssertTrue(try inbox.pendingItems().isEmpty)
+    }
+
+    func testShareStagedByAnOlderBuildIsStillReadAsAudio() throws {
+        let (temp, inbox) = try makeTemporaryInbox()
+        let id = UUID()
+        let directory = inbox.rootURL.appendingPathComponent(id.uuidString.lowercased())
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(
+            at: try writeSource("legacy.m4a", in: temp),
+            to: directory.appendingPathComponent("source.m4a")
+        )
+        let legacy = """
+        {"id":"\(id.uuidString)","originalName":"Old.m4a","storedName":"source.m4a","createdAt":0}
+        """
+        try Data(legacy.utf8).write(to: directory.appendingPathComponent("item.json"))
+
+        let pending = try XCTUnwrap(inbox.pendingItems().first)
+        XCTAssertEqual(pending.id, id)
+        XCTAssertEqual(pending.resolvedKind, .audio)
     }
 
     func testOversizedFileIsRejectedBeforeCopy() throws {

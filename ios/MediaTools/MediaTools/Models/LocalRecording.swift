@@ -36,6 +36,10 @@ struct LocalRecording: Identifiable, Codable, Equatable, Sendable {
     /// Clerk user ID that owns this device copy. Older manifests decode this
     /// as nil and are claimed by the first signed-in account after migration.
     var ownerID: String? = nil
+    /// Set when "Automatically transcribe" was on as this recording was saved.
+    /// Older manifests decode as nil: those recordings were saved under a promise
+    /// that audio is sent only on request, so they keep their manual button.
+    var autoTranscribeRequested: Bool? = nil
 
     var displayTitle: String {
         if let originalFilename, !originalFilename.isEmpty {
@@ -70,7 +74,7 @@ struct LocalRecording: Identifiable, Codable, Equatable, Sendable {
         case .invalid:
             return lastError ?? "Recording needs recovery"
         case .waitingForUpload:
-            return "Waiting for a connection"
+            return lastError ?? "Waiting for a connection"
         case .uploading:
             let percent = Int(((uploadProgress ?? 0) * 100).rounded())
             return percent > 0 ? "Uploading \(percent)%" : "Starting upload"
@@ -92,6 +96,12 @@ struct LocalRecording: Identifiable, Codable, Equatable, Sendable {
 
     var canUpload: Bool {
         state == .ready || state == .interrupted || state == .uploadFailed
+    }
+
+    /// A failed upload stays manual: it would otherwise retry a permanent
+    /// rejection on every foreground. Invalid audio is never offered.
+    var isWaitingForAutomaticTranscription: Bool {
+        autoTranscribeRequested == true && (state == .ready || state == .interrupted)
     }
 
     private static let titleFormatter: DateFormatter = {

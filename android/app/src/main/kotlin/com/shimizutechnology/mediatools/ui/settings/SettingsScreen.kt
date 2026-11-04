@@ -362,7 +362,7 @@ private fun AIProcessingDisclosure(onAllow: () -> Unit, onDecline: () -> Unit, o
         title = { Text("Allow third-party AI processing?") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Media Tools only sends content when you choose an AI feature. Permission applies to this account on this Android device.")
+                Text("With automatic transcription on, new recordings go to OpenAI when they are saved, and their transcripts go to OpenRouter. Everything else is sent only when you use an AI feature. Permission applies to this account on this Android device.")
                 Text("OpenAI receives audio for transcription and may process text if the primary AI route is unavailable. API content is not used to train OpenAI models by default.")
                 Text("OpenRouter and the selected model provider receive transcript or document text and chat prompts for formatting, summaries, citations, and answers. Media Tools requires zero-data-retention providers.")
                 Text("You can revoke permission for future requests in Settings. Processing you already started may finish.")

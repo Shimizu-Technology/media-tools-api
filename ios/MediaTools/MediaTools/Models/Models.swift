@@ -11,6 +11,7 @@ struct Transcript: Identifiable, Codable {
     let wordCount: Int?
     let createdAt: Date?
     let updatedAt: Date?
+    var errorMessage: String? = nil
 
     var displayTitle: String {
         title ?? "(Untitled)"
@@ -188,7 +189,7 @@ struct LibraryListItem: Identifiable, Codable, Hashable {
         let supportedExtensions: Set<String>
         switch itemType {
         case "audio":
-            supportedExtensions = ["aac", "caf", "m4a", "mp3", "mp4", "mov", "wav"]
+            supportedExtensions = ["aac", "caf", "m4a", "mp3", "mp4", "mov", "qta", "wav"]
         case "pdf":
             supportedExtensions = ["pdf"]
         default:

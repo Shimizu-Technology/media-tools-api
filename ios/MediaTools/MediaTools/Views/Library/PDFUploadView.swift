@@ -73,6 +73,15 @@ struct PDFUploadView: View {
                             .font(Theme.caption())
                             .foregroundStyle(Theme.textMuted)
                     }
+                    NavigationLink {
+                        ItemDetailView(item: .pdf(result))
+                    } label: {
+                        Label("Open", systemImage: "arrow.right.circle.fill")
+                            .font(Theme.body(14, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.brand500)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accentCardStyle()

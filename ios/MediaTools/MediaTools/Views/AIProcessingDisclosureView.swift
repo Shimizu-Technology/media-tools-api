@@ -16,7 +16,7 @@ struct AIProcessingDisclosureView: View {
                         Text("Allow third-party AI processing?")
                             .font(Theme.heading(25))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("Media Tools only sends content when you choose an AI feature. Your permission applies to this account on this iPhone.")
+                        Text("With automatic transcription on, new recordings and shared audio go to OpenAI when they are saved, as do shared video links that have no subtitles, and their transcripts go to OpenRouter. Everything else is sent only when you use an AI feature. You can turn automatic transcription off in Settings. This permission applies to this account on this iPhone.")
                             .font(Theme.body(14))
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -31,7 +31,7 @@ struct AIProcessingDisclosureView: View {
                         detail: "Receives transcript or document text and chat prompts for readable formatting, summaries, citations, and answers. Media Tools requires zero-data-retention providers."
                     )
 
-                    Text("You can revoke permission for future requests in Settings. Processing you already started may finish.")
+                    Text("You can revoke permission for future requests in Settings. Processing already started may finish.")
                         .font(Theme.caption(13))
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)

@@ -20,6 +20,7 @@ struct SettingsView: View {
     @State private var showAdvanced = false
     @State private var notificationState: NotificationPermissionState = .notRequested
     @State private var isSigningOut = false
+    @State private var showSignOutConfirmation = false
     @State private var signOutError: String?
     @State private var showDeleteAccount = false
     @State private var deletionConfirmation = ""
@@ -609,7 +610,7 @@ struct SettingsView: View {
                 Label {
                     Text(aiProcessingConsent.hasConsent
                          ? "Allowed for this account on this iPhone."
-                         : "Not allowed. Media Tools will ask before sharing content with third-party AI providers.")
+                         : "Not allowed. Media Tools will ask before sending content to third-party AI providers.")
                         .font(Theme.body(14))
                         .foregroundStyle(Theme.textPrimary)
                 } icon: {
@@ -621,6 +622,38 @@ struct SettingsView: View {
                     .font(Theme.caption(13))
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                Toggle(isOn: Binding(
+                    get: { aiProcessingConsent.isAutoTranscribeEnabled },
+                    set: { aiProcessingConsent.setAutoTranscribeEnabled($0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Automatically transcribe")
+                            .font(Theme.body(14, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text(autoTranscribeDetail)
+                            .font(Theme.caption(13))
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .tint(Theme.brand500)
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("settings.auto-transcribe")
+
+                if aiProcessingConsent.isAutoTranscribeEnabled,
+                   aiProcessingConsent.hasConsent,
+                   !aiProcessingConsent.hasAutomaticConsent {
+                    Button {
+                        Task { _ = await aiProcessingConsent.requestAutomaticPermission() }
+                    } label: {
+                        Label("Review automatic transcription", systemImage: "info.circle")
+                            .font(Theme.body(14, weight: .semibold))
+                            .foregroundStyle(Theme.brand400)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 Button {
                     if aiProcessingConsent.hasConsent {
@@ -641,6 +674,15 @@ struct SettingsView: View {
             }
             .cardStyle(padding: 14)
         }
+    }
+
+    private var autoTranscribeDetail: String {
+        guard aiProcessingConsent.isAutoTranscribeEnabled else {
+            return "New recordings stay on this iPhone until you tap Transcribe."
+        }
+        return aiProcessingConsent.hasAutomaticConsent
+            ? "New recordings, shared audio, and shared video links with no subtitles go to OpenAI when they are saved."
+            : "New recordings stay on this iPhone until you allow AI processing."
     }
 
     private var helpSection: some View {
@@ -767,7 +809,7 @@ struct SettingsView: View {
     private var signOutSection: some View {
         VStack(spacing: 8) {
             Button(role: .destructive) {
-                Task { await signOut() }
+                showSignOutConfirmation = true
             } label: {
                 HStack(spacing: 8) {
                     if isSigningOut {
@@ -789,6 +831,18 @@ struct SettingsView: View {
                 }
             }
             .disabled(isSigningOut)
+            .confirmationDialog(
+                "Sign out of Media Tools?",
+                isPresented: $showSignOutConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Sign Out", role: .destructive) {
+                    Task { await signOut() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Recordings saved on this iPhone stay here and finish after you sign back in.")
+            }
 
             if let signOutError {
                 Text(signOutError)
@@ -1278,6 +1332,8 @@ private struct ClerkMigrationCard: View {
                     .frame(minHeight: 44)
             }
         }
+        // Without this the card's identifier replaces the Disconnect button's.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clerk-migration.card")
     }
 

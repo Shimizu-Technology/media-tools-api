@@ -101,6 +101,12 @@ final class AccountDeletionRecoveryService {
         self.journal = journal ?? AccountDeletionKeychainJournal.shared
     }
 
+    /// Local read used before opening a stored workspace. A deletion that might
+    /// have committed must be reconciled before showing that account's content.
+    var hasPendingDeletion: Bool {
+        (try? journal.load()) != nil
+    }
+
     /// Persist the receipt before sending DELETE. Retrying for the same owner
     /// always reuses the exact receipt, including after a crash or lost reply.
     func prepare(ownerID: String) throws -> PendingAccountDeletion {

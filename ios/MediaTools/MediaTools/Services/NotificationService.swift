@@ -10,6 +10,8 @@ enum NotificationPermissionState: Equatable {
 /// Handles local notifications for transcription completion.
 /// (Push notifications via APNs can be added later when the backend supports it.)
 enum NotificationService {
+    static let uploadIdentifierPrefix = "audio-upload-"
+
     static func permissionState() async -> NotificationPermissionState {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         switch settings.authorizationStatus {
@@ -41,7 +43,7 @@ enum NotificationService {
         content.title = "Transcription Complete"
         content.body = title
         content.sound = .default
-        content.userInfo = ["item_id": itemId]
+        content.userInfo = ["item_id": itemId, "type": "transcript"]
 
         let request = UNNotificationRequest(
             identifier: "transcription-\(itemId)",
@@ -72,13 +74,13 @@ enum NotificationService {
     static func notifyAudioUploadAccepted(title: String, itemId: String) {
         let content = UNMutableNotificationContent()
         content.title = "Recording Uploaded"
-        content.body = "\(title) is ready for transcription."
+        content.body = "\(title) is being transcribed."
         content.sound = .default
         content.userInfo = ["item_id": itemId, "type": "audio"]
 
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(
-                identifier: "audio-upload-\(itemId)",
+                identifier: "\(uploadIdentifierPrefix)\(itemId)",
                 content: content,
                 trigger: nil
             )

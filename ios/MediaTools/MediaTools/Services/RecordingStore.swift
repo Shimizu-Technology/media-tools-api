@@ -74,9 +74,60 @@ struct RecordingStore {
         )
     }
 
+    /// Recordings that exist while the manifest cannot be read. Writing the
+    /// manifest then would replace it with only what this launch knows about, and
+    /// leave the earlier audio unreachable. Each recording gets its own file so one
+    /// write can never cover another; the manifest absorbs them once it loads.
+    func saveUnmergedRecording(_ recording: LocalRecording) throws {
+        try Self.encoder.encode(recording).write(
+            to: unmergedURL(for: recording.id),
+            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+        )
+    }
+
+    func removeUnmergedRecording(id: UUID) throws {
+        let url = unmergedURL(for: id)
+        guard fileManager.fileExists(atPath: url.path) else { return }
+        try fileManager.removeItem(at: url)
+    }
+
+    /// Throws when a file cannot be read, because a locked file may hold a
+    /// recording. Undecodable content cannot improve with a retry, so it is
+    /// skipped rather than keeping the manifest closed forever.
+    func loadUnmergedRecordings() throws -> [LocalRecording] {
+        try unmergedURLs().compactMap { url in
+            let data = try Data(contentsOf: url)
+            guard let recording = try? Self.decoder.decode(LocalRecording.self, from: data),
+                  fileManager.fileExists(atPath: fileURL(for: recording).path)
+            else { return nil }
+            return recording
+        }
+    }
+
+    func removeAllUnmergedRecordings() throws {
+        for url in try unmergedURLs() {
+            try fileManager.removeItem(at: url)
+        }
+    }
+
+    private func unmergedURL(for id: UUID) -> URL {
+        directoryURL.appendingPathComponent(
+            "\(Self.unmergedPrefix)\(id.uuidString.lowercased()).json",
+            isDirectory: false
+        )
+    }
+
+    private func unmergedURLs() throws -> [URL] {
+        try fileManager.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix(Self.unmergedPrefix) }
+    }
+
+    private static let unmergedPrefix = "unmerged-"
+
     func makeRecording(
         contentType: String,
         ownerID: String? = nil,
+        autoTranscribeRequested: Bool = false,
         now: Date = Date()
     ) -> LocalRecording {
         let id = UUID()
@@ -101,7 +152,8 @@ struct RecordingStore {
             uploadSizeBytes: nil,
             uploadMimeType: nil,
             uploadTaskIdentifier: nil,
-            ownerID: ownerID
+            ownerID: ownerID,
+            autoTranscribeRequested: autoTranscribeRequested
         )
         return recording
     }
@@ -119,6 +171,7 @@ struct RecordingStore {
         ownerID: String? = nil,
         id: UUID = UUID(),
         originalName: String? = nil,
+        autoTranscribeRequested: Bool = false,
         now: Date = Date()
     ) throws -> LocalRecording {
         let sourceExtension = sourceURL.pathExtension.lowercased()
@@ -139,7 +192,8 @@ struct RecordingStore {
             uploadSizeBytes: nil,
             uploadMimeType: nil,
             uploadTaskIdentifier: nil,
-            ownerID: ownerID
+            ownerID: ownerID,
+            autoTranscribeRequested: autoTranscribeRequested
         )
         // A previous process may have died after copying but before saving the
         // manifest. The inbox still owns the source, so replacing that orphan

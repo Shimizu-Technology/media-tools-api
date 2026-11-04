@@ -33,6 +33,9 @@ struct QuickRecordIntent: AudioRecordingIntent, LiveActivityIntent {
         // only lets the widget extension compile and expose intent metadata.
         return .result()
         #else
+        // A stop saved in this process should start its upload straight away,
+        // which needs the upload coordinator to exist and be listening.
+        _ = RecordingUploadCoordinator.shared
         _ = await RecordingCoordinator.shared.toggleFromSystem()
         QuickCaptureNavigation.requestRecordTab()
         return .result()
@@ -52,6 +55,7 @@ struct StopRecordingIntent: LiveActivityIntent {
         #if WIDGET_EXTENSION
         return .result()
         #else
+        _ = RecordingUploadCoordinator.shared
         _ = await RecordingCoordinator.shared.stopFromSystem()
         return .result()
         #endif

@@ -91,7 +91,7 @@ function AIProcessingDisclosureDialog({ onAllow, onDecline }: { onAllow: () => v
         </h2>
         <div id="ai-processing-description" className="mt-3 space-y-4 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
           <p>
-            Only when you choose an AI feature, Media Tools sends the content needed for that request to these providers:
+            With automatic transcription on, new recordings go to OpenAI when they are saved, and their transcripts go to OpenRouter. Everything else is sent only when you use an AI feature. Media Tools sends the content needed to these providers:
           </p>
           <ul className="space-y-3">
             <li className="flex gap-3">

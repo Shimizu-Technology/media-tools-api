@@ -23,6 +23,36 @@ private final class MemoryDeviceSessionStore: DeviceSessionStoring {
     func removeLocalOwnerID(for clerkID: String) { ownerMappings.removeValue(forKey: clerkID) }
 }
 
+/// A Keychain that cannot answer until the iPhone is unlocked.
+@MainActor
+private final class LockableDeviceSessionStore: DeviceSessionStoring {
+    var isLocked = true
+    var value: StoredDeviceSession?
+    private(set) var bootstrapSaves = 0
+    init(_ value: StoredDeviceSession?) { self.value = value }
+    func load() -> StoredDeviceSession? { isLocked ? nil : value }
+    func loadResult() -> DeviceSessionLoadResult {
+        if isLocked { return .unavailable }
+        return value.map(DeviceSessionLoadResult.found) ?? .missing
+    }
+    func save(_ value: StoredDeviceSession) throws { self.value = value }
+    func delete() { value = nil }
+    func loadPendingBootstrap() throws -> PendingDeviceSessionBootstrap? { nil }
+    func savePendingBootstrap(_ value: PendingDeviceSessionBootstrap) throws { bootstrapSaves += 1 }
+    func deletePendingBootstrap() {}
+    func localOwnerID(for clerkID: String) -> String? { nil }
+    func clerkID(forLocalOwnerID ownerID: String) -> String? { nil }
+    func saveLocalOwnerID(_ ownerID: String, for clerkID: String) {}
+    func removeLocalOwnerID(for clerkID: String) {}
+}
+
+private struct UnreachableDeviceSessionTransport: DeviceSessionTransport {
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        XCTFail("Startup must not reach the network: \(request)")
+        throw URLError(.notConnectedToInternet)
+    }
+}
+
 @MainActor
 private final class MemoryDeletedClerkIdentityStore: DeletedClerkIdentityStoring {
     private(set) var values: Set<String> = []
@@ -973,5 +1003,132 @@ final class DeviceSessionTests: XCTestCase {
         XCTAssertThrowsError(try controller.markClerkDetached(expectedOwnerID: "server-b"))
         XCTAssertEqual(store.value?.source, .clerk)
         XCTAssertEqual(store.value?.verifiedClerkID, "clerk-a")
+    }
+}
+
+@MainActor
+final class DeviceSessionStartupTests: XCTestCase {
+    private func storedSession(
+        source: DeviceSessionSource = .passkey,
+        verifiedClerkID: String? = nil,
+        pendingRevocation: Bool? = nil,
+        expiresIn: TimeInterval = 3_600
+    ) -> StoredDeviceSession {
+        StoredDeviceSession(
+            pair: DeviceSessionPair(
+                sessionID: "session-a",
+                userID: "server-a",
+                accessToken: "access",
+                accessExpiresAt: Date().addingTimeInterval(expiresIn),
+                refreshToken: "refresh",
+                inactiveExpiresAt: Date().addingTimeInterval(86_400)
+            ),
+            source: source,
+            verifiedClerkID: verifiedClerkID,
+            pendingRevocation: pendingRevocation
+        )
+    }
+
+    private func controller(
+        store: any DeviceSessionStoring,
+        deleted: MemoryDeletedClerkIdentityStore? = nil
+    ) -> DeviceSessionController {
+        DeviceSessionController(
+            transport: UnreachableDeviceSessionTransport(),
+            baseURL: URL(string: "https://example.invalid/api/v1")!,
+            store: store,
+            deletedClerkIdentities: deleted ?? MemoryDeletedClerkIdentityStore(),
+            enabled: true
+        )
+    }
+
+    func testStoredSessionOpensTheWorkspaceBeforeAnyNetworkRequest() {
+        let session = controller(store: MemoryDeviceSessionStore(storedSession()))
+        XCTAssertEqual(session.activeUserID, "server-a")
+    }
+
+    func testExpiredAccessTokenStillOpensTheWorkspaceImmediately() {
+        let session = controller(store: MemoryDeviceSessionStore(storedSession(expiresIn: -60)))
+        XCTAssertEqual(session.activeUserID, "server-a")
+    }
+
+    func testStoredClerkSessionFromAnEarlierBuildStillOpens() throws {
+        let legacy = Data("""
+        {"pair":{"session_id":"session-a","user_id":"server-a","access_token":"access",\
+        "access_expires_at":1000000000,"refresh_token":"refresh",\
+        "inactive_expires_at":1000000000},"source":"clerk","verifiedClerkID":"clerk-a"}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(StoredDeviceSession.self, from: legacy)
+        XCTAssertEqual(decoded.source, .clerk)
+        let session = controller(store: MemoryDeviceSessionStore(decoded))
+        XCTAssertEqual(session.activeUserID, "server-a")
+        XCTAssertEqual(session.verifiedMigration?.clerkID, "clerk-a")
+    }
+
+    func testRevokedAndRetiredSessionsDoNotOpen() {
+        let revoked = controller(
+            store: MemoryDeviceSessionStore(storedSession(pendingRevocation: true))
+        )
+        XCTAssertNil(revoked.activeUserID)
+
+        let deleted = MemoryDeletedClerkIdentityStore()
+        deleted.insert("clerk-a")
+        let retired = controller(
+            store: MemoryDeviceSessionStore(
+                storedSession(source: .clerk, verifiedClerkID: "clerk-a")
+            ),
+            deleted: deleted
+        )
+        XCTAssertNil(retired.activeUserID)
+    }
+
+    func testLockedKeychainIsNotASignedOutState() async {
+        let store = LockableDeviceSessionStore(storedSession())
+        let session = controller(store: store)
+
+        XCTAssertTrue(session.isSessionStoreUnavailable)
+        XCTAssertNil(session.activeUserID)
+        let revision = session.sessionRevision
+
+        // Still locked: nothing changes and nothing gets replaced.
+        session.reloadStoredSessionIfUnavailable()
+        XCTAssertTrue(session.isSessionStoreUnavailable)
+        XCTAssertEqual(session.sessionRevision, revision)
+        let owner = await session.activate(clerkID: "clerk-a", clerkIsLoaded: true)
+        XCTAssertNil(owner)
+        XCTAssertEqual(store.bootstrapSaves, 0, "A locked Keychain must not start a second session")
+        XCTAssertNotNil(store.value)
+
+        // Foreground after unlock restores the same session without signing in.
+        store.isLocked = false
+        session.reloadStoredSessionIfUnavailable()
+        XCTAssertFalse(session.isSessionStoreUnavailable)
+        XCTAssertEqual(session.activeUserID, "server-a")
+        XCTAssertEqual(session.sessionRevision, revision + 1)
+    }
+
+    func testLockedKeychainThatTurnsOutEmptyBecomesSignedOut() {
+        let store = LockableDeviceSessionStore(nil)
+        let session = controller(store: store)
+        XCTAssertTrue(session.isSessionStoreUnavailable)
+
+        store.isLocked = false
+        session.reloadStoredSessionIfUnavailable()
+
+        XCTAssertFalse(session.isSessionStoreUnavailable)
+        XCTAssertNil(session.activeUserID)
+    }
+
+    func testClerkFinishingItsLoadReleasesOnlyOtherSignOutBlocks() {
+        let deleted = MemoryDeletedClerkIdentityStore()
+        deleted.insert("clerk-a")
+        deleted.insert("clerk-b")
+        let session = controller(store: MemoryDeviceSessionStore(nil), deleted: deleted)
+
+        session.clerkFinishedLoading(clerkID: "clerk-a")
+        XCTAssertEqual(deleted.values, ["clerk-a"])
+
+        session.clerkFinishedLoading(clerkID: nil)
+        XCTAssertTrue(deleted.values.isEmpty)
     }
 }

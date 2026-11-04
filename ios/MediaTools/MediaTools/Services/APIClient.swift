@@ -13,7 +13,18 @@ actor APIClient {
 
     private init() {
         self.baseURL = Configuration.apiBaseURL + "/api/v1"
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-ui-test-signed-in") {
+            // The fixture session must never reach a real server.
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [UITestAPIProtocol.self]
+            self.session = URLSession(configuration: configuration)
+        } else {
+            self.session = URLSession.shared
+        }
+        #else
         self.session = URLSession.shared
+        #endif
 
         self.decoder = Self.makeDecoder()
         self.encoder = JSONEncoder()
