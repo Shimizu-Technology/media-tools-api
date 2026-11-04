@@ -111,7 +111,7 @@ func (db *DB) RenameAudioTranscriptionForActor(ctx context.Context, id string, u
 	}
 	query := fmt.Sprintf(`
 		UPDATE audio_transcriptions
-		SET original_name = $4
+		SET original_name = $4, title_manually_set = true
 		WHERE id = $1
 		  AND (($2::uuid IS NOT NULL AND user_id = $2)
 		    OR ($3::uuid IS NOT NULL AND api_key_id = $3))

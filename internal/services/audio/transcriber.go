@@ -17,6 +17,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 // instead of parsing error message strings.
 type WhisperAPIError struct {
 	StatusCode int
+	RetryAfter time.Duration
 	Body       string
 }
 
@@ -187,7 +189,7 @@ func (t *Transcriber) Transcribe(ctx context.Context, audioData io.Reader, filen
 
 	// Check for API errors
 	if resp.StatusCode != http.StatusOK {
-		return nil, &WhisperAPIError{StatusCode: resp.StatusCode, Body: string(respBody)}
+		return nil, &WhisperAPIError{StatusCode: resp.StatusCode, Body: string(respBody), RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
 	}
 
 	// Parse the response
@@ -320,4 +322,14 @@ func transcriptionSegmentsToTranscriptSegments(segments []TranscriptionSegment) 
 // NewWhisperAdapter creates an adapter for use with the transcript package.
 func NewWhisperAdapter(t *Transcriber) *WhisperAdapter {
 	return &WhisperAdapter{Transcriber: t}
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	if seconds, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if when, err := http.ParseTime(value); err == nil && when.After(now) {
+		return when.Sub(now)
+	}
+	return 0
 }

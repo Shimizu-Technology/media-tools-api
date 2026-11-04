@@ -7,6 +7,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,7 +28,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
-const supportedTranscriptionUploadFormats = "mp3, wav, caf, m4a, mp4, ogg, flac, webm"
+const supportedTranscriptionUploadFormats = "mp3, wav, caf, m4a, mp4, mov, qta, aac, ogg, flac, webm"
 
 // supportedTranscriptionUploadTypes maps upload extensions accepted by the app.
 //
@@ -39,6 +40,9 @@ var supportedTranscriptionUploadTypes = map[string]bool{
 	".caf":  true,
 	".m4a":  true,
 	".mp4":  true,
+	".mov":  true,
+	".qta":  true,
+	".aac":  true,
 	".ogg":  true,
 	".flac": true,
 	".webm": true,
@@ -96,7 +100,7 @@ type AudioUploadCompleteRequest struct {
 // POST /api/v1/audio/transcribe
 //
 // Accepts multipart file upload with field name "file".
-// Supported formats: mp3, wav, caf, m4a, mp4, ogg, flac, webm
+// Supported formats: mp3, wav, caf, m4a, mp4, mov, qta, aac, ogg, flac, webm
 //
 // Returns 202 Accepted immediately with the transcription record.
 // Frontend should poll GET /api/v1/audio/transcriptions/:id for completion.
@@ -279,8 +283,12 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 		log.Printf("Audio transcription %s queued durably; payload refresh failed and recovery was signaled: %v", at.ID, err)
 	}
 
+	if at.AudioS3Key != "" {
+		_ = os.Remove(tempFilePath)
+	}
+
 	log.Printf("📤 Audio transcription job queued: %s (%s, %.1f MB)",
-		at.ID, header.Filename, float64(header.Size)/(1024*1024))
+		at.ID, "[recording]", float64(header.Size)/(1024*1024))
 
 	// Return 202 Accepted — frontend should poll for completion
 	c.JSON(http.StatusAccepted, at)
@@ -440,6 +448,11 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 
 	session, err := h.DB.GetAudioUploadSessionForActor(c.Request.Context(), req.ObjectKey, actor.UserID, actor.APIKeyID)
 	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "database_unavailable", Message: "Please try again shortly", Code: http.StatusServiceUnavailable})
+			return
+		}
+
 		c.JSON(http.StatusForbidden, models.ErrorResponse{
 			Error:   "forbidden",
 			Message: "Upload session not found, expired, or not owned by you",
@@ -572,6 +585,11 @@ func (h *Handler) GetAudioTranscription(c *gin.Context) {
 
 	at, err := h.DB.GetAudioTranscriptionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID)
 	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "database_unavailable", Message: "Please try again shortly", Code: http.StatusServiceUnavailable})
+			return
+		}
+
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
 			Message: "Audio transcription not found",
@@ -682,22 +700,7 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 		return
 	}
 
-	ext := filepath.Ext(at.Filename)
-	if ext == "" {
-		ext = ".webm"
-	}
-	tempFilePath := filepath.Join(os.TempDir(), uuid.New().String()+ext)
-	downloadCtx, cancel := context.WithTimeout(c.Request.Context(), 90*time.Second)
-	defer cancel()
-	if err := h.AudioStorage.DownloadFile(downloadCtx, at.AudioS3Key, tempFilePath); err != nil {
-		log.Printf("Failed to download audio from S3 for retry: %v", err)
-		c.JSON(http.StatusBadGateway, models.ErrorResponse{
-			Error:   "storage_error",
-			Message: "Failed to fetch stored audio for retry",
-			Code:    http.StatusBadGateway,
-		})
-		return
-	}
+	tempFilePath := "" // The durable worker downloads and retries storage failures.
 
 	payload := worker.AudioPayload{
 		AudioID:      at.ID,
@@ -722,37 +725,10 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 		CreatedAt: time.Now(),
 	}
 
-	clearStaleChat := func() {
-		chatCtx, chatCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer chatCancel()
-		if err := h.DB.DeleteChatSessionForActor(chatCtx, "audio", at.ID, actor.UserID, actor.APIKeyID); err != nil {
-			log.Printf("Warning: failed to clear stale audio chat session for %s before re-transcribe: %v", at.ID, err)
-		}
-	}
-
-	at.Duration = 0
-	at.Language = ""
-	at.TranscriptText = ""
-	at.FormattedTranscript = ""
-	at.FormattingStatus = "none"
-	at.FormattingModel = ""
-	at.FormattingVersion = ""
-	at.FormattingError = ""
-	at.WordCount = 0
 	at.Status = "pending"
 	at.ErrorMessage = ""
-	at.QualityWarning = ""
-	at.OmittedRanges = json.RawMessage("[]")
 	at.ProcessingStage = "queued"
 	at.ProcessingProgress = 0
-	at.SummaryText = ""
-	at.KeyPoints = json.RawMessage("[]")
-	at.ActionItems = json.RawMessage("[]")
-	at.Decisions = json.RawMessage("[]")
-	at.SummaryModel = ""
-	at.SummaryStatus = "none"
-	at.SummaryEvidence = json.RawMessage("{}")
-	at.SummaryErrorMessage = ""
 
 	// Atomically swap from completed/failed to pending. The DB status predicate
 	// closes the concurrent-request window where two re-transcribe clicks could
@@ -784,12 +760,11 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 		log.Printf("Audio retry %s queued durably; payload refresh failed and recovery was signaled: %v", at.ID, err)
 	}
 
-	clearStaleChat()
 	c.JSON(http.StatusAccepted, at)
 }
 
 func audioSourceRetryBlocked(at *models.AudioTranscription) bool {
-	return at != nil && (at.ProcessingStage == "invalid_source" ||
+	return at != nil && (at.ProcessingStage == "invalid_source" || at.ErrorMessage == worker.InvalidAudioSourceMessage() ||
 		worker.IsInvalidAudioSourceError(errors.New(at.ErrorMessage)))
 }
 

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -203,6 +204,7 @@ type openRouterErrorBody struct {
 // ProviderError keeps provider failures typed without exposing raw upstream
 // response bodies through persisted job errors or API responses.
 type ProviderError struct {
+	RetryAfter time.Duration
 	Provider   string
 	StatusCode int
 	ErrorType  string
@@ -335,7 +337,7 @@ func summaryMaxTokens(length string) int {
 	}
 }
 
-func newProviderError(provider string, status int, body []byte) error {
+func newProviderError(provider string, status int, body []byte, retryAfter ...string) error {
 	var response struct {
 		Error   *openRouterErrorBody `json:"error"`
 		Choices []struct {
@@ -350,7 +352,15 @@ func newProviderError(provider string, status int, body []byte) error {
 	if errorType == "" && len(response.Choices) > 0 && response.Choices[0].Error != nil {
 		errorType = response.Choices[0].Error.Metadata.ErrorType
 	}
-	return &ProviderError{Provider: provider, StatusCode: status, ErrorType: errorType}
+	var delay time.Duration
+	if len(retryAfter) > 0 {
+		if seconds, err := strconv.Atoi(retryAfter[0]); err == nil && seconds > 0 {
+			delay = time.Duration(seconds) * time.Second
+		} else if when, err := http.ParseTime(retryAfter[0]); err == nil {
+			delay = max(0, time.Until(when))
+		}
+	}
+	return &ProviderError{Provider: provider, StatusCode: status, ErrorType: errorType, RetryAfter: delay}
 }
 
 func providerErrorStatus(responseStatus, errorCode int) int {

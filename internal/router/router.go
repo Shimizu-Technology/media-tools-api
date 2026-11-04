@@ -194,6 +194,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	}
 	{
 		jwtProtected.GET("/auth/me", h.GetMe)
+		jwtProtected.GET("/account/processing-preferences", h.ProcessingPreferences)
+		jwtProtected.PATCH("/account/processing-preferences", h.ProcessingPreferences)
 		if cfg.FirstPartyAuthEnabled {
 			jwtProtected.GET("/auth/sessions", h.ListFirstPartySessions)
 			jwtProtected.DELETE("/auth/sessions/:id", h.RevokeFirstPartySession)
