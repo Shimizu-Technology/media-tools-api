@@ -61,7 +61,8 @@ a Clerk development instance, and App Review rejected build 9.
 | G | Android auth parity | D | Merged (#104) |
 | H | Design system and redesign, iOS and web | A, E, F | Merged (#107, #111) |
 | I | Server Clerk removal and cleanup | E, F, G, production verification | Merged (#110) |
-| J | Release: TestFlight build and QA | everything above | Build 14 uploaded; production test passed after #113 and #114; awaiting tester availability and Leon's device test |
+| J | Release: TestFlight build and QA | everything above | Build 14 uploaded; production test passed after #113 and #114; reached Leon's iPhone 2026-11-05; superseded by K |
+| K | Redesign: Sunrise Home, Studio Library | J | In progress |
 
 ### A. iOS capture and results flow
 
@@ -288,6 +289,11 @@ upload, transcription, automatic title and summary, chat, library organizing,
 search, export, collections, agent keys, `mta`, deletion, and web cookie sign-in,
 refresh, and logout through Netlify. App Store Connect's session expired before
 build 14's processing could be checked. Device-only flows remain for Leon.
+
+### K. Redesign after device test
+
+Leon tested build 14 and chose a new design: `docs/plans/v1-design-plan.md`. It
+replaces the design in workstream H and ends with build 15 on TestFlight.
 
 ## Production configuration, in order
 
