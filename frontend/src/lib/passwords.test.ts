@@ -105,4 +105,16 @@ describe('web password sign-in', () => {
       .rejects.toMatchObject({ code: 'unsafe_response' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it('prepares once more and retries after a stale pending successor', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'sign_in_not_prepared' }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: true, user_id: 'user-1' }), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: true, user_id: 'user-1' }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(signInWithPassword('owner@example.com', 'aaaaaaaaaaaaaaa')).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls.map(([url]) => String(url).split('/').pop())).toEqual(['prepare', 'finish', 'prepare', 'finish', 'status']);
+  });
 });

@@ -9,7 +9,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           react: ['react', 'react-dom', 'react-router-dom'],
-          clerk: ['@clerk/clerk-react'],
           motion: ['framer-motion'],
           markdown: ['react-markdown', 'remark-gfm', 'rehype-sanitize'],
         },

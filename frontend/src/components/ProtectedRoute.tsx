@@ -1,13 +1,12 @@
-import { useState } from 'react';
-import { SignInButton } from '@clerk/clerk-react';
+import { lazy, Suspense, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { KeyRound, Loader2, Lock, LogIn } from 'lucide-react';
-import { ApiKeySetup } from './ApiKeySetup';
-import { PasskeySignInButton } from './PasskeySignInButton';
-import { PasswordSignIn } from './PasswordSignIn';
-import { RecoveryCodeSignIn } from './RecoveryCodeSignIn';
+import { Loader2, RefreshCw } from 'lucide-react';
 import { useAuthContext } from '../contexts/useAuthContext';
-import { isWebOnboardingRequired, webSessionEnabled } from '../lib/webSession';
+import { isWebOnboardingRequired, localApiKeyMode } from '../lib/webSession';
+
+// Resolved at build time: null in production, so the development-only gate
+// never ships to users.
+const LocalApiKeyGate = localApiKeyMode ? lazy(() => import('./LocalApiKeyGate')) : null;
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -15,13 +14,14 @@ interface ProtectedRouteProps {
 }
 
 /**
- * ProtectedRoute gates the real application behind account auth when configured.
- * In local/dev API-key mode, it falls back to the existing API key setup flow.
+ * ProtectedRoute gates the application behind a Media Tools account session.
+ * A session that could not be checked (offline, server trouble) is shown as a
+ * retry, never as a sign-in prompt: the account is not signed out.
  */
 export function ProtectedRoute({ children, requireOwner = false }: ProtectedRouteProps) {
   const location = useLocation();
-  const { isClerkEnabled, accountAuthEnabled, isAuthenticated, isLoading } = useAuthContext();
-  const [hasLocalApiKey, setHasLocalApiKey] = useState(() => !!localStorage.getItem('mta_api_key'));
+  const { accountAuthEnabled, isAuthenticated, isLoading, isUnavailable, retrySession } = useAuthContext();
+  const [hasLocalApiKey, setHasLocalApiKey] = useState(() => localApiKeyMode && !!localStorage.getItem('mta_api_key'));
 
   if (isLoading) {
     return (
@@ -34,21 +34,26 @@ export function ProtectedRoute({ children, requireOwner = false }: ProtectedRout
     );
   }
 
+  if (isUnavailable) return <SessionUnavailable onRetry={() => void retrySession()} />;
+
   if (accountAuthEnabled && !isAuthenticated) {
-    return <SignInGate returnTo={`${location.pathname}${location.search}`} isClerkEnabled={isClerkEnabled} />;
+    const next = `${location.pathname}${location.search}`;
+    return <Navigate to={`/sign-in?next=${encodeURIComponent(next)}`} replace />;
   }
 
   if (!accountAuthEnabled && !hasLocalApiKey) {
-    return <ApiKeyGate onKeySet={() => setHasLocalApiKey(true)} />;
+    return LocalApiKeyGate
+      ? <Suspense fallback={null}><LocalApiKeyGate onKeySet={() => setHasLocalApiKey(true)} /></Suspense>
+      : <Navigate to="/sign-in" replace />;
   }
 
   if (accountAuthEnabled && isAuthenticated && isWebOnboardingRequired()) {
     return <Navigate to="/join" replace />;
   }
 
-  // Placeholder for future owner/admin roles. Until backend roles exist, keep ops
-  // gated by API-key auth in the API client itself instead of pretending every
-  // Clerk user is an owner.
+  // Placeholder for future owner/admin roles. Until backend roles exist, keep
+  // ops gated by API-key auth in the API client itself instead of pretending
+  // every account is an owner.
   if (requireOwner && accountAuthEnabled) {
     return <Navigate to="/app/developer" replace />;
   }
@@ -56,52 +61,23 @@ export function ProtectedRoute({ children, requireOwner = false }: ProtectedRout
   return <>{children}</>;
 }
 
-function SignInGate({ returnTo, isClerkEnabled }: { returnTo: string; isClerkEnabled: boolean }) {
+function SessionUnavailable({ onRetry }: { onRetry: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const retry = () => {
+    setBusy(true);
+    onRetry();
+    window.setTimeout(() => setBusy(false), 1200);
+  };
   return (
     <main className="min-h-screen px-4 py-10 flex items-center justify-center" style={{ backgroundColor: 'var(--color-surface)' }}>
-      <section className="w-full max-w-lg rounded-[2rem] border p-8 text-center" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-        <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
-          <Lock className="h-6 w-6" />
-        </div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.24em]" style={{ color: 'var(--color-brand-500)' }}>Private workspace</p>
-        <h1 className="text-3xl font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>Sign in to open Media Tools.</h1>
-        <p className="mx-auto mt-3 max-w-sm text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
-          Your transcripts, recordings, PDFs, summaries, chats, and collections stay tied to your account.
+      <section className="w-full max-w-md rounded-[2rem] border p-6 text-center sm:p-8" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }} role="alert">
+        <h1 className="text-2xl font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>Can’t reach Media Tools</h1>
+        <p className="mt-3 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
+          We could not check your session right now. Nothing has been signed out or changed. We keep trying, or you can try now.
         </p>
-        {webSessionEnabled && <div className="mt-6 space-y-3"><PasswordSignIn className="w-full" /><PasskeySignInButton className="w-full" /><RecoveryCodeSignIn className="w-full" /></div>}
-        {isClerkEnabled && (
-          <div className={webSessionEnabled ? 'mt-4 border-t pt-4' : 'mt-6'} style={{ borderColor: 'var(--color-border)' }}>
-            {webSessionEnabled && <p className="mb-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>Migrating from the previous sign-in?</p>}
-            <SignInButton mode="modal" fallbackRedirectUrl={returnTo}>
-              <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border px-5 py-3 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
-                <LogIn className="h-4 w-4" />
-                {webSessionEnabled ? 'Use previous sign-in' : 'Sign in'}
-              </button>
-            </SignInButton>
-          </div>
-        )}
-      </section>
-    </main>
-  );
-}
-
-function ApiKeyGate({ onKeySet }: { onKeySet: () => void }) {
-  return (
-    <main className="min-h-screen px-4 py-10 flex items-center justify-center" style={{ backgroundColor: 'var(--color-surface)' }}>
-      <section className="w-full max-w-xl rounded-[2rem] border p-6 sm:p-8" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-        <div className="mb-5 flex items-start gap-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
-            <KeyRound className="h-5 w-5" />
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--color-brand-500)' }}>Development mode</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>Add an API key to continue.</h1>
-            <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
-              Clerk is not configured in this environment, so the app uses API-key auth for local development.
-            </p>
-          </div>
-        </div>
-        <ApiKeySetup onKeySet={onKeySet} hasKey={false} />
+        <button type="button" onClick={retry} disabled={busy} className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold disabled:opacity-60" style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)' }}>
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}{busy ? 'Trying…' : 'Try again'}
+        </button>
       </section>
     </main>
   );

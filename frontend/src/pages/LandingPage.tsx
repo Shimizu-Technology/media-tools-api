@@ -1,11 +1,7 @@
-import { SignInButton, SignUpButton } from '@clerk/clerk-react';
-import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { ArrowRight, BookOpen, CheckCircle2, FileText, Library, Lock, Mic, Sparkles } from 'lucide-react';
 import { useAuthContext } from '../contexts/useAuthContext';
-import { PasskeySignInButton } from '../components/PasskeySignInButton';
-import { RecoveryCodeSignIn } from '../components/RecoveryCodeSignIn';
-import { PasswordSignIn } from '../components/PasswordSignIn';
-import { webSessionEnabled } from '../lib/webSession';
+import { useAuthCapabilities } from '../hooks/useAuthCapabilities';
 
 const features = [
   { icon: FileText, title: 'Video transcripts', body: 'Capture transcripts from YouTube, Vimeo, and other supported video sites.' },
@@ -16,8 +12,9 @@ const features = [
 
 export function LandingPage() {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-  const { isClerkEnabled, accountAuthEnabled, isAuthenticated } = useAuthContext();
+  const { accountAuthEnabled, isAuthenticated } = useAuthContext();
+  const { state: capabilities } = useAuthCapabilities();
+  const canSignUp = capabilities.status === 'ready' && capabilities.signup;
   const hasSharedTranscript = searchParams.has('id') || searchParams.has('transcript');
 
   if (hasSharedTranscript) {
@@ -49,7 +46,7 @@ export function LandingPage() {
               <ArrowRight className="h-4 w-4" />
             </Link>
           ) : accountAuthEnabled ? (
-            <Link to="/app" className="inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+            <Link to="/sign-in" className="inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)' }}>
               Sign in
               <ArrowRight className="h-4 w-4" />
             </Link>
@@ -80,19 +77,17 @@ export function LandingPage() {
                 Open workspace
                 <ArrowRight className="h-4 w-4" />
               </Link>
-            ) : webSessionEnabled ? (
+            ) : accountAuthEnabled ? (
               <>
-                <PasswordSignIn onSuccess={() => navigate('/app')} />
-                <PasskeySignInButton onSuccess={() => navigate('/app')} />
-                <RecoveryCodeSignIn onSuccess={() => navigate('/app')} />
-                {isClerkEnabled && <SignInButton mode="modal" fallbackRedirectUrl="/app">
-                  <button className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border px-5 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>Move an existing Clerk account</button>
-                </SignInButton>}
-              </>
-            ) : isClerkEnabled ? (
-              <>
-                <SignUpButton mode="modal" fallbackRedirectUrl="/app"><button className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white" style={{ backgroundColor: 'var(--color-brand-500)' }}>Create workspace<ArrowRight className="h-4 w-4" /></button></SignUpButton>
-                <SignInButton mode="modal" fallbackRedirectUrl="/app"><button className="inline-flex min-h-12 items-center justify-center rounded-xl border px-5 text-sm font-semibold" style={{ borderColor: 'var(--color-border)' }}>Sign in</button></SignInButton>
+                <Link to="/sign-in" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white transition hover:-translate-y-0.5" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+                  Sign in
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+                {canSignUp && (
+                  <Link to="/sign-up" className="inline-flex min-h-12 items-center justify-center rounded-xl border px-5 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
+                    Create an account
+                  </Link>
+                )}
               </>
             ) : (
               <Link to="/app" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white transition hover:-translate-y-0.5" style={{ backgroundColor: 'var(--color-brand-500)' }}>

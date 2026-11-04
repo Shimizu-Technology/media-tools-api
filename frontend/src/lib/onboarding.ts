@@ -21,7 +21,7 @@ const base = '/api/v1/auth/web/session/onboarding';
 let commitRequest: Promise<WebOnboardingStatus> | null = null;
 
 /**
- * Runs before Clerk, auth restoration, analytics, or any other app network
+ * Runs before auth restoration, analytics, or any other app network
  * work. The URL fragment stays in history unless the server confirms it was
  * installed in the narrow HttpOnly onboarding cookie.
  */
@@ -68,7 +68,7 @@ export async function getWebOnboardingStatus(): Promise<WebOnboardingStatus> {
     // An interrupted setup can outlive its short access cookie. Restore from
     // the year-long HttpOnly refresh cookie before deciding the link is gone.
     const restored = await restoreWebSession();
-    if (restored?.authenticated) status = await fetchOnboardingStatus();
+    if (restored.state === 'authenticated') status = await fetchOnboardingStatus();
   }
   return status;
 }
@@ -94,7 +94,7 @@ async function performCommit(): Promise<WebOnboardingStatus> {
     await finishCommit();
   }
   const restored = await restoreWebSession();
-  if (!restored?.authenticated || !restored.onboarding_required) {
+  if (restored.state !== 'authenticated' || !restored.status.onboarding_required) {
     throw new OnboardingError('Could not verify the new browser session.', 'authentication_unavailable');
   }
   setWebSessionActive(true);
@@ -130,8 +130,8 @@ async function finishCommit(): Promise<void> {
 }
 
 async function committedSessionExists(): Promise<boolean> {
-  const restored = await restoreWebSession().catch(() => null);
-  if (!restored?.authenticated || !restored.onboarding_required) return false;
+  const restored = await restoreWebSession();
+  if (restored.state !== 'authenticated' || !restored.status.onboarding_required) return false;
   const status = await fetchOnboardingStatus().catch(() => null);
   if (!status || status.pending) return false;
   setWebSessionActive(true);

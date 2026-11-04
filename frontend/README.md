@@ -12,9 +12,16 @@ make frontend-dev
 ```
 
 Vite runs at `http://localhost:5173` and proxies `/api` to the Go API at
-`http://localhost:8080`. Use `frontend/.env.example` only for public client
-configuration. `VITE_CLERK_PUBLISHABLE_KEY` is safe to expose; backend, AI,
-database, and admin credentials must never use a `VITE_` variable.
+`http://localhost:8080`. The browser signs in with first-party cookie sessions,
+so the API needs `FIRST_PARTY_AUTH_ENABLED`, `FIRST_PARTY_PASSWORD_AUTH_ENABLED`
+and `WEB_COOKIE_AUTH_ENABLED`, and `CORS_ORIGIN=http://localhost:5173`.
+Production builds always use the same-origin `/api` path that Netlify proxies;
+there are no web auth build variables. Backend, AI, database, and admin
+credentials must never use a `VITE_` variable.
+
+Local API-key mode (no account) exists only under `vite dev`: set
+`VITE_LOCAL_API_KEY_MODE=true` (and optionally `VITE_API_URL`). It is compiled
+out of production builds.
 
 ## Main areas
 

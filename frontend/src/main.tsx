@@ -8,6 +8,9 @@ const storedTheme = localStorage.getItem('mta_theme')
 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
 document.documentElement.classList.toggle('dark', storedTheme ? storedTheme === 'dark' : prefersDark)
 
+// A bearer token left by the retired JWT sign-in must not linger in storage.
+try { localStorage.removeItem('mta_jwt_token') } catch { /* storage can be blocked */ }
+
 const root = createRoot(document.getElementById('root')!)
 
 async function start() {

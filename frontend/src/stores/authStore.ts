@@ -1,8 +1,8 @@
 /**
  * Auth store — helpers for API key management.
  *
- * With Clerk, auth tokens are fetched just-in-time by apiAuth.
- * This file only handles API key storage for developer/API-key flows.
+ * Browser sessions use HttpOnly cookies. This file only handles the API key
+ * storage used by local API-key development mode.
  */
 
 const API_KEY_STORAGE_KEY = 'mta_api_key';

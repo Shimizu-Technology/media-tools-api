@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, AlertTriangle, ArrowRight, Bot, Check, Copy, ExternalLink, KeyRound, Loader2, Plus, RefreshCw, ShieldCheck, Trash2, Webhook } from 'lucide-react';
-import { ApiKeySetup } from '../components/ApiKeySetup';
+import { LocalApiKeySetup } from '../components/LocalApiKeySetup';
+import { localApiKeyMode } from '../lib/webSession';
 import { createUserAPIKey, getErrorMessage, listAgentActivity, listAPIKeys, revokeAPIKey, type AgentActivity, type APIKey } from '../lib/api';
 import { activityItemLabel, DEFAULT_AGENT_SCOPES, describeActivity, isScopedKey, SCOPE_OPTIONS, SCOPE_PRESETS, scopeLabel, toggleScope, type KeyScope } from '../lib/agentAccess';
 import { useAuthContext } from '../contexts/useAuthContext';
@@ -20,7 +21,7 @@ export function DeveloperPage() {
   const [isActivityLoading, setIsActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState('');
   const [error, setError] = useState('');
-  const [localKeyConfigured, setLocalKeyConfigured] = useState(() => !!localStorage.getItem('mta_api_key'));
+  const [localKeyConfigured, setLocalKeyConfigured] = useState(() => localApiKeyMode && !!localStorage.getItem('mta_api_key'));
   const isMountedRef = useRef(false);
   const copyResetTimeoutRef = useRef<number | null>(null);
 
@@ -169,7 +170,7 @@ export function DeveloperPage() {
 
       {!accountAuthEnabled && !localKeyConfigured && (
         <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-          <ApiKeySetup onKeySet={() => setLocalKeyConfigured(true)} hasKey={false} />
+          <LocalApiKeySetup onKeySet={() => setLocalKeyConfigured(true)} hasKey={false} />
         </section>
       )}
 

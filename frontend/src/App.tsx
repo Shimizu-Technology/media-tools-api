@@ -1,5 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { ClerkProvider, useAuth, useClerk } from '@clerk/clerk-react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { FileText } from 'lucide-react'
 import { AppShell } from './components/AppShell'
@@ -7,15 +6,11 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 import { ScrollToTop } from './components/ScrollToTop'
 import { AuthProvider } from './contexts/AuthContext'
 import { AIProcessingConsentProvider } from './contexts/AIProcessingConsentContext'
-import { getCurrentUser, type User } from './lib/api'
-import { setAuthTokenGetter } from './lib/apiAuth'
-import { bootstrapWebSession, isWebSessionActive, logoutWebSession, reconcileWebSessionWithClerk, restoreWebSession, setWebOnboardingRequired, setWebSessionActive, webSessionEnabled, webSessionStateChanged } from './lib/webSession'
+import { getCurrentUser, isAPIError, type User } from './lib/api'
+import { announceSessionChange, sessionAccountChanged, subscribeSessionChanges } from './lib/sessionSync'
+import { getSessionPhase, isWebSessionActive, localApiKeyMode, logoutWebSession, restoreWebSession, setSessionPhase, setWebOnboardingRequired, setWebSessionActive, subscribeWebSession, webSessionStateChanged } from './lib/webSession'
 import { clearPasskeySignInJournal, recoverPendingPasskeySignIn } from './lib/passkeys'
-import { migrateAIConsentToStableUser } from './lib/aiConsentStorage'
 import { isJoinSetupPath } from './lib/onboarding'
-
-const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
-const isClerkEnabled = Boolean(CLERK_PUBLISHABLE_KEY && CLERK_PUBLISHABLE_KEY !== 'YOUR_PUBLISHABLE_KEY')
 
 const HomePage = lazy(() => import('./pages/HomePage').then((module) => ({ default: module.HomePage })))
 const MyLibraryPage = lazy(() => import('./pages/MyLibraryPage').then((module) => ({ default: module.MyLibraryPage })))
@@ -36,10 +31,13 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then((module) => 
 const ProcessingPage = lazy(() => import('./pages/ProcessingPage').then((module) => ({ default: module.ProcessingPage })))
 const ItemDetailPage = lazy(() => import('./pages/ItemDetailPage').then((module) => ({ default: module.ItemDetailPage })))
 const CreatePage = lazy(() => import('./pages/CreatePage').then((module) => ({ default: module.CreatePage })))
+const SignInPage = lazy(() => import('./pages/AuthPages').then((module) => ({ default: module.SignInPage })))
+const SignUpPage = lazy(() => import('./pages/AuthPages').then((module) => ({ default: module.SignUpPage })))
+const ForgotPasswordPage = lazy(() => import('./pages/AuthPages').then((module) => ({ default: module.ForgotPasswordPage })))
 const JoinPage = lazy(() => import('./pages/JoinPage').then((module) => ({ default: module.JoinPage })))
 
-if (!isClerkEnabled && !webSessionEnabled) {
-  console.warn('Account auth is not configured — using local API-key development mode.')
+if (localApiKeyMode) {
+  console.warn('Local API-key development mode: this build never ships to production.')
 }
 
 function AppRoutes() {
@@ -50,6 +48,9 @@ function AppRoutes() {
         <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/join" element={<JoinPage />} />
+        <Route path="/sign-in" element={<SignInPage />} />
+        <Route path="/sign-up" element={<SignUpPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
       <Route element={<PublicLayout />}>
         <Route path="/docs" element={<DocsPage />} />
@@ -163,176 +164,194 @@ function AppFooter() {
   )
 }
 
-function ClerkAppContent() {
-  const { getToken, isLoaded, isSignedIn, userId } = useAuth()
-  const clerk = useClerk()
-  const signOut = useCallback(() => clerk.signOut({ redirectUrl: '/' }), [clerk])
-  const leaveForOnboarding = useCallback(() => clerk.signOut({ redirectUrl: '/join' }), [clerk])
-  const bridge = useMemo<ClerkBridge>(() => ({
-    isLoaded,
-    isSignedIn: isSignedIn ?? false,
-    userId,
-    getToken,
-    signOut,
-    leaveForOnboarding,
-  }), [getToken, isLoaded, isSignedIn, leaveForOnboarding, signOut, userId])
-  return (
-    <AccountAppContent clerk={bridge} />
-  )
-}
+type RestoreResult = 'authenticated' | 'signed_out' | 'unavailable'
 
-type ClerkBridge = {
-  isLoaded: boolean
-  isSignedIn: boolean
-  userId: string | null | undefined
-  getToken: (options?: { skipCache?: boolean }) => Promise<string | null>
-  signOut: () => Promise<void>
-  leaveForOnboarding: () => Promise<void>
-}
-
-function AccountAppContent({ clerk }: { clerk?: ClerkBridge }) {
+function AccountAppContent() {
+  const phase = useSyncExternalStore(subscribeWebSession, getSessionPhase)
   const [user, setUser] = useState<User | null>(null)
-  const [isUserLoading, setIsUserLoading] = useState(true)
-  const [hasWebSession, setHasWebSession] = useState(false)
-  const [authBlocked, setAuthBlocked] = useState(false)
-  const clerkReady = clerk?.isLoaded ?? true
-  const clerkSignedIn = clerk?.isSignedIn ?? false
-  const clerkUserId = clerk?.userId ?? null
+  // restore() loads the account itself; the phase listener must not repeat it.
+  const restoringRef = useRef(false)
+  const loadedUserIDRef = useRef<string | null>(null)
+  useEffect(() => { loadedUserIDRef.current = user?.id ?? null }, [user])
 
-  useEffect(() => {
-    setAuthTokenGetter(async (forceRefresh) => {
-      if (!clerk) return null
-      try {
-        return await clerk.getToken(forceRefresh ? { skipCache: true } : undefined)
-      } catch {
-        return null
-      }
-    })
-  }, [clerk])
+  const loadUser = useCallback(async (): Promise<boolean> => {
+    try {
+      setUser(await getCurrentUser())
+      return true
+    } catch (error) {
+      // An explicit 401 has already signed the browser out through the API
+      // client. Anything else (offline, 5xx, throttled) leaves the loaded
+      // account on screen: the session is unknown, never assumed gone.
+      if (!(isAPIError(error) && error.code === 401)) return false
+      setUser(null)
+      return true
+    }
+  }, [])
 
   const refreshUser = useCallback(async () => {
-    if (!isWebSessionActive() && !clerkSignedIn) {
+    if (!isWebSessionActive()) {
       setUser(null)
       return
     }
-    setIsUserLoading(true)
-    try {
-      setUser(await getCurrentUser())
-    } catch {
-      setUser(null)
-    } finally {
-      setIsUserLoading(false)
-    }
-  }, [clerkSignedIn])
+    await loadUser()
+  }, [loadUser])
 
-  useEffect(() => {
-    const syncWebSessionState = () => {
-      const active = isWebSessionActive()
-      setHasWebSession(active)
-      if (active) void refreshUser()
-    }
-    window.addEventListener(webSessionStateChanged, syncWebSessionState)
-    return () => window.removeEventListener(webSessionStateChanged, syncWebSessionState)
-  }, [refreshUser])
-
-  useEffect(() => {
-    if (!clerkReady) return
-    let cancelled = false
-    const restore = async () => {
-      // `/join` owns account switching. Its transferred bearer credential is
-      // held in a narrow HttpOnly cookie, so ordinary Clerk reconciliation or
-      // bootstrap must not clear it before the guided flow can commit it.
-      const joiningAccount = isJoinSetupPath(window.location.pathname)
-      setIsUserLoading(true)
-      setAuthBlocked(false)
-      setHasWebSession(false)
-      setUser(null)
-      if (!clerkSignedIn) localStorage.removeItem('mta_jwt_token')
+  const restore = useCallback(async (): Promise<RestoreResult> => {
+    // `/join` owns account switching: its transferred credential lives in a
+    // narrow HttpOnly cookie that ordinary restoration must not disturb.
+    const joiningAccount = isJoinSetupPath(window.location.pathname)
+    let restored = await restoreWebSession()
+    if (restored.state === 'signed_out' && !joiningAccount) {
       try {
-        if (webSessionEnabled) {
-          setWebSessionActive(false)
-          let status = await restoreWebSession()
-          if (cancelled) return
-          if (!joiningAccount) {
-            try { status = await reconcileWebSessionWithClerk(status, clerkUserId) } catch (error) { setAuthBlocked(true); throw error }
-          }
-          if (cancelled) return
-          if (status === null) setWebSessionActive(false)
-          if (status !== null) {
-            clearPasskeySignInJournal()
-            setWebOnboardingRequired(status.onboarding_required === true)
-            setWebSessionActive(true)
-          }
-          if (!isWebSessionActive() && !joiningAccount) {
-            const recovered = await recoverPendingPasskeySignIn()
-            if (cancelled) return
-            if (recovered) status = await restoreWebSession()
-            try { status = await reconcileWebSessionWithClerk(status, clerkUserId) } catch (error) { setAuthBlocked(true); throw error }
-            if (cancelled) return
-            if (status === null) setWebSessionActive(false)
-            if (status !== null) {
-              setWebOnboardingRequired(status.onboarding_required === true)
-              setWebSessionActive(true)
-            }
-          }
-          if (!isWebSessionActive() && !joiningAccount && clerkUserId && clerk) {
-            const token = await clerk.getToken()
-            if (cancelled) return
-            if (token && await bootstrapWebSession(token, clerkUserId)) setWebSessionActive(true)
-          }
-        }
-        if (cancelled) return
-        setHasWebSession(isWebSessionActive())
-        if (isWebSessionActive() || clerkSignedIn) {
-          setUser(await getCurrentUser())
-        } else {
-          setUser(null)
-        }
+        if (await recoverPendingPasskeySignIn()) restored = await restoreWebSession()
       } catch {
-        if (!cancelled) setUser(null)
-      } finally {
-        if (!cancelled) setIsUserLoading(false)
+        restored = { state: 'unavailable' }
       }
     }
-    void restore()
-    return () => { cancelled = true }
-  }, [clerk, clerkReady, clerkSignedIn, clerkUserId])
+    if (restored.state === 'authenticated') {
+      clearPasskeySignInJournal()
+      setWebOnboardingRequired(restored.status.onboarding_required === true)
+      restoringRef.current = true
+      try { setSessionPhase('authenticated') } finally { restoringRef.current = false }
+      if (!await loadUser()) {
+        setSessionPhase('unavailable')
+        return 'unavailable'
+      }
+      // loadUser can discover an explicit 401, which signs the browser out.
+      return getSessionPhase() === 'authenticated' ? 'authenticated' : 'signed_out'
+    }
+    setSessionPhase(restored.state)
+    if (restored.state === 'signed_out') setUser(null)
+    return restored.state
+  }, [loadUser])
+
+  // First restore. The API client and sign-in screens move the phase afterwards.
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void restore() }, 0)
+    return () => window.clearTimeout(timer)
+  }, [restore])
+
+  // Pick up sign-ins completed by the passkey, recovery and password screens.
+  useEffect(() => {
+    let lastPhase = getSessionPhase()
+    const onChange = () => {
+      const current = getSessionPhase()
+      if (current === lastPhase) return
+      lastPhase = current
+      if (current === 'authenticated') {
+        announceSessionChange()
+        if (!restoringRef.current) {
+          void loadUser().then((loaded) => {
+            // Signed in but the account can't be read yet: use the retry state,
+            // because the app can't work without knowing whose data this is.
+            if (!loaded && !loadedUserIDRef.current && getSessionPhase() === 'authenticated') setSessionPhase('unavailable')
+          })
+        }
+      }
+      // Never show the previous account's details to whoever signs in next.
+      else if (current === 'signed_out') { announceSessionChange(); setUser(null) }
+    }
+    window.addEventListener(webSessionStateChanged, onChange)
+    return () => window.removeEventListener(webSessionStateChanged, onChange)
+  }, [loadUser])
+
+  // Another tab may have signed out or switched accounts. Reloading is the one
+  // reliable way to drop every piece of state that belongs to the old account.
+  useEffect(() => {
+    const revalidate = async () => {
+      if (getSessionPhase() !== 'authenticated') return
+      const restored = await restoreWebSession()
+      if (restored.state === 'signed_out') {
+        setWebSessionActive(false)
+        setUser(null)
+      } else if (restored.state === 'authenticated' && sessionAccountChanged(loadedUserIDRef.current, restored.status.user_id)) {
+        window.location.reload()
+      }
+    }
+    const onVisible = () => { if (document.visibilityState === 'visible') void revalidate() }
+    const unsubscribe = subscribeSessionChanges(() => { void revalidate() })
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      unsubscribe()
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [])
+
+  const retrySession = useCallback(async () => {
+    // An established session only needs its account re-read: a failed retry
+    // must never replace the app with a full-page error.
+    if (getSessionPhase() === 'authenticated') {
+      await loadUser()
+      return
+    }
+    await restore()
+  }, [loadUser, restore])
+
+  // While the session is unknown, keep asking: when the connection returns,
+  // when the tab is foregrounded, and on a gentle backoff.
+  useEffect(() => {
+    if (phase !== 'unavailable') return
+    let delay = 5000
+    let timer: number | undefined
+    let inFlight = false
+    let stopped = false
+    // Hidden or offline tabs make no requests, so a forgotten tab can't keep the
+    // database awake. One attempt at a time, so slow answers can't pile up.
+    const attempt = async () => {
+      if (inFlight || document.visibilityState !== 'visible' || !navigator.onLine) return
+      inFlight = true
+      try { await retrySession() } finally { inFlight = false }
+    }
+    const schedule = () => {
+      timer = window.setTimeout(() => {
+        void attempt().finally(() => {
+          if (stopped) return
+          delay = Math.min(delay * 2, 60000)
+          schedule()
+        })
+      }, delay)
+    }
+    schedule()
+    const onWake = () => { void attempt() }
+    window.addEventListener('online', onWake)
+    document.addEventListener('visibilitychange', onWake)
+    return () => {
+      stopped = true
+      window.clearTimeout(timer)
+      window.removeEventListener('online', onWake)
+      document.removeEventListener('visibilitychange', onWake)
+    }
+  }, [phase, retrySession])
 
   const signOut = useCallback(async () => {
     if (isWebSessionActive()) await logoutWebSession()
     setWebSessionActive(false)
-    setHasWebSession(false)
     setUser(null)
-    if (clerk) await clerk.signOut()
-  }, [clerk])
+  }, [])
 
-  useEffect(() => {
-    if (!hasWebSession || !user?.id || !user.clerk_id) return
-    migrateAIConsentToStableUser({ stableUserID: user.id, linkedClerkID: user.clerk_id, activeClerkID: clerkUserId })
-  }, [clerkUserId, hasWebSession, user])
+  const isAuthenticated = phase === 'authenticated'
 
   return (
     <AuthProvider
-      isClerkEnabled={Boolean(clerk)}
       accountAuthEnabled={true}
-      isFirstPartySession={!authBlocked && hasWebSession}
-      isPreviousProviderSignedIn={clerkSignedIn}
-      isAuthenticated={!authBlocked && (hasWebSession || clerkSignedIn)}
-      isLoading={!clerkReady || isUserLoading}
-      canUseWorkspace={!authBlocked}
-      user={user}
+      phase={phase}
+      isAuthenticated={isAuthenticated}
+      isLoading={phase === 'checking'}
+      canUseWorkspace={true}
+      user={isAuthenticated ? user : null}
       refreshUser={refreshUser}
+      retrySession={retrySession}
       signOut={signOut}
-      leavePreviousProviderForOnboarding={clerk?.leaveForOnboarding}
     >
-      <AIProcessingConsentProvider ownerID={!authBlocked && hasWebSession ? user?.id ?? null : user?.clerk_id ?? clerkUserId}>
+      <AIProcessingConsentProvider ownerID={isAuthenticated ? user?.id ?? null : null}>
         <AppRoutes />
       </AIProcessingConsentProvider>
     </AuthProvider>
   )
 }
 
-function NoClerkAppContent() {
+/** Local development only: `vite dev` with VITE_LOCAL_API_KEY_MODE=true. Never reachable in a production build. */
+function LocalApiKeyApp() {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('mta_api_key'))
 
   useEffect(() => {
@@ -347,14 +366,11 @@ function NoClerkAppContent() {
 
   return (
     <AuthProvider
-      isClerkEnabled={false}
       accountAuthEnabled={false}
-      isFirstPartySession={false}
+      phase={apiKey ? 'authenticated' : 'signed_out'}
       isAuthenticated={Boolean(apiKey)}
       isLoading={false}
       canUseWorkspace={false}
-      user={null}
-      refreshUser={async () => undefined}
     >
       <APIKeyConsentScope key={apiKey ?? 'no-api-key'} apiKey={apiKey} />
     </AuthProvider>
@@ -395,20 +411,10 @@ async function fingerprintAPIKey(apiKey: string): Promise<string | null> {
 }
 
 function App() {
-  if (!isClerkEnabled) {
-    return (
-      <BrowserRouter>
-        {webSessionEnabled ? <AccountAppContent /> : <NoClerkAppContent />}
-      </BrowserRouter>
-    )
-  }
-
   return (
-    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} afterSignOutUrl="/" signInFallbackRedirectUrl="/app" signUpFallbackRedirectUrl="/app">
-      <BrowserRouter>
-        <ClerkAppContent />
-      </BrowserRouter>
-    </ClerkProvider>
+    <BrowserRouter>
+      {localApiKeyMode ? <LocalApiKeyApp /> : <AccountAppContent />}
+    </BrowserRouter>
   )
 }
 

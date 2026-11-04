@@ -1,9 +1,6 @@
-import { renewWebSession, setWebOnboardingRequired, setWebSessionActive, webCSRFHeaders, type WebSessionStatus } from './webSession';
+import { setWebOnboardingRequired, setWebSessionActive, webCSRFHeaders, type WebSessionStatus } from './webSession';
 
 const webPasswordBase = '/api/v1/auth/web/session/password';
-const passwordBase = '/api/v1/auth/password';
-
-export type PasswordStatus = { configured: boolean; updated_at?: string };
 
 export class PasswordError extends Error {
   readonly code: string;
@@ -35,6 +32,12 @@ export async function signInWithPassword(email: string, password: string): Promi
       throw new PasswordError('Could not reach Media Tools. Check your connection and try again.', 'network_error');
     }
   }
+  if (response.status === 400 && await isSignInNotPrepared(response)) {
+    // A stale pending successor was cleared by the server: prepare once more.
+    const again = await safeFetch(`${webPasswordBase}/prepare`, { method: 'POST', credentials: 'same-origin' });
+    if (!again.ok) throw await responseError(again, 'Could not prepare password sign-in.');
+    response = await execute();
+  }
   if (!response.ok) {
     throw await responseError(response, 'Could not sign in.');
   }
@@ -58,42 +61,14 @@ async function committedPasswordSessionExists(expectedUserID: string): Promise<b
   return true;
 }
 
-export async function getPasswordStatus(): Promise<PasswordStatus> {
-  return authenticatedJSON<PasswordStatus>(passwordBase, { credentials: 'same-origin' });
-}
-
-export async function setPassword(password: string): Promise<PasswordStatus> {
-  return authenticatedJSON<PasswordStatus>(passwordBase, {
-    method: 'POST', credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', ...webCSRFHeaders() },
-    body: JSON.stringify({ password }),
-  });
-}
-
-async function authenticatedJSON<T>(url: string, init: RequestInit): Promise<T> {
-  let response = await safeFetch(url, init);
-  if (response.status === 401 && await errorCode(response) === 'unauthorized') {
-    const renewal = await renewWebSession();
-    if (renewal === 'renewed') {
-      response = await safeFetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), ...webCSRFHeaders() } });
-    } else if (renewal === 'invalid') {
-      setWebSessionActive(false);
-    } else {
-      throw new PasswordError('Could not renew your session. Please try again.', 'authentication_unavailable');
-    }
-  }
-  if (!response.ok) throw await responseError(response, 'Password request failed.');
-  return await response.json() as T;
-}
-
 async function safeFetch(url: string, init: RequestInit): Promise<Response> {
   try { return await fetch(url, init); }
   catch { throw new PasswordError('Could not reach Media Tools. Check your connection and try again.', 'network_error'); }
 }
 
-async function errorCode(response: Response): Promise<string | undefined> {
+async function isSignInNotPrepared(response: Response): Promise<boolean> {
   const body = await response.clone().json().catch(() => null) as { error?: string } | null;
-  return body?.error;
+  return body?.error === 'sign_in_not_prepared';
 }
 
 async function responseError(response: Response, fallback: string): Promise<PasswordError> {
