@@ -12,7 +12,6 @@ func setRequiredReleaseEnv(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret-that-is-not-the-development-default")
 	t.Setenv("ADMIN_API_KEY", "test-admin-key-that-is-at-least-32-chars")
 	t.Setenv("YT_DLP_PATH", "/bin/true")
-	t.Setenv("CLERK_JWKS_URL", "https://example.clerk.accounts.dev/.well-known/jwks.json")
 }
 
 func TestLoadRejectsMissingOrShortProductionSecrets(t *testing.T) {
@@ -92,50 +91,6 @@ func TestLoadNormalizesProductionSecretsBeforeUse(t *testing.T) {
 	}
 }
 
-func TestLoadInfersClerkAuthorizedPartyFromCORSOrigin(t *testing.T) {
-	setRequiredReleaseEnv(t)
-	t.Setenv("CORS_ORIGIN", "https://media-tools-gu.netlify.app/")
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
-	}
-
-	if cfg.ClerkAuthorizedParty != "https://media-tools-gu.netlify.app" {
-		t.Fatalf("ClerkAuthorizedParty = %q, want frontend origin without trailing slash", cfg.ClerkAuthorizedParty)
-	}
-	if got := cfg.AllowedOrigins[0]; got != "https://media-tools-gu.netlify.app" {
-		t.Fatalf("AllowedOrigins[0] = %q, want frontend origin without trailing slash", got)
-	}
-}
-
-func TestLoadDefaultsLegacyAuthOffInRelease(t *testing.T) {
-	setRequiredReleaseEnv(t)
-	t.Setenv("CORS_ORIGIN", "https://media-tools-gu.netlify.app")
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
-	}
-	if cfg.LegacyAuthEnabled {
-		t.Fatal("LegacyAuthEnabled = true, want false by default in release mode")
-	}
-}
-
-func TestLoadAllowsLegacyAuthOverride(t *testing.T) {
-	setRequiredReleaseEnv(t)
-	t.Setenv("CORS_ORIGIN", "https://media-tools-gu.netlify.app")
-	t.Setenv("LEGACY_AUTH_ENABLED", "true")
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
-	}
-	if !cfg.LegacyAuthEnabled {
-		t.Fatal("LegacyAuthEnabled = false, want true when explicitly enabled")
-	}
-}
-
 func TestLoadParsesMultipleCORSOrigins(t *testing.T) {
 	t.Setenv("YT_DLP_PATH", "/bin/true")
 	t.Setenv("CORS_ORIGIN", "https://app.example.com/, https://preview.example.com")
@@ -155,11 +110,10 @@ func TestLoadParsesMultipleCORSOrigins(t *testing.T) {
 	}
 }
 
-func TestLoadAllowsPasskeyCookieAuthWithoutClerk(t *testing.T) {
+func TestLoadAllowsPasskeyCookieAuthWithoutProvider(t *testing.T) {
 	t.Setenv("YT_DLP_PATH", "/bin/true")
 	t.Setenv("FIRST_PARTY_AUTH_ENABLED", "true")
 	t.Setenv("WEB_COOKIE_AUTH_ENABLED", "true")
-	t.Setenv("CLERK_JWKS_URL", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -170,74 +124,12 @@ func TestLoadAllowsPasskeyCookieAuthWithoutClerk(t *testing.T) {
 	}
 }
 
-func TestLoadDefaultsClerkMigrationOnlyOff(t *testing.T) {
-	t.Setenv("YT_DLP_PATH", "/bin/true")
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
-	}
-	if cfg.ClerkMigrationOnly {
-		t.Fatal("ClerkMigrationOnly = true, want explicit opt-in")
-	}
-}
-
-func TestLoadRequiresClerkMigrationOnlyBeforeProductionFirstPartyAuth(t *testing.T) {
-	setRequiredReleaseEnv(t)
-	t.Setenv("CORS_ORIGIN", "https://media.shimizu-technology.com")
-	t.Setenv("FIRST_PARTY_AUTH_ENABLED", "true")
-	t.Setenv("CLERK_MIGRATION_ONLY", "false")
-
-	_, err := Load()
-	if err == nil || !strings.Contains(err.Error(), "CLERK_MIGRATION_ONLY must be enabled") {
-		t.Fatalf("Load error = %v, want Clerk migration guard error", err)
-	}
-}
-
-func TestLoadAllowsProductionFirstPartyAuthWithMigrationOnlyClerk(t *testing.T) {
-	setRequiredReleaseEnv(t)
-	t.Setenv("CORS_ORIGIN", "https://media.shimizu-technology.com")
-	t.Setenv("FIRST_PARTY_AUTH_ENABLED", "true")
-	t.Setenv("CLERK_MIGRATION_ONLY", "true")
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
-	}
-	if !cfg.FirstPartyAuthEnabled || !cfg.ClerkMigrationOnly {
-		t.Fatalf("migration config = first-party %v, Clerk migration %v", cfg.FirstPartyAuthEnabled, cfg.ClerkMigrationOnly)
-	}
-}
-
 func TestLoadRequiresFirstPartyAuthForPasswordAuth(t *testing.T) {
 	t.Setenv("FIRST_PARTY_PASSWORD_AUTH_ENABLED", "true")
 	t.Setenv("FIRST_PARTY_AUTH_ENABLED", "false")
 	_, err := Load()
 	if err == nil || !strings.Contains(err.Error(), "FIRST_PARTY_PASSWORD_AUTH_ENABLED requires FIRST_PARTY_AUTH_ENABLED") {
 		t.Fatalf("Load error = %v", err)
-	}
-}
-
-func TestLoadRejectsPasswordAuthWithLegacyAuth(t *testing.T) {
-	t.Setenv("FIRST_PARTY_PASSWORD_AUTH_ENABLED", "true")
-	t.Setenv("FIRST_PARTY_AUTH_ENABLED", "true")
-	t.Setenv("LEGACY_AUTH_ENABLED", "true")
-	_, err := Load()
-	if err == nil || !strings.Contains(err.Error(), "FIRST_PARTY_PASSWORD_AUTH_ENABLED cannot be combined with LEGACY_AUTH_ENABLED") {
-		t.Fatalf("Load error = %v", err)
-	}
-}
-
-func TestLoadRequiresClerkAudienceAuthorizedPartyOrCORSOriginInRelease(t *testing.T) {
-	setRequiredReleaseEnv(t)
-	t.Setenv("CORS_ORIGIN", "")
-
-	_, err := Load()
-	if err == nil {
-		t.Fatal("Load succeeded, want missing Clerk token-boundary config error")
-	}
-	if !strings.Contains(err.Error(), "CLERK_AUDIENCE, CLERK_AUTHORIZED_PARTY, or single CORS_ORIGIN") {
-		t.Fatalf("Load error = %q, want Clerk token-boundary config error", err.Error())
 	}
 }
 

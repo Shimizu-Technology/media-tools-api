@@ -38,28 +38,27 @@ type readinessChecker interface {
 // variables or service locators, we pass dependencies explicitly.
 // This makes testing easy — just create a Handler with mock dependencies.
 type Handler struct {
-	MonthlyMinutes              int
-	MonthlyAIRequests           int
-	OwnerUserID                 string
-	Email                       *emailservice.Service
-	Pwned                       *accountservice.PwnedChecker
-	PublicSignupEnabled         bool
-	lastAuthPurge               atomic.Int64
-	DB                          *database.DB
-	Worker                      *worker.Pool
-	AudioTranscriber            *audio.Transcriber             // MTA-16: Whisper API transcriber
-	AudioStorage                *storage.S3                    // Raw audio storage + playback URLs
-	WebhookService              *webhookservice.Service        // MTA-18: Webhook notifications
-	Summarizer                  *summary.Service               // MTA-22: AI summary service
-	JWTSecret                   string                         // MTA-20: JWT signing secret
-	AdminAPIKey                 string                         // Admin key for protected bootstrap operations
-	OwnerAPIKeyID               string                         // Optional owner key ID override
-	OwnerAPIKeyPrefix           string                         // Optional owner key prefix override
-	YtDlpCookiesConfigured      bool                           // True when yt-dlp cookies are configured
-	ClerkAccountDeletionEnabled bool                           // Clerk Backend API deletion is configured
-	Passkeys                    *webauthn.WebAuthn             // Enabled only behind the first-party auth flag
-	Passwords                   *accountservice.PasswordHasher // Enabled only behind the first-party password flag
-	PasswordAuthEnabled         bool                           // Public capability used by clients during staged rollout
+	MonthlyMinutes         int
+	MonthlyAIRequests      int
+	OwnerUserID            string
+	Email                  *emailservice.Service
+	Pwned                  *accountservice.PwnedChecker
+	PublicSignupEnabled    bool
+	lastAuthPurge          atomic.Int64
+	DB                     *database.DB
+	Worker                 *worker.Pool
+	AudioTranscriber       *audio.Transcriber             // MTA-16: Whisper API transcriber
+	AudioStorage           *storage.S3                    // Raw audio storage + playback URLs
+	WebhookService         *webhookservice.Service        // MTA-18: Webhook notifications
+	Summarizer             *summary.Service               // MTA-22: AI summary service
+	JWTSecret              string                         // MTA-20: JWT signing secret
+	AdminAPIKey            string                         // Admin key for protected bootstrap operations
+	OwnerAPIKeyID          string                         // Optional owner key ID override
+	OwnerAPIKeyPrefix      string                         // Optional owner key prefix override
+	YtDlpCookiesConfigured bool                           // True when yt-dlp cookies are configured
+	Passkeys               *webauthn.WebAuthn             // Enabled only behind the first-party auth flag
+	Passwords              *accountservice.PasswordHasher // Enabled only behind the first-party password flag
+	PasswordAuthEnabled    bool                           // Public capability used by clients during staged rollout
 	// Version is the build identifier reported by health endpoints.
 	Version          string
 	readinessChecker readinessChecker

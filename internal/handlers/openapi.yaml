@@ -8,8 +8,6 @@ info:
     ## Authentication
     Protected endpoints accept an `X-API-Key` header or an enabled bearer
     provider. First-party access tokens are the durable account credential.
-    Clerk is an optional migration bridge. Legacy HS256 bearer tokens are
-    accepted only while `LEGACY_AUTH_ENABLED=true`.
 
     ## Rate Limiting
     Each API key has a per-hour rate limit (default: 100 requests/hour).
@@ -44,7 +42,7 @@ components:
     BearerAuth:
       type: http
       scheme: bearer
-      description: First-party access token, optional migration-only Clerk session JWT, or explicitly enabled legacy token.
+      description: Opaque first-party access token.
 
   schemas:
     Transcript:
@@ -1304,51 +1302,11 @@ paths:
         "409":
           description: Transcript not yet completed
 
-  /auth/register:
-    post:
-      tags: [Authentication]
-      summary: Register a legacy user when legacy auth is enabled
-      security: []
-      responses: {"201": {description: User registered}, "404": {description: Legacy auth disabled}}
-  /auth/login:
-    post:
-      tags: [Authentication]
-      summary: Sign in with legacy credentials when enabled
-      security: []
-      responses: {"200": {description: Auth token}, "401": {description: Invalid credentials}}
   /auth/me:
     get:
       tags: [Authentication]
       summary: Get the signed-in user
       responses: {"200": {description: Current user}}
-  /auth/session/bootstrap:
-    post:
-      tags: [Authentication]
-      summary: Bootstrap a recoverable native first-party session
-      description: |
-        Requires a current Clerk bearer identity for an existing account. iOS
-        and Android clients must generate and durably save next_refresh_token
-        before sending this request. An exact retry recovers the same session
-        with a fresh access token while that session and refresh credential
-        remain active, including after a lost HTTP response or delayed app
-        relaunch. Raw web clients are rejected; browsers use the HttpOnly
-        same-origin cookie session endpoints.
-      security: [{BearerAuth: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [client_type, next_refresh_token]
-              properties:
-                client_type: {type: string, enum: [ios, android]}
-                device_name: {type: string, maxLength: 80}
-                next_refresh_token: {type: string, description: Client-generated mta_rt_ credential saved before sending}
-      responses:
-        "201": {description: New or exactly recovered first-party session credentials}
-        "400": {description: Invalid, unavailable, or browser successor credential}
-        "401": {description: Current Clerk identity required}
   /auth/invitations:
     post:
       tags: [Authentication]
@@ -1519,32 +1477,6 @@ paths:
                 device_name: {type: string, maxLength: 80}
                 next_refresh_token: {type: string, description: Client-generated mta_rt_ credential saved before sending}
       responses: {"201": {description: First-party session credentials}, "401": {description: Invalid, used, expired, or mismatched recovery retry}}
-  /auth/clerk-detachment:
-    get:
-      tags: [Authentication]
-      summary: Check whether an account can disconnect Clerk
-      description: |
-        Requires a valid first-party device session. Reports only factor counts
-        and link state. A linked account is ready after it has an active unused
-        recovery code plus either a passkey or an enabled configured password.
-      security: [{BearerAuth: []}]
-      responses:
-        "200": {description: Clerk link and first-party recovery readiness}
-        "401": {description: A first-party device session is required}
-    post:
-      tags: [Authentication]
-      summary: Disconnect the legacy Clerk identity
-      description: |
-        Requires a valid first-party device session. Atomically clears the
-        legacy users.clerk_id and removes Clerk auth-identity rows only after an
-        active unused recovery code exists together with either a passkey or an
-        enabled configured password. User data, API keys, and device sessions
-        are preserved. Repeating a successful request is idempotent.
-      security: [{BearerAuth: []}]
-      responses:
-        "200": {description: Clerk is disconnected or was already disconnected}
-        "401": {description: A first-party device session is required}
-        "409": {description: An unused recovery code plus a passkey or enabled password is required}
   /auth/passkeys:
     get:
       tags: [Authentication]
@@ -1565,7 +1497,7 @@ paths:
       tags: [Authentication]
       summary: Begin passkey enrollment for the signed-in account
       description: |
-        Requires a verified Clerk session JWT with a session ID or a first-party
+        Requires a first-party
         access token. Legacy JWTs and API keys cannot enroll a passkey. The
         first-party auth feature flag must be enabled. The relying-party ID is
         media.shimizu-technology.com and user verification is required.
@@ -1738,34 +1670,6 @@ paths:
         "201": {description: Browser cookies installed; body contains metadata only}
         "401": {description: Email or password is incorrect}
         "403": {description: Origin or CSRF validation failed}
-  /auth/web/session/bootstrap/prepare:
-    post:
-      tags: [Authentication]
-      summary: Prepare a response-loss-safe Clerk-to-cookie session exchange
-      security: []
-      description: |
-        Requires an exact allowed Origin. Installs a host-only HttpOnly refresh
-        successor and a readable CSRF cookie before the authenticated commit.
-        No credential is returned to JavaScript.
-      responses:
-        "204": {description: Successor and CSRF cookies installed}
-        "403": {description: Origin is not allowed}
-  /auth/web/session/bootstrap:
-    post:
-      tags: [Authentication]
-      summary: Exchange a verified Clerk identity for browser cookies
-      security: [{BearerAuth: []}]
-      parameters:
-        - {name: X-CSRF-Token, in: header, required: true, schema: {type: string}}
-      description: |
-        Requires the prepared HttpOnly successor and matching CSRF cookie. An
-        exact retry recovers the same recent session. The response contains
-        user and expiry metadata only; access and refresh credentials are set
-        as host-only HttpOnly cookies.
-      responses:
-        "201": {description: Browser session cookies installed}
-        "400": {description: Browser sign-in was not prepared}
-        "403": {description: Origin or CSRF validation failed}
   /auth/web/session/passkeys/login/begin:
     post:
       tags: [Authentication]
@@ -1926,8 +1830,7 @@ paths:
       summary: Permanently delete the signed-in account and its data
       description: |
         Immediately purges account-owned database content and queues durable
-        cleanup of raw audio objects and any still-linked Clerk identity. A
-        detached first-party account does not require Clerk configuration.
+        cleanup of raw audio objects. Retired provider steps complete locally.
         A second object cleanup runs after issued upload URLs expire.
       security:
         - BearerAuth: []
@@ -1957,7 +1860,7 @@ paths:
                   status: {type: string, example: pending}
                   requested_at: {type: string, format: date-time}
                   cleanup_after: {type: string, format: date-time}
-        "400": {description: Confirmation missing or account is not Clerk-managed}
+        "400": {description: Confirmation missing or invalid request}
         "503": {description: Account deletion is temporarily unavailable}
   /account/deletion-status:
     post:
@@ -1994,11 +1897,6 @@ paths:
         "400": {description: Receipt is malformed}
         "429": {description: Too many attempts}
         "503": {description: Receipt status is temporarily unavailable}
-  /auth/refresh:
-    post:
-      tags: [Authentication]
-      summary: Refresh a legacy auth token when enabled
-      responses: {"200": {description: Refreshed token}}
   /workspace:
     get:
       tags: [Workspace]

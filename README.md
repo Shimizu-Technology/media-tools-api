@@ -134,8 +134,8 @@ session. Access and rotating refresh credentials are opaque, revocable, and
 stored only as hashes by the API. The browser keeps them in host-only HttpOnly
 cookies, and native apps keep them in Keychain or encrypted platform storage.
 
-Accounts remain invite-only. Clerk is temporarily available only to move an
-existing linked account into first-party authentication during the migration.
+Public signup is controlled by `PUBLIC_SIGNUP_ENABLED`; existing accounts can
+sign in or reset their password through first-party authentication.
 Public docs stay at `/docs`; legacy web URLs such as `/audio`, `/pdf`,
 `/library`, and `/collections` redirect into the signed-in app shell. See
 [invite onboarding and rescue](docs/INVITE_ONBOARDING.md) for operator
@@ -262,13 +262,8 @@ not copy its hard-coded identity into future migrations.
 | `JWT_SECRET` | Yes | Independent random value, minimum 32 characters |
 | `ADMIN_API_KEY` | Yes | Independent bootstrap key, minimum 32 characters |
 | `FIRST_PARTY_AUTH_ENABLED` | First-party auth | Enable revocable device sessions, passkeys, and recovery codes |
-| `FIRST_PARTY_PASSWORD_AUTH_ENABLED` | First-party auth | Enable Argon2id password enrollment and sign-in; requires first-party auth and cannot be combined with legacy auth |
+| `FIRST_PARTY_PASSWORD_AUTH_ENABLED` | First-party auth | Enable Argon2id password enrollment and sign-in; requires first-party auth |
 | `WEB_COOKIE_AUTH_ENABLED` | Browser auth | Store browser access and refresh credentials in same-origin HttpOnly cookies |
-| `CLERK_SECRET_KEY` | Migration only | Clerk Backend API key used while linked accounts move to first-party sign-in |
-| `CLERK_JWKS_URL` | Browser auth | Clerk JWKS URL for validating signed-in users |
-| `CLERK_AUTHORIZED_PARTY` | Browser auth | Comma-separated frontend origins allowed in Clerk token `azp` claim |
-| `CLERK_MIGRATION_ONLY` | First-party rollout | Restrict Clerk to an existing exact identity or legacy `clerk_id`; required when first-party auth and Clerk are both enabled in production |
-| `LEGACY_AUTH_ENABLED` | Optional | Enable legacy email/password routes and HS256 bearer-token acceptance; defaults off in release |
 | `DEFAULT_RATE_LIMIT` | Optional | Requests/hour for API keys and signed-in browser mutations; defaults to 100 |
 | `DEFAULT_BROWSER_READ_RATE_LIMIT` | Optional | GET/HEAD requests/hour for signed-in browser users; defaults to 10,000 |
 | `OPENROUTER_API_KEY` | For summaries | OpenRouter API key |

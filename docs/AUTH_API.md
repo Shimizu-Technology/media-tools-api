@@ -1,7 +1,7 @@
 # Email/password auth API
 
 Workstream D contract for web (E), iOS (F), and Android (G). Existing passkey,
-Clerk bridge, recovery and `/auth/session/*` contracts remain available. All paths
+recovery and `/auth/session/refresh` contracts remain available. All paths
 below start with `/api/v1`. Errors retain `{"error","message","code"}`; `code`
 is the HTTP status, and `error` is the stable machine-readable identifier.
 
@@ -19,8 +19,8 @@ is the HTTP status, and `error` is the stable machine-readable identifier.
 - `EMAIL_DELIVERY=resend` needs `RESEND_API_KEY` and `RESEND_FROM_EMAIL`. Configure
   a verified sending identity before enabling real delivery. Missing Resend
   configuration fails startup only when Resend mode is explicitly selected.
-- Clerk remains linked. No account is automatically marked verified from a
-  stored address, invitation, Clerk identity, or password enrollment. A reset or
+- Retained provider columns are rollout metadata only. No account is automatically marked verified from a
+  stored address, invitation, retired provider identity, or password enrollment. A reset or
   verification code proves control of the stored email.
 - Configure the immutable `OWNER_USER_ID`, or retain the existing configured
   exact owner API key ID. Prefix matching never grants quota exemption. Account exemptions are derived from that trusted
@@ -77,7 +77,7 @@ Never store a code in local storage, analytics, crash reports, or URLs.
 
 Passwordless existing accounts use **forgot password with their stored email**.
 Reset works with or without a previous first-party password, verifies that email,
-and preserves the stable user ID, library and Clerk link. A code is the required
+and preserves the stable user ID, library and stored provider metadata. A code is the required
 proof; knowing an email alone does not create or link an account.
 
 A reset or email change atomically deactivates every account API key, including
@@ -128,7 +128,7 @@ session and revokes all others, preserving API keys. A concurrent password repla
 
 `DELETE /account` retains `confirmation:"DELETE"` and optional
 `deletion_receipt_token`, and now requires `current_password` when configured.
-Passwordless first-party/Clerk accounts retain their existing deletion boundary.
+Passwordless first-party accounts retain their existing deletion boundary.
 An older client that cannot collect the current password receives a clear 401;
 F/G/E must add that input before exposing replacement/deletion for password users.
 Login and refresh payloads stay compatible with iOS build 13.
@@ -138,7 +138,7 @@ or recovery codes. The shipped passkey-plus-recovery completion path remains
 accepted during the transition. `/auth/web/session/onboarding/status` adds
 `email_verified` and `password_configured`; `complete` recognizes either path.
 `GET /auth/me` adds `email_verified`. Passkeys/recovery remain optional security
-and recovery methods; this work does not detach or remove Clerk.
+and recovery methods; retired provider JWTs are no longer accepted.
 
 ## Browser recovery
 
@@ -283,8 +283,7 @@ was inspected. Rollout still needs real direct-Render and Netlify spoof checks.
 
 Go-served HTML now has CSP restricting scripts, frames, objects and form actions.
 Swagger permits its one static initialization script by hash. E must add the
-corresponding policy to **Netlify-served** HTML headers and verify Clerk's
-remaining bridge origins during rollout. API response headers cannot protect a
+corresponding policy to **Netlify-served** HTML headers. API response headers cannot protect a
 separately served Netlify document.
 
 ## Email jobs and operational data
@@ -307,3 +306,18 @@ remain for response-loss recovery. There is no idle database polling loop.
 Tests use fake Resend and HIBP transports. The local HTTP acceptance fixture has
 a code-reading hook defined exclusively in `_test.go`; it cannot appear in the
 release server. No real email was sent and no Resend key was sought.
+
+## Retired authentication and current device
+
+Provider bootstrap/detachment and legacy register/login/refresh routes are removed.
+Existing opaque sessions refresh without consulting provider configuration, including
+iOS build 13 sessions whose local source label still names the retired provider.
+`GET /auth/sessions` adds `current` to each row; exactly the requesting session
+has `current:true`. Other rows have `current:false`.
+
+Netlify signature diagnostics log at most one success and one invalid-signature
+or missing/invalid-client-address observation per process. Failed proof can only
+be identified as *suggested* Netlify traffic by its header names; callers can forge
+those names. The logs contain no tokens, secrets, or addresses. Netlify's
+[header forwarding notice](https://answers.netlify.com/t/upcoming-change-stripping-exposed-netlify-headers-from-function-and-proxy-requests/52665)
+confirms `X-Nf-Client-Connection-Ip` is forwarded to external proxies.

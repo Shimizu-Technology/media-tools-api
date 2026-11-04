@@ -71,6 +71,7 @@ type AuthTokenPair struct {
 }
 
 type AuthSession struct {
+	Current           bool       `json:"current" db:"-"`
 	ID                string     `json:"id" db:"id"`
 	ClientType        string     `json:"client_type" db:"client_type"`
 	DeviceName        string     `json:"device_name" db:"device_name"`
@@ -328,87 +329,6 @@ func (db *DB) CreateOrRecoverFirstPartySession(ctx context.Context, userID, clie
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit session bootstrap: %w", err)
-	}
-	return pair, nil
-}
-
-// CreateOrRecoverClerkMigrationSession verifies the exact legacy provider link
-// and issues its first-party session under one account lock and transaction.
-// A concurrent detachment therefore linearizes entirely before or after this
-// operation; session bootstrap can never restore a link after detachment.
-func (db *DB) CreateOrRecoverClerkMigrationSession(ctx context.Context, userID, clerkSubject, clientType, deviceName, nextRefreshToken string) (*AuthTokenPair, error) {
-	clerkSubject = strings.TrimSpace(clerkSubject)
-	if userID == "" || clerkSubject == "" {
-		return nil, ErrClerkIdentityUnknown
-	}
-	deviceName, successorHash, err := validateRecoverableSessionInput(clientType, deviceName, nextRefreshToken)
-	if err != nil {
-		return nil, err
-	}
-	now := time.Now().UTC()
-	tx, err := db.BeginTxx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin Clerk migration bootstrap: %w", err)
-	}
-	defer tx.Rollback()
-	// Keep the global order used by generic bootstrap: successor lock, then any
-	// user-row/FK lock. This prevents a reused successor from deadlocking a
-	// Clerk migration bootstrap against another session ceremony.
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, successorHash); err != nil {
-		return nil, fmt.Errorf("lock Clerk migration successor: %w", err)
-	}
-
-	var storedClerkID sql.NullString
-	err = tx.GetContext(ctx, &storedClerkID, `SELECT clerk_id FROM users WHERE id = $1 FOR UPDATE /* clerk-bootstrap-lock */`, userID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrClerkIdentityUnknown
-	}
-	if err != nil {
-		return nil, fmt.Errorf("lock Clerk migration account: %w", err)
-	}
-	var identityOwner string
-	err = tx.GetContext(ctx, &identityOwner, `
-		SELECT user_id FROM auth_identities
-		WHERE provider = 'clerk' AND subject = $1`, clerkSubject)
-	switch {
-	case err == nil && identityOwner != userID:
-		return nil, ErrIdentityOwnedByOther
-	case err != nil && !errors.Is(err, sql.ErrNoRows):
-		return nil, fmt.Errorf("load Clerk migration identity: %w", err)
-	}
-	legacyLinked := storedClerkID.Valid && storedClerkID.String == clerkSubject
-	identityLinked := err == nil && identityOwner == userID
-	if !legacyLinked && !identityLinked {
-		return nil, ErrClerkIdentityUnknown
-	}
-	if !identityLinked {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO auth_identities (user_id, provider, subject)
-			VALUES ($1, 'clerk', $2)
-			ON CONFLICT (provider, subject) DO NOTHING`, userID, clerkSubject); err != nil {
-			return nil, fmt.Errorf("backfill Clerk migration identity: %w", err)
-		}
-		if err := tx.GetContext(ctx, &identityOwner, `
-			SELECT user_id FROM auth_identities
-			WHERE provider = 'clerk' AND subject = $1`, clerkSubject); err != nil {
-			return nil, fmt.Errorf("verify Clerk migration identity: %w", err)
-		}
-		if identityOwner != userID {
-			return nil, ErrIdentityOwnedByOther
-		}
-	}
-
-	pair, commitOnError, err := createOrRecoverFirstPartySessionTx(ctx, tx, userID, clientType, deviceName, nextRefreshToken, successorHash, now, false)
-	if err != nil {
-		if commitOnError {
-			if commitErr := tx.Commit(); commitErr != nil {
-				return nil, fmt.Errorf("commit invalid Clerk migration bootstrap: %w", commitErr)
-			}
-		}
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit Clerk migration bootstrap: %w", err)
 	}
 	return pair, nil
 }

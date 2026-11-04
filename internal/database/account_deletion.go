@@ -22,8 +22,8 @@ const accountDeletionColumns = `
 	requested_at, updated_at, COALESCE(deletion_receipt_hash, '') AS deletion_receipt_hash
 `
 
-func clerkUserHash(clerkUserID string) string {
-	sum := sha256.Sum256([]byte(clerkUserID))
+func providerUserHash(retiredProviderID string) string {
+	sum := sha256.Sum256([]byte(retiredProviderID))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -32,10 +32,10 @@ func deletionReceiptHash(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// HasAccountDeletionTombstone prevents a valid but already-issued Clerk token
+// HasAccountDeletionTombstone prevents a valid but already-issued retired provider token
 // from recreating an application account after deletion was requested.
-func (db *DB) HasAccountDeletionTombstone(ctx context.Context, clerkUserID string) (bool, error) {
-	if strings.TrimSpace(clerkUserID) == "" {
+func (db *DB) HasAccountDeletionTombstone(ctx context.Context, retiredProviderID string) (bool, error) {
+	if strings.TrimSpace(retiredProviderID) == "" {
 		return false, nil
 	}
 	var exists bool
@@ -43,28 +43,28 @@ func (db *DB) HasAccountDeletionTombstone(ctx context.Context, clerkUserID strin
 		SELECT EXISTS (
 			SELECT 1 FROM account_deletion_requests
 			WHERE clerk_user_hash = $1
-		)`, clerkUserHash(clerkUserID)); err != nil {
+		)`, providerUserHash(retiredProviderID)); err != nil {
 		return false, fmt.Errorf("check account deletion tombstone: %w", err)
 	}
 	return exists, nil
 }
 
 // RequestAccountDeletion atomically records the durable deletion request and
-// removes every account-owned database row. Object storage and Clerk are
-// completed asynchronously because both are external systems that can fail.
+// removes every account-owned database row. Object storage cleanup finishes
+// asynchronously; retained provider metadata needs no remote call.
 func (db *DB) RequestAccountDeletion(
 	ctx context.Context,
 	userID string,
-	clerkUserID *string,
+	retiredProviderID *string,
 	cleanupAfter time.Time,
 ) (*models.AccountDeletionRequest, error) {
-	return db.RequestAccountDeletionWithReceipt(ctx, userID, clerkUserID, cleanupAfter, "")
+	return db.RequestAccountDeletionWithReceipt(ctx, userID, retiredProviderID, cleanupAfter, "")
 }
 
 func (db *DB) RequestAccountDeletionWithReceipt(
 	ctx context.Context,
 	userID string,
-	clerkUserID *string,
+	retiredProviderID *string,
 	cleanupAfter time.Time,
 	receiptToken string,
 	verifiedPassword ...string,
@@ -75,8 +75,8 @@ func (db *DB) RequestAccountDeletionWithReceipt(
 	}
 	defer tx.Rollback()
 
-	var storedClerkID sql.NullString
-	if err := tx.GetContext(ctx, &storedClerkID, `
+	var storedProviderID sql.NullString
+	if err := tx.GetContext(ctx, &storedProviderID, `
 		SELECT clerk_id FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			var existing string
@@ -104,18 +104,12 @@ func (db *DB) RequestAccountDeletionWithReceipt(
 	if strings.TrimSpace(receiptToken) != "" {
 		receiptHash = deletionReceiptHash(receiptToken)
 	}
-	if storedClerkID.Valid && storedClerkID.String != "" {
-		if clerkUserID == nil || strings.TrimSpace(*clerkUserID) != storedClerkID.String {
-			return nil, fmt.Errorf("account is not linked to the authenticated Clerk identity")
-		}
-		providerID = storedClerkID.String
-		providerHash = clerkUserHash(storedClerkID.String)
-	} else {
-		if clerkUserID != nil && strings.TrimSpace(*clerkUserID) != "" {
-			return nil, fmt.Errorf("account is not linked to the authenticated Clerk identity")
-		}
-		identityDeletedAt = time.Now().UTC()
+	// Preserve rollout metadata while treating the retired provider as complete.
+	if storedProviderID.Valid && storedProviderID.String != "" {
+		providerID = storedProviderID.String
+		providerHash = providerUserHash(storedProviderID.String)
 	}
+	identityDeletedAt = time.Now().UTC()
 
 	if cleanupAfter.Before(time.Now().UTC()) {
 		cleanupAfter = time.Now().UTC()

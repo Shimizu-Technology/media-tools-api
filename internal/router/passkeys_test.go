@@ -21,7 +21,6 @@ import (
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
-	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
 
 const testPasskeyRPID = "media.shimizu-technology.com"
@@ -235,10 +234,7 @@ func TestPasskeyRegistrationAndLoginHTTP(t *testing.T) {
 	if response := postPasskeyJSON(t, engine, registerBegin, map[string]any{}, ""); response.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated registration = %d", response.Code)
 	}
-	legacy, err := middleware.GenerateJWT(&models.User{ID: userID, Email: "legacy@example.com"}, "test-only")
-	if err != nil {
-		t.Fatal(err)
-	}
+	legacy := "retired-token"
 	if response := postPasskeyJSON(t, engine, registerBegin, map[string]any{}, legacy); response.Code != http.StatusUnauthorized {
 		t.Fatalf("legacy JWT enrolled passkey = %d", response.Code)
 	}

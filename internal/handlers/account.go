@@ -20,7 +20,7 @@ const accountDeletionConfirmation = "DELETE"
 var accountDeletionReceiptPattern = regexp.MustCompile(`^mta_del_[A-Za-z0-9_-]{43}$`)
 
 // DeleteAccount begins a durable, cross-system deletion. The database purge
-// commits before the response; object storage and Clerk finish asynchronously.
+// commits before the response; object storage finish asynchronously.
 // DELETE /api/v1/account
 func (h *Handler) DeleteAccount(c *gin.Context) {
 	user := middleware.GetUser(c)
@@ -32,19 +32,7 @@ func (h *Handler) DeleteAccount(c *gin.Context) {
 		})
 		return
 	}
-	var clerkUserID *string
-	if user.ClerkID != nil && strings.TrimSpace(*user.ClerkID) != "" {
-		trimmed := strings.TrimSpace(*user.ClerkID)
-		clerkUserID = &trimmed
-		if !h.ClerkAccountDeletionEnabled {
-			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
-				Error:   "account_deletion_unavailable",
-				Message: "Account deletion is temporarily unavailable. Please contact support.",
-				Code:    http.StatusServiceUnavailable,
-			})
-			return
-		}
-	} else if !strings.HasPrefix(middleware.AuthSessionBinding(c), "first-party:") {
+	if !strings.HasPrefix(middleware.AuthSessionBinding(c), "first-party:") {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error:   "first_party_session_required",
 			Message: "A signed-in device session is required to delete this account.",
@@ -78,7 +66,7 @@ func (h *Handler) DeleteAccount(c *gin.Context) {
 		cleanupAfter = cleanupAfter.Add(h.AudioStorage.PresignedURLExpiry() + 5*time.Minute)
 	}
 	request, err := h.DB.RequestAccountDeletionWithReceipt(
-		c.Request.Context(), user.ID, clerkUserID, cleanupAfter, body.DeletionReceiptToken, snapshot,
+		c.Request.Context(), user.ID, nil, cleanupAfter, body.DeletionReceiptToken, snapshot,
 	)
 	if err != nil {
 		if errors.Is(err, database.ErrPasswordCredentialChanged) {

@@ -189,7 +189,6 @@ available.
 To exercise durable user sessions and first-party passwords locally, add:
 
 ```bash
-LEGACY_AUTH_ENABLED=false
 FIRST_PARTY_AUTH_ENABLED=true
 FIRST_PARTY_PASSWORD_AUTH_ENABLED=true
 WEB_COOKIE_AUTH_ENABLED=true
@@ -201,52 +200,6 @@ redeem it, then add a password, passkey, and recovery codes in Settings. Native
 and browser sessions use opaque access and rotating refresh credentials; the
 server stores only hashes. API keys remain available for agents and scripts.
 
-### Clerk migration bridge
-
-Clerk is optional and exists only to move an account that was linked before
-first-party auth. New development accounts should use invitations.
-
-#### a. Create a Clerk Application
-
-1. Go to [dashboard.clerk.com](https://dashboard.clerk.com) and create a new application
-2. Enable the sign-in methods you want (Email, Google, etc.)
-3. Copy your **Publishable Key** and **Secret Key**
-
-#### b. Set Backend Environment Variables
-
-Add to your `.env`:
-
-```bash
-# Clerk Authentication
-CLERK_PUBLISHABLE_KEY=pk_test_...
-CLERK_SECRET_KEY=sk_test_...
-CLERK_JWKS_URL=https://your-app.clerk.accounts.dev/.well-known/jwks.json
-```
-
-The JWKS URL is found in **Clerk Dashboard → API Keys → Advanced → JWKS URL**.
-
-#### c. Set Frontend Environment Variables
-
-Create `frontend/.env` (or copy from `frontend/.env.example`):
-
-```bash
-VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
-```
-
-#### d. Restart Both Servers
-
-```bash
-# Terminal 1: restart backend
-make run
-
-# Terminal 2: restart frontend
-make frontend-dev
-```
-
-Set `CLERK_MIGRATION_ONLY=true` whenever Clerk and first-party auth are enabled
-together. The server then accepts only an exact existing Clerk identity and
-will not create an account from a new Clerk signup.
-
 #### How Auth Works
 
 The app supports two current authentication families:
@@ -256,11 +209,7 @@ The app supports two current authentication families:
 | **API Key** | `X-API-Key` header | Scripts, automation, CI/CD |
 | **First-party session** | Opaque bearer credential or same-origin HttpOnly cookies | iPhone, Android, and browser users |
 
-Clerk JWTs are accepted only during migration when configured. The old bcrypt
-plus JWT routes remain disabled when first-party password auth is on.
-
-**Without user-auth flags configured**, the frontend hides sign-in UI and
-protects `/app/*` with the local API-key prompt.
+First-party sessions and API keys are the supported credentials.
 
 ---
 

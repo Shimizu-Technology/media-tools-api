@@ -173,13 +173,13 @@ func TestVerifiedIdentityCannotMoveBetweenUsers(t *testing.T) {
 		t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, *target) })
 	}
 	subject := "user_" + uuid.NewString()
-	if err := db.EnsureAuthIdentity(ctx, firstID, "clerk", subject); err != nil {
+	if err := db.EnsureAuthIdentity(ctx, firstID, "test-provider", subject); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.EnsureAuthIdentity(ctx, firstID, "clerk", subject); err != nil {
+	if err := db.EnsureAuthIdentity(ctx, firstID, "test-provider", subject); err != nil {
 		t.Fatalf("idempotent identity link failed: %v", err)
 	}
-	if err := db.EnsureAuthIdentity(ctx, secondID, "clerk", subject); !errors.Is(err, ErrIdentityOwnedByOther) {
+	if err := db.EnsureAuthIdentity(ctx, secondID, "test-provider", subject); !errors.Is(err, ErrIdentityOwnedByOther) {
 		t.Fatalf("cross-account identity link = %v", err)
 	}
 }

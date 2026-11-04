@@ -445,22 +445,22 @@ type User struct {
 	Email              string    `json:"email" db:"email"`
 	PasswordHash       string    `json:"-" db:"password_hash"`
 	Name               string    `json:"name" db:"name"`
-	ClerkID            *string   `json:"clerk_id,omitempty" db:"clerk_id"`
+	ProviderID         *string   `json:"clerk_id,omitempty" db:"clerk_id"`
 	OnboardingRequired bool      `json:"onboarding_required" db:"onboarding_required"`
 	CreatedAt          time.Time `json:"created_at" db:"created_at"`
 }
 
 // AccountDeletionRequest is the durable coordination record for deleting an
-// account across PostgreSQL, object storage, and Clerk.
+// account across PostgreSQL, object storage, and retired provider.
 type AccountDeletionRequest struct {
 	ID                  string          `json:"id" db:"id"`
 	AppUserID           string          `json:"-" db:"app_user_id"`
-	ClerkUserID         *string         `json:"-" db:"clerk_user_id"`
-	ClerkUserHash       string          `json:"-" db:"clerk_user_hash"`
+	ProviderUserID      *string         `json:"-" db:"clerk_user_id"`
+	ProviderUserHash    string          `json:"-" db:"clerk_user_hash"`
 	ObjectKeys          json.RawMessage `json:"-" db:"object_keys"`
 	Status              string          `json:"status" db:"status"`
 	CleanupAfter        time.Time       `json:"cleanup_after" db:"cleanup_after"`
-	ClerkDeletedAt      *time.Time      `json:"-" db:"clerk_deleted_at"`
+	ProviderDeletedAt   *time.Time      `json:"-" db:"clerk_deleted_at"`
 	CompletedAt         *time.Time      `json:"completed_at,omitempty" db:"completed_at"`
 	LastError           string          `json:"-" db:"last_error"`
 	RequestedAt         time.Time       `json:"requested_at" db:"requested_at"`

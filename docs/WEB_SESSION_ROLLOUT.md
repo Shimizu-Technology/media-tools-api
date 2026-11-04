@@ -1,3 +1,9 @@
+# Historical migration rollout
+
+The bridge and detachment routes described below were retired in workstream I.
+Use [AUTH_API.md](AUTH_API.md) for current endpoints. Existing opaque sessions
+continue to refresh regardless of the client’s stored source label.
+
 # Browser session rollout
 
 Media Tools web auth uses first-party access and refresh cookies. A passkey can

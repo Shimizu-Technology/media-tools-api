@@ -14,7 +14,7 @@ import (
 func TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
 	ctx := context.Background()
-	clerkID := "user_" + uuid.NewString()
+	providerID := "user_" + uuid.NewString()
 	email := uuid.NewString() + "@example.com"
 	ownedObjectKey := "audio/" + uuid.NewString() + ".m4a"
 	pendingObjectKey := "audio/" + uuid.NewString() + ".m4a"
@@ -22,7 +22,7 @@ func TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup(t *testing.T) {
 	var userID string
 	if err := db.QueryRowContext(ctx, `
 		INSERT INTO users (email, password_hash, name, clerk_id)
-		VALUES ($1, '', 'Deletion Test', $2) RETURNING id`, email, clerkID).Scan(&userID); err != nil {
+		VALUES ($1, '', 'Deletion Test', $2) RETURNING id`, email, providerID).Scan(&userID); err != nil {
 		t.Fatalf("insert user: %v", err)
 	}
 
@@ -74,7 +74,7 @@ func TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup(t *testing.T) {
 	}
 
 	cleanupAfter := time.Now().UTC().Add(time.Hour)
-	request, err := db.RequestAccountDeletion(ctx, userID, &clerkID, cleanupAfter)
+	request, err := db.RequestAccountDeletion(ctx, userID, &providerID, cleanupAfter)
 	if err != nil {
 		t.Fatalf("RequestAccountDeletion() error = %v", err)
 	}
@@ -86,8 +86,8 @@ func TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAccountDeletionRequest() error = %v", err)
 	}
-	if loadedRequest.ClerkUserID == nil || *loadedRequest.ClerkUserID != clerkID {
-		t.Fatalf("loaded Clerk user ID = %#v", loadedRequest.ClerkUserID)
+	if loadedRequest.ProviderUserID == nil || *loadedRequest.ProviderUserID != providerID {
+		t.Fatalf("loaded retired provider user ID = %#v", loadedRequest.ProviderUserID)
 	}
 
 	for table, id := range map[string]string{
@@ -118,7 +118,7 @@ func TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup(t *testing.T) {
 		t.Fatalf("object keys = %#v", keys)
 	}
 
-	blocked, err := db.HasAccountDeletionTombstone(ctx, clerkID)
+	blocked, err := db.HasAccountDeletionTombstone(ctx, providerID)
 	if err != nil || !blocked {
 		t.Fatalf("deletion tombstone = %v, %v", blocked, err)
 	}
@@ -166,7 +166,7 @@ func TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload completed deletion: %v", err)
 	}
-	if completed.Status != "completed" || completed.ClerkUserID != nil || string(completed.ObjectKeys) != "[]" {
+	if completed.Status != "completed" || completed.ProviderUserID != nil || string(completed.ObjectKeys) != "[]" {
 		t.Fatalf("completed deletion retained provider data: %#v", completed)
 	}
 }
@@ -219,7 +219,7 @@ func TestRequestNativeAccountDeletionPurgesOwnedDataAndPreservesOtherUsers(t *te
 		_, _ = db.ExecContext(context.Background(), `DELETE FROM background_jobs WHERE resource_id = $1`, request.ID)
 		_, _ = db.ExecContext(context.Background(), `DELETE FROM account_deletion_requests WHERE id = $1`, request.ID)
 	})
-	if request.ClerkUserID != nil || request.ClerkUserHash != "" || request.ClerkDeletedAt == nil {
+	if request.ProviderUserID != nil || request.ProviderUserHash != "" || request.ProviderDeletedAt == nil {
 		t.Fatalf("native deletion retained provider state: %#v", request)
 	}
 	if request.DeletionReceiptHash == "" || request.DeletionReceiptHash == receiptToken {

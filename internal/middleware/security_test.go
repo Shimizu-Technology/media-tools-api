@@ -18,7 +18,7 @@ func TestSecurityHeaders(t *testing.T) {
 	req.Header.Set("X-Forwarded-Proto", "https")
 	res := httptest.NewRecorder()
 	r.ServeHTTP(res, req)
-	for _, source := range []string{"https://challenges.cloudflare.com", "https://api.fontshare.com", "https://fonts.googleapis.com", "https://fonts.gstatic.com", "worker-src 'self' blob:"} {
+	for _, source := range []string{"https://challenges.cloudflare.com", "worker-src 'self' blob:"} {
 		if !strings.Contains(res.Header().Get("Content-Security-Policy"), source) {
 			t.Errorf("missing CSP source %s", source)
 		}

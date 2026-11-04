@@ -208,7 +208,7 @@ func TestAuthHTTPPasswordlessResetChangesAndDeletion(t *testing.T) {
 	email := uuid.NewString() + "@example.invalid"
 	f.cleanupEmail(email)
 	var userID string
-	if err := f.db.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,name,clerk_id) VALUES($1,'','Passwordless HTTP',$2) RETURNING id`, email, "synthetic_clerk_"+uuid.NewString()).Scan(&userID); err != nil {
+	if err := f.db.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,name,clerk_id) VALUES($1,'','Passwordless HTTP',$2) RETURNING id`, email, "synthetic_provider_"+uuid.NewString()).Scan(&userID); err != nil {
 		t.Fatal(err)
 	}
 	old, err := f.db.CreateFirstPartySession(ctx, userID, "ios", "Before reset")
@@ -237,14 +237,11 @@ func TestAuthHTTPPasswordlessResetChangesAndDeletion(t *testing.T) {
 	f.request("POST", "/api/v1/auth/email/change/verify", gin.H{"email": newEmail, "code": f.code(newEmail, "email_change")}, pair.AccessToken, 200)
 	f.request("GET", "/api/v1/auth/me", nil, pair.AccessToken, 401)
 	pair = f.login(newEmail, replacement)
-	// Preserve the real Clerk link through reset and email change; deletion is
-	// tested after local detachment to avoid any provider calls.
-	var clerk *string
-	if err := f.db.GetContext(ctx, &clerk, `SELECT clerk_id FROM users WHERE id=$1`, userID); err != nil || clerk == nil {
-		t.Fatal("Clerk migration link lost")
-	}
-	if _, err = f.db.ExecContext(ctx, `UPDATE users SET clerk_id=NULL WHERE id=$1`, userID); err != nil {
-		t.Fatal(err)
+	// Preserve the real retired provider link through reset and email change; deletion is
+	// tested with rollout metadata retained, without provider configuration.
+	var provider *string
+	if err := f.db.GetContext(ctx, &provider, `SELECT clerk_id FROM users WHERE id=$1`, userID); err != nil || provider == nil {
+		t.Fatal("retired provider migration link lost")
 	}
 	f.request("DELETE", "/api/v1/account", gin.H{"confirmation": "DELETE"}, pair.AccessToken, 401)
 	var notices int
@@ -257,7 +254,7 @@ func TestAuthHTTPPasswordlessResetChangesAndDeletion(t *testing.T) {
 	if exists {
 		t.Fatal("deletion did not persist")
 	}
-	t.Log("D04/D05 passed via local HTTP: passwordless Clerk account reset, session revocation, password/email reauthentication, notices, deletion")
+	t.Log("D04/D05 passed via local HTTP: passwordless retired provider account reset, session revocation, password/email reauthentication, notices, deletion")
 }
 func TestAuthHTTPUsageAndOwnerExemption(t *testing.T) {
 	f := newAuthHTTPFixture(t, true)
