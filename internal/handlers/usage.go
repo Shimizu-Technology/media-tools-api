@@ -24,6 +24,7 @@ func usageAccount(c *gin.Context) string {
 }
 func (h *Handler) ensureUsage(c *gin.Context, userID string) bool {
 	if err := h.DB.EnsureUsagePolicy(c.Request.Context(), userID, h.MonthlyMinutes, h.MonthlyAIRequests, h.OwnerUserID, h.OwnerAPIKeyID); err != nil {
+		log.Printf("usage policy check failed: %v", err)
 		authError(c, 503, "usage_unavailable", "Could not check account usage; retry")
 		c.Abort()
 		return false
@@ -41,6 +42,7 @@ func (h *Handler) GetUsage(c *gin.Context) {
 	}
 	usage, err := h.DB.AccountUsage(c.Request.Context(), userID)
 	if err != nil {
+		log.Printf("usage lookup failed: %v", err)
 		authError(c, 503, "usage_unavailable", "Could not check account usage; retry")
 		return
 	}
@@ -72,6 +74,7 @@ func (h *Handler) UsageGuard() gin.HandlerFunc {
 		}
 		usage, err := h.DB.AccountUsage(c.Request.Context(), userID)
 		if err != nil {
+			log.Printf("usage lookup failed: %v", err)
 			authError(c, 503, "usage_unavailable", "Could not check account usage; retry")
 			c.Abort()
 			return
@@ -101,6 +104,7 @@ func (h *Handler) UsageGuard() gin.HandlerFunc {
 				if database.IsUsageCap(err) {
 					authError(c, 402, "monthly_ai_cap", "Monthly summary and chat limit reached; try again next month")
 				} else {
+					log.Printf("AI usage reservation failed: %v", err)
 					authError(c, 503, "usage_unavailable", "Could not check account usage; retry")
 				}
 				c.Abort()

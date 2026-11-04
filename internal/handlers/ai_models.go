@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"log"
+	"strings"
+
 	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/gin-gonic/gin"
-	"strings"
 )
 
 // Current iOS/web/CLI clients default to the server model (empty override).
@@ -29,6 +31,7 @@ func (h *Handler) allowAIModel(c *gin.Context, model string) bool {
 		}
 		usage, err := h.DB.AccountUsage(c.Request.Context(), account)
 		if err != nil {
+			log.Printf("usage lookup failed: %v", err)
 			authError(c, 503, "usage_unavailable", "Could not check account usage; retry")
 			return false
 		}

@@ -57,11 +57,14 @@ func TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup(t *testing.T) {
 		) VALUES ($1, 'pending.m4a', 100, $2, NOW() + INTERVAL '7 days')`, pendingObjectKey, userID); err != nil {
 		t.Fatalf("insert upload session: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO collections (name, user_id) VALUES ('Owned', $1);
-		INSERT INTO workspace_items (user_id, item_type, item_id) VALUES ($1, 'audio', $2);
-		INSERT INTO media_item_preferences (user_id, item_type, item_id) VALUES ($1, 'audio', $2)`, userID, audioID); err != nil {
-		t.Fatalf("insert account-owned metadata: %v", err)
+	if _, err := db.ExecContext(ctx, `INSERT INTO collections (name, user_id) VALUES ('Owned', $1)`, userID); err != nil {
+		t.Fatalf("insert owned collection: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO workspace_items (user_id, item_type, item_id) VALUES ($1, 'audio', $2)`, userID, audioID); err != nil {
+		t.Fatalf("insert owned workspace item: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO media_item_preferences (user_id, item_type, item_id) VALUES ($1, 'audio', $2)`, userID, audioID); err != nil {
+		t.Fatalf("insert owned preference: %v", err)
 	}
 	var reportID string
 	if err := db.QueryRowContext(ctx, `

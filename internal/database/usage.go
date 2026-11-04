@@ -31,6 +31,8 @@ type Usage struct {
 // Policy defaults are captured on first use, so a future per-account override
 // is not overwritten by every request. Exemption is derived from explicit
 // owner configuration, never an email, client flag, or first-created account.
+// Every $1 is cast to uuid: with prepared statements, a lone $1::text would make
+// Postgres infer text for all of them and reject the uuid comparison.
 func (db *DB) EnsureUsagePolicy(ctx context.Context, userID string, minutes, ai int, ownerID, ownerKeyID string) error {
 	if minutes <= 0 {
 		minutes = 300
@@ -39,7 +41,7 @@ func (db *DB) EnsureUsagePolicy(ctx context.Context, userID string, minutes, ai 
 		ai = 1000
 	}
 	_, err := db.ExecContext(ctx, `INSERT INTO account_usage_policies(user_id,transcription_limit_seconds,ai_request_limit,exempt)
- VALUES($1,$2,$3, COALESCE($1::text=NULLIF($4,''),FALSE) OR EXISTS(SELECT 1 FROM api_keys WHERE user_id=$1 AND id::text=NULLIF($5,'')))
+ VALUES($1::uuid,$2,$3, COALESCE($1::uuid::text=NULLIF($4,''),FALSE) OR EXISTS(SELECT 1 FROM api_keys WHERE user_id=$1::uuid AND id::text=NULLIF($5,'')))
  ON CONFLICT(user_id) DO UPDATE SET exempt=EXCLUDED.exempt`, userID, int64(minutes)*60, ai, ownerID, ownerKeyID)
 	return err
 }
