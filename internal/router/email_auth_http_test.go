@@ -416,8 +416,13 @@ func TestAuthHTTPFailedGuessesDoNotLockCorrectPassword(t *testing.T) {
 		}
 		f.request("POST", "/api/v1/auth/password/login", request, "", want)
 	}
+	// Past the budget, a guess inside the gap isn't checked at all, so an attacker
+	// can't tell a right answer from a wrong one here. The account is slowed, not
+	// locked: the correct password works on the next open slot.
+	correct := gin.H{"email": email, "password": password, "client_type": "ios", "next_refresh_token": next}
+	f.request("POST", "/api/v1/auth/password/login", correct, "", 429)
+	f.clearPasswordGuessSlots() // Stands in for waiting out the 30-second gap.
 	f.login(email, password)
-	t.Log("D06 passed: account failures throttle wrong guesses, correct password remains usable")
 }
 
 func TestAuthHTTPBrowserCSRFAndStalePendingRecovery(t *testing.T) {
@@ -481,4 +486,11 @@ type quotaHTTPExtractor struct{}
 
 func (quotaHTTPExtractor) ExtractFromURL(context.Context, string, string) (*transcript.Result, error) {
 	return &transcript.Result{Duration: 60, Title: "Quota fixture", Language: "en", Transcript: "Local quota acceptance transcript.", WordCount: 4}, nil
+}
+
+func (f *authHTTPFixture) clearPasswordGuessSlots() {
+	f.t.Helper()
+	if _, err := f.db.ExecContext(context.Background(), `DELETE FROM auth_password_guess_slots`); err != nil {
+		f.t.Fatal(err)
+	}
 }

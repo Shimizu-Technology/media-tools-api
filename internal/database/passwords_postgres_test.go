@@ -221,14 +221,14 @@ func TestPasswordGuessesSlowDownPastTheFailureBudget(t *testing.T) {
 		t.Fatalf("second guess inside the gap must not be verified: allowed=%v err=%v", allowed, err)
 	}
 
-	if _, err := db.ExecContext(ctx, `UPDATE auth_password_credentials SET slow_guess_at = NOW() - INTERVAL '31 seconds' WHERE user_id = $1`, userID); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE auth_password_guess_slots SET claimed_at = NOW() - INTERVAL '31 seconds' WHERE user_id = $1`, userID); err != nil {
 		t.Fatal(err)
 	}
 	if allowed, err := db.ClaimPasswordGuess(ctx, userID); err != nil || !allowed {
 		t.Fatalf("a later guess must get through so a correct password still works: allowed=%v err=%v", allowed, err)
 	}
 
-	if _, err := db.ExecContext(ctx, `UPDATE auth_password_credentials SET failure_window_started_at = NOW() - INTERVAL '16 minutes', slow_guess_at = NOW() WHERE user_id = $1`, userID); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE auth_password_credentials SET failure_window_started_at = NOW() - INTERVAL '16 minutes' WHERE user_id = $1`, userID); err != nil {
 		t.Fatal(err)
 	}
 	if allowed, err := db.ClaimPasswordGuess(ctx, userID); err != nil || !allowed {

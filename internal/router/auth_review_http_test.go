@@ -169,6 +169,7 @@ func TestAuthHTTPAccountLimitsDoNotShareProxyBucket(t *testing.T) {
 		f.request("POST", "/api/v1/auth/password/login", gin.H{"email": one, "password": "wrong", "client_type": "ios", "next_refresh_token": next}, "", want)
 		f.request("POST", "/api/v1/auth/password/forgot", gin.H{"email": one}, "", 202)
 	}
+	f.clearPasswordGuessSlots() // Stands in for waiting out the 30-second gap.
 	f.login(one, password)
 	f.login(two, password)
 	f.request("POST", "/api/v1/auth/password/forgot", gin.H{"email": two}, "", 202)

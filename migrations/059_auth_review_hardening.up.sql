@@ -16,4 +16,8 @@ ALTER TABLE audio_transcriptions DROP CONSTRAINT check_audio_formatting_status;
 ALTER TABLE audio_transcriptions ADD CONSTRAINT check_audio_formatting_status CHECK(formatting_status IN ('none','pending','processing','completed','failed','skipped'));
 
 -- Past the free failure budget, one password check per interval per account.
-ALTER TABLE auth_password_credentials ADD COLUMN slow_guess_at TIMESTAMPTZ;
+-- A separate table, because existing code scans whole credential rows.
+CREATE TABLE auth_password_guess_slots (
+ user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ claimed_at TIMESTAMPTZ NOT NULL
+);

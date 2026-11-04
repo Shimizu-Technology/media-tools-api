@@ -77,8 +77,8 @@ func (db *DB) GetPasswordStatus(ctx context.Context, userID string) (*PasswordSt
 // ClaimPasswordGuess decides whether this attempt may reach password
 // verification. Past the failure budget an account allows one check per interval.
 // That bounds online guessing while a correct password still gets through on a
-// later try, so a stranger can slow a login but never lock it. The claim is a
-// single UPDATE, so concurrent guesses can't share a slot.
+// later try, so a stranger can slow a login but never lock it. The claim is one
+// atomic upsert, so concurrent guesses can't share a slot.
 func (db *DB) ClaimPasswordGuess(ctx context.Context, userID string) (bool, error) {
 	var overBudget bool
 	err := db.GetContext(ctx, &overBudget, `
@@ -96,8 +96,9 @@ func (db *DB) ClaimPasswordGuess(ctx context.Context, userID string) (bool, erro
 		return true, nil
 	}
 	result, err := db.ExecContext(ctx, `
-		UPDATE auth_password_credentials SET slow_guess_at = NOW()
-		WHERE user_id = $1 AND (slow_guess_at IS NULL OR slow_guess_at <= NOW() - make_interval(secs => $2))`,
+		INSERT INTO auth_password_guess_slots (user_id, claimed_at) VALUES ($1, NOW())
+		ON CONFLICT (user_id) DO UPDATE SET claimed_at = NOW()
+		WHERE auth_password_guess_slots.claimed_at <= NOW() - make_interval(secs => $2)`,
 		userID, passwordSlowGuessGap.Seconds())
 	if err != nil {
 		return false, fmt.Errorf("claim password guess: %w", err)
