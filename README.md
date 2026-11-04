@@ -225,7 +225,7 @@ curl -X POST http://localhost:8080/api/v1/summaries \
     "transcript_id": "UUID",
     "length": "medium",
     "style": "bullet",
-    "model": "google/gemini-2.5-flash"
+    "model": "openai/gpt-4.1-mini"
   }'
 ```
 

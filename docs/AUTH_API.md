@@ -213,9 +213,9 @@ Workers initialize missing policies from the server defaults and exact owner
 configuration, so pre-rollout queued enrichment also counts.
 
 All client-supplied `model` overrides are allowlisted server-side. Omit the model
-to use the operator's default, or use `openai/gpt-4o`, `openai/gpt-4o-mini`,
-`google/gemini-2.5-flash`, `google/gemini-2.5-flash-lite`, or
-`anthropic/claude-4.5-sonnet-20250929`. This covers the choices on current main:
+to use the operator's default, or use `openai/gpt-4o`, `openai/gpt-4o-mini`, or
+`openai/gpt-4.1-mini`. Each needs a zero-data-retention endpoint on OpenRouter,
+because every request requires one. This covers the choices on current main:
 iOS sends nil, web defaults to no override and documents GPT-4o, and CLI defaults
 to no override. CLI's arbitrary `--model` is intentionally restricted for capped
 accounts. Unknown choices return 400 `invalid_model` before provider work. Only

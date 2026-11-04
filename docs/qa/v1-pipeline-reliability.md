@@ -64,7 +64,7 @@ instance has upgraded, set `AUTOMATIC_AUDIO_ENRICHMENT_ENABLED=true`. This avoid
 older workers ignoring the new title-only payload when summaries are disabled.
 The user preference defaults to automatic summaries on. Bearer clients read or
 patch `/api/v1/account/processing-preferences` with `automatic_summaries`.
-`OPENROUTER_TITLE_MODEL` defaults to `google/gemini-2.5-flash-lite`; summaries
+`OPENROUTER_TITLE_MODEL` defaults to `openai/gpt-4o-mini`; summaries
 continue through the existing Summarizer evidence and citation path.
 
 Successful replacement transcription invalidates old chat in its completion

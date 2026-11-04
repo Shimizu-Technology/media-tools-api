@@ -143,10 +143,10 @@ func Load() (*Config, error) {
 
 		// OpenRouter AI
 		OpenRouterAPIKey: getEnv("OPENROUTER_API_KEY", ""),
-		OpenRouterModel:  getEnv("OPENROUTER_MODEL", "anthropic/claude-4.5-sonnet-20250929"),
+		OpenRouterModel:  getEnv("OPENROUTER_MODEL", "openai/gpt-4.1-mini"),
 		// Interactive Q&A favors a fast workhorse model; durable summaries keep
 		// the separately configured quality-oriented model above.
-		OpenRouterChatModel:    getEnv("OPENROUTER_CHAT_MODEL", "google/gemini-2.5-flash"),
+		OpenRouterChatModel:    getEnv("OPENROUTER_CHAT_MODEL", "openai/gpt-4.1-mini"),
 		OpenRouterProviderSort: getEnv("OPENROUTER_PROVIDER_SORT", "throughput"),
 
 		// OpenAI (Whisper/API for audio transcription and a direct summary

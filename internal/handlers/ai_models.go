@@ -11,12 +11,12 @@ import (
 // Current iOS/web/CLI clients default to the server model (empty override).
 // Keep the documented GPT-4o choices and the configured production defaults.
 // Arbitrary CLI --model overrides are intentionally restricted for capped users.
+// Every request requires zero data retention, so each model here needs a ZDR
+// endpoint on OpenRouter. Without one, OpenRouter answers 404 "No endpoints found".
 var publicAIModels = map[string]bool{
-	"openai/gpt-4o":                        true,
-	"openai/gpt-4o-mini":                   true,
-	"google/gemini-2.5-flash":              true,
-	"google/gemini-2.5-flash-lite":         true,
-	"anthropic/claude-4.5-sonnet-20250929": true,
+	"openai/gpt-4o":       true,
+	"openai/gpt-4o-mini":  true,
+	"openai/gpt-4.1-mini": true,
 }
 
 func (h *Handler) allowAIModel(c *gin.Context, model string) bool {
