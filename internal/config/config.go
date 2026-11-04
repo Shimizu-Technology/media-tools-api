@@ -228,6 +228,13 @@ func Load() (*Config, error) {
 	if cfg.PublicSignupEnabled && !cfg.FirstPartyPasswordAuthEnabled {
 		return nil, fmt.Errorf("PUBLIC_SIGNUP_ENABLED requires FIRST_PARTY_PASSWORD_AUTH_ENABLED")
 	}
+	for _, key := range []string{"DEFAULT_MONTHLY_TRANSCRIPTION_MINUTES", "DEFAULT_MONTHLY_AI_REQUESTS"} {
+		if raw := os.Getenv(key); raw != "" {
+			if _, err := strconv.Atoi(raw); err != nil {
+				return nil, fmt.Errorf("%s must be an integer", key)
+			}
+		}
+	}
 	if cfg.DefaultMonthlyTranscriptionMinutes < 1 || cfg.DefaultMonthlyAIRequests < 1 {
 		return nil, fmt.Errorf("monthly usage caps must be positive")
 	}

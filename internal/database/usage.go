@@ -48,29 +48,29 @@ func (db *DB) AccountUsage(ctx context.Context, userID string) (*Usage, error) {
 	err := db.GetContext(ctx, &usage, `SELECT date_trunc('month',NOW() AT TIME ZONE 'UTC')::date AS month,p.transcription_limit_seconds,p.ai_request_limit,p.exempt,COALESCE(u.transcription_seconds,0) AS transcription_seconds,COALESCE(u.ai_requests,0) AS ai_requests FROM account_usage_policies p LEFT JOIN account_monthly_usage u ON u.user_id=p.user_id AND u.month=date_trunc('month',NOW() AT TIME ZONE 'UTC')::date WHERE p.user_id=$1`, userID)
 	return &usage, err
 }
-func (db *DB) ReserveAIRequest(ctx context.Context, userID string) error {
+func (db *DB) ReserveAIRequest(ctx context.Context, userID string) (time.Time, error) {
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
 	defer tx.Rollback()
 	var exempt bool
 	var limit int64
 	if err = tx.QueryRowContext(ctx, `SELECT exempt,ai_request_limit FROM account_usage_policies WHERE user_id=$1 FOR UPDATE`, userID).Scan(&exempt, &limit); err != nil {
-		return err
+		return time.Time{}, err
 	}
 	if exempt {
-		return nil
+		return time.Time{}, nil
 	}
-	var count int64
-	err = tx.QueryRowContext(ctx, `INSERT INTO account_monthly_usage(user_id,month,ai_requests) VALUES($1,date_trunc('month',NOW() AT TIME ZONE 'UTC')::date,1) ON CONFLICT(user_id,month) DO UPDATE SET ai_requests=account_monthly_usage.ai_requests+1 WHERE account_monthly_usage.ai_requests<$2 RETURNING ai_requests`, userID, limit).Scan(&count)
+	var month time.Time
+	err = tx.QueryRowContext(ctx, `INSERT INTO account_monthly_usage(user_id,month,ai_requests) VALUES($1,date_trunc('month',NOW() AT TIME ZONE 'UTC')::date,1) ON CONFLICT(user_id,month) DO UPDATE SET ai_requests=account_monthly_usage.ai_requests+1 WHERE account_monthly_usage.ai_requests<$2 RETURNING month`, userID, limit).Scan(&month)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrMonthlyUsageCap
+		return time.Time{}, ErrMonthlyUsageCap
 	}
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
-	return tx.Commit()
+	return month, tx.Commit()
 }
 func (db *DB) RefundAIRequest(ctx context.Context, userID string, month time.Time) error {
 	_, err := db.ExecContext(ctx, `UPDATE account_monthly_usage SET ai_requests=GREATEST(ai_requests-1,0) WHERE user_id=$1 AND month=$2`, userID, month)
@@ -80,7 +80,7 @@ func (db *DB) RefundAIRequest(ctx context.Context, userID string, month time.Tim
 // ReserveTranscriptionDuration must precede paid transcription. Unknown or
 // invalid duration fails closed for capped accounts; owner/legacy work keeps
 // its existing recovery path. Each resource is charged once per UTC month.
-func (db *DB) ReserveTranscriptionDuration(ctx context.Context, userID *string, apiKeyID *string, resourceID string, seconds float64) error {
+func (db *DB) ReserveTranscriptionDuration(ctx context.Context, userID *string, apiKeyID *string, resourceID string, seconds float64, defaults ...UsageDefaults) error {
 	var account string
 	if userID != nil {
 		account = *userID
@@ -91,6 +91,16 @@ func (db *DB) ReserveTranscriptionDuration(ctx context.Context, userID *string, 
 	}
 	if account == "" {
 		return nil
+	}
+	if len(defaults) > 0 && defaults[0] != (UsageDefaults{}) {
+		policy := defaults[0]
+		if err := db.EnsureUsagePolicy(ctx, account, policy.MonthlyMinutes, policy.MonthlyAIRequests, policy.OwnerUserID, policy.OwnerKeyID); err != nil {
+			return err
+		}
+	} else {
+		if _, err := db.ExecContext(ctx, `INSERT INTO account_usage_policies(user_id,transcription_limit_seconds,ai_request_limit) VALUES($1,18000,1000) ON CONFLICT DO NOTHING`, account); err != nil {
+			return err
+		}
 	}
 	var capped bool
 	if err := db.GetContext(ctx, &capped, `SELECT EXISTS(SELECT 1 FROM account_usage_policies WHERE user_id=$1 AND NOT exempt)`, account); err != nil {
@@ -150,7 +160,7 @@ func (db *DB) ReserveAutomaticAIRequest(ctx context.Context, userID, apiKeyID *s
 	if account == "" {
 		return nil
 	}
-	if len(defaults) > 0 {
+	if len(defaults) > 0 && defaults[0] != (UsageDefaults{}) {
 		policy := defaults[0]
 		if err := db.EnsureUsagePolicy(ctx, account, policy.MonthlyMinutes, policy.MonthlyAIRequests, policy.OwnerUserID, policy.OwnerKeyID); err != nil {
 			return err

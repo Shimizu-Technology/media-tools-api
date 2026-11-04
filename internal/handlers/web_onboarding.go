@@ -298,7 +298,7 @@ func (h *WebSessionHandler) CompleteWebOnboarding(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "onboarding_unavailable", Message: "Could not finish account setup; retry", Code: http.StatusServiceUnavailable})
 		return
 	}
-	completed, err := h.db.CompleteOnboarding(c.Request.Context(), user.ID)
+	completed, err := h.db.CompleteOnboarding(c.Request.Context(), user.ID, h.auth != nil && h.auth.PasswordAuthEnabled)
 	if err != nil {
 		log.Printf("verify web onboarding completion: %v", err)
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "onboarding_unavailable", Message: "Could not finish account setup; retry", Code: http.StatusServiceUnavailable})

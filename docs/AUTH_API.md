@@ -294,7 +294,7 @@ Bearer authorization, `from`, a `to` array, plain `subject`/`text`, and stable
 `Idempotency-Key: auth-email/<outbox UUID>`. Network errors, 429 and 5xx retry via
 the existing durable job system (eight attempts, at least 30 seconds, respecting
 `Retry-After`). Provider bodies and transport errors never enter logs. Expired,
-consumed and superseded challenges are not deliverable. Delivered encrypted
+consumed and superseded challenges are excluded by the pre-send eligibility check. A provider send already started may finish after resend or proof completion; the old code remains invalid. No database lock is held across the provider call. Delivered encrypted
 payloads are cleared. AES-GCM envelopes and code HMACs derive distinct keys from
 `JWT_SECRET`; rotating that secret invalidates pending codes/mail.
 

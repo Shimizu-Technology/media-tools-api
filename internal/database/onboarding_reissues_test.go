@@ -336,7 +336,7 @@ func TestCompleteOnboardingRequiresCommittedFactorsAndIsIdempotent(t *testing.T)
 	if _, err := db.ExecContext(ctx, `UPDATE users SET onboarding_required = TRUE WHERE id = $1`, userID); err != nil {
 		t.Fatal(err)
 	}
-	if completed, err := db.CompleteOnboarding(ctx, userID); err != nil || completed {
+	if completed, err := db.CompleteOnboarding(ctx, userID, false); err != nil || completed {
 		t.Fatalf("completed without factors = %v, %v", completed, err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -344,7 +344,7 @@ func TestCompleteOnboardingRequiresCommittedFactorsAndIsIdempotent(t *testing.T)
 		VALUES ($1, $2, '{}')`, []byte("completion-passkey-"+uuid.NewString()), userID); err != nil {
 		t.Fatal(err)
 	}
-	if completed, err := db.CompleteOnboarding(ctx, userID); err != nil || completed {
+	if completed, err := db.CompleteOnboarding(ctx, userID, false); err != nil || completed {
 		t.Fatalf("completed without active recovery codes = %v, %v", completed, err)
 	}
 	rotation, err := db.BeginRecoveryCodeRotation(ctx, userID)
@@ -355,12 +355,30 @@ func TestCompleteOnboardingRequiresCommittedFactorsAndIsIdempotent(t *testing.T)
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		if completed, err := db.CompleteOnboarding(ctx, userID); err != nil || !completed {
+		if completed, err := db.CompleteOnboarding(ctx, userID, false); err != nil || !completed {
 			t.Fatalf("completion %d = %v, %v", i, completed, err)
 		}
 	}
 	var required bool
 	if err := db.GetContext(ctx, &required, `SELECT onboarding_required FROM users WHERE id = $1`, userID); err != nil || required {
 		t.Fatalf("durable requirement remained = %v, %v", required, err)
+	}
+}
+
+func TestPasswordOnboardingRequiresEnabledFlag(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	user := insertOnboardingRescueTestUser(t, db)
+	if _, err := db.ExecContext(ctx, `INSERT INTO auth_password_credentials(user_id,email_normalized,password_hash) SELECT id,lower(email),'$2a$04$abcdefghijklmnopqrstuu8OcnTnO4oZ0JHf9w5k3XjY2v2lZ5o1a' FROM users WHERE id=$1`, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO auth_verified_emails(user_id,email) SELECT id,lower(normalize(btrim(email),NFC)) FROM users WHERE id=$1`, user); err != nil {
+		t.Fatal(err)
+	}
+	if completed, err := db.CompleteOnboarding(ctx, user, false); err != nil || completed {
+		t.Fatalf("disabled password completed onboarding: %v %v", completed, err)
+	}
+	if completed, err := db.CompleteOnboarding(ctx, user, true); err != nil || !completed {
+		t.Fatalf("enabled password did not complete onboarding: %v %v", completed, err)
 	}
 }

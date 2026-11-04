@@ -112,7 +112,7 @@ func TestAutomaticEnrichmentChecksCapBeforeProvider(t *testing.T) {
 	if err = db.EnsureUsagePolicy(context.Background(), userID, 300, 1, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err = db.ReserveAIRequest(context.Background(), userID); err != nil {
+	if _, err := db.ReserveAIRequest(context.Background(), userID); err != nil {
 		t.Fatal(err)
 	}
 	if err = db.QueryRow(`INSERT INTO audio_transcriptions(filename,original_name,status,transcript_text,summary_status,user_id) VALUES('quota.m4a','New Recording','completed','Synthetic quota fixture.','pending',$1) RETURNING id`, userID).Scan(&audioID); err != nil {

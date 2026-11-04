@@ -18,6 +18,11 @@ func TestSecurityHeaders(t *testing.T) {
 	req.Header.Set("X-Forwarded-Proto", "https")
 	res := httptest.NewRecorder()
 	r.ServeHTTP(res, req)
+	for _, source := range []string{"https://challenges.cloudflare.com", "https://api.fontshare.com", "https://fonts.googleapis.com", "https://fonts.gstatic.com", "worker-src 'self' blob:"} {
+		if !strings.Contains(res.Header().Get("Content-Security-Policy"), source) {
+			t.Errorf("missing CSP source %s", source)
+		}
+	}
 	for _, name := range []string{"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Permissions-Policy", "Strict-Transport-Security"} {
 		if res.Header().Get(name) == "" {
 			t.Errorf("missing %s", name)

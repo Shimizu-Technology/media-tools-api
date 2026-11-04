@@ -332,3 +332,15 @@ func TestEmailSignupAndQuotaDefaults(t *testing.T) {
 		t.Fatal("signup enabled without password auth")
 	}
 }
+
+func TestMalformedMonthlyCaps(t *testing.T) {
+	for _, key := range []string{"DEFAULT_MONTHLY_TRANSCRIPTION_MINUTES", "DEFAULT_MONTHLY_AI_REQUESTS"} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, "100O")
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), key) {
+				t.Fatalf("expected malformed %s error, got %v", key, err)
+			}
+		})
+	}
+}

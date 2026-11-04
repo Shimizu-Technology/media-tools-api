@@ -248,7 +248,7 @@ func (db *DB) OnboardingSecurityStatus(ctx context.Context, userID string) (pass
 // CompleteOnboarding serializes with recovery rotation and rescue redemption
 // on the user row. Verified email plus password completes setup; the shipped
 // passkey/recovery path remains usable during the client transition.
-func (db *DB) CompleteOnboarding(ctx context.Context, userID string) (bool, error) {
+func (db *DB) CompleteOnboarding(ctx context.Context, userID string, passwordAuthEnabled bool) (bool, error) {
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("begin onboarding completion: %w", err)
@@ -274,7 +274,7 @@ func (db *DB) CompleteOnboarding(ctx context.Context, userID string) (bool, erro
  EXISTS(SELECT 1 FROM users u JOIN auth_password_credentials p ON p.user_id=u.id WHERE u.id=$1 AND EXISTS(SELECT 1 FROM auth_verified_emails v WHERE v.user_id=u.id AND v.email=lower(normalize(btrim(u.email),NFC)))) AS email_password`, lockedID); err != nil {
 		return false, fmt.Errorf("verify onboarding security factors: %w", err)
 	}
-	if !status.EmailPassword && (status.Passkeys == 0 || status.RecoveryCodes == 0) {
+	if !(passwordAuthEnabled && status.EmailPassword) && (status.Passkeys == 0 || status.RecoveryCodes == 0) {
 		return false, nil
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET onboarding_required = FALSE WHERE id = $1`, lockedID); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
+	"log"
 	"net/http"
 	"net/mail"
 	"strconv"
@@ -264,6 +265,8 @@ func (h *Handler) AuthAudit() gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		event := c.Request.Method + " " + c.FullPath() + " " + strconv.Itoa(c.Writer.Status())
-		_ = h.DB.RecordAuthEvent(ctx, userID, event)
+		if err := h.DB.RecordAuthEvent(ctx, userID, event); err != nil {
+			log.Printf("auth audit write failed: %v", err)
+		}
 	}
 }

@@ -51,12 +51,21 @@ BEGIN
  account:=NEW.user_id;
  IF account IS NULL AND NEW.api_key_id IS NOT NULL THEN SELECT user_id INTO account FROM api_keys WHERE id=NEW.api_key_id; END IF;
  IF account IS NULL THEN RETURN NEW; END IF;
- IF TG_OP='INSERT' AND NEW.status IN ('pending','processing') THEN
+ IF (TG_OP='INSERT' AND NEW.status IN ('pending','processing')) OR (TG_OP='UPDATE' AND NEW.status='pending' AND OLD.status='failed') THEN
   PERFORM reserve_transcription_usage(account,NEW.id,60,TRUE);
  ELSIF TG_OP='UPDATE' AND NEW.status='failed' AND OLD.status<>NEW.status THEN
-  SELECT seconds INTO reserved FROM account_transcription_usage
-  WHERE user_id=account AND resource_id=NEW.id AND month=date_trunc('month',NOW() AT TIME ZONE 'UTC')::date AND provisional;
-  IF FOUND THEN PERFORM reserve_transcription_usage(account,NEW.id,0,TRUE); END IF;
+  PERFORM 1 FROM account_usage_policies WHERE user_id=account FOR UPDATE;
+  WITH released AS (
+   UPDATE account_transcription_usage SET seconds=0
+   WHERE user_id=account AND resource_id=NEW.id AND provisional
+   RETURNING month
+  ), refunds AS (
+   SELECT u.month,sum(u.seconds) AS seconds FROM account_transcription_usage u
+   WHERE u.user_id=account AND u.resource_id=NEW.id AND u.provisional GROUP BY u.month
+  )
+  UPDATE account_monthly_usage m SET transcription_seconds=GREATEST(0,m.transcription_seconds-r.seconds)
+  FROM refunds r WHERE m.user_id=account AND m.month=r.month AND EXISTS(SELECT 1 FROM released);
+
  END IF;
  RETURN NEW;
 END;

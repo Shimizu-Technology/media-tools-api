@@ -433,8 +433,6 @@ paths:
                 name:
                   type: string
       responses:
-        '200':
-          description: Proof accepted; sign in again after signup, reset or email change.
         '202':
           description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
         '400':
@@ -476,8 +474,6 @@ paths:
       responses:
         '200':
           description: Proof accepted; sign in again after signup, reset or email change.
-        '202':
-          description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
         '400':
           description: invalid_request, weak_password, password_compromised, or invalid_code (ErrorResponse shape).
         '401':
@@ -507,8 +503,6 @@ paths:
                   type: string
                   format: email
       responses:
-        '200':
-          description: Proof accepted; sign in again after signup, reset or email change.
         '202':
           description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
         '400':
@@ -550,8 +544,6 @@ paths:
       responses:
         '200':
           description: Proof accepted; all account sessions and API keys (classic, scoped and capture) revoked atomically; notice queued. Sign in and create replacement keys.
-        '202':
-          description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
         '400':
           description: invalid_request, weak_password, password_compromised, or invalid_code (ErrorResponse shape).
         '401':
@@ -585,8 +577,6 @@ paths:
                   format: password
                   maxLength: 128
       responses:
-        '200':
-          description: Proof accepted; sign in again after signup, reset or email change.
         '202':
           description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
         '400':
@@ -623,8 +613,6 @@ paths:
       responses:
         '200':
           description: Proof accepted; all account sessions and API keys (classic, scoped and capture) revoked atomically; notice queued. Sign in and create replacement keys.
-        '202':
-          description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
         '400':
           description: invalid_request, weak_password, password_compromised, or invalid_code (ErrorResponse shape).
         '401':
@@ -654,8 +642,6 @@ paths:
                   type: string
                   format: email
       responses:
-        '200':
-          description: Proof accepted; sign in again after signup, reset or email change.
         '202':
           description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
         '400':
@@ -692,8 +678,6 @@ paths:
       responses:
         '200':
           description: Proof accepted; sign in again after signup, reset or email change.
-        '202':
-          description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
         '400':
           description: invalid_request, weak_password, password_compromised, or invalid_code (ErrorResponse shape).
         '401':

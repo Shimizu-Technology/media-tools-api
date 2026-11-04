@@ -23,7 +23,7 @@ func TestUsageAtomicConcurrentCapsMonthAndOwner(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := db.ReserveAIRequest(ctx, userID)
+			_, err := db.ReserveAIRequest(ctx, userID)
 			if err == nil {
 				passed.Add(1)
 			} else if !IsUsageCap(err) {
@@ -63,7 +63,7 @@ func TestUsageAtomicConcurrentCapsMonthAndOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 5; i++ {
-		if err := db.ReserveAIRequest(ctx, userID); err != nil {
+		if _, err := db.ReserveAIRequest(ctx, userID); err != nil {
 			t.Fatal("owner capped")
 		}
 	}
@@ -125,7 +125,7 @@ func TestAutomaticAIReservationsShareCapAndRecoverWithoutDoubleCharge(t *testing
 	if err := db.ReserveAutomaticAIRequest(ctx, &userID, nil, "durable-job:summary"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.ReserveAIRequest(ctx, userID); !IsUsageCap(err) {
+	if _, err := db.ReserveAIRequest(ctx, userID); !IsUsageCap(err) {
 		t.Fatal("automatic requests did not share the interactive cap")
 	}
 	if err := db.ReserveAutomaticAIRequest(ctx, &userID, nil, "another-job:summary"); !IsUsageCap(err) {
@@ -134,5 +134,47 @@ func TestAutomaticAIReservationsShareCapAndRecoverWithoutDoubleCharge(t *testing
 	usage, err := db.AccountUsage(ctx, userID)
 	if err != nil || usage.AIRequests != 2 {
 		t.Fatal("retry double charged automatic work")
+	}
+}
+
+func TestRecoveredPolicyAndPreviousMonthRefund(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	user := createPasswordTestUser(t, db)
+	resource := uuid.NewString()
+	if err := db.ReserveTranscriptionDuration(ctx, &user, nil, resource, 0); !IsUsageCap(err) {
+		t.Fatalf("missing policy must fail closed: %v", err)
+	}
+	if err := db.EnsureUsagePolicy(ctx, user, 300, 1000, user, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ReserveTranscriptionDuration(ctx, &user, nil, resource, 0); err != nil {
+		t.Fatalf("owner exemption changed: %v", err)
+	}
+	if err := db.EnsureUsagePolicy(ctx, user, 300, 1000, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	item := &models.AudioTranscription{Filename: "refund.m4a", OriginalName: "refund", Status: "pending", UserID: &user}
+	if err := db.CreateAudioTranscription(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE account_transcription_usage SET month=(date_trunc('month',NOW() AT TIME ZONE 'UTC')-interval '1 month')::date WHERE resource_id=$1;`, item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE account_monthly_usage SET month=(date_trunc('month',NOW() AT TIME ZONE 'UTC')-interval '1 month')::date WHERE user_id=$1`, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE audio_transcriptions SET status='failed' WHERE id=$1`, item.ID); err != nil {
+		t.Fatal(err)
+	}
+	var used int64
+	if err := db.GetContext(ctx, &used, `SELECT transcription_seconds FROM account_monthly_usage WHERE user_id=$1`, user); err != nil || used != 0 {
+		t.Fatalf("old month refund: %d %v", used, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE account_usage_policies SET transcription_limit_seconds=1 WHERE user_id=$1`, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE audio_transcriptions SET status='pending' WHERE id=$1`, item.ID); !IsUsageCap(err) {
+		t.Fatalf("retry admission must enforce cap: %v", err)
 	}
 }

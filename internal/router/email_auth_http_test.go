@@ -299,10 +299,10 @@ func TestAuthHTTPUsageAndOwnerExemption(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
-	if err := f.db.ReserveAIRequest(context.Background(), pair.UserID); err != nil {
+	if _, err := f.db.ReserveAIRequest(context.Background(), pair.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.db.ReserveAIRequest(context.Background(), pair.UserID); err != nil {
+	if _, err := f.db.ReserveAIRequest(context.Background(), pair.UserID); err != nil {
 		t.Fatal(err)
 	}
 	raw = f.request("GET", "/api/v1/auth/usage", nil, pair.AccessToken, 200)
@@ -311,7 +311,8 @@ func TestAuthHTTPUsageAndOwnerExemption(t *testing.T) {
 		t.Fatal("HTTP work did not persist monthly usage")
 	}
 
-	f.request("POST", "/api/v1/transcripts", gin.H{"url": "https://youtube.com/watch?v=dQw4w9WgXcQ"}, pair.AccessToken, 402)
+	f.request("POST", "/api/v1/transcripts", gin.H{"url": "https://youtube.com/watch?v=dQw4w9WgXcQ"}, pair.AccessToken, 200)
+	f.request("POST", "/api/v1/transcripts", gin.H{"url": "https://youtube.com/watch?v=abcdefghijk"}, pair.AccessToken, 402)
 	f.request("POST", "/api/v1/summaries", gin.H{}, pair.AccessToken, 402)
 	f.request("POST", "/api/v1/audio/transcriptions/"+uuid.NewString()+"/chat", gin.H{}, pair.AccessToken, 402)
 	// Agent keys share the account balance, and cannot use auth routes to
@@ -327,7 +328,7 @@ func TestAuthHTTPUsageAndOwnerExemption(t *testing.T) {
 		path string
 		want int
 	}{{"/api/v1/transcripts", 402}, {"/api/v1/summaries", 402}, {"/api/v1/auth/password", 401}} {
-		req, err := http.NewRequest("POST", f.server.URL+tc.path, strings.NewReader(`{}`))
+		req, err := http.NewRequest("POST", f.server.URL+tc.path, strings.NewReader(`{"url":"https://youtube.com/watch?v=abcdefghijk"}`))
 		if err != nil {
 			t.Fatal(err)
 		}

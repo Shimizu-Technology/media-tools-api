@@ -239,6 +239,7 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	}
 
 	if err := h.DB.CreateAudioTranscriptionWithJob(c.Request.Context(), at, tempFilePath); err != nil {
+		os.Remove(tempFilePath)
 		if quotaCreationError(c, err) {
 			return
 		}

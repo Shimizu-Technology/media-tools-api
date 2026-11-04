@@ -193,3 +193,54 @@ test database and clean v1-auth-fixes worktree remain for the lead/reviewer.
 Implementation is pushed to codex/v1-auth-backend. This pass does not merge,
 request a duplicate review, or wait on CodeRabbit. The independent final-head
 review and remote CI are separate from the local evidence above.
+
+### PR 102 second review fixes (2026-11-04)
+
+Context: branch based on origin/main ac8ac9d; auth backend for existing and
+public-signup accounts, with Clerk still active. Acceptance is agent-executed
+local PostgreSQL/API testing on mta_test_auth with synthetic providers. No
+production configuration or data was read or changed.
+
+- Recovered workers initialize missing policies before paid work. Configured
+  owner exemptions remain supported; unconfigured recovery preserves existing
+  policy overrides and exemptions. Unknown duration fails closed for capped users.
+- AI refunds use the month returned by the reservation transaction. Failed
+  provisional resources refund every recorded month. Failed-to-pending retries
+  reserve admission in the same database transaction.
+- Completed transcript reuse and upload completion replays reach the handlers;
+  database admission still caps new work. Batch admission remains atomic.
+- Password onboarding requires password auth enabled. Malformed quota settings
+  fail startup. Rejected multipart admission removes its local file. Audit and
+  refund failures are logged; refunds are not retried.
+- Summary budget is reserved before the optional title. A title hitting the cap
+  is skipped. Worker metadata duration reservations are retained instead of
+  being replaced by the truncated integer display duration; extractors without
+  the guard retain result-duration accounting.
+- Go's CSP includes Clerk, Turnstile, workers, Fontshare, Google fonts, and
+  embedded YouTube. Netlify serves production HTML, so Go headers do not apply
+  to those pages. frontend/public/_headers adds the policy in report-only mode.
+  Browser/provider compatibility and deployed response headers remain unverified;
+  workstream E should verify before enforcing the Netlify policy.
+- OpenAPI initiation/completion status codes match the handlers. Email delivery
+  documents that a provider send already started may finish after invalidation.
+- The background_jobs CHECK is added NOT VALID to avoid the startup scan.
+  Existing rows are not validated by this migration; new writes are checked.
+- Declined concurrent expiry indexes as instructed: tables are tiny and the
+  migration runner runs inside transactions. No other requested finding declined.
+
+Focused regression coverage includes missing-policy failure, preserved owner
+exemption, previous-month provisional refunds, atomic retry rejection, password
+onboarding flag, malformed settings, CSP sources, and HTTP completed reuse at
+cap versus new-work rejection. Web UI and native device journeys were not run:
+this pass changes backend behavior and report-only hosting headers, with no UI
+interaction changes. No deployment or merge is authorized in this pass.
+
+Verification: gofmt and diff checks, go vet ./..., the full serialized Go race
+suite with TEST_DATABASE_URL pointing only to mta_test_auth, frontend lint,
+38 frontend tests, frontend production build, and scripts/scan-secrets.sh passed.
+Affected database/worker/handler race tests were repeated after final fixes.
+The updated migration 058 functions were refreshed in the existing local test
+database before testing; the NOT VALID constraint was checked in a rolled-back
+local transaction. No server, browser tab, simulator, or container is left running.
+CodeRabbit's earlier review is not approval of these changes; final-head CI and
+incremental review remain pending after push.

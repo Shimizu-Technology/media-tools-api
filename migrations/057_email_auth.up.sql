@@ -31,7 +31,7 @@ CREATE TABLE auth_email_outbox (
 );
 ALTER TABLE background_jobs DROP CONSTRAINT background_jobs_type_check;
 ALTER TABLE background_jobs ADD CONSTRAINT background_jobs_type_check CHECK
- (job_type IN ('transcript_extraction','summary_generation','audio_transcription','audio_summary','audio_transcript_formatting','account_deletion','auth_email'));
+ (job_type IN ('transcript_extraction','summary_generation','audio_transcription','audio_summary','audio_transcript_formatting','account_deletion','auth_email')) NOT VALID;
 
 -- Fixed-size keyed email identifiers, never raw addresses or passwords.
 CREATE TABLE auth_failure_buckets (

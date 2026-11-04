@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -79,7 +80,8 @@ func (h *Handler) UsageGuard() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		if transcription && usage.TranscriptionSeconds+60 > usage.TranscriptionLimitSeconds {
+		atomicAdmission := route == "/api/v1/transcripts" || route == "/api/v1/transcripts/batch" || route == "/api/v1/audio/uploads/complete"
+		if transcription && !atomicAdmission && usage.TranscriptionSeconds+60 > usage.TranscriptionLimitSeconds {
 			authError(c, 402, "monthly_transcription_cap", "Monthly transcription limit reached; try again next month")
 			c.Abort()
 			return
@@ -93,7 +95,9 @@ func (h *Handler) UsageGuard() gin.HandlerFunc {
 				return
 			}
 		} else if ai {
-			if err = h.DB.ReserveAIRequest(c.Request.Context(), userID); err != nil {
+			reservedMonth, reserveErr := h.DB.ReserveAIRequest(c.Request.Context(), userID)
+			err = reserveErr
+			if err != nil {
 				if database.IsUsageCap(err) {
 					authError(c, 402, "monthly_ai_cap", "Monthly summary and chat limit reached; try again next month")
 				} else {
@@ -108,7 +112,9 @@ func (h *Handler) UsageGuard() gin.HandlerFunc {
 				if c.Writer.Status() >= 400 && !providerCalled.Load() {
 					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
-					_ = h.DB.RefundAIRequest(ctx, userID, usage.Month)
+					if err := h.DB.RefundAIRequest(ctx, userID, reservedMonth); err != nil {
+						log.Printf("AI usage refund failed; manual reconciliation may be needed: %v", err)
+					}
 				}
 			}()
 		}
