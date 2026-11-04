@@ -3,6 +3,7 @@
 
 import json
 import plistlib
+import tomllib
 from pathlib import Path
 
 
@@ -18,9 +19,20 @@ def check_public_files(public: Path) -> None:
         "AASA must contain the verified app identifier under webcredentials"
     )
 
-    redirects = (public / "_redirects").read_text().splitlines()
-    assert "/*    /index.html   200" in redirects, (
+    # netlify.toml holds the SPA fallback, because _redirects runs first and a
+    # catch-all there would swallow the signed API proxy.
+    netlify = tomllib.loads((public.parents[1] / "netlify.toml").read_text())
+    fallback = [rule for rule in netlify.get("redirects", []) if rule.get("from") == "/*"]
+    assert len(fallback) == 1 and fallback[0].get("to") == "/index.html" and fallback[0].get("status") == 200, (
+        "netlify.toml must hold the SPA fallback"
+    )
+    assert not fallback[0].get("force", False), (
         "SPA fallback must remain unforced so Netlify serves the AASA file"
+    )
+
+    redirects = (public / "_redirects").read_text().splitlines()
+    assert not any(line.split()[:1] == ["/*"] for line in redirects), (
+        "A catch-all in _redirects would run before the signed API proxy and the AASA file"
     )
     assert not any(
         line.startswith("/.well-known/apple-app-site-association ") for line in redirects
