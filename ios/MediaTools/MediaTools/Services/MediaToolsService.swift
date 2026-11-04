@@ -34,6 +34,14 @@ final class MediaToolsService {
         try await api.post("/transcripts", body: TranscribeRequest(url: url))
     }
 
+    func importSharedLink(_ link: String, expectedOwnerID: String?) async throws {
+        let _: Transcript = try await api.post(
+            "/transcripts",
+            body: TranscribeRequest(url: link),
+            expectedOwnerID: expectedOwnerID
+        )
+    }
+
     func searchTranscripts(_ query: String) async throws -> [Transcript] {
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
         let response: TranscriptListResponse = try await api.get("/transcripts?search=\(encoded)")
@@ -238,6 +246,21 @@ final class MediaToolsService {
         try await api.get("/library/items/\(itemType)/\(itemId)/segments")
     }
 
+    func importSharedPDF(
+        fileURL: URL,
+        filename: String,
+        expectedOwnerID: String?
+    ) async throws {
+        let _: PDFExtraction = try await api.uploadFile(
+            "/pdf/extract",
+            fileURL: fileURL,
+            filename: filename,
+            mimeType: "application/pdf",
+            fields: [:],
+            expectedOwnerID: expectedOwnerID
+        )
+    }
+
     func deletePDF(_ id: String) async throws {
         try await api.delete("/pdf/extractions/\(id)")
     }
@@ -250,7 +273,8 @@ final class MediaToolsService {
         itemType: String? = nil,
         status: String? = nil,
         search: String? = nil,
-        sortDirection: String = "desc"
+        sortDirection: String = "desc",
+        archivedOnly: Bool = false
     ) async throws -> LibraryListResponse {
         try await api.get(Self.libraryItemsPath(
             page: page,
@@ -258,7 +282,8 @@ final class MediaToolsService {
             itemType: itemType,
             status: status,
             search: search,
-            sortDirection: sortDirection
+            sortDirection: sortDirection,
+            archivedOnly: archivedOnly
         ))
     }
 
@@ -268,7 +293,8 @@ final class MediaToolsService {
         itemType: String?,
         status: String?,
         search: String?,
-        sortDirection: String
+        sortDirection: String,
+        archivedOnly: Bool = false
     ) -> String {
         var components = URLComponents()
         components.path = "/library/items"
@@ -285,6 +311,9 @@ final class MediaToolsService {
         }
         if let search = search?.trimmingCharacters(in: .whitespacesAndNewlines), !search.isEmpty {
             queryItems.append(URLQueryItem(name: "search", value: search))
+        }
+        if archivedOnly {
+            queryItems.append(URLQueryItem(name: "archive", value: "only"))
         }
         components.queryItems = queryItems
         return components.string ?? "/library/items"
@@ -429,12 +458,22 @@ final class MediaToolsService {
     }
 
     func summarizeAudio(audioId: String, contentType: String? = nil) async throws -> Summary {
-        let accepted: AudioTranscription = try await api.post(
-            "/audio/transcriptions/\(audioId)/summarize",
-            body: SummarizeAudioRequest(contentType: contentType, model: nil, length: "medium")
-        )
-        if accepted.summaryStatus == "completed" {
-            return audioSummary(from: accepted)
+        do {
+            let accepted: AudioTranscription = try await api.post(
+                "/audio/transcriptions/\(audioId)/summarize",
+                body: SummarizeAudioRequest(contentType: contentType, model: nil, length: "medium")
+            )
+            if accepted.summaryStatus == "completed" {
+                return audioSummary(from: accepted)
+            }
+        } catch let APIError.httpError(statusCode, code, message)
+            where statusCode == 409 && code == "summary_not_queued" {
+            // The server may already be summarizing this recording on its own.
+            // Follow that run, unless it turns out nothing is actually running.
+            let current = try await getAudioItem(audioId)
+            guard ["pending", "processing"].contains(current.summaryStatus ?? "") else {
+                throw APIError.httpError(statusCode: statusCode, code: code, message: message)
+            }
         }
 
         for _ in 0..<60 {
@@ -453,7 +492,7 @@ final class MediaToolsService {
         throw APIError.httpError(statusCode: 408, message: "Summary generation timed out")
     }
 
-    private func audioSummary(from audio: AudioTranscription) -> Summary {
+    func audioSummary(from audio: AudioTranscription) -> Summary {
         Summary(
             id: audio.id,
             transcriptId: nil,

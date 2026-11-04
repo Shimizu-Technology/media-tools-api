@@ -47,6 +47,10 @@ final class RecordingCoordinator {
     private let activityManager: RecordingActivityManaging
     private let availableCapacity: (URL) -> Int64?
     private let localAccountDefaults: UserDefaults
+    /// Called whenever a finished recording appears, so automatic transcription
+    /// has one entry point for every capture path: Action Button, Live Activity,
+    /// the in-app button, and imported shares.
+    var onSavedRecordingsChanged: (() -> Void)?
 
     static let minimumStartCapacityBytes: Int64 = 100 * 1_024 * 1_024
     static let criticalRecordingCapacityBytes: Int64 = 50 * 1_024 * 1_024
@@ -63,7 +67,8 @@ final class RecordingCoordinator {
         simulatesCapture: Bool? = nil,
         activityManager: RecordingActivityManaging? = nil,
         localAccountDefaults: UserDefaults = .standard,
-        availableCapacity: @escaping (URL) -> Int64? = RecordingStorageCapacity.available
+        availableCapacity: @escaping (URL) -> Int64? = RecordingStorageCapacity.available,
+        shareInbox: ShareInboxStore? = nil
     ) {
         #if DEBUG
         self.simulatesCapture = simulatesCapture
@@ -74,6 +79,7 @@ final class RecordingCoordinator {
         self.activityManager = activityManager ?? RecordingActivityManager.shared
         self.availableCapacity = availableCapacity
         self.localAccountDefaults = localAccountDefaults
+        self.shareInbox = shareInbox
 
         if let store {
             self.store = store
@@ -111,6 +117,16 @@ final class RecordingCoordinator {
         pendingRecordings.filter {
             $0.state != .recording && $0.ownerID == activeOwnerID
         }
+    }
+
+    /// Changes only when an upload changes state, not on every progress tick, so
+    /// observers can refresh a server list without turning it into polling.
+    var uploadStateSignature: String {
+        availableRecordings.map { "\($0.id.uuidString):\($0.state.rawValue)" }.joined(separator: "|")
+    }
+
+    private var autoTranscribeEnabledForNewRecordings: Bool {
+        AutoTranscribePreference(defaults: localAccountDefaults).isEnabled(ownerID: activeOwnerID)
     }
 
     /// Switches the visible device workspace. Unowned recordings are legacy or
@@ -183,8 +199,9 @@ final class RecordingCoordinator {
     }
 
     /// Move completed share-sheet handoffs into the same durable recording
-    /// queue used by Files and Quick Record. Never upload here: the main app
-    /// must first establish account ownership and AI processing consent.
+    /// queue used by Files and Quick Record. Never upload here: the upload
+    /// coordinator checks account ownership and AI processing consent. PDFs and
+    /// links have no recording, so they stay in the inbox until it sends them.
     func importSharedItems() {
         do {
             let inbox: ShareInboxStore
@@ -194,30 +211,67 @@ final class RecordingCoordinator {
                 inbox = try ShareInboxStore()
                 shareInbox = inbox
             }
-            var errors: [UUID: String] = [:]
-            for item in try inbox.pendingItems() {
+            var errors = pendingSharedErrors
+            for item in try inbox.pendingItems() where item.resolvedKind == .audio {
                 do {
                     _ = try importRecording(
                         from: inbox.fileURL(for: item),
                         contentType: "general",
                         shareID: item.id,
-                        originalName: item.originalName
+                        originalName: item.originalName,
+                        autoTranscribe: autoTranscribeEnabledForNewRecordings
                     )
                     try inbox.remove(item)
+                    errors[item.id] = nil
                 } catch {
                     errors[item.id] = error.localizedDescription
                 }
             }
             pendingSharedItems = try inbox.pendingItems()
             pendingSharedErrors = errors
+            onSavedRecordingsChanged?()
         } catch {
             errorMessage = "Shared files are unavailable. Restart Media Tools to try again."
         }
     }
 
     func sharedFileURL(for item: ShareInboxStore.Item) -> URL? {
-        guard pendingSharedItems.contains(where: { $0.id == item.id }) else { return nil }
+        guard item.resolvedKind != .link,
+              pendingSharedItems.contains(where: { $0.id == item.id })
+        else { return nil }
         return shareInbox?.fileURL(for: item)
+    }
+
+    /// Audio still in the inbox failed to import. A PDF or link only needs
+    /// attention after sending it failed; until then it is simply on its way.
+    var sharesNeedingAttention: [ShareInboxStore.Item] {
+        pendingSharedItems.filter {
+            $0.resolvedKind == .audio || pendingSharedErrors[$0.id] != nil
+        }
+    }
+
+    /// Only for a deliberate tap on a share that could not be processed.
+    func discardSharedItem(_ item: ShareInboxStore.Item) {
+        completeSharedDocument(item)
+    }
+
+    var pendingSharedDocuments: [ShareInboxStore.Item] {
+        pendingSharedItems.filter { $0.resolvedKind != .audio }
+    }
+
+    /// The server has the item, so the inbox copy is no longer the only one.
+    func completeSharedDocument(_ item: ShareInboxStore.Item) {
+        do {
+            try shareInbox?.remove(item)
+            pendingSharedItems.removeAll { $0.id == item.id }
+            pendingSharedErrors[item.id] = nil
+        } catch {
+            pendingSharedErrors[item.id] = error.localizedDescription
+        }
+    }
+
+    func failSharedDocument(_ item: ShareInboxStore.Item, message: String) {
+        pendingSharedErrors[item.id] = message
     }
 
     /// Starts capture from the visible app. This path may present the system's
@@ -524,7 +578,8 @@ final class RecordingCoordinator {
         from sourceURL: URL,
         contentType: String,
         shareID: UUID? = nil,
-        originalName: String? = nil
+        originalName: String? = nil,
+        autoTranscribe: Bool = false
     ) throws -> LocalRecording {
         guard let store else {
             throw RecordingCoordinatorError.storageUnavailable
@@ -537,7 +592,8 @@ final class RecordingCoordinator {
             contentType: contentType,
             ownerID: activeOwnerID,
             id: shareID ?? UUID(),
-            originalName: originalName
+            originalName: originalName,
+            autoTranscribeRequested: autoTranscribe
         )
         if case .failure(let validationError) = RecordingIntegrityValidator.validate(
             url: store.fileURL(for: recording)
@@ -564,6 +620,18 @@ final class RecordingCoordinator {
             recording.lastError = message
             recording.uploadProgress = nil
             recording.uploadTaskIdentifier = nil
+        }
+    }
+
+    /// Permission was revoked, or the person is discarding, while this recording
+    /// was queued. It goes back to a saved recording only a deliberate tap can send.
+    func markReadyAfterConsentRevoked(_ recordingID: UUID) {
+        updateRecording(recordingID) { recording in
+            recording.state = .ready
+            recording.lastError = nil
+            recording.uploadProgress = nil
+            recording.uploadTaskIdentifier = nil
+            recording.autoTranscribeRequested = false
         }
     }
 
@@ -657,7 +725,8 @@ final class RecordingCoordinator {
         do {
             let newRecording = store.makeRecording(
                 contentType: contentType,
-                ownerID: activeOwnerID
+                ownerID: activeOwnerID,
+                autoTranscribeRequested: autoTranscribeEnabledForNewRecordings
             )
             recording = newRecording
             pendingRecordings.insert(newRecording, at: 0)
@@ -717,7 +786,8 @@ final class RecordingCoordinator {
         do {
             let newRecording = store.makeRecording(
                 contentType: contentType,
-                ownerID: activeOwnerID
+                ownerID: activeOwnerID,
+                autoTranscribeRequested: autoTranscribeEnabledForNewRecordings
             )
             recording = newRecording
             // A tiny CAF fixture exercises the crash-recovery validator without
@@ -868,6 +938,7 @@ final class RecordingCoordinator {
                 )
             }
         }
+        onSavedRecordingsChanged?()
         return finalDuration
     }
 

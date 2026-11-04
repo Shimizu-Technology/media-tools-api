@@ -49,6 +49,7 @@ struct LibraryQuery: Hashable {
     let status: LibraryStatusFilter
     let sort: LibrarySortOrder
     let search: String
+    var archivedOnly = false
 }
 
 /// Owns the Library snapshot independently from its navigation destination.
@@ -64,7 +65,11 @@ final class LibraryViewModel {
     var selectedStatus: LibraryStatusFilter = .all
     var sortOrder: LibrarySortOrder = .newest
     var searchText = ""
+    var showsArchived = false
     var visibleReference: LibraryReference?
+    /// Lives here rather than in the view so a notification tap can open an item
+    /// before the Library tab has ever been shown.
+    var presentedReference: LibraryReference?
     private(set) var currentPage = 0
     private(set) var totalPages = 0
     private(set) var totalItems = 0
@@ -84,12 +89,20 @@ final class LibraryViewModel {
     /// an older page request immediately, while that request's eventual defer
     /// must not clear the indicator for a newer page request.
     private var paginationGeneration = 0
+    private var lastLoadedAt: Date?
+    private let now: () -> Date
+
+    /// Separates tab switches and foregrounding from each other enough that
+    /// neither wakes the database twice for one glance at the Library.
+    static let minimumAutomaticRefreshInterval: TimeInterval = 15
 
     init(
         service: MediaToolsService = .shared,
         previewItems: [LibraryListItem]? = nil,
-        pageSize: Int = 20
+        pageSize: Int = 20,
+        now: @escaping () -> Date = Date.init
     ) {
+        self.now = now
         self.service = service
         self.previewItems = previewItems
         self.pageSize = max(1, pageSize)
@@ -100,7 +113,8 @@ final class LibraryViewModel {
             type: selectedType,
             status: selectedStatus,
             sort: sortOrder,
-            search: searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            search: searchText.trimmingCharacters(in: .whitespacesAndNewlines),
+            archivedOnly: showsArchived
         )
     }
 
@@ -108,8 +122,8 @@ final class LibraryViewModel {
         currentPage > 0 && currentPage < totalPages
     }
 
-    /// Re-entering the Library with the same query is intentionally a no-op.
-    /// Pull-to-refresh remains the explicit way to request fresh data.
+    /// Re-entering the Library with the same query keeps its loaded pages and
+    /// scroll position. `refreshIfStale` is what keeps those pages current.
     func loadIfNeeded(for requestedQuery: LibraryQuery) async {
         guard loadedQuery != requestedQuery else { return }
         await reload(for: requestedQuery, clearExisting: true)
@@ -117,6 +131,21 @@ final class LibraryViewModel {
 
     func refresh() async {
         await reload(for: query, clearExisting: false)
+    }
+
+    /// For events that do not prove anything changed: tab appearance and
+    /// foregrounding. Known changes call `refresh()` directly.
+    func refreshIfStale() async {
+        guard loadedQuery == query, !isLoading else { return }
+        if let lastLoadedAt,
+           now().timeIntervalSince(lastLoadedAt) < Self.minimumAutomaticRefreshInterval {
+            return
+        }
+        await refresh()
+    }
+
+    var hasActiveItems: Bool {
+        items.contains { ["pending", "processing"].contains($0.status) }
     }
 
     func retryInitialLoad() async {
@@ -192,6 +221,7 @@ final class LibraryViewModel {
             currentPage = min(currentPage, totalPages)
             totalItems = filtered.count
             loadedQuery = requestedQuery
+            lastLoadedAt = now()
             return
         }
 
@@ -220,6 +250,7 @@ final class LibraryViewModel {
             totalPages = latestResponse.totalPages
             totalItems = latestResponse.totalItems
             loadedQuery = requestedQuery
+            lastLoadedAt = now()
             updateSpotlightIndex(items, for: requestedQuery)
         } catch {
             guard !Task.isCancelled,
@@ -289,7 +320,8 @@ final class LibraryViewModel {
             itemType: requestedQuery.type.queryValue,
             status: requestedQuery.status.queryValue,
             search: requestedQuery.search,
-            sortDirection: requestedQuery.sort.direction
+            sortDirection: requestedQuery.sort.direction,
+            archivedOnly: requestedQuery.archivedOnly
         )
     }
 
@@ -302,7 +334,7 @@ final class LibraryViewModel {
         _ source: [LibraryListItem],
         for requestedQuery: LibraryQuery
     ) -> [LibraryListItem] {
-        var result = source
+        var result = source.filter { $0.archived == requestedQuery.archivedOnly }
         if let type = requestedQuery.type.queryValue {
             result = result.filter { $0.itemType == type }
         }
@@ -330,7 +362,8 @@ final class LibraryViewModel {
         guard requestedQuery.type == .all,
               requestedQuery.status == .all,
               requestedQuery.sort == .newest,
-              requestedQuery.search.isEmpty
+              requestedQuery.search.isEmpty,
+              !requestedQuery.archivedOnly
         else { return }
 
         SpotlightService.indexLibraryItems(recentItems)

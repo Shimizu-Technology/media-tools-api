@@ -6,22 +6,37 @@ import Foundation
 struct ShareInboxStore {
     // Keep this list in sync with the API's audio upload allowlist. A share
     // should never appear ready to transcribe if upload will reject it.
-    static let supportedExtensions: Set<String> = [
-        "mp3", "wav", "caf", "m4a", "mp4", "ogg", "flac", "webm",
+    static let supportedAudioExtensions: Set<String> = [
+        "mp3", "wav", "caf", "m4a", "mp4", "mov", "qta", "aac", "ogg", "flac", "webm",
     ]
+    static let supportedExtensions = supportedAudioExtensions.union(["pdf"])
+    private static let maximumPDFBytes: Int64 = 50 * 1_024 * 1_024
+    private static let maximumAudioBytes: Int64 = 2 * 1_024 * 1_024 * 1_024
 
     enum ShareError: LocalizedError {
         case unsupportedFormat
         case fileTooLarge
+        case pdfTooLarge
+        case unsupportedLink
 
         var errorDescription: String? {
             switch self {
             case .unsupportedFormat:
-                "This file format cannot be transcribed. Share an MP3, WAV, CAF, M4A, MP4, OGG, FLAC, or WebM file."
+                "This file format cannot be transcribed. Share an MP3, WAV, CAF, M4A, MP4, MOV, QTA, AAC, OGG, FLAC, WebM, or PDF file."
             case .fileTooLarge:
                 "This file is larger than the 2 GB upload limit."
+            case .pdfTooLarge:
+                "This PDF is larger than the 50 MB upload limit."
+            case .unsupportedLink:
+                "Share a web link to a video."
             }
         }
+    }
+
+    enum Kind: String, Codable {
+        case audio
+        case pdf
+        case link
     }
 
     struct Item: Codable, Identifiable {
@@ -29,6 +44,11 @@ struct ShareInboxStore {
         let originalName: String
         let storedName: String
         let createdAt: Date
+        /// Older shares predate this field and were always audio.
+        var kind: Kind? = nil
+        var link: String? = nil
+
+        var resolvedKind: Kind { kind ?? .audio }
     }
 
     let rootURL: URL
@@ -57,31 +77,56 @@ struct ShareInboxStore {
         try mutableRoot.setResourceValues(values)
     }
 
-    func stageFile(from sourceURL: URL, originalName: String) throws -> Item {
+    /// The source file's real extension wins over anything that looks like an
+    /// extension in the display name, because "Call v2.1" is a name and not a
+    /// `.1` file. The display name is the fallback for providers that hand over
+    /// a temporary file, and the shared type covers names with no extension.
+    static func resolvedExtension(
+        sourceExtension: String,
+        displayName: String,
+        contentTypeExtension: String? = nil
+    ) -> String? {
+        let candidates = [
+            sourceExtension,
+            (displayName as NSString).pathExtension,
+            contentTypeExtension ?? "",
+        ]
+        return candidates
+            .map { $0.lowercased() }
+            .first { supportedExtensions.contains($0) }
+    }
+
+    func stageFile(
+        from sourceURL: URL,
+        originalName: String,
+        contentTypeExtension: String? = nil
+    ) throws -> Item {
         let id = UUID()
         let directory = directoryURL(for: id)
         let safeName = (originalName as NSString).lastPathComponent
-        let sourceExtension = sourceURL.pathExtension.lowercased()
-        let displayExtension = (safeName as NSString).pathExtension.lowercased()
-        let fileExtension = !displayExtension.isEmpty ? displayExtension : sourceExtension
-        guard Self.supportedExtensions.contains(fileExtension) else {
+        guard let fileExtension = Self.resolvedExtension(
+            sourceExtension: sourceURL.pathExtension,
+            displayName: safeName,
+            contentTypeExtension: contentTypeExtension
+        ) else {
             throw ShareError.unsupportedFormat
         }
-        if let size = try sourceURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-           Int64(size) > 2 * 1_024 * 1_024 * 1_024 {
-            throw ShareError.fileTooLarge
+        let kind: Kind = fileExtension == "pdf" ? .pdf : .audio
+        if let size = try sourceURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+            if kind == .pdf, Int64(size) > Self.maximumPDFBytes {
+                throw ShareError.pdfTooLarge
+            }
+            if Int64(size) > Self.maximumAudioBytes {
+                throw ShareError.fileTooLarge
+            }
         }
-        let storedName = fileExtension.isEmpty ? "source" : "source.\(fileExtension)"
-        let displayName = safeName.isEmpty ? storedName : (
-            displayExtension.isEmpty && !fileExtension.isEmpty
-                ? "\(safeName).\(fileExtension)"
-                : safeName
-        )
+        let storedName = "source.\(fileExtension)"
         let item = Item(
             id: id,
-            originalName: displayName,
+            originalName: Self.displayName(safeName, fileExtension: fileExtension, fallback: storedName),
             storedName: storedName,
-            createdAt: Date()
+            createdAt: Date(),
+            kind: kind
         )
 
         try fileManager.createDirectory(
@@ -95,11 +140,41 @@ struct ShareInboxStore {
                 [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
                 ofItemAtPath: fileURL(for: item).path
             )
-            let manifest = try JSONEncoder().encode(item)
-            try manifest.write(
-                to: directory.appendingPathComponent("item.json"),
-                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
-            )
+            try writeManifest(item, in: directory)
+            return item
+        } catch {
+            try? fileManager.removeItem(at: directory)
+            throw error
+        }
+    }
+
+    /// Links have no file to copy. The app sends them to the server, which
+    /// decides whether the page has a video it can transcribe.
+    func stageLink(_ url: URL, title: String? = nil) throws -> Item {
+        guard let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              url.host?.isEmpty == false
+        else {
+            throw ShareError.unsupportedLink
+        }
+        let id = UUID()
+        let directory = directoryURL(for: id)
+        let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let item = Item(
+            id: id,
+            originalName: trimmedTitle?.isEmpty == false ? trimmedTitle! : url.absoluteString,
+            storedName: "link",
+            createdAt: Date(),
+            kind: .link,
+            link: url.absoluteString
+        )
+        try fileManager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+        )
+        do {
+            try writeManifest(item, in: directory)
             return item
         } catch {
             try? fileManager.removeItem(at: directory)
@@ -117,9 +192,7 @@ struct ShareInboxStore {
             guard let data = try? Data(contentsOf: directory.appendingPathComponent("item.json")),
                   let item = try? JSONDecoder().decode(Item.self, from: data),
                   directory.lastPathComponent == item.id.uuidString.lowercased(),
-                  item.storedName == "source.\((item.storedName as NSString).pathExtension.lowercased())",
-                  Self.supportedExtensions.contains((item.storedName as NSString).pathExtension.lowercased()),
-                  fileManager.fileExists(atPath: fileURL(for: item).path)
+                  isComplete(item)
             else { return nil }
             return item
         }.sorted { $0.createdAt < $1.createdAt }
@@ -131,6 +204,40 @@ struct ShareInboxStore {
 
     func remove(_ item: Item) throws {
         try fileManager.removeItem(at: directoryURL(for: item.id))
+    }
+
+    private func isComplete(_ item: Item) -> Bool {
+        if item.resolvedKind == .link {
+            return item.link.flatMap(URL.init(string:)) != nil
+        }
+        let fileExtension = (item.storedName as NSString).pathExtension.lowercased()
+        return item.storedName == "source.\(fileExtension)"
+            && Self.supportedExtensions.contains(fileExtension)
+            && fileManager.fileExists(atPath: fileURL(for: item).path)
+    }
+
+    private func writeManifest(_ item: Item, in directory: URL) throws {
+        let manifest = try JSONEncoder().encode(item)
+        try manifest.write(
+            to: directory.appendingPathComponent("item.json"),
+            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+        )
+    }
+
+    /// Replace only a real file extension, so "Call v2.1" becomes
+    /// "Call v2.1.m4a" rather than "Call v2.m4a".
+    private static func displayName(
+        _ name: String,
+        fileExtension: String,
+        fallback: String
+    ) -> String {
+        guard !name.isEmpty else { return fallback }
+        let nameExtension = (name as NSString).pathExtension.lowercased()
+        if nameExtension == fileExtension { return name }
+        let base = supportedExtensions.contains(nameExtension)
+            ? (name as NSString).deletingPathExtension
+            : name
+        return "\(base).\(fileExtension)"
     }
 
     private func directoryURL(for id: UUID) -> URL {

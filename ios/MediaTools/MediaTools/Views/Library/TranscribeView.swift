@@ -88,9 +88,9 @@ struct TranscribeView: View {
                 if let result {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Image(systemName: result.isComplete ? "checkmark.circle.fill" : "clock")
-                                .foregroundStyle(result.isComplete ? Theme.success : Theme.audioColor)
-                            Text(result.isComplete ? "Complete" : "Processing...")
+                            Image(systemName: resultIcon(result))
+                                .foregroundStyle(resultColor(result))
+                            Text(resultStatusText(result))
                                 .font(Theme.body(16, weight: .semibold))
                                 .foregroundStyle(Theme.textPrimary)
                         }
@@ -103,6 +103,23 @@ struct TranscribeView: View {
                             Text("\(wc) words")
                                 .font(Theme.caption())
                                 .foregroundStyle(Theme.textMuted)
+                        }
+
+                        if result.status == "failed" {
+                            Text(result.errorMessage ?? "This video could not be transcribed.")
+                                .font(Theme.caption())
+                                .foregroundStyle(Theme.error)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else if result.isComplete {
+                            NavigationLink {
+                                ItemDetailView(item: .transcript(result))
+                            } label: {
+                                Label("Open", systemImage: "arrow.right.circle.fill")
+                                    .font(Theme.body(14, weight: .semibold))
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.brand500)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -139,6 +156,21 @@ struct TranscribeView: View {
         .navigationTitle("Transcribe")
     }
 
+    private func resultIcon(_ result: Transcript) -> String {
+        if result.status == "failed" { return "exclamationmark.triangle.fill" }
+        return result.isComplete ? "checkmark.circle.fill" : "clock"
+    }
+
+    private func resultColor(_ result: Transcript) -> Color {
+        if result.status == "failed" { return Theme.error }
+        return result.isComplete ? Theme.success : Theme.audioColor
+    }
+
+    private func resultStatusText(_ result: Transcript) -> String {
+        if result.status == "failed" { return "Couldn’t import this video" }
+        return result.isComplete ? "Complete" : "Processing..."
+    }
+
     private func submit() async {
         error = nil
         withAnimation(Theme.springSnappy) { isSubmitting = true }
@@ -152,18 +184,38 @@ struct TranscribeView: View {
                 result = transcript
             }
 
-            guard let id = result?.id else { return }
+            guard let id = result?.id else {
+                withAnimation(Theme.springSnappy) { isSubmitting = false }
+                return
+            }
+            var consecutiveFailures = 0
             while result?.status != "completed" && result?.status != "failed" {
                 try await Task.sleep(for: .seconds(5))
-                let updated = try await service.getTranscript(id)
-                withAnimation(Theme.springGentle) {
-                    result = updated
+                do {
+                    let updated = try await service.getTranscript(id)
+                    consecutiveFailures = 0
+                    withAnimation(Theme.springGentle) {
+                        result = updated
+                    }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    // The import keeps running on the server, so a short loss of
+                    // connection must not read as a failure.
+                    consecutiveFailures += 1
+                    guard consecutiveFailures >= 3 else { continue }
+                    withAnimation(Theme.springGentle) { result = nil }
+                    self.error = "Status could not refresh. The import keeps running; check your Library for the result."
+                    withAnimation(Theme.springSnappy) { isSubmitting = false }
+                    return
                 }
             }
 
             withAnimation(Theme.springSnappy) { isSubmitting = false }
 
-            if result?.status == "completed" {
+            if result?.status == "failed" {
+                Haptics.error()
+            } else if result?.status == "completed" {
                 url = ""
                 await service.loadTranscripts()
                 Haptics.success()

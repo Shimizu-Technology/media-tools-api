@@ -9,6 +9,8 @@ struct AudioPlayerView: View {
     @State private var player = AudioPlayerService()
     @State private var isLoading = true
     @State private var error: String?
+    @State private var playbackNotice: String?
+    @Environment(RecordingCoordinator.self) private var recorder
 
     init(
         audioId: String,
@@ -102,7 +104,7 @@ struct AudioPlayerView: View {
                             if player.isPlaying {
                                 player.pause()
                             } else {
-                                player.play()
+                                startPlayback()
                             }
                         } label: {
                             Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
@@ -124,6 +126,13 @@ struct AudioPlayerView: View {
                         Text(player.formattedDuration)
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(Theme.textSecondary)
+                    }
+
+                    if let playbackNotice {
+                        Text(playbackNotice)
+                            .font(Theme.caption())
+                            .foregroundStyle(Theme.textSecondary)
+                            .multilineTextAlignment(.center)
                     }
 
                     // Speed control
@@ -162,12 +171,32 @@ struct AudioPlayerView: View {
         .onChange(of: seekTime) {
             guard let seekTime else { return }
             player.seek(seconds: seekTime)
-            player.play()
+            startPlayback()
             self.seekTime = nil
+        }
+        .onChange(of: recorder.captureState) { _, state in
+            // Starting a capture with the Action Button must not record this
+            // audio through the speaker.
+            if state != .idle { player.pause() }
         }
         .onDisappear {
             player.stop()
         }
+    }
+
+    private var captureIsActive: Bool {
+        recorder.isRecording || recorder.isStarting
+    }
+
+    /// Capture owns the audio session while it runs. Claiming it for playback
+    /// would interrupt the recording, so playback waits until capture finishes.
+    private func startPlayback() {
+        guard !captureIsActive else {
+            playbackNotice = "Playback is available after the recording stops."
+            return
+        }
+        playbackNotice = nil
+        player.play()
     }
 
     private func loadAudio() async {
@@ -178,7 +207,7 @@ struct AudioPlayerView: View {
                 player.load(url: url, knownDuration: knownDuration)
                 if let seekTime {
                     player.seek(seconds: seekTime)
-                    player.play()
+                    startPlayback()
                     self.seekTime = nil
                 }
             } else {
@@ -224,14 +253,6 @@ class AudioPlayerService {
         progress = 0
         duration = Self.validDuration(knownDuration) ?? 0
 
-        // Switch to playback mode so audio comes from speaker, not earpiece
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("Audio session setup failed: \(error)")
-        }
-
         let asset = AVURLAsset(url: url)
         let item = AVPlayerItem(asset: asset)
         avPlayer = AVPlayer(playerItem: item)
@@ -269,6 +290,15 @@ class AudioPlayerService {
     }
 
     func play() {
+        // Switch to playback mode so audio comes from speaker, not earpiece.
+        // This happens on play rather than load, because merely opening an item
+        // during a recording must not touch the session capture is using.
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("Audio session setup failed: \(error)")
+        }
         avPlayer?.rate = speed
         isPlaying = true
     }

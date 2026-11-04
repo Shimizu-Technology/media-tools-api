@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 import UniformTypeIdentifiers
 
 enum TranscriptionWatchFailureDisposition: Equatable {
@@ -31,9 +32,37 @@ protocol RecordingUploadServicing: AnyObject {
         _ completion: AudioUploadCompleteRequest,
         expectedOwnerID: String?
     ) async throws -> AudioTranscription
+    func importSharedLink(_ link: String, expectedOwnerID: String?) async throws
+    func importSharedPDF(
+        fileURL: URL,
+        filename: String,
+        expectedOwnerID: String?
+    ) async throws
 }
 
 extension MediaToolsService: RecordingUploadServicing {}
+
+/// Finishing a request after the app leaves the foreground needs a little time
+/// from iOS. Without this, stopping from the lock screen or a Live Activity can
+/// suspend the app before the presigned request hands off to the background
+/// session. The recording stays safe either way; this only avoids waiting for
+/// the next time the app opens.
+@MainActor
+private final class BackgroundTimeLease {
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+
+    init(name: String) {
+        identifier = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            MainActor.assumeIsolated { self?.end() }
+        }
+    }
+
+    func end() {
+        guard identifier != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(identifier)
+        identifier = .invalid
+    }
+}
 
 /// Durable orchestration for recordings after capture finishes.
 ///
@@ -50,6 +79,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
 
     private(set) var latestItem: AudioTranscription?
     private(set) var statusMessage: String?
+    /// Lets the Library refresh after a shared PDF or link reaches the server.
+    private(set) var sharedDocumentImports = 0
 
     var latestItemSignature: String {
         guard let latestItem else { return "" }
@@ -76,6 +107,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     /// Handles callbacks already queued by iOS while task descriptions change.
     private var verifiedOwnerAliases: [String: String] = [:]
     private let simulatesUpload: Bool
+    private let isForeground: @MainActor () -> Bool
+    private var sharedDocumentTasks: [UUID: Task<Void, Never>] = [:]
+    private var rejectedSharedDocuments: Set<UUID> = []
 
     init(
         recorder: RecordingCoordinator? = nil,
@@ -83,7 +117,10 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         transport: BackgroundUploadService = .shared,
         watchStore: TranscriptionWatchStore? = nil,
         localAccountDefaults: UserDefaults = .standard,
-        aiProcessingConsent: AIProcessingConsentManager? = nil
+        aiProcessingConsent: AIProcessingConsentManager? = nil,
+        isForeground: @escaping @MainActor () -> Bool = {
+            UIApplication.shared.applicationState == .active
+        }
     ) {
         self.recorder = recorder ?? .shared
         self.service = service
@@ -100,8 +137,15 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         #else
         simulatesUpload = false
         #endif
+        self.isForeground = isForeground
         watches = (try? self.watchStore?.load()) ?? []
         transport.receiver = self
+        self.recorder.onSavedRecordingsChanged = { [weak self] in
+            self?.autoQueueEligibleRecordings()
+        }
+        self.aiProcessingConsent.onAutomaticTranscriptionStateChanged = { [weak self] in
+            self?.automaticTranscriptionStateChanged()
+        }
     }
 
     func queue(_ recording: LocalRecording) {
@@ -113,6 +157,124 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         recorder.markWaitingForUpload(recording.id)
         retryAttempts[recording.id] = 0
         process(recordingID: recording.id)
+    }
+
+    /// Sends every finished recording that was saved with automatic transcription
+    /// on. Safe to call repeatedly, because queueing moves a recording out of the
+    /// eligible states. Without consent the audio simply stays on this iPhone.
+    func autoQueueEligibleRecordings() {
+        guard let ownerID = recorder.activeOwnerID,
+              aiProcessingConsent.isAutoTranscribeEnabled(ownerID: ownerID),
+              !hasPendingLocalAccountDeletion(ownerID: ownerID)
+        else { return }
+        let eligible = recorder.availableRecordings.filter(\.isWaitingForAutomaticTranscription)
+        guard !eligible.isEmpty else { return }
+        if aiProcessingConsent.hasAutomaticConsent(ownerID: ownerID) {
+            eligible.forEach(queue)
+        } else if isForeground(),
+                  !recorder.isRecording,
+                  aiProcessingConsent.activeOwnerID == ownerID {
+            aiProcessingConsent.promptOnceForAutomaticTranscription()
+        }
+    }
+
+    private func automaticTranscriptionStateChanged() {
+        guard let ownerID = recorder.activeOwnerID else { return }
+        if !aiProcessingConsent.hasConsent(ownerID: ownerID) {
+            returnQueuedWorkAfterRevocation()
+        }
+        autoQueueEligibleRecordings()
+    }
+
+    /// Without this, a revoke would strand queued recordings: they could be
+    /// neither uploaded nor discarded while marked as in progress.
+    private func returnQueuedWorkAfterRevocation() {
+        let queued = recorder.availableRecordings.filter {
+            [.waitingForUpload, .uploading, .finalizingUpload].contains($0.state)
+        }
+        guard !queued.isEmpty else { return }
+        let queuedIDs = Set(queued.map(\.id))
+        for recordingID in queuedIDs {
+            uploadTasks[recordingID]?.cancel()
+            uploadTasks[recordingID] = nil
+            retryTasks[recordingID]?.cancel()
+            retryTasks[recordingID] = nil
+            retryAttempts[recordingID] = nil
+            recorder.markReadyAfterConsentRevoked(recordingID)
+        }
+        Task { [transport] in
+            await transport.cancel(recordingIDs: queuedIDs)
+        }
+    }
+
+    /// A queued recording may wait indefinitely for a connection. Automatic upload
+    /// must not take away the choice to delete it during that wait. Nothing has
+    /// reached the server yet, because an upload in flight is `.uploading`.
+    func discard(_ recording: LocalRecording) {
+        if recorder.recording(withID: recording.id)?.state == .waitingForUpload {
+            uploadTasks[recording.id]?.cancel()
+            uploadTasks[recording.id] = nil
+            retryTasks[recording.id]?.cancel()
+            retryTasks[recording.id] = nil
+            retryAttempts[recording.id] = nil
+            recorder.markReadyAfterConsentRevoked(recording.id)
+        }
+        guard let current = recorder.recording(withID: recording.id) else { return }
+        recorder.discard(current)
+    }
+
+    /// Imports whatever the share extension staged, then sends PDFs and links to
+    /// the server. Audio follows the same path as a finished recording.
+    ///
+    /// A rejected share, such as a link with no video, would fail the same way on
+    /// every foreground, so it waits for `retryRejected` from the Retry button.
+    func processSharedItems(retryRejected: Bool = false) {
+        recorder.importSharedItems()
+        guard let ownerID = recorder.activeOwnerID else { return }
+        if retryRejected {
+            rejectedSharedDocuments.removeAll()
+        }
+        for item in recorder.pendingSharedDocuments
+        where sharedDocumentTasks[item.id] == nil && !rejectedSharedDocuments.contains(item.id) {
+            let lease = BackgroundTimeLease(name: "share-\(item.id.uuidString)")
+            sharedDocumentTasks[item.id] = Task { [weak self] in
+                defer { lease.end() }
+                guard let self else { return }
+                defer { self.sharedDocumentTasks[item.id] = nil }
+                do {
+                    switch item.resolvedKind {
+                    case .link:
+                        try await self.service.importSharedLink(
+                            item.link ?? "",
+                            expectedOwnerID: ownerID
+                        )
+                    case .pdf, .audio:
+                        guard let fileURL = self.recorder.sharedFileURL(for: item) else { return }
+                        try await self.service.importSharedPDF(
+                            fileURL: fileURL,
+                            filename: item.originalName,
+                            expectedOwnerID: ownerID
+                        )
+                    }
+                    guard self.recorder.activeOwnerID == ownerID else { return }
+                    self.recorder.completeSharedDocument(item)
+                    self.sharedDocumentImports += 1
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard self.recorder.activeOwnerID == ownerID else { return }
+                    if !Self.isRetryable(error) {
+                        self.rejectedSharedDocuments.insert(item.id)
+                    }
+                    // The staged copy stays in the inbox, so foregrounding or
+                    // Retry can send it again and nothing is lost.
+                    self.recorder.failSharedDocument(
+                        item,
+                        message: error.localizedDescription
+                    )
+                }
+            }
+        }
     }
 
     /// Keeps upload/finalization credentials aligned with the signed-in Clerk
@@ -317,6 +479,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 break
             }
         }
+        autoQueueEligibleRecordings()
 
         guard !hasReconciledTransfers else { return }
         hasReconciledTransfers = true
@@ -364,6 +527,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             recorder.markUploadFinalizing(metadata.recordingID)
             finalize(recordingID: metadata.recordingID)
         case .failed(let metadata, let message, let shouldRetry):
+            // Cancelling a revoked upload reports back here. The recording has
+            // already returned to the saved state, and must stay there.
+            guard recorder.recording(withID: metadata.recordingID)?.state != .ready else { return }
             if shouldRetry {
                 recorder.markWaitingForUpload(
                     metadata.recordingID,
@@ -387,7 +553,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
               let fileURL = recorder.fileURL(for: recording)
         else { return }
 
+        let lease = BackgroundTimeLease(name: "upload-\(recordingID.uuidString)")
         uploadTasks[recordingID] = Task { [weak self] in
+            defer { lease.end() }
             guard let self else { return }
             defer { self.uploadTasks[recordingID] = nil }
             guard self.isActiveOwner(
@@ -500,7 +668,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
               let sizeBytes = recording.uploadSizeBytes
         else { return }
 
+        let lease = BackgroundTimeLease(name: "finalize-\(recordingID.uuidString)")
         uploadTasks[recordingID] = Task { [weak self] in
+            defer { lease.end() }
             guard let self else { return }
             defer { self.uploadTasks[recordingID] = nil }
             guard self.isActiveOwner(
@@ -590,6 +760,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 }
                 self.removeWatch(id: watch.id)
                 self.statusMessage = "Transcription complete"
+                NotificationService.notifyAudioComplete(title: item.displayTitle, itemId: item.id)
                 return
             }
             var failures = 0
@@ -856,6 +1027,9 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         recorder.markUploadFinalizing(recording.id)
         try? await Task.sleep(for: .milliseconds(500))
         guard !Task.isCancelled else { return }
+        #if DEBUG
+        UITestAPIProtocol.acceptAudio(title: recording.displayTitle)
+        #endif
         guard let item = simulatedItem(
             id: "ui-test-audio",
             title: recording.displayTitle,

@@ -93,9 +93,19 @@ struct PendingDeviceSessionBootstrap: Codable, Equatable {
 
 /// App-only Keychain item. The future Share Extension must not receive this
 /// credential; its signed-out capture route remains authentication-free.
+/// A Keychain read has three real outcomes. "Unavailable" usually means the
+/// iPhone has not been unlocked since restart. Treating it like "missing" would
+/// sign a person out of a session that is still sitting safely in the Keychain.
+enum DeviceSessionLoadResult: Equatable {
+    case found(StoredDeviceSession)
+    case missing
+    case unavailable
+}
+
 @MainActor
 protocol DeviceSessionStoring {
     func load() -> StoredDeviceSession?
+    func loadResult() -> DeviceSessionLoadResult
     func save(_ value: StoredDeviceSession) throws
     func delete()
     func loadPendingBootstrap() throws -> PendingDeviceSessionBootstrap?
@@ -105,6 +115,12 @@ protocol DeviceSessionStoring {
     func clerkID(forLocalOwnerID ownerID: String) -> String?
     func saveLocalOwnerID(_ ownerID: String, for clerkID: String)
     func removeLocalOwnerID(for clerkID: String)
+}
+
+extension DeviceSessionStoring {
+    func loadResult() -> DeviceSessionLoadResult {
+        load().map(DeviceSessionLoadResult.found) ?? .missing
+    }
 }
 
 struct DeviceSessionKeychainStore: DeviceSessionStoring {
@@ -138,12 +154,28 @@ struct DeviceSessionKeychainStore: DeviceSessionStoring {
     }
 
     func load() -> StoredDeviceSession? {
+        if case .found(let session) = loadResult() { return session }
+        return nil
+    }
+
+    func loadResult() -> DeviceSessionLoadResult {
         var query = baseQuery(account: account)
         query[kSecReturnData as String] = true
         var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return try? JSONDecoder().decode(StoredDeviceSession.self, from: data)
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return .missing }
+        #if targetEnvironment(simulator)
+        // An unsigned simulator build has no Keychain at all, so waiting for an
+        // unlock would never end. Signed builds always have this entitlement.
+        if status == errSecMissingEntitlement { return .missing }
+        #endif
+        guard status == errSecSuccess, let data = result as? Data else { return .unavailable }
+        // Unreadable data will not improve on a retry, so it counts as missing.
+        // The item is left in place rather than deleted.
+        guard let session = try? JSONDecoder().decode(StoredDeviceSession.self, from: data) else {
+            return .missing
+        }
+        return .found(session)
     }
 
     func save(_ value: StoredDeviceSession) throws {
@@ -270,7 +302,18 @@ private struct KeychainFailure: LocalizedError {
 @MainActor
 @Observable
 final class DeviceSessionController {
-    static let shared = DeviceSessionController()
+    static let shared: DeviceSessionController = {
+        #if DEBUG
+        if let fixture = UITestDeviceSessionFixture.current {
+            return DeviceSessionController(
+                transport: fixture.transport,
+                store: fixture.store,
+                enabled: true
+            )
+        }
+        #endif
+        return DeviceSessionController()
+    }()
 
     private let store: any DeviceSessionStoring
     private let transport: any DeviceSessionTransport
@@ -284,6 +327,8 @@ final class DeviceSessionController {
     private(set) var activeUserID: String?
     private(set) var needsSignIn = false
     private(set) var sessionRevision = 0
+    /// The Keychain could not answer, so "no session" is not actually known yet.
+    private(set) var isSessionStoreUnavailable = false
 
     init(transport: any DeviceSessionTransport = URLSession.shared,
          baseURL: URL = URL(string: Configuration.apiBaseURL + "/api/v1")!,
@@ -297,10 +342,51 @@ final class DeviceSessionController {
         self.enabled = enabled
         // Keep the verified local-owner mapping available during an iOS flag
         // rollback without ever using its first-party bearer credential.
-        self.stored = self.store.load()
+        applyStoreRead(self.store.loadResult())
         if let stored, stored.source == .clerk, let clerkID = stored.verifiedClerkID {
             self.store.saveLocalOwnerID(stored.pair.userID, for: clerkID)
         }
+    }
+
+    /// Takes a stored session as the workspace owner without touching the
+    /// network, so the app opens immediately. Background activation still
+    /// refreshes it and closes the workspace if the server rejects it.
+    private func applyStoreRead(_ result: DeviceSessionLoadResult) {
+        switch result {
+        case .found(let session):
+            stored = session
+            isSessionStoreUnavailable = false
+            if enabled, session.pendingRevocation != true, !isRetired(session) {
+                activeUserID = session.pair.userID
+            }
+        case .missing:
+            stored = nil
+            isSessionStoreUnavailable = false
+        case .unavailable:
+            stored = nil
+            isSessionStoreUnavailable = true
+        }
+    }
+
+    private func isRetired(_ session: StoredDeviceSession) -> Bool {
+        guard session.source == .clerk, let clerkID = session.verifiedClerkID else { return false }
+        return deletedClerkIdentities.contains(clerkID)
+    }
+
+    /// Re-reads only after a failed read. Called on every foreground, because
+    /// the iPhone may have been unlocked since the app launched in the background.
+    func reloadStoredSessionIfUnavailable() {
+        guard isSessionStoreUnavailable else { return }
+        let result = store.loadResult()
+        guard result != .unavailable else { return }
+        applyStoreRead(result)
+        sessionRevision += 1
+    }
+
+    /// Clerk's nil user can only be trusted after it finishes hydrating its
+    /// cache. Sign-out blocks are released here, without rebuilding the workspace.
+    func clerkFinishedLoading(clerkID: String?) {
+        deletedClerkIdentities.removeAll(except: clerkID)
     }
 
     var verifiedMigration: (clerkID: String, userID: String)? {
@@ -352,6 +438,11 @@ final class DeviceSessionController {
     }
 
     func activate(clerkID: String?, clerkIsLoaded: Bool) async -> String? {
+        reloadStoredSessionIfUnavailable()
+        // The session may still be in the locked Keychain. Bootstrapping now
+        // would replace it with a second session for the same device.
+        if isSessionStoreUnavailable { return nil }
+
         // A nil user is authoritative only after Clerk has finished hydrating
         // its local cache. Preserve sign-out and deletion intent during the
         // earlier nil state so a cached identity cannot reappear on relaunch.

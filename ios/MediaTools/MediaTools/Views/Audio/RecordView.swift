@@ -13,6 +13,7 @@ struct RecordView: View {
     @State private var error: String?
     @State private var recordingToDiscard: LocalRecording?
     @State private var showFilePicker = false
+    @State private var sharedItemToRemove: ShareInboxStore.Item?
 
     private let service = MediaToolsService.shared
 
@@ -77,19 +78,22 @@ struct RecordView: View {
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
 
-                    if !recorder.pendingSharedItems.isEmpty {
+                    if !recorder.sharesNeedingAttention.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             SectionHeader(text: "Shares needing attention", icon: "square.and.arrow.down")
-                            Text("These files are still saved on this iPhone. Retry importing or export the original.")
+                            Text("These are still saved on this iPhone. Retry, or remove them if you no longer need them.")
                                 .font(Theme.caption(12))
                                 .foregroundStyle(Theme.textSecondary)
-                            ForEach(recorder.pendingSharedItems) { item in
+                            ForEach(recorder.sharesNeedingAttention) { item in
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
                                         Text(item.originalName)
                                             .lineLimit(1)
                                         Spacer()
-                                        Button("Retry") { recorder.importSharedItems() }
+                                        Button("Retry") { uploader.processSharedItems(retryRejected: true) }
+                                            .frame(minHeight: 44)
+                                        Button("Remove", role: .destructive) { sharedItemToRemove = item }
+                                            .frame(minHeight: 44)
                                         if let fileURL = recorder.sharedFileURL(for: item) {
                                             ShareLink(item: fileURL) {
                                                 Image(systemName: "square.and.arrow.up")
@@ -252,7 +256,7 @@ struct RecordView: View {
                     .padding(.bottom, 20)
                     .fileImporter(
                         isPresented: $showFilePicker,
-                        allowedContentTypes: [.audio, .mpeg4Movie],
+                        allowedContentTypes: [.audio, .mpeg4Movie, .quickTimeMovie],
                         allowsMultipleSelection: false
                     ) { result in
                         switch result {
@@ -325,6 +329,24 @@ struct RecordView: View {
             )
         }
         .alert(
+            "Remove this share?",
+            isPresented: Binding(
+                get: { sharedItemToRemove != nil },
+                set: { if !$0 { sharedItemToRemove = nil } }
+            ),
+            presenting: sharedItemToRemove
+        ) { item in
+            Button("Remove", role: .destructive) {
+                recorder.discardSharedItem(item)
+                sharedItemToRemove = nil
+            }
+            Button("Keep", role: .cancel) {
+                sharedItemToRemove = nil
+            }
+        } message: { _ in
+            Text("This removes the copy saved on this iPhone and cannot be undone.")
+        }
+        .alert(
             "Discard recording?",
             isPresented: Binding(
                 get: { recordingToDiscard != nil },
@@ -334,7 +356,7 @@ struct RecordView: View {
         ) { recording in
             Button("Discard", role: .destructive) {
                 withAnimation(Theme.springSnappy) {
-                    recorder.discard(recording)
+                    uploader.discard(recording)
                 }
                 recordingToDiscard = nil
             }
@@ -598,7 +620,9 @@ struct RecordView: View {
         if recorder.statusMessage != nil {
             return "The previous recording is saved. The clock is reset and ready when you are."
         }
-        return "Record only with required permission. Choose a content type, then tap the microphone; audio is saved on this iPhone first."
+        return aiProcessingConsent.isAutoTranscribeEnabled
+            ? "Record only with required permission. Audio is saved on this iPhone first, then transcribed automatically."
+            : "Record only with required permission. Choose a content type, then tap the microphone; audio is saved on this iPhone first."
     }
 
     private var captureFootnote: String {
@@ -711,7 +735,7 @@ struct RecordView: View {
                 .buttonStyle(.bordered)
                 .tint(Theme.error)
                 .disabled(
-                    recording.isUploadInProgress
+                    (recording.isUploadInProgress && recording.state != .waitingForUpload)
                         || recorder.isStarting
                         || recorder.isRecording
                 )

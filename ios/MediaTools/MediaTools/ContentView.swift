@@ -10,6 +10,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showAuth = false
     @State private var isResolvingAccount = Configuration.firstPartyIOSAuthEnabled
+    @State private var isReconcilingDeletion: Bool
     @State private var migrationFailed = false
     @State private var migrationRetry = 0
     @State private var nativeAuthOperation: NativeAuthOperation?
@@ -27,6 +28,11 @@ struct ContentView: View {
     init(forceSignedOutForUITesting: Bool = false) {
         self.forceSignedOutForUITesting = forceSignedOutForUITesting
         _passwordAuthAvailable = State(initialValue: forceSignedOutForUITesting ? true : nil)
+        _isReconcilingDeletion = State(
+            initialValue: !forceSignedOutForUITesting
+                && Configuration.firstPartyIOSAuthEnabled
+                && AccountDeletionRecoveryService.shared.hasPendingDeletion
+        )
     }
 
     private var activeUserID: String? {
@@ -44,8 +50,21 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if isResolvingAccount && Configuration.firstPartyIOSAuthEnabled {
+            if isReconcilingDeletion || isBlockedOnAccountResolution {
                 ProgressView("Restoring your workspace…")
+            } else if deviceSession.isSessionStoreUnavailable,
+                      activeUserID == nil,
+                      !forceSignedOutForUITesting {
+                VStack(spacing: 16) {
+                    Text("Unlock your iPhone to open Media Tools. Your recordings are safe.")
+                        .multilineTextAlignment(.center)
+                    Button("Try again") { deviceSession.reloadStoredSessionIfUnavailable() }
+                        .frame(minHeight: 44)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .foregroundStyle(Theme.textPrimary)
+                .background(Theme.surface)
             } else if migrationFailed {
                 VStack(spacing: 16) {
                     Text("Your local recordings could not be connected to this account.")
@@ -59,6 +78,9 @@ struct ContentView: View {
                 .background(Theme.surface)
             } else if activeUserID != nil {
                 MainTabView()
+                    // A different account gets fresh tabs and library state. A
+                    // background refresh of the same account never rebuilds them.
+                    .id(activeUserID)
                     .onAppear {
                         if deviceSession.hasNativeFirstPartySession {
                             tokenSync.stopSyncing()
@@ -91,11 +113,29 @@ struct ContentView: View {
                 }
             }
         }
-        .task(id: "\(clerk.isLoaded)|\(clerk.user?.id ?? "signed-out")|\(deviceSession.needsSignIn)|\(deviceSession.sessionRevision)|\(migrationRetry)") {
+        .onChange(of: clerk.isLoaded) { _, isLoaded in
+            guard isLoaded, !forceSignedOutForUITesting else { return }
+            deviceSession.clerkFinishedLoading(clerkID: clerk.user?.id)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            deviceSession.reloadStoredSessionIfUnavailable()
+        }
+        .task(id: "\(clerk.user?.id ?? "signed-out")|\(deviceSession.needsSignIn)|\(deviceSession.sessionRevision)|\(migrationRetry)") {
             let clerkID = forceSignedOutForUITesting ? nil : clerk.user?.id
             if Configuration.firstPartyIOSAuthEnabled && !forceSignedOutForUITesting {
                 isResolvingAccount = true
                 migrationFailed = false
+                // Open a stored workspace before any network request: a slow or
+                // absent connection must not stand between Leon and his library
+                // or a recording. Everything below keeps running in the background.
+                if !isReconcilingDeletion, let openOwnerID = activeUserID {
+                    guard await applyVerifiedMigration() else { return }
+                    aiProcessingConsent.setActiveOwnerID(openOwnerID)
+                    await uploadCoordinator.setActiveOwnerID(openOwnerID)
+                    guard !Task.isCancelled else { return }
+                    isResolvingAccount = false
+                }
                 let retryDeletionOwnerID = deviceSession.storedUserID
                     ?? deviceSession.fallbackOwnerID(for: clerk.user?.id)
                 if let pending = try? await AccountDeletionRecoveryService.shared.confirmedPendingDeletion(
@@ -111,34 +151,14 @@ struct ContentView: View {
                     )
                 }
                 guard !Task.isCancelled else { return }
+                isReconcilingDeletion = false
                 let clerkID = clerk.user?.id
                 let ownerID = await deviceSession.activate(
                     clerkID: clerkID,
                     clerkIsLoaded: clerk.isLoaded
                 )
                 guard !Task.isCancelled else { return }
-                if let migration = deviceSession.verifiedMigration {
-                    do {
-                        try await uploadCoordinator.migrateOwnerID(
-                            from: migration.clerkID,
-                            to: migration.userID
-                        )
-                        aiProcessingConsent.migrateConsent(
-                            from: migration.clerkID,
-                            to: migration.userID
-                        )
-                    } catch {
-                        guard !Task.isCancelled else { return }
-                        // A partial migration is repeatable, but exposing the
-                        // workspace here could hide Clerk-owned recordings.
-                        await uploadCoordinator.setActiveOwnerID(nil)
-                        aiProcessingConsent.setActiveOwnerID(nil)
-                        migrationFailed = true
-                        isResolvingAccount = false
-                        return
-                    }
-                }
-                guard !Task.isCancelled else { return }
+                guard await applyVerifiedMigration() else { return }
                 if ownerID != nil, deviceSession.hasNativeFirstPartySession, clerk.user != nil {
                     do {
                         try await clerk.auth.signOut()
@@ -161,9 +181,10 @@ struct ContentView: View {
                         clerkIsLoaded: clerk.isLoaded
                     )
                 }
+                // The consent owner comes first: resuming work may need to ask.
+                aiProcessingConsent.setActiveOwnerID(ownerID)
                 await uploadCoordinator.setActiveOwnerID(ownerID)
                 guard !Task.isCancelled else { return }
-                aiProcessingConsent.setActiveOwnerID(ownerID)
                 isResolvingAccount = false
             }
         }
@@ -190,6 +211,36 @@ struct ContentView: View {
                 // recovery-code sheet before the user submits a code.
                 nativeAuthError = nil
             }
+        }
+    }
+
+    /// A background refresh must not cover an open workspace with a spinner:
+    /// that destroys the tabs and any route the Action Button just requested.
+    private var isBlockedOnAccountResolution: Bool {
+        isResolvingAccount && Configuration.firstPartyIOSAuthEnabled && activeUserID == nil
+    }
+
+    /// Returns false when the workspace must stay closed. A partial migration
+    /// is repeatable, but opening here could hide Clerk-owned recordings.
+    private func applyVerifiedMigration() async -> Bool {
+        guard let migration = deviceSession.verifiedMigration else { return true }
+        do {
+            try await uploadCoordinator.migrateOwnerID(
+                from: migration.clerkID,
+                to: migration.userID
+            )
+            aiProcessingConsent.migrateConsent(
+                from: migration.clerkID,
+                to: migration.userID
+            )
+            return !Task.isCancelled
+        } catch {
+            guard !Task.isCancelled else { return false }
+            await uploadCoordinator.setActiveOwnerID(nil)
+            aiProcessingConsent.setActiveOwnerID(nil)
+            migrationFailed = true
+            isResolvingAccount = false
+            return false
         }
     }
 

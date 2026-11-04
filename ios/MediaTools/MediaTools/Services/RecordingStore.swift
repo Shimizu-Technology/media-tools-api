@@ -77,6 +77,7 @@ struct RecordingStore {
     func makeRecording(
         contentType: String,
         ownerID: String? = nil,
+        autoTranscribeRequested: Bool = false,
         now: Date = Date()
     ) -> LocalRecording {
         let id = UUID()
@@ -101,7 +102,8 @@ struct RecordingStore {
             uploadSizeBytes: nil,
             uploadMimeType: nil,
             uploadTaskIdentifier: nil,
-            ownerID: ownerID
+            ownerID: ownerID,
+            autoTranscribeRequested: autoTranscribeRequested
         )
         return recording
     }
@@ -119,6 +121,7 @@ struct RecordingStore {
         ownerID: String? = nil,
         id: UUID = UUID(),
         originalName: String? = nil,
+        autoTranscribeRequested: Bool = false,
         now: Date = Date()
     ) throws -> LocalRecording {
         let sourceExtension = sourceURL.pathExtension.lowercased()
@@ -139,7 +142,8 @@ struct RecordingStore {
             uploadSizeBytes: nil,
             uploadMimeType: nil,
             uploadTaskIdentifier: nil,
-            ownerID: ownerID
+            ownerID: ownerID,
+            autoTranscribeRequested: autoTranscribeRequested
         )
         // A previous process may have died after copying but before saving the
         // manifest. The inbox still owns the source, so replacing that orphan

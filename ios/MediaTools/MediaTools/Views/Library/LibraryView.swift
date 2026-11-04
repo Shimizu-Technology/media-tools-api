@@ -9,13 +9,26 @@ struct LibraryView: View {
     @State private var showDeleteConfirmation = false
     @State private var isDeleting = false
     @State private var collectionTarget: LibraryReference?
-    @State private var presentedReference: LibraryReference?
+    @State private var isVisible = false
+    @Environment(RecordingCoordinator.self) private var recorder
+    @Environment(RecordingUploadCoordinator.self) private var uploader
+    @Environment(\.scenePhase) private var scenePhase
 
     private let service = MediaToolsService.shared
     private let previewItems: [LibraryListItem]?
+    private let onOpenRecord: () -> Void
 
-    init(model: LibraryViewModel? = nil, previewItems: [LibraryListItem]? = nil) {
+    /// Items running on the server have no local event to report completion, so
+    /// the visible Library checks on them at this pace and stops once they settle.
+    private static let activeItemRefreshInterval: Duration = .seconds(15)
+
+    init(
+        model: LibraryViewModel? = nil,
+        previewItems: [LibraryListItem]? = nil,
+        onOpenRecord: @escaping () -> Void = {}
+    ) {
         self.previewItems = previewItems
+        self.onOpenRecord = onOpenRecord
         _model = State(
             initialValue: model ?? LibraryViewModel(previewItems: previewItems)
         )
@@ -31,7 +44,7 @@ struct LibraryView: View {
         .searchable(text: $model.searchText, prompt: "Search all media")
         .toolbar { libraryToolbar }
         .safeAreaInset(edge: .bottom) { selectionBar }
-        .navigationDestination(item: $presentedReference) { reference in
+        .navigationDestination(item: $model.presentedReference) { reference in
             LibraryDetailLoader(
                 reference: reference,
                 previewTitle: previewItems?.first { $0.reference == reference }?.displayTitle
@@ -74,6 +87,109 @@ struct LibraryView: View {
             }
             await model.loadIfNeeded(for: requestedQuery)
         }
+        .onAppear {
+            isVisible = true
+            Task { await model.refreshIfStale() }
+        }
+        .onDisappear { isVisible = false }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await model.refreshIfStale() }
+        }
+        .onChange(of: recorder.uploadStateSignature) { _, _ in
+            Task { await model.refresh() }
+        }
+        .onChange(of: uploader.sharedDocumentImports) { _, _ in
+            Task { await model.refresh() }
+        }
+        .onChange(of: model.presentedReference) { previous, current in
+            // A detail screen may have renamed, archived, or finished the item.
+            guard previous != nil, current == nil else { return }
+            Task { await model.refresh() }
+        }
+        .task(id: isVisible && scenePhase == .active && model.hasActiveItems) {
+            guard isVisible, scenePhase == .active, model.hasActiveItems else { return }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: Self.activeItemRefreshInterval)
+                } catch {
+                    return
+                }
+                await model.refresh()
+            }
+        }
+    }
+
+    // MARK: - Device uploads
+
+    /// Audio still on this iPhone has no server row yet. Showing it here means
+    /// a new recording is visible in the Library from the moment it is saved.
+    private var deviceRecordings: [LocalRecording] {
+        guard model.selectedType == .all || model.selectedType == .audio,
+              model.selectedStatus == .all || model.selectedStatus == .active,
+              model.query.search.isEmpty,
+              !model.showsArchived
+        else { return [] }
+        let serverIDs = Set(model.items.map(\.reference))
+        return recorder.availableRecordings.filter { recording in
+            guard let remoteID = recording.remoteTranscriptionID else { return true }
+            return !serverIDs.contains(LibraryReference(itemType: "audio", itemId: remoteID))
+        }
+    }
+
+    /// Shares that failed to import stay visible until they are dealt with.
+    private var sharesNeedingAttention: [ShareInboxStore.Item] {
+        recorder.sharesNeedingAttention
+    }
+
+    private var hasDeviceRows: Bool {
+        !deviceRecordings.isEmpty || !sharesNeedingAttention.isEmpty
+    }
+
+    @ViewBuilder
+    private var deviceRows: some View {
+        ForEach(deviceRecordings) { recording in
+            Button {
+                if let remoteID = recording.remoteTranscriptionID {
+                    model.presentedReference = LibraryReference(itemType: "audio", itemId: remoteID)
+                } else {
+                    onOpenRecord()
+                }
+            } label: {
+                DeviceRecordingRow(recording: recording)
+                    .cardStyle(padding: 12)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("library-device-\(recording.id.uuidString)")
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+        ForEach(sharesNeedingAttention) { item in
+            Button(action: onOpenRecord) {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Theme.warning)
+                        .frame(width: 44, height: 44)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.originalName)
+                            .font(Theme.body(15, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(2)
+                        Text(recorder.pendingSharedErrors[item.id] ?? "")
+                            .font(Theme.caption())
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 4)
+                }
+                .cardStyle(padding: 12)
+            }
+            .buttonStyle(.plain)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
     }
 
     private var mediaFilterBar: some View {
@@ -110,14 +226,21 @@ struct LibraryView: View {
                 dismissibleErrorRow(operationError)
             }
 
+            deviceRows
+
             if model.isLoading && model.items.isEmpty {
                 loadingRow
             } else if let loadError = model.loadError, model.items.isEmpty {
                 errorRow(loadError)
             } else if model.items.isEmpty {
-                emptyRow
+                if !hasDeviceRows {
+                    emptyRow
+                }
             } else {
-                if model.selectedStatus != .all || model.sortOrder != .newest || !model.query.search.isEmpty {
+                if model.selectedStatus != .all
+                    || model.sortOrder != .newest
+                    || !model.query.search.isEmpty
+                    || model.showsArchived {
                     filterSummaryRow
                 }
 
@@ -195,6 +318,18 @@ struct LibraryView: View {
 
                 Section {
                     Button {
+                        model.showsArchived.toggle()
+                        leaveSelectionMode()
+                    } label: {
+                        Label(
+                            model.showsArchived ? "Hide Archived" : "Show Archived",
+                            systemImage: model.showsArchived ? "tray.full" : "archivebox"
+                        )
+                    }
+                }
+
+                Section {
+                    Button {
                         withAnimation(Theme.springSnappy) {
                             isSelecting = true
                         }
@@ -232,7 +367,7 @@ struct LibraryView: View {
         } else {
             Button {
                 model.visibleReference = item.reference
-                presentedReference = item.reference
+                model.presentedReference = item.reference
             } label: {
                 HStack(spacing: 10) {
                     LibrarySummaryRow(item: item, selectionState: nil)
@@ -308,6 +443,7 @@ struct LibraryView: View {
 
     private var emptyTitle: String {
         if !model.query.search.isEmpty { return "No Results" }
+        if model.showsArchived { return "No Archived Items" }
         if model.selectedStatus != .all { return "No Matching Items" }
         return "Your Library Is Ready"
     }
@@ -315,6 +451,9 @@ struct LibraryView: View {
     private var emptyDescription: String {
         if !model.query.search.isEmpty {
             return "Try a different title, transcript phrase, summary, or tag."
+        }
+        if model.showsArchived {
+            return "Items you archive stay here until you unarchive them."
         }
         if model.selectedStatus != .all {
             return "Change the status filter to see more of your library."
@@ -330,10 +469,11 @@ struct LibraryView: View {
                 .font(Theme.caption())
                 .foregroundStyle(Theme.textSecondary)
             Spacer()
-            if model.selectedStatus != .all || model.sortOrder != .newest {
+            if model.selectedStatus != .all || model.sortOrder != .newest || model.showsArchived {
                 Button("Reset") {
                     model.selectedStatus = .all
                     model.sortOrder = .newest
+                    model.showsArchived = false
                 }
                 .font(Theme.caption())
                 .foregroundStyle(Theme.brand400)
@@ -348,6 +488,7 @@ struct LibraryView: View {
     private var filterSummary: String {
         var parts: [String] = []
         if !model.query.search.isEmpty { parts.append("Results for “\(model.query.search)”") }
+        if model.showsArchived { parts.append("Archived") }
         if model.selectedStatus != .all { parts.append(model.selectedStatus.title) }
         if model.sortOrder != .newest { parts.append(model.sortOrder.title) }
         return parts.joined(separator: " · ")
@@ -495,6 +636,57 @@ struct LibraryView: View {
             operationError = "\(failed.count) item\(failed.count == 1 ? "" : "s") couldn’t be deleted. The failed selection was kept so you can try again."
             Haptics.error()
         }
+    }
+}
+
+/// Mirrors `LibrarySummaryRow` for a recording the server does not list yet.
+private struct DeviceRecordingRow: View {
+    let recording: LocalRecording
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Theme.audioColor.opacity(0.14))
+                Image(systemName: iconName)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(isFailed ? Theme.error : Theme.audioColor)
+            }
+            .frame(width: 44, height: 44)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(recording.displayTitle)
+                    .font(Theme.body(15, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(2)
+                Text(recording.recoveryDescription)
+                    .font(Theme.caption())
+                    .foregroundStyle(isFailed ? Theme.error : Theme.textSecondary)
+                    .lineLimit(2)
+                if recording.state == .uploading {
+                    ProgressView(value: recording.uploadProgress ?? 0)
+                        .tint(Theme.brand400)
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.textMuted)
+                .accessibilityHidden(true)
+        }
+        .frame(minHeight: 58)
+        .contentShape(Rectangle())
+    }
+
+    private var isFailed: Bool {
+        [.invalid, .uploadFailed].contains(recording.state)
+    }
+
+    private var iconName: String {
+        if isFailed { return "exclamationmark.triangle.fill" }
+        return recording.isUploadInProgress ? "icloud.and.arrow.up" : "iphone"
     }
 }
 

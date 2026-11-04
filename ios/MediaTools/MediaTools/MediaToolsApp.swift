@@ -20,8 +20,41 @@ struct MediaToolsApp: App {
         if ProcessInfo.processInfo.arguments.contains("-ui-test-cold-quick-capture") {
             QuickCaptureNavigation.requestRecordTab()
         }
+        // The same two steps QuickRecordIntent performs after a cold launch.
+        if ProcessInfo.processInfo.arguments.contains("-ui-test-cold-action-button") {
+            Task { @MainActor in
+                _ = await RecordingCoordinator.shared.toggleFromSystem()
+                QuickCaptureNavigation.requestRecordTab()
+            }
+        }
+        if ProcessInfo.processInfo.arguments.contains("-ui-test-notification-route") {
+            NotificationRouter.shared.open(
+                LibraryReference(itemType: "audio", itemId: UITestAPIProtocol.audioID)
+            )
+        }
         #endif
         configureAppearance()
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-ui-test-reset-recordings") {
+            AIProcessingConsentManager.shared.resetForUITesting()
+        }
+        #endif
+        // A stored session owns anything captured from here on, including a
+        // cold Action Button press and work finishing in a background launch
+        // where no scene, and so no ContentView, ever exists.
+        // Not during a pending account deletion: a capture claimed by that account
+        // now would be removed with its data once the deletion is confirmed.
+        if let ownerID = DeviceSessionController.shared.activeUserID,
+           !AccountDeletionRecoveryService.shared.hasPendingDeletion {
+            aiProcessingConsent.setActiveOwnerID(ownerID)
+            recordingCoordinator.setActiveOwnerID(ownerID)
+            #if DEBUG
+            if arguments.contains("-ui-test-ai-consent") {
+                AIProcessingConsentManager.shared.grantForUITesting(ownerID: ownerID)
+            }
+            #endif
+        }
     }
 
     var body: some Scene {
@@ -31,6 +64,7 @@ struct MediaToolsApp: App {
                 .environment(uploadCoordinator)
                 .environment(aiProcessingConsent)
                 .environment(deviceSession)
+                .environment(NotificationRouter.shared)
                 .sheet(isPresented: Binding(
                     get: { aiProcessingConsent.isPresentingDisclosure },
                     set: { if !$0 { aiProcessingConsent.decline() } }
@@ -38,11 +72,11 @@ struct MediaToolsApp: App {
                     AIProcessingDisclosureView(manager: aiProcessingConsent)
                 }
                 .task {
-                    recordingCoordinator.importSharedItems()
+                    uploadCoordinator.processSharedItems()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     guard phase == .active else { return }
-                    recordingCoordinator.importSharedItems()
+                    uploadCoordinator.processSharedItems()
                     uploadCoordinator.resumePendingWork()
                 }
         }
@@ -54,7 +88,12 @@ struct MediaToolsApp: App {
         // Deterministic, authentication-free launch modes let UI tests and
         // manual simulator reviews exercise core screens. Release builds do
         // not contain these branches or their sample library data.
-        if ProcessInfo.processInfo.arguments.contains("-ui-test-onboarding") {
+        if ProcessInfo.processInfo.arguments.contains("-ui-test-signed-in") {
+            // The real signed-in path through ContentView, with a fixture session.
+            ContentView()
+                .environment(Clerk.shared)
+                .preferredColorScheme(.dark)
+        } else if ProcessInfo.processInfo.arguments.contains("-ui-test-onboarding") {
             OnboardingView(isComplete: .constant(false))
                 .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-welcome") {
@@ -127,8 +166,15 @@ struct MediaToolsApp: App {
     private func configureAppearance() {
         // Navigation bar
         let navAppearance = UINavigationBarAppearance()
-        navAppearance.configureWithOpaqueBackground()
-        navAppearance.backgroundColor = UIColor(Theme.surface)
+        if #available(iOS 26.0, *) {
+            // iOS 26 draws titles behind an opaque bar background, which leaves
+            // them in the accessibility tree but blank on screen. Every screen
+            // already paints Theme.surface behind a transparent bar.
+            navAppearance.configureWithTransparentBackground()
+        } else {
+            navAppearance.configureWithOpaqueBackground()
+            navAppearance.backgroundColor = UIColor(Theme.surface)
+        }
         navAppearance.titleTextAttributes = [.foregroundColor: UIColor(Theme.textPrimary)]
         navAppearance.largeTitleTextAttributes = [.foregroundColor: UIColor(Theme.textPrimary)]
         UINavigationBar.appearance().standardAppearance = navAppearance

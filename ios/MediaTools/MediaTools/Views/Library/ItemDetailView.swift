@@ -27,6 +27,8 @@ struct ItemDetailView: View {
     @State private var summary: Summary?
     @State private var isLoadingSummary = false
     @State private var summaryContentType = "general"
+    @State private var summaryError: String?
+    @State private var transcriptSummaryIsRunning = false
     @State private var showExportSheet = false
     @State private var exportText = ""
     @State private var preferences = LibraryPreferences(favorite: false, archived: false, tags: [])
@@ -45,7 +47,7 @@ struct ItemDetailView: View {
 
     private let service = MediaToolsService.shared
 
-    private let summaryTypes = [
+    private static let transcriptSummaryTypes = [
         ("general", "General"),
         ("tutorial", "Tutorial"),
         ("lecture", "Lecture"),
@@ -54,6 +56,21 @@ struct ItemDetailView: View {
         ("review", "Review"),
         ("news", "News"),
     ]
+
+    // The audio endpoint rejects anything else. Keep in sync with
+    // ValidContentTypes in internal/models/models.go.
+    private static let audioSummaryTypes = [
+        ("general", "General"),
+        ("phone_call", "Conversation"),
+        ("meeting", "Meeting"),
+        ("voice_memo", "Voice Memo"),
+        ("interview", "Interview"),
+        ("lecture", "Lecture"),
+    ]
+
+    private var summaryTypes: [(String, String)] {
+        isAudioItem ? Self.audioSummaryTypes : Self.transcriptSummaryTypes
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -69,8 +86,11 @@ struct ItemDetailView: View {
                     processingSection
                     actionButtons
                     preferencesSection
-                    summaryTypeSection
+                    if canSummarize {
+                        summaryTypeSection
+                    }
                     audioPlayerSection
+                    summaryStatusSection
                     summarySection
                     transcriptSection
                 }
@@ -264,13 +284,21 @@ struct ItemDetailView: View {
             }
             .buttonStyle(.bordered)
             .tint(Theme.brand400)
-            .disabled(isLoadingSummary || !canSummarize)
+            .disabled(isLoadingSummary || !canSummarize || isSummaryRunning)
         }
     }
 
     private var canSummarize: Bool {
         if case .pdf = item { return false }
         return canUseContentActions
+    }
+
+    /// True whether Summarize was tapped here or the server started on its own.
+    private var isSummaryRunning: Bool {
+        if let audio {
+            return ["pending", "processing"].contains(audio.summaryStatus ?? "")
+        }
+        return transcriptSummaryIsRunning
     }
 
     private var canUseContentActions: Bool {
@@ -301,6 +329,25 @@ struct ItemDetailView: View {
                         .accessibilityLabel("Transcription progress")
                         .accessibilityValue("\(progress) percent")
                 }
+            }
+            .accentCardStyle()
+        } else if let message = nonAudioFailureMessage {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("This item needs attention", systemImage: "exclamationmark.triangle.fill")
+                    .font(Theme.body(15, weight: .semibold))
+                    .foregroundStyle(Theme.error)
+                Text(message)
+                    .font(Theme.caption())
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .cardStyle()
+        } else if isNonAudioItemProcessing {
+            HStack(spacing: 12) {
+                ProgressView()
+                    .tint(Theme.brand400)
+                Text("You can leave this screen. Media Tools will keep working in the background.")
+                    .font(Theme.caption())
+                    .foregroundStyle(Theme.textSecondary)
             }
             .accentCardStyle()
         } else if let audio, audio.status == "failed" {
@@ -425,6 +472,42 @@ struct ItemDetailView: View {
     }
 
     // MARK: - Summary
+
+    private var summaryFailureMessage: String? {
+        if let summaryError { return summaryError }
+        if let audio, audio.summaryStatus == "failed" {
+            return audio.summaryErrorMessage ?? "The summary could not be generated."
+        }
+        if let summary, summary.isFailed { return summary.failureMessage }
+        return nil
+    }
+
+    @ViewBuilder
+    private var summaryStatusSection: some View {
+        if isSummaryRunning || isLoadingSummary {
+            HStack(spacing: 10) {
+                ProgressView()
+                    .tint(Theme.brand400)
+                Text("Summarizing…")
+                    .font(Theme.body(14, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardStyle(padding: 12)
+        } else if let summaryFailureMessage {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Summary needs attention", systemImage: "exclamationmark.triangle.fill")
+                    .font(Theme.body(14, weight: .semibold))
+                    .foregroundStyle(Theme.error)
+                Text(summaryFailureMessage)
+                    .font(Theme.caption())
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardStyle(padding: 12)
+        }
+    }
 
     @ViewBuilder
     private var summarySection: some View {
@@ -701,9 +784,9 @@ struct ItemDetailView: View {
 
     private var title: String {
         switch item {
-        case .transcript(let t): t.displayTitle
+        case .transcript(let t): (transcript ?? t).displayTitle
         case .audio(let a): (audio ?? a).displayTitle
-        case .pdf(let p): p.displayTitle
+        case .pdf(let p): (pdf ?? p).displayTitle
         }
     }
 
@@ -741,17 +824,17 @@ struct ItemDetailView: View {
 
     private var statusText: String {
         switch item {
-        case .transcript(let t): t.status
+        case .transcript(let t): (transcript ?? t).status
         case .audio(let a): (audio ?? a).status
-        case .pdf(let p): p.status
+        case .pdf(let p): (pdf ?? p).status
         }
     }
 
     private var wordCount: Int? {
         switch item {
-        case .transcript(let t): t.wordCount
+        case .transcript(let t): (transcript ?? t).wordCount
         case .audio(let a): (audio ?? a).wordCount
-        case .pdf(let p): p.wordCount
+        case .pdf(let p): (pdf ?? p).wordCount
         }
     }
 
@@ -789,6 +872,30 @@ struct ItemDetailView: View {
         }
     }
 
+    private var nonAudioFailureMessage: String? {
+        if let transcript, transcript.status == "failed" {
+            return transcript.errorMessage ?? "This video could not be transcribed."
+        }
+        if let pdf, pdf.status == "failed" {
+            return pdf.errorMessage ?? "This PDF could not be processed."
+        }
+        return nil
+    }
+
+    private var isNonAudioItemProcessing: Bool {
+        let status = transcript?.status ?? pdf?.status ?? ""
+        return ["pending", "processing"].contains(status)
+    }
+
+    private var needsDetailPolling: Bool {
+        if let audio {
+            return ["pending", "processing"].contains(audio.status)
+                || ["pending", "processing"].contains(audio.formattingStatus ?? "none")
+                || isSummaryRunning
+        }
+        return isNonAudioItemProcessing || isSummaryRunning
+    }
+
     private func formatDuration(_ seconds: Double) -> String {
         let mins = Int(seconds) / 60
         let secs = Int(seconds) % 60
@@ -801,29 +908,18 @@ struct ItemDetailView: View {
             switch item {
             case .transcript(let t):
                 transcript = try await service.getTranscript(t.id)
+                await loadTranscriptSummary()
             case .audio(let a):
-                audio = try await service.getAudioItem(a.id)
-                if let audio, audio.summaryStatus == "completed" {
-                    summary = Summary(
-                        id: audio.id,
-                        transcriptId: nil,
-                        summaryText: audio.summaryText,
-                        keyPoints: audio.keyPoints,
-                        actionItems: audio.actionItems,
-                        topics: nil,
-                        status: audio.summaryStatus,
-                        message: nil,
-                        errorMessage: audio.summaryErrorMessage,
-                        evidence: audio.summaryEvidence
-                    )
+                let loaded = try await service.getAudioItem(a.id)
+                if Self.audioSummaryTypes.contains(where: { $0.0 == loaded.contentType }) {
+                    summaryContentType = loaded.contentType ?? summaryContentType
                 }
-                if let audio,
-                   ["pending", "processing"].contains(audio.status)
-                    || ["pending", "processing"].contains(audio.formattingStatus ?? "none") {
-                    startDetailPolling()
-                }
+                applyAudio(loaded)
             case .pdf(let p):
                 pdf = try await service.getPDF(p.id)
+            }
+            if needsDetailPolling {
+                startDetailPolling()
             }
         } catch {
             detailError = error.localizedDescription
@@ -837,11 +933,41 @@ struct ItemDetailView: View {
             detailError = error.localizedDescription
         }
 
+        await loadSegments()
+    }
+
+    private func loadSegments() async {
         do {
             segments = try await service.getMediaSegments(itemType: chatItemType, itemId: itemId)
         } catch {
             // Legacy items may predate source segments; plain text remains usable.
             print("Failed to load source segments: \(error)")
+        }
+    }
+
+    /// A server response is the source of truth for the summary, which may have
+    /// been started by the server rather than by this screen.
+    private func applyAudio(_ updated: AudioTranscription) {
+        audio = updated
+        if updated.summaryStatus == "completed" {
+            summary = service.audioSummary(from: updated)
+            summaryError = nil
+        }
+    }
+
+    private func loadTranscriptSummary() async {
+        guard let summaries = try? await service.getSummaries(transcriptId: itemId),
+              let latest = summaries.first
+        else {
+            transcriptSummaryIsRunning = false
+            return
+        }
+        let hasText = latest.summaryText?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty == false
+        transcriptSummaryIsRunning = !hasText && !latest.isFailed
+        if hasText || latest.isFailed {
+            summary = latest
         }
     }
 
@@ -945,7 +1071,7 @@ struct ItemDetailView: View {
         detailError = nil
         defer { isRenaming = false }
         do {
-            audio = try await service.renameAudioItem(itemId, name: nextName)
+            applyAudio(try await service.renameAudioItem(itemId, name: nextName))
             showRenameSheet = false
             Haptics.success()
         } catch {
@@ -993,7 +1119,7 @@ struct ItemDetailView: View {
         detailError = nil
         defer { isRetrying = false }
         do {
-            audio = try await service.retryAudioItem(itemId)
+            applyAudio(try await service.retryAudioItem(itemId))
             Haptics.light()
             startDetailPolling()
         } catch {
@@ -1009,7 +1135,7 @@ struct ItemDetailView: View {
         detailError = nil
         defer { isFormattingTranscript = false }
         do {
-            audio = try await service.formatAudioTranscript(itemId)
+            applyAudio(try await service.formatAudioTranscript(itemId))
             transcriptViewMode = .readable
             Haptics.light()
             startDetailPolling()
@@ -1023,13 +1149,19 @@ struct ItemDetailView: View {
         detailPollingTask?.cancel()
         pollingWarning = nil
         detailPollingTask = Task {
-            while !Task.isCancelled,
-                  let current = audio,
-                  ["pending", "processing"].contains(current.status)
-                    || ["pending", "processing"].contains(current.formattingStatus ?? "none") {
+            let wasProcessing = !["completed", "failed"].contains(statusText)
+            while !Task.isCancelled, needsDetailPolling {
                 do {
                     try await Task.sleep(for: .seconds(3))
-                    audio = try await service.getAudioItem(itemId)
+                    switch item {
+                    case .audio:
+                        applyAudio(try await service.getAudioItem(itemId))
+                    case .transcript:
+                        transcript = try await service.getTranscript(itemId)
+                        await loadTranscriptSummary()
+                    case .pdf:
+                        pdf = try await service.getPDF(itemId)
+                    }
                     pollingWarning = nil
                 } catch is CancellationError {
                     return
@@ -1041,7 +1173,11 @@ struct ItemDetailView: View {
                 }
             }
             pollingWarning = nil
-            if audio?.status == "completed" { Haptics.success() }
+            guard !Task.isCancelled, wasProcessing, statusText == "completed" else { return }
+            // Segments are only written once the transcript exists, so the load
+            // made when this screen opened came back empty.
+            await loadSegments()
+            Haptics.success()
         }
     }
 
@@ -1091,6 +1227,7 @@ struct ItemDetailView: View {
         guard await aiProcessingConsent.requestPermission() else { return }
         guard !isLoadingSummary else { return }
         isLoadingSummary = true
+        summaryError = nil
         Haptics.light()
         defer { isLoadingSummary = false }
         do {
@@ -1101,6 +1238,7 @@ struct ItemDetailView: View {
                 result = try await service.getSummary(transcriptId: itemId, contentType: selectedContentType)
             case .audio:
                 result = try await service.summarizeAudio(audioId: itemId, contentType: selectedContentType)
+                audio = service.audioItems.first { $0.id == itemId } ?? audio
             case .pdf:
                 throw APIError.httpError(statusCode: 400, message: "PDF summaries are not available yet")
             }
@@ -1109,8 +1247,8 @@ struct ItemDetailView: View {
             }
             Haptics.success()
         } catch {
+            summaryError = error.localizedDescription
             Haptics.error()
-            print("Summary failed: \(error)")
         }
     }
 }
@@ -1160,38 +1298,36 @@ struct ExportSheet: View {
     let text: String
     let title: String
     @Environment(\.dismiss) private var dismiss
+    @State private var files: [ExportFile] = []
+    @State private var exportError: String?
+
+    private struct ExportFile: Identifiable {
+        let label: String
+        let icon: String
+        let url: URL
+        var id: String { label }
+    }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 12) {
-                Button {
-                    shareText(text, as: "\(title).txt")
-                } label: {
-                    Label("Plain Text (.txt)", systemImage: "doc.text")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .cardStyle(padding: 14)
-
-                Button {
-                    let md = "# \(title)\n\n\(text)"
-                    shareText(md, as: "\(title).md")
-                } label: {
-                    Label("Markdown (.md)", systemImage: "doc.richtext")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .cardStyle(padding: 14)
-
-                Button {
-                    let json: [String: Any] = ["title": title, "text": text]
-                    if let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
-                       let jsonString = String(data: data, encoding: .utf8) {
-                        shareText(jsonString, as: "\(title).json")
+                // ShareLink presents from this sheet. Presenting from the root
+                // view controller failed silently, because that controller was
+                // already busy presenting this sheet.
+                ForEach(files) { file in
+                    ShareLink(item: file.url) {
+                        Label(file.label, systemImage: file.icon)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(minHeight: 44)
                     }
-                } label: {
-                    Label("JSON (.json)", systemImage: "curlybraces")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    .cardStyle(padding: 14)
                 }
-                .cardStyle(padding: 14)
+
+                if let exportError {
+                    Text(exportError)
+                        .font(Theme.caption())
+                        .foregroundStyle(Theme.error)
+                }
 
                 Spacer()
             }
@@ -1208,18 +1344,38 @@ struct ExportSheet: View {
         }
         .presentationDetents([.medium])
         .preferredColorScheme(.dark)
+        .task { prepareFiles() }
     }
 
-    private func shareText(_ content: String, as filename: String) {
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-        try? content.write(to: tempURL, atomically: true, encoding: .utf8)
-
-        let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = windowScene.windows.first?.rootViewController {
-            root.present(activityVC, animated: true)
+    private func prepareFiles() {
+        guard files.isEmpty else { return }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        // A title can contain "/" or ":", which would otherwise fail the write
+        // and leave nothing to share.
+        let safeTitle = title
+            .components(separatedBy: CharacterSet(charactersIn: "/\\:?%*|\"<>"))
+            .joined(separator: "-")
+        let jsonData = try? JSONSerialization.data(
+            withJSONObject: ["title": title, "text": text],
+            options: .prettyPrinted
+        )
+        let formats: [(String, String, String, Data?)] = [
+            ("Plain Text (.txt)", "doc.text", "txt", Data(text.utf8)),
+            ("Markdown (.md)", "doc.richtext", "md", Data("# \(title)\n\n\(text)".utf8)),
+            ("JSON (.json)", "curlybraces", "json", jsonData),
+        ]
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            files = try formats.compactMap { label, icon, fileExtension, data in
+                guard let data else { return nil }
+                let url = directory.appendingPathComponent("\(safeTitle).\(fileExtension)")
+                try data.write(to: url, options: .atomic)
+                return ExportFile(label: label, icon: icon, url: url)
+            }
+        } catch {
+            exportError = "The export could not be prepared: \(error.localizedDescription)"
         }
-        dismiss()
     }
 }
 

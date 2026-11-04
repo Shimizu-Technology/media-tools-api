@@ -8,8 +8,9 @@ struct MainTabView: View {
         case settings
     }
 
-    @State private var selectedTab: TabSelection = .home
+    @State private var selectedTab: TabSelection = .library
     @State private var libraryModel = LibraryViewModel()
+    @Environment(NotificationRouter.self) private var notificationRouter
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -25,7 +26,10 @@ struct MainTabView: View {
 
             Tab("Library", systemImage: "books.vertical", value: .library) {
                 NavigationStack {
-                    LibraryView(model: libraryModel)
+                    LibraryView(
+                        model: libraryModel,
+                        onOpenRecord: { selectedTab = .record }
+                    )
                 }
             }
 
@@ -57,6 +61,10 @@ struct MainTabView: View {
             if QuickCaptureNavigation.consumeRecordTabRequest() {
                 selectedTab = .record
             }
+            openPendingNotificationRoute()
+        }
+        .onChange(of: notificationRouter.pendingReference) { _, _ in
+            openPendingNotificationRoute()
         }
         .onReceive(NotificationCenter.default.publisher(for: .mediaToolsQuickCapture)) { _ in
             // Consume the persisted fallback as well so a later onAppear does
@@ -64,5 +72,11 @@ struct MainTabView: View {
             _ = QuickCaptureNavigation.consumeRecordTabRequest()
             selectedTab = .record
         }
+    }
+
+    private func openPendingNotificationRoute() {
+        guard let reference = notificationRouter.consume() else { return }
+        selectedTab = .library
+        libraryModel.presentedReference = reference
     }
 }

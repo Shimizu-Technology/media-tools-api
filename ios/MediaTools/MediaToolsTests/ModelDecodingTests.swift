@@ -1834,6 +1834,14 @@ private final class SuspendedRecordingUploadService: RecordingUploadServicing {
         }
     }
 
+    func importSharedLink(_ link: String, expectedOwnerID: String?) async throws {}
+
+    func importSharedPDF(
+        fileURL: URL,
+        filename: String,
+        expectedOwnerID: String?
+    ) async throws {}
+
     func resumeCompletion(_ item: AudioTranscription) {
         completionContinuation?.resume(returning: item)
         completionContinuation = nil
