@@ -2,17 +2,19 @@
  * API client for the Media Tools API.
  * 
  * In development, Vite proxies /api requests to localhost:8080.
- * In production, VITE_API_URL points to the Render backend.
+ * In production the same-origin /api path is proxied to the backend by Netlify.
  */
 import {
   getAuthHeadersAsync,
   getAuthUploadHeadersAsync,
-  getRefreshedClerkHeaders,
 } from './apiAuth';
 import { notifyLibraryActivityChanged } from './libraryActivityEvents';
-import { isWebSessionActive, renewWebSession, setWebSessionActive, webSessionEnabled } from './webSession';
+import { isWebSessionActive, localApiKeyMode, renewWebSession, setConnectionDegraded, setWebSessionActive } from './webSession';
 
-const API_BASE = !webSessionEnabled && import.meta.env.VITE_API_URL
+// Cookie sessions need the same origin, so production always uses the relative
+// path (Netlify proxies it to the API). A separate API host is a local
+// API-key development convenience only.
+const API_BASE = localApiKeyMode && import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api/v1`
   : '/api/v1';
 
@@ -352,13 +354,8 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  clerk_id?: string;
+  email_verified?: boolean;
   created_at: string;
-}
-
-export interface AuthResponse {
-  token: string;
-  user: User;
 }
 
 export interface WorkspaceResponse {
@@ -434,34 +431,47 @@ async function getUploadHeaders(): Promise<Record<string, string>> {
 }
 
 /**
- * Replay one rejected Clerk request with a freshly minted session token.
- * Clerk caches short-lived JWTs, so a tab restored after auth configuration or
- * session state changes can otherwise remain stuck on 401 until a manual
- * sign-out. Request bodies in this client are replayable strings or FormData.
+ * Every API call goes through here. A rejected session cookie is renewed once
+ * and the request replayed. Only an explicit "invalid session" answer signs the
+ * browser out: a network failure, 5xx or throttled renewal keeps the session and
+ * marks the connection degraded so the UI can offer a retry.
  */
-async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const response = await fetch(input, init);
-  if (response.status !== 401) return response;
-  if (isWebSessionActive()) {
-    const renewal = await renewWebSession();
-    if (renewal === 'renewed') return fetch(input, init);
-    if (renewal === 'retry') return retryWebSessionResponse();
-    setWebSessionActive(false);
+export async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const response = await trackedFetch(input, init);
+  if (response.status !== 401 || !isWebSessionActive()) return response;
+  const renewal = await renewWebSession();
+  if (renewal === 'renewed') return trackedFetch(input, init);
+  if (renewal === 'retry') {
+    setConnectionDegraded(true);
+    return retryWebSessionResponse();
   }
-
-  const existingHeaders = new Headers(init?.headers);
-  const isMultipart = init?.body instanceof FormData;
-  const refreshedHeaders = await getRefreshedClerkHeaders(!isMultipart);
-  if (!refreshedHeaders) return response;
-
-  for (const [key, value] of Object.entries(refreshedHeaders)) {
-    existingHeaders.set(key, value);
-  }
-  if (isMultipart) existingHeaders.delete('Content-Type');
-
-  return fetch(input, { ...init, headers: existingHeaders });
+  setWebSessionActive(false);
+  return response;
 }
 
+async function trackedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(input, init);
+  } catch (error) {
+    setConnectionDegraded(true);
+    throw error;
+  }
+  setConnectionDegraded(await isOutageResponse(response));
+  return response;
+}
+
+/**
+ * A gateway error or an error page from the proxy means the API is unreachable.
+ * A 503 the API itself sent about one feature (for example "transcription is
+ * not configured") is a normal answer and must not look like an outage.
+ */
+async function isOutageResponse(response: Response): Promise<boolean> {
+  if (response.status === 502 || response.status === 504) return true;
+  if (response.status !== 503) return false;
+  const body = await response.clone().json().catch(() => null) as { error?: string } | null;
+  return !body?.error || body.error === 'authentication_unavailable';
+}
 
 function retryWebSessionResponse(): Response {
   return new Response(JSON.stringify({
@@ -476,7 +486,7 @@ function retryWebSessionResponse(): Response {
 
 function getAPIKeyHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const apiKey = localStorage.getItem('mta_api_key');
+  const apiKey = localApiKeyMode ? localStorage.getItem('mta_api_key') : null;
   if (apiKey) headers['X-API-Key'] = apiKey;
   return headers;
 }
@@ -488,6 +498,8 @@ async function handleResponse<T>(response: Response): Promise<T> {
       message: `HTTP ${response.status}: ${response.statusText}`,
       code: response.status,
     }));
+    // A body from a proxy or an older route may omit the numeric code.
+    if (typeof error.code !== 'number') error.code = response.status;
     const retryAfter = Number.parseInt(response.headers.get('Retry-After') || '', 10);
     if (Number.isFinite(retryAfter) && retryAfter > 0) {
       error.retry_after_seconds = retryAfter;
@@ -523,11 +535,11 @@ export interface AccountDeletionResponse {
   cleanup_after: string;
 }
 
-export async function deleteAccount(confirmation: 'DELETE'): Promise<AccountDeletionResponse> {
+export async function deleteAccount(confirmation: 'DELETE', currentPassword?: string): Promise<AccountDeletionResponse> {
   const res = await fetchWithAuth(`${API_BASE}/account`, {
     method: 'DELETE',
     headers: await getHeaders(),
-    body: JSON.stringify({ confirmation }),
+    body: JSON.stringify(currentPassword ? { confirmation, current_password: currentPassword } : { confirmation }),
   });
   return handleResponse<AccountDeletionResponse>(res);
 }
@@ -999,34 +1011,6 @@ export async function deletePDFExtraction(id: string): Promise<void> {
     }));
     throw error;
   }
-}
-
-// ── Auth (MTA-20) ──
-
-export async function register(email: string, password: string, name: string): Promise<AuthResponse> {
-  const res = await fetchWithAuth(`${API_BASE}/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, name }),
-  });
-  return handleResponse<AuthResponse>(res);
-}
-
-export async function login(email: string, password: string): Promise<AuthResponse> {
-  const res = await fetchWithAuth(`${API_BASE}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  return handleResponse<AuthResponse>(res);
-}
-
-export async function refreshToken(): Promise<AuthResponse> {
-  const res = await fetchWithAuth(`${API_BASE}/auth/refresh`, {
-    method: 'POST',
-    headers: await getHeaders(),
-  });
-  return handleResponse<AuthResponse>(res);
 }
 
 // ── Workspace (MTA-20) ──

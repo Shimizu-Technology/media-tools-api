@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle, LoaderCircle, Trash2 } from 'lucide-react';
 import { deleteAccount, getErrorMessage } from '../lib/api';
 import { useAuthContext } from '../contexts/useAuthContext';
+import { getPasswordStatus } from '../lib/accountAuth';
+import { PasswordField } from './auth/fields';
 
 const accountStorageKeys = [
   'mta_active_audio_transcription_id',
   'mta_api_key',
-  'mta_jwt_token',
   'mta_transcript_ids',
 ];
 
@@ -18,7 +19,7 @@ function clearLocalAccountState() {
 
 /**
  * Presents Media Tools' destructive account-deletion confirmation and routes
- * the request through the application purge before Clerk sign-out.
+ * the request through the application purge before signing out.
  */
 export function DeleteAccountSection() {
   const { signOut } = useAuthContext();
@@ -26,13 +27,25 @@ export function DeleteAccountSection() {
   const [confirmation, setConfirmation] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [password, setPassword] = useState('');
+  // Accounts with a password must re-enter it. If the check fails, offer the
+  // field anyway: the server remains the authority and rejects a missing password.
+  const [passwordState, setPasswordState] = useState<'unknown' | 'required' | 'none'>('unknown');
+  const needsPassword = passwordState !== 'none';
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    getPasswordStatus().then((status) => { if (!cancelled) setPasswordState(status.configured ? 'required' : 'none'); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [isOpen]);
 
   const permanentlyDelete = async () => {
-    if (confirmation !== 'DELETE') return;
+    if (confirmation !== 'DELETE' || (passwordState === 'required' && !password)) return;
     setIsDeleting(true);
     setError(null);
     try {
-      await deleteAccount('DELETE');
+      await deleteAccount('DELETE', password || undefined);
       clearLocalAccountState();
       try {
         await signOut();
@@ -74,10 +87,11 @@ export function DeleteAccountSection() {
           <p className="mt-1 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>Application data is purged immediately. Secure storage and identity-provider cleanup continue durably in the background.</p>
           <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--color-text-muted)' }} htmlFor="delete-account-confirmation">Confirmation</label>
           <input id="delete-account-confirmation" value={confirmation} onChange={(event) => setConfirmation(event.target.value.toUpperCase())} disabled={isDeleting} autoComplete="off" className="mt-2 min-h-11 w-full rounded-xl border bg-transparent px-3 font-mono text-sm outline-none transition focus:ring-2" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }} placeholder="DELETE" />
+          {needsPassword && <div className="mt-4"><PasswordField label="Current password" value={password} onChange={(event) => setPassword(event.target.value)} disabled={isDeleting} autoComplete="current-password" hint="If your account has no password yet, leave this blank." /></div>}
           {error && <p role="alert" className="mt-3 text-sm" style={{ color: 'var(--color-error)' }}>{error}</p>}
           <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <button type="button" disabled={isDeleting} onClick={() => { setIsOpen(false); setConfirmation(''); setError(null); }} className="min-h-11 rounded-xl px-4 text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Cancel</button>
-            <button type="button" disabled={confirmation !== 'DELETE' || isDeleting} onClick={() => void permanentlyDelete()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45" style={{ backgroundColor: 'var(--color-error)', color: 'var(--color-on-brand)' }}>
+            <button type="button" disabled={isDeleting} onClick={() => { setIsOpen(false); setConfirmation(''); setPassword(''); setError(null); }} className="min-h-11 rounded-xl px-4 text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Cancel</button>
+            <button type="button" disabled={confirmation !== 'DELETE' || isDeleting || (passwordState === 'required' && !password)} onClick={() => void permanentlyDelete()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45" style={{ backgroundColor: 'var(--color-error)', color: 'var(--color-on-brand)' }}>
               {isDeleting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               {isDeleting ? 'Deleting…' : 'Permanently delete account'}
             </button>

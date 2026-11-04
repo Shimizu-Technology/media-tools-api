@@ -13,7 +13,7 @@ interface SaveToWorkspaceProps {
 /**
  * Save to Workspace button — shown on transcript/audio/PDF results.
  * Uses AuthContext for reactive auth state (re-renders on sign-in/sign-out).
- * Works with both Clerk and API key auth.
+ * Works with account sessions and local API-key mode.
  */
 export function SaveToWorkspace({ itemType, itemId }: SaveToWorkspaceProps) {
   const { isAuthenticated, canUseWorkspace } = useAuthContext();

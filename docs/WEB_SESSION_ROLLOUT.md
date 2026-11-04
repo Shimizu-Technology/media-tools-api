@@ -6,6 +6,19 @@ bridge that links a verified existing Clerk subject to the same stable
 `users.id`; it is not required after a user has enrolled a password or passkey
 and saved recovery codes.
 
+## Web client (workstream E)
+
+The web build has no Clerk code and no browser-side auth switch. It always uses
+the cookie session below, with email and password screens for sign-up, sign-in,
+forgot password, change password and email, usage, and signed-in devices
+(`docs/AUTH_API.md`). Consequently the server flags in step 6 must be on **before**
+this frontend deploys: against a server with `WEB_COOKIE_AUTH_ENABLED` off the
+site shows a "can't reach" retry instead of a sign-in form. `VITE_API_URL`,
+`VITE_CLERK_PUBLISHABLE_KEY` and `VITE_WEB_COOKIE_AUTH_ENABLED` are no longer
+read; remove them from Netlify after the deploy. Only a 401 from the session
+routes signs the browser out. Offline, 5xx, 429 and CSRF/Origin refusals keep the
+session and show a retry. Local API-key mode exists only under `vite dev`.
+
 ## Security contract
 
 - Access, refresh, and pending-successor cookies are host-only, HttpOnly,
@@ -52,16 +65,14 @@ and saved recovery codes.
    rollout. Verify readiness, password enrollment, sign-in, response-loss
    retry, replacement revocation, passkey/recovery fallback, and sign-out on
    the physical iPhone. Keep `WEB_COOKIE_AUTH_ENABLED=false`.
-6. For the later browser rollout, enable `WEB_COOKIE_AUTH_ENABLED`, then build
-   the frontend with `VITE_WEB_COOKIE_AUTH_ENABLED=true` and no
-   `VITE_API_URL`. `VITE_CLERK_PUBLISHABLE_KEY` may remain during migration, but
-   also test a build without it: passkey restore, passkey sign-in, Settings
-   enrollment, recovery-code sign-in and rotation, account deletion, and
-   sign-out must still work.
+6. For the later browser rollout, set `FIRST_PARTY_PASSWORD_AUTH_ENABLED` and
+   `WEB_COOKIE_AUTH_ENABLED`, then deploy the frontend (it needs no build
+   variables). Test: password sign-in, forgot password for an account with no
+   password, passkey restore and sign-in, Settings enrollment, recovery-code
+   sign-in and rotation, account deletion (asks for the password), and sign-out.
 7. On the existing owner account, confirm the same stable user and media appear,
    create a password or enroll a passkey, save recovery codes, sign out, sign in with the first-party method,
-   reload after access expiry, simulate a lost finish response, and verify the
-   previous Clerk sign-in can still bridge only the same account.
+   reload after access expiry, and simulate a lost finish response.
 
 The browser session remains valid for up to 365 days of inactivity. Access
 credentials last 15 minutes and renew through the prepared-successor flow.
@@ -69,12 +80,12 @@ Sign-out revokes the current device session before clearing browser state.
 
 ## Rollback
 
-Disable `VITE_WEB_COOKIE_AUTH_ENABLED` first so new browser traffic stops using
-cookie auth. Then disable `WEB_COOKIE_AUTH_ENABLED` after in-flight traffic has
-drained. Keep `FIRST_PARTY_AUTH_ENABLED` while native clients use first-party
+The web client has no Clerk fallback, so rolling back the browser means
+redeploying the previous Netlify build, not flipping a variable. Disable
+`WEB_COOKIE_AUTH_ENABLED` only after that deploy is live and in-flight traffic
+has drained. Keep `FIRST_PARTY_AUTH_ENABLED` while native clients use first-party
 sessions. Do not remove migrations or delete session rows during rollback.
-Clerk remains the temporary fallback until password or passkey plus recovery sign-in have
-been verified on the owner account and future-user onboarding is available.
+The server's Clerk bridge stays until iOS and Android drop Clerk (workstream I).
 If first-party auth must be rolled back temporarily, leave
 `CLERK_MIGRATION_ONLY=true`; reopening Clerk account creation would bypass
 invite-only onboarding. Disable the migration guard only as a deliberate policy

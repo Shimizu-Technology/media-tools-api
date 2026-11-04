@@ -18,6 +18,7 @@ import {
   Settings,
   X,
 } from 'lucide-react';
+import { ConnectionBanner } from './ConnectionBanner';
 import { useAuthContext } from '../contexts/useAuthContext';
 import { LibraryActivityProvider } from '../contexts/LibraryActivityContext';
 import { useLibraryActivity } from '../contexts/useLibraryActivity';
@@ -87,7 +88,7 @@ function AppShellContent() {
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'; } catch { return false; }
   });
-  const { user, accountAuthEnabled, isAuthenticated, isFirstPartySession } = useAuthContext();
+  const { user, accountAuthEnabled, isAuthenticated } = useAuthContext();
   const { activeJobCount } = useLibraryActivity();
   const page = getPageContext(location.pathname);
 
@@ -152,14 +153,14 @@ function AppShellContent() {
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}>
       <aside className={`fixed inset-y-0 left-0 z-40 hidden border-r backdrop-blur-xl transition-[width] duration-200 lg:flex lg:flex-col ${collapsed ? 'w-20' : 'w-64'}`} style={{ backgroundColor: 'var(--color-sidebar-bg)', borderColor: 'var(--color-border)' }}>
-        <SidebarContent collapsed={collapsed} onToggleCollapsed={toggleCollapsed} userName={userName} accountAuthEnabled={accountAuthEnabled} isFirstPartySession={isFirstPartySession} activeJobs={activeJobCount} />
+        <SidebarContent collapsed={collapsed} onToggleCollapsed={toggleCollapsed} userName={userName} accountAuthEnabled={accountAuthEnabled} activeJobs={activeJobCount} />
       </aside>
 
       {mobileOpen && (
         <div ref={mobileDialogRef} className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Workspace navigation">
           <button tabIndex={-1} className="absolute inset-0 backdrop-blur-sm" style={{ backgroundColor: 'var(--color-modal-scrim)' }} aria-label="Close navigation" onClick={() => setMobileOpen(false)} />
           <aside className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[340px] flex-col border-r shadow-2xl" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-            <SidebarContent collapsed={false} onToggleCollapsed={toggleCollapsed} userName={userName} accountAuthEnabled={accountAuthEnabled} isFirstPartySession={isFirstPartySession} activeJobs={activeJobCount} mobile onNavigate={() => setMobileOpen(false)} />
+            <SidebarContent collapsed={false} onToggleCollapsed={toggleCollapsed} userName={userName} accountAuthEnabled={accountAuthEnabled} activeJobs={activeJobCount} mobile onNavigate={() => setMobileOpen(false)} />
           </aside>
           <button className="absolute left-[calc(min(86vw,340px)+0.75rem)] top-4 flex h-11 w-11 items-center justify-center rounded-full border backdrop-blur" style={{ backgroundColor: 'var(--color-modal-control)', borderColor: 'var(--color-modal-control-border)', color: 'var(--color-on-brand)' }} onClick={() => setMobileOpen(false)} aria-label="Close navigation">
             <X className="h-5 w-5" />
@@ -197,6 +198,7 @@ function AppShellContent() {
           </div>
         </header>
 
+        <ConnectionBanner />
         <main className="min-h-[calc(100vh-4rem)] px-4 pb-28 pt-5 sm:px-6 sm:pt-7 lg:px-8 lg:pb-8">
           <Outlet />
         </main>
@@ -207,12 +209,11 @@ function AppShellContent() {
   );
 }
 
-function SidebarContent({ collapsed, onToggleCollapsed, userName, accountAuthEnabled, isFirstPartySession, activeJobs, mobile = false, onNavigate }: {
+function SidebarContent({ collapsed, onToggleCollapsed, userName, accountAuthEnabled, activeJobs, mobile = false, onNavigate }: {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   userName: string;
   accountAuthEnabled: boolean;
-  isFirstPartySession: boolean;
   activeJobs: number;
   mobile?: boolean;
   onNavigate?: () => void;
@@ -248,7 +249,7 @@ function SidebarContent({ collapsed, onToggleCollapsed, userName, accountAuthEna
 
       <div className={`mt-4 border-t pt-4 ${collapsed ? 'px-0' : 'px-2'}`} style={{ borderColor: 'var(--color-border)' }}>
         <NavLink to="/app/settings" onClick={onNavigate} className={({ isActive }) => navClass(isActive, collapsed)} title="Settings"><Settings className="h-5 w-5 shrink-0" />{!collapsed && <span>Settings</span>}</NavLink>
-        {!collapsed && <div className="mt-3 rounded-2xl border p-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}><p className="truncate text-sm font-semibold">{userName}</p><p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>{accountAuthEnabled ? (isFirstPartySession ? 'Durable browser session' : 'Previous sign-in provider') : 'API key development mode'}</p></div>}
+        {!collapsed && <div className="mt-3 rounded-2xl border p-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}><p className="truncate text-sm font-semibold">{userName}</p><p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>{accountAuthEnabled ? 'Durable browser session' : 'API key development mode'}</p></div>}
       </div>
     </div>
   );

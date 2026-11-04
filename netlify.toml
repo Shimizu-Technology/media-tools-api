@@ -16,3 +16,17 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Security headers for the served app. The API keeps its own policy.
+# - style-src-attr: components set inline style attributes.
+# - connect-src amazonaws.com: audio uploads PUT straight to a presigned S3 URL
+#   (the app falls back to the API on any failure, so a missing origin here would
+#   silently push large files through the Netlify proxy instead).
+# - frame-src youtube.com: the source-video player on transcript pages.
+# No Clerk origins: the web app no longer loads Clerk.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' https://api.fontshare.com https://fonts.googleapis.com; style-src-attr 'unsafe-inline'; font-src 'self' https://cdn.fontshare.com https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob: https://*.amazonaws.com; connect-src 'self' https://*.amazonaws.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"

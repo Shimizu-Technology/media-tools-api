@@ -1,50 +1,41 @@
 /**
- * AuthContext — provides a consistent auth interface whether Clerk is enabled or not.
+ * AuthContext — reactive account state for components.
  *
- * Pattern from Brain Dump CLERK_AUTH_SETUP_GUIDE:
- * - Provides reactive isAuthenticated state for components
- * - Manages token getter for the API client
- * - Works with or without Clerk
+ * App owns the browser-session lifecycle and passes the result in, so this
+ * provider stays a plain container that is easy to render in tests.
  */
 import type { ReactNode } from 'react';
 import type { User } from '../lib/api';
+import type { SessionPhase } from '../lib/webSession';
 import { AuthContext } from './authContextValue';
 
 interface AuthProviderProps {
   children: ReactNode;
-  isClerkEnabled: boolean;
   accountAuthEnabled: boolean;
-  isFirstPartySession: boolean;
-  isPreviousProviderSignedIn?: boolean;
+  phase?: SessionPhase;
   isAuthenticated: boolean;
   isLoading: boolean;
   canUseWorkspace: boolean;
   user?: User | null;
   refreshUser?: () => Promise<void>;
+  retrySession?: () => Promise<void>;
   signOut?: () => Promise<void>;
-  leavePreviousProviderForOnboarding?: () => Promise<void>;
 }
 
-/**
- * Generic auth provider — receives auth state from parent.
- * This decouples the context from Clerk hooks so it works outside ClerkProvider.
- */
 export function AuthProvider({
   children,
-  isClerkEnabled,
   accountAuthEnabled,
-  isFirstPartySession,
-  isPreviousProviderSignedIn = false,
+  phase = 'checking',
   isAuthenticated,
   isLoading,
   canUseWorkspace,
   user = null,
   refreshUser = async () => undefined,
+  retrySession = async () => undefined,
   signOut = async () => undefined,
-  leavePreviousProviderForOnboarding = async () => undefined,
 }: AuthProviderProps) {
   return (
-    <AuthContext.Provider value={{ isClerkEnabled, accountAuthEnabled, isFirstPartySession, isPreviousProviderSignedIn, isAuthenticated, isLoading, canUseWorkspace, user, refreshUser, signOut, leavePreviousProviderForOnboarding }}>
+    <AuthContext.Provider value={{ accountAuthEnabled, phase, isAuthenticated, isLoading, isUnavailable: phase === 'unavailable', canUseWorkspace, user, refreshUser, retrySession, signOut }}>
       {children}
     </AuthContext.Provider>
   );

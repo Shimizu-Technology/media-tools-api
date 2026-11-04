@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { KeyRound, Loader2 } from 'lucide-react';
 import { PasskeyError, passkeysSupported, signInWithPasskey } from '../lib/passkeys';
 
-export function PasskeySignInButton({ onSuccess, className = '' }: { onSuccess?: () => void; className?: string }) {
+export function PasskeySignInButton({ onSuccess, className = '', variant = 'primary' }: { onSuccess?: () => void; className?: string; variant?: 'primary' | 'secondary' }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const supported = passkeysSupported();
@@ -32,8 +32,8 @@ export function PasskeySignInButton({ onSuccess, className = '' }: { onSuccess?:
         type="button"
         onClick={() => void signIn()}
         disabled={pending || !supported}
-        className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
-        style={{ backgroundColor: 'var(--color-brand-500)' }}
+        className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${variant === 'primary' ? 'text-white hover:-translate-y-0.5' : 'border hover:bg-[var(--color-nav-hover)]'} ${className}`}
+        style={variant === 'primary' ? { backgroundColor: 'var(--color-brand-500)' } : { borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
       >
         {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
         {pending ? 'Checking passkey…' : 'Sign in with a passkey'}

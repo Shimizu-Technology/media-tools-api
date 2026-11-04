@@ -1,8 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
-import { SignInButton } from '@clerk/clerk-react'
-import { useSearchParams, useNavigate } from 'react-router-dom'
+import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, LogIn, Video } from 'lucide-react'
-import { ApiKeySetup } from '../components/ApiKeySetup'
+import { LocalApiKeySetup } from '../components/LocalApiKeySetup'
 import { TranscriptInput } from '../components/TranscriptInput'
 import { TranscriptDisplay } from '../components/TranscriptDisplay'
 import { SummaryPanel } from '../components/SummaryPanel'
@@ -15,13 +14,14 @@ import {
   type Transcript,
 } from '../lib/api'
 import { useAuthContext } from '../contexts/useAuthContext'
+import { localApiKeyMode } from '../lib/webSession'
 import { CapturePageHeader } from '../components/CapturePageHeader'
 
 export function HomePage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const { isClerkEnabled, accountAuthEnabled, isAuthenticated, isLoading: isAuthLoading } = useAuthContext()
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('mta_api_key') || '')
+  const { accountAuthEnabled, isAuthenticated, isLoading: isAuthLoading } = useAuthContext()
+  const [apiKey, setApiKey] = useState(() => (localApiKeyMode ? localStorage.getItem('mta_api_key') : null) || '')
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -127,15 +127,14 @@ export function HomePage() {
           <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>
             Your videos, recordings, PDFs, chats, and collections stay tied to your account.
           </p>
-          {isClerkEnabled && <SignInButton mode="modal">
-            <button
-              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90"
-              style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
-            >
-              <LogIn className="w-4 h-4" />
-              Sign in
-            </button>
-          </SignInButton>}
+          <Link
+            to="/sign-in?next=%2Fapp%2Fvideo"
+            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90"
+            style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
+          >
+            <LogIn className="w-4 h-4" />
+            Sign in
+          </Link>
         </div>
       )}
 
@@ -145,7 +144,7 @@ export function HomePage() {
 
       {!transcript && !accountAuthEnabled && !apiKey && (
         <div className="mb-8">
-          <ApiKeySetup onKeySet={setApiKey} hasKey={!!apiKey} />
+          <LocalApiKeySetup onKeySet={setApiKey} hasKey={!!apiKey} />
         </div>
       )}
 

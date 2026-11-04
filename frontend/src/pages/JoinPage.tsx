@@ -9,11 +9,10 @@ import { webSessionEnabled } from '../lib/webSession';
 
 export function JoinPage() {
   const navigate = useNavigate();
-  const { isLoading: authLoading, isPreviousProviderSignedIn, leavePreviousProviderForOnboarding, refreshUser } = useAuthContext();
+  const { isLoading: authLoading, refreshUser } = useAuthContext();
   const [status, setStatus] = useState<WebOnboardingStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [committing, setCommitting] = useState(false);
-  const [leavingPrevious, setLeavingPrevious] = useState(false);
   const [addingPasskey, setAddingPasskey] = useState(false);
   const [rotation, setRotation] = useState<RecoveryRotation | null>(null);
   const [startingCodes, setStartingCodes] = useState(false);
@@ -37,7 +36,7 @@ export function JoinPage() {
       } else if (current.complete && current.onboarding_required) {
         await completeWebOnboarding();
         setCompleted(true);
-      } else if (current.pending && !current.session_ready && !isPreviousProviderSignedIn) {
+      } else if (current.pending && !current.session_ready) {
         setCommitting(true);
         const committed = await commitWebOnboarding();
         setStatus(committed);
@@ -60,17 +59,6 @@ export function JoinPage() {
     // The initial state machine intentionally runs once after auth restoration.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading]);
-
-  const leavePrevious = async () => {
-    setLeavingPrevious(true);
-    setError('');
-    try {
-      await leavePreviousProviderForOnboarding();
-    } catch {
-      setError('Your setup link is safely held. We could not sign out the previous account yet, so try again.');
-      setLeavingPrevious(false);
-    }
-  };
 
   const addPasskey = async () => {
     setAddingPasskey(true);
@@ -149,7 +137,6 @@ export function JoinPage() {
   };
 
   const passkeyReady = Boolean(status?.passkeys && status.passkeys > 0);
-  const pendingLink = status?.pending === true;
   const unavailable = !webSessionEnabled;
   const missing = Boolean(!loading && !error && !completed && status && !status.pending && !status.onboarding_required);
 
@@ -183,13 +170,7 @@ export function JoinPage() {
 
             {!loading && unavailable && <StatusPanel title="Account setup is not available yet." body="This deployment has not enabled first-party browser accounts. Keep the original link and try again after setup is enabled." />}
 
-            {!loading && isPreviousProviderSignedIn && pendingLink && !completed && (
-              <StatusPanel icon={<KeyRound className="h-6 w-6" />} title="Continue with the invited account" body="This browser is signed in through the previous account provider. Your setup link is already protected; sign out there before we create or recover the invited account.">
-                <button type="button" onClick={() => void leavePrevious()} disabled={leavingPrevious} className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white disabled:opacity-60 sm:w-auto" style={{ backgroundColor: 'var(--color-brand-500)' }}>{leavingPrevious && <Loader2 className="h-4 w-4 animate-spin" />}{leavingPrevious ? 'Signing out…' : 'Sign out and continue'}</button>
-              </StatusPanel>
-            )}
-
-            {!loading && status?.session_ready && !passkeyReady && !completed && !isPreviousProviderSignedIn && (
+            {!loading && status?.session_ready && !passkeyReady && !completed && (
               <StatusPanel icon={<KeyRound className="h-6 w-6" />} title="Create your passkey" body="Use Face ID, Touch ID, or your device lock. Media Tools never receives your biometric data.">
                 {passkeysSupported() ? <button type="button" onClick={() => void addPasskey()} disabled={addingPasskey} className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white disabled:opacity-60 sm:w-auto" style={{ backgroundColor: 'var(--color-brand-500)' }}>{addingPasskey && <Loader2 className="h-4 w-4 animate-spin" />}{addingPasskey ? 'Creating passkey…' : 'Create passkey'}</button> : <p className="mt-4 rounded-xl border p-4 text-sm" role="alert" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Open this page in a current version of Safari, Chrome, or Edge on a device that supports passkeys.</p>}
               </StatusPanel>

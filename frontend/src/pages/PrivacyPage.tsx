@@ -36,8 +36,9 @@ export function PrivacyPage() {
           <ul className="list-disc pl-5 space-y-2">
             <li>
               <strong style={{ color: 'var(--color-text-primary)' }}>Account information</strong> —
-              When you sign in via Clerk (Google, email, etc.), we receive your
-              name and email address for authentication purposes.
+              When you create an account or sign in, we receive your email
+              address and, optionally, your name. We store a salted hash of your
+              password, never the password itself.
             </li>
             <li>
               <strong style={{ color: 'var(--color-text-primary)' }}>Media content</strong> —
@@ -128,8 +129,17 @@ export function PrivacyPage() {
         <PrivacySection title="Third-Party Services">
           <ul className="list-disc pl-5 space-y-2">
             <li>
+              <strong style={{ color: 'var(--color-text-primary)' }}>Resend</strong> —
+              Sends the sign-up, verification, and password-reset emails you
+              request, so it receives your email address and the message.{' '}
+              <a href="https://resend.com/legal/privacy-policy" className="underline" style={{ color: 'var(--color-brand-500)' }}>
+                Privacy policy
+              </a>
+            </li>
+            <li>
               <strong style={{ color: 'var(--color-text-primary)' }}>Clerk</strong> —
-              Authentication provider.{' '}
+              The previous sign-in provider, still used by older versions of
+              the iOS app while they update.{' '}
               <a href="https://clerk.com/privacy" className="underline" style={{ color: 'var(--color-brand-500)' }}>
                 Privacy policy
               </a>
@@ -168,8 +178,9 @@ export function PrivacyPage() {
         <PrivacySection title="Data Security">
           <p>
             All data is transmitted over HTTPS. Audio files are stored in
-            encrypted Amazon S3 buckets. Authentication is handled by Clerk
-            with industry-standard security practices.
+            encrypted Amazon S3 buckets. Passwords are stored as salted
+            hashes, and browser sessions use secure, HttpOnly cookies that
+            scripts on the page cannot read.
           </p>
         </PrivacySection>
 
