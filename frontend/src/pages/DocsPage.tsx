@@ -1,7 +1,5 @@
 import { useState, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Book,
   Copy,
   Check,
   Play,
@@ -14,7 +12,6 @@ import {
   ChevronUp,
   Terminal,
   Code,
-  Zap,
   Shield,
 } from 'lucide-react';
 import { createAPIKey, type Transcript } from '../lib/api';
@@ -28,76 +25,17 @@ const API_BASE_EXAMPLE = `${API_ORIGIN}/api/v1`;
  */
 export function DocsPage() {
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.3 }}
-      className="max-w-5xl mx-auto px-4 sm:px-6 pt-24 pb-16"
-    >
-      {/* Hero */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        className="mb-12"
-      >
-        <div
-          className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium mb-4"
-          style={{
-            backgroundColor: 'var(--color-accent-tint)',
-            color: 'var(--color-accent)',
-          }}
-        >
-          <Book className="w-3.5 h-3.5" />
-          API Reference
-        </div>
-        <h1
-          className="text-3xl sm:text-4xl lg:text-5xl font-semibold tracking-tight mb-4"
-          style={{ color: 'var(--color-text)' }}
-        >
-          Media Tools API
-        </h1>
-        <p className="text-lg max-w-2xl" style={{ color: 'var(--color-text-secondary)' }}>
-          Extract YouTube transcripts and generate AI summaries programmatically.
-          Simple REST API with API key authentication.
+    <div className="mx-auto max-w-4xl px-4 pb-16 pt-10 sm:px-6">
+      <header className="mb-10">
+        <h1 className="text-large-title">Media Tools API</h1>
+        <p className="mt-3 max-w-2xl text-body text-text-secondary">
+          Add recordings, video links and PDFs, then read transcripts, summaries and answers from your own scripts or agents. A REST API with API key authentication.
         </p>
-      </motion.div>
+      </header>
       <div className="h-px mb-10" style={{ backgroundColor: 'var(--color-separator)' }} />
 
-      {/* Quick Start Features */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-        className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-12"
-      >
-        {[
-          { icon: Zap, title: 'Fast extraction', desc: 'Transcripts in 10-30 seconds' },
-          { icon: Shield, title: 'API key auth', desc: 'Secure per-key rate limiting' },
-          { icon: Terminal, title: 'REST API', desc: 'JSON in, JSON out' },
-        ].map((item, i) => (
-          <div
-            key={i}
-            className="p-5 rounded-lg border"
-            style={{
-              backgroundColor: 'var(--color-surface)',
-              borderColor: 'var(--color-separator)',
-            }}
-          >
-            <item.icon className="w-5 h-5 mb-3" style={{ color: 'var(--color-accent)' }} />
-            <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
-              {item.title}
-            </h3>
-            <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              {item.desc}
-            </p>
-          </div>
-        ))}
-      </motion.div>
-
       {/* Base URL */}
-      <Section title="Base URL" delay={0.15}>
+      <Section title="Base URL">
         <CodeBlock code={API_BASE_EXAMPLE} language="text" />
         <p className="text-sm mt-3" style={{ color: 'var(--color-text-secondary)' }}>
           All endpoints are prefixed with <code className="px-1.5 py-0.5 rounded-sm text-xs font-mono" style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-accent)' }}>/api/v1</code>.
@@ -106,12 +44,12 @@ export function DocsPage() {
       </Section>
 
       {/* Get API Key Section */}
-      <Section title="Get an API Key" delay={0.2}>
+      <Section title="Get an API Key">
         <APIKeySignup />
       </Section>
 
       {/* Endpoints */}
-      <Section title="Endpoints" delay={0.25}>
+      <Section title="Endpoints">
         <div className="space-y-4">
           <EndpointCard
             method="GET"
@@ -288,17 +226,17 @@ export function DocsPage() {
       </Section>
 
       {/* Code Examples */}
-      <Section title="Code Examples" delay={0.3}>
+      <Section title="Code Examples">
         <CodeExamples />
       </Section>
 
       {/* Try It */}
-      <Section title="Try It" delay={0.35}>
+      <Section title="Try It">
         <TryItSection />
       </Section>
 
       {/* Error Responses */}
-      <Section title="Error Format" delay={0.4}>
+      <Section title="Error Format">
         <p className="text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
           All errors return a consistent JSON format:
         </p>
@@ -311,9 +249,9 @@ export function DocsPage() {
           language="json"
         />
         <div className="mt-4 space-y-2">
-          <h4 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
             Common status codes
-          </h4>
+          </h3>
           <div className="text-sm space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
             <p><strong>200</strong> Success</p>
             <p><strong>202</strong> Accepted (async processing started)</p>
@@ -327,7 +265,7 @@ export function DocsPage() {
       </Section>
 
       {/* Rate Limiting */}
-      <Section title="Rate Limiting" delay={0.45}>
+      <Section title="Rate Limiting">
         <p className="text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
           API-key limits use one shared request budget. Signed-in browser sessions keep reads and mutations separate so status refreshes cannot block job actions. Check these headers for the applicable budget:
         </p>
@@ -340,22 +278,17 @@ Retry-After: 4`}
           language="text"
         />
       </Section>
-    </motion.div>
+    </div>
   );
 }
 
 // ── Sub-components ──
 
-function Section({ title, children, delay = 0 }: { title: string; children: React.ReactNode; delay?: number }) {
+function Section({ title, children }: { title: string; children: React.ReactNode; delay?: number }) {
   return (
-    <motion.section
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay, ease: [0.22, 1, 0.36, 1] }}
-      className="mb-12"
-    >
+    <section className="mb-12">
       <h2
-        className="text-xl font-bold tracking-tight mb-4 pb-2 border-b"
+        className="mb-4 border-b pb-2 text-heading"
         style={{
           color: 'var(--color-text)',
           borderColor: 'var(--color-separator)',
@@ -364,7 +297,7 @@ function Section({ title, children, delay = 0 }: { title: string; children: Reac
         {title}
       </h2>
       {children}
-    </motion.section>
+    </section>
   );
 }
 
@@ -431,11 +364,11 @@ function EndpointCard({
   const [expanded, setExpanded] = useState(false);
 
   const methodColors: Record<string, { bg: string; text: string }> = {
-    GET: { bg: 'rgba(24, 185, 133, 0.12)', text: 'var(--color-accent)' },
-    POST: { bg: 'var(--color-accent-tint)', text: 'var(--color-accent)' },
-    DELETE: { bg: 'rgba(239, 68, 68, 0.12)', text: 'var(--color-danger)' },
-    PUT: { bg: 'rgba(245, 158, 11, 0.1)', text: '#f59e0b' },
-    PATCH: { bg: 'rgba(168, 85, 247, 0.1)', text: '#a855f7' },
+    GET: { bg: 'var(--color-fill)', text: 'var(--color-text)' },
+    POST: { bg: 'var(--color-fill)', text: 'var(--color-text)' },
+    DELETE: { bg: 'var(--color-fill)', text: 'var(--color-text)' },
+    PUT: { bg: 'var(--color-fill)', text: 'var(--color-text)' },
+    PATCH: { bg: 'var(--color-fill)', text: 'var(--color-text)' },
   };
 
   const colors = methodColors[method] || methodColors.GET;
@@ -475,15 +408,8 @@ function EndpointCard({
         )}
       </button>
 
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
-          >
+      {expanded && (
+          <div>
             <div className="px-4 pb-4 space-y-3" style={{ borderTop: '1px solid var(--color-separator)' }}>
               <div className="pt-3">
                 <p className="text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
@@ -499,23 +425,22 @@ function EndpointCard({
 
               {requestExample && (
                 <div>
-                  <h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                  <h3 className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>
                     Request Body
-                  </h4>
+                  </h3>
                   <CodeBlock code={requestExample} language="json" />
                 </div>
               )}
 
               <div>
-                <h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                <h3 className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>
                   Response
-                </h4>
+                </h3>
                 <CodeBlock code={responseExample} language="json" />
               </div>
             </div>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
     </div>
   );
 }
@@ -641,17 +566,7 @@ print(f'Transcript: {transcript["transcript_text"][:200]}...')`,
         ))}
       </div>
 
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={activeTab}
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -4 }}
-          transition={{ duration: 0.15 }}
-        >
-          <CodeBlock code={examples[activeTab].code} language={activeTab} />
-        </motion.div>
-      </AnimatePresence>
+      <CodeBlock code={examples[activeTab].code} language={activeTab} />
     </div>
   );
 }
@@ -691,7 +606,7 @@ function APIKeySignup() {
         className="p-4 rounded-md border"
         style={{
           backgroundColor: 'var(--color-surface)',
-          borderColor: 'rgba(16, 185, 129, 0.3)',
+          borderColor: 'var(--color-separator)',
         }}
       >
         <div className="flex items-center gap-2 mb-3">
@@ -894,32 +809,19 @@ function TryItSection() {
 
       {/* Result */}
       {result && (
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mt-4"
-        >
-          <h4 className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+        <div className="mt-4">
+          <h3 className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>
             Response (202 Accepted)
-          </h4>
+          </h3>
           <CodeBlock code={JSON.stringify(result, null, 2)} language="json" />
-        </motion.div>
+        </div>
       )}
 
       {error && (
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-center gap-2 mt-4 p-3 rounded-sm text-sm"
-          style={{
-            backgroundColor: 'rgba(239, 68, 68, 0.12)',
-            border: '1px solid rgba(239, 68, 68, 0.24)',
-            color: 'var(--color-danger)',
-          }}
-        >
+        <div className="mt-4 flex items-center gap-2 rounded-md bg-fill p-3 text-callout" role="alert">
           <AlertCircle className="w-4 h-4 shrink-0" />
           {error}
-        </motion.div>
+        </div>
       )}
     </div>
   );

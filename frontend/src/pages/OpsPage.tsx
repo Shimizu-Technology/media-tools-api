@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Activity, AlertCircle, Flag, RefreshCw } from 'lucide-react';
+import { BackToSettings } from '../components/settings/BackToSettings';
+import { AlertCircle, Flag, RefreshCw } from 'lucide-react';
 import {
   getAIContentReports,
   getAudioOpsHealth,
@@ -60,17 +61,11 @@ export function OpsPage() {
 
   return (
     <main className="pb-12 sm:pb-16">
-      <div className="max-w-4xl mx-auto">
+      <div className="mx-auto max-w-2xl">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-3"
-              style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}>
-              <Activity className="w-3.5 h-3.5" />
-              Operations
-            </div>
-            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight" style={{ color: 'var(--color-text)' }}>
-              Operations
-            </h1>
+            <BackToSettings />
+            <h1 className="mt-1 text-large-title">System health</h1>
           </div>
           <button
             onClick={load}
@@ -142,7 +137,7 @@ export function OpsPage() {
                     <span className="capitalize" style={{ color: 'var(--color-text-secondary)' }}>{report.target_type.replaceAll('_', ' ')}</span>
                     <span style={{ color: 'var(--color-text-secondary)' }}>{new Date(report.created_at).toLocaleString()}</span>
                   </div>
-                  <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: report.status === 'open' ? 'var(--color-text)' : report.status === 'resolved' ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}>
+                  <span className="text-meta font-semibold capitalize" style={{ color: report.status === 'open' ? 'var(--color-text)' : report.status === 'resolved' ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}>
                     {report.status}
                   </span>
                 </div>

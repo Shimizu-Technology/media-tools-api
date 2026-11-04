@@ -8,21 +8,15 @@ import { PrivacySection } from '../components/legal/PrivacySection';
 /** Explains Media Tools data collection, processing, retention, and user controls. */
 export function PrivacyPage() {
   return (
-    <div className="max-w-3xl mx-auto px-6 py-16">
-      <h1
-        className="text-3xl font-bold mb-2"
-        style={{ color: 'var(--color-text)' }}
-      >
+    <div className="mx-auto max-w-[60ch] px-4 py-10 sm:px-6 sm:py-16">
+      <h1 className="text-large-title">
         Privacy Policy
       </h1>
-      <p
-        className="text-sm mb-10"
-        style={{ color: 'var(--color-text-secondary)' }}
-      >
+      <p className="mb-10 mt-2 text-callout text-text-secondary">
         Last updated: August 22, 2026
       </p>
 
-      <div className="space-y-8" style={{ color: 'var(--color-text-secondary)' }}>
+      <div className="space-y-9 text-body leading-7 text-text [&_a]:text-accent [&_a]:underline">
         <PrivacySection title="Overview">
           <p>
             ST Media Tools ("Media Tools", "we", "our") is a media transcription

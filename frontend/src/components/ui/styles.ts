@@ -14,13 +14,15 @@ const variants: Record<ButtonVariant, string> = {
 
 const sizes: Record<ButtonSize, string> = {
   // 44px: the smallest touch target in the app.
-  md: 'min-h-11 rounded-md px-4 text-callout',
+  md: 'min-h-11 px-4 text-callout',
   // The full-width record pill and other one-per-screen actions.
-  lg: 'min-h-14 rounded-full px-6 text-[1.0625rem]',
+  lg: 'min-h-14 px-6 text-[1.0625rem]',
 };
 
 export function buttonClass({ variant = 'secondary', size = 'md', block = false, className = '' }: { variant?: ButtonVariant; size?: ButtonSize; block?: boolean; className?: string } = {}) {
-  return [base, variants[variant], sizes[size], block ? 'w-full' : '', className].filter(Boolean).join(' ');
+  // A caller's own radius wins; otherwise md is a soft rectangle and lg a pill.
+  const radius = /(^|\s)rounded-/.test(className) ? '' : size === 'lg' ? 'rounded-full' : 'rounded-md';
+  return [base, variants[variant], sizes[size], radius, block ? 'w-full' : '', className].filter(Boolean).join(' ');
 }
 
 export function iconLinkClass(tone: 'accent' | 'neutral' = 'accent') {
