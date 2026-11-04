@@ -40,6 +40,9 @@ func main() {
 	}
 
 	log.Printf("📋 Config loaded: port=%s, workers=%d, gin_mode=%s", cfg.Port, cfg.WorkerCount, cfg.GinMode)
+	if cfg.GinMode == "release" && !cfg.RenderClientIPEnabled && cfg.NetlifyProxySignatureSecret == "" && strings.TrimSpace(strings.Join(cfg.TrustedProxyCIDRs, "")) == "" {
+		log.Print("WARNING: no verified client-IP source configured; shared proxy IP throttling is disabled. Per-account auth limits remain active. Configure RENDER_CLIENT_IP_ENABLED, NETLIFY_PROXY_SIGNATURE_SECRET or TRUSTED_PROXY_CIDRS.")
+	}
 	log.Printf("🔧 yt-dlp path: %s", cfg.YtDlpPath)
 
 	if err := os.Setenv("GIN_MODE", cfg.GinMode); err != nil {
@@ -161,6 +164,7 @@ func main() {
 		log.Fatal("invalid email delivery configuration")
 	}
 	wp := worker.NewPool(cfg.WorkerCount, cfg.JobQueueSize, db, extractor, summarizer)
+	wp.ConfigureUsage(database.UsageDefaults{MonthlyMinutes: cfg.DefaultMonthlyTranscriptionMinutes, MonthlyAIRequests: cfg.DefaultMonthlyAIRequests, OwnerUserID: cfg.OwnerUserID, OwnerKeyID: cfg.OwnerAPIKeyID})
 	wp.SetWebhookService(webhookService)     // MTA-18: wire webhooks into worker for job notifications
 	wp.SetAudioTranscriber(audioTranscriber) // Wire audio transcriber for async Whisper jobs
 	wp.SetTranscriptFormatter(transcriptFormatter)
@@ -248,6 +252,8 @@ func main() {
 		Email:                              email,
 		PublicSignupEnabled:                cfg.PublicSignupEnabled,
 		TrustedProxyCIDRs:                  cfg.TrustedProxyCIDRs,
+		RenderClientIPEnabled:              cfg.RenderClientIPEnabled,
+		NetlifyProxySignatureSecret:        cfg.NetlifyProxySignatureSecret,
 		DefaultMonthlyTranscriptionMinutes: cfg.DefaultMonthlyTranscriptionMinutes,
 		DefaultMonthlyAIRequests:           cfg.DefaultMonthlyAIRequests,
 		OwnerUserID:                        cfg.OwnerUserID,

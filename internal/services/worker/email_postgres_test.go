@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcriptformat"
 	"io"
 	"net/http"
 	"os"
@@ -108,7 +109,7 @@ func TestAutomaticEnrichmentChecksCapBeforeProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM users WHERE id=$1`, userID) })
-	if err = db.EnsureUsagePolicy(context.Background(), userID, 300, 1, "", "", ""); err != nil {
+	if err = db.EnsureUsagePolicy(context.Background(), userID, 300, 1, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err = db.ReserveAIRequest(context.Background(), userID); err != nil {
@@ -124,8 +125,72 @@ func TestAutomaticEnrichmentChecksCapBeforeProvider(t *testing.T) {
 	for _, source := range []string{"New Recording", ""} {
 		payload, _ := json.Marshal(AudioSummaryPayload{AudioID: audioID, Automatic: true, TitleSource: source})
 		err = pool.processAudioSummary(Job{ID: audioID, QueueID: uuid.NewString(), Payload: payload})
-		if !database.IsUsageCap(err) {
-			t.Fatal("automatic title/summary bypassed cap", err)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var status, message, transcriptStatus string
+		if err = db.QueryRow(`SELECT summary_status,summary_error_message,status FROM audio_transcriptions WHERE id=$1`, audioID).Scan(&status, &message, &transcriptStatus); err != nil || status != "skipped" || !strings.Contains(message, "monthly AI limit") || transcriptStatus != "completed" {
+			t.Fatal("automatic cap did not skip enrichment and preserve transcription", err)
+		}
+	}
+}
+
+func TestFormattingJobsChargeCapAndCannotRequeueWhenCapped(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	db, err := database.New(url)
+	if err != nil {
+		t.Fatal("connect local database")
+	}
+	defer db.Close()
+	if err = db.RunMigrations("../../../migrations"); err != nil {
+		t.Fatal(err)
+	}
+	var userID string
+	if err = db.QueryRow(`INSERT INTO users(email,password_hash) VALUES($1,'') RETURNING id`, uuid.NewString()+"@example.invalid").Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM users WHERE id=$1`, userID) })
+	if err = db.EnsureUsagePolicy(context.Background(), userID, 300, 1, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	original := http.DefaultTransport
+	http.DefaultTransport = emailTestTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "api.openai.com" {
+			return original.RoundTrip(r)
+		}
+		calls++
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"{\"text\":\"Synthetic quota fixture.\"}"}}],"model":"gpt-4.1-mini"}`))}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = original })
+	pool := NewPool(1, 10, db, nil, nil)
+	defer pool.cancel()
+	pool.SetTranscriptFormatter(transcriptformat.New("synthetic-test-key", ""))
+	var ids []string
+	for i := 0; i < 2; i++ {
+		var audioID string
+		if err = db.QueryRow(`INSERT INTO audio_transcriptions(filename,original_name,status,transcript_text,formatting_status,user_id) VALUES('quota.m4a','Quota fixture','completed','Synthetic quota fixture.','pending',$1) RETURNING id`, userID).Scan(&audioID); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, audioID)
+		if err = pool.processAudioTranscriptFormatting(Job{ID: audioID, QueueID: uuid.NewString()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	usage, err := db.AccountUsage(context.Background(), userID)
+	if err != nil || usage.AIRequests != 1 || calls != 1 {
+		t.Fatal("formatting bypassed or double charged cap", err)
+	}
+	var status, transcriptionStatus, message string
+	if err = db.QueryRow(`SELECT formatting_status,status,formatting_error_message FROM audio_transcriptions WHERE id=$1`, ids[1]).Scan(&status, &transcriptionStatus, &message); err != nil || status != "skipped" || transcriptionStatus != "completed" || !strings.Contains(message, "monthly AI limit") {
+		t.Fatal("capped formatting did not skip safely", err)
+	}
+	for _, id := range ids {
+		if err = db.QueueAudioTranscriptFormatting(context.Background(), id); !database.IsUsageCap(err) {
+			t.Fatal("capped account requeued formatting", err)
 		}
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	accountservice "github.com/Shimizu-Technology/media-tools-api/internal/services/account"
 	emailservice "github.com/Shimizu-Technology/media-tools-api/internal/services/email"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -42,7 +43,7 @@ type authHTTPFixture struct {
 	t      *testing.T
 }
 
-func newAuthHTTPFixture(t *testing.T, signup bool) *authHTTPFixture {
+func newAuthHTTPFixture(t *testing.T, signup bool, services ...*summary.Service) *authHTTPFixture {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -60,7 +61,11 @@ func newAuthHTTPFixture(t *testing.T, signup bool) *authHTTPFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	engine := Setup(RouterConfig{DB: db, FirstPartyAuthEnabled: true, FirstPartyPasswordAuthEnabled: true, WebCookieAuthEnabled: true, PublicSignupEnabled: signup, Email: email, Pwned: unbreachedTestChecker(), AllowedOrigins: []string{"https://media.example.test"}, DefaultMonthlyTranscriptionMinutes: 2, DefaultMonthlyAIRequests: 2})
+	var summarizer *summary.Service
+	if len(services) > 0 {
+		summarizer = services[0]
+	}
+	engine := Setup(RouterConfig{Summarizer: summarizer, DB: db, FirstPartyAuthEnabled: true, FirstPartyPasswordAuthEnabled: true, WebCookieAuthEnabled: true, PublicSignupEnabled: signup, Email: email, Pwned: unbreachedTestChecker(), AllowedOrigins: []string{"https://media.example.test"}, DefaultMonthlyTranscriptionMinutes: 2, DefaultMonthlyAIRequests: 2})
 	fixture := &authHTTPFixture{db: db, email: email, engine: engine, t: t}
 	// This hook exists ONLY in a _test.go file. It cannot be compiled into
 	// cmd/server or any release binary, irrespective of environment variables.
@@ -142,13 +147,14 @@ func (f *authHTTPFixture) cleanupEmail(email string) {
 	f.t.Cleanup(func() {
 		_, _ = f.db.ExecContext(context.Background(), `DELETE FROM users WHERE lower(email)=$1`, email)
 		_, _ = f.db.ExecContext(context.Background(), `DELETE FROM auth_email_challenges WHERE email=$1`, email)
+		_, _ = f.db.ExecContext(context.Background(), `DELETE FROM auth_email_limits WHERE email=$1`, email)
 	})
 }
 func (f *authHTTPFixture) signup(email, password string) {
 	f.t.Helper()
 	f.cleanupEmail(email)
 	f.request("POST", "/api/v1/auth/signup", gin.H{"email": email, "password": password, "name": "HTTP Auth"}, "", 202)
-	f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": f.code(email, "signup")}, "", 200)
+	f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": f.code(email, "signup"), "password": password}, "", 200)
 }
 func (f *authHTTPFixture) login(email, password string) *database.AuthTokenPair {
 	f.t.Helper()
@@ -173,12 +179,12 @@ func TestAuthHTTPDefaultsEnumerationAndVerification(t *testing.T) {
 	if !bytes.Equal(first, again) || code != f.code(email, "signup") {
 		t.Fatal("resend throttle changed receipt or code")
 	}
-	f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": code}, "", 200)
+	f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": code, "password": password}, "", 200)
 	same := f.request("POST", "/api/v1/auth/signup", gin.H{"email": email, "password": password}, "", 202)
 	if !bytes.Equal(first, same) {
 		t.Fatal("signup reveals existing address")
 	}
-	f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": code}, "", 400)
+	f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": code, "password": password}, "", 400)
 	pair := f.login(email, password)
 	raw := f.request("GET", "/api/v1/auth/me", nil, pair.AccessToken, 200)
 	var user struct {
@@ -371,10 +377,10 @@ func TestAuthHTTPVerificationExpiryAttemptsAndResend(t *testing.T) {
 		wrong = "999999"
 	}
 	for i := 0; i < 5; i++ {
-		f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": wrong}, "", 400)
+		f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": wrong, "password": password}, "", 400)
 	}
-	f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": code}, "", 400)
-	if _, err := f.db.ExecContext(context.Background(), `UPDATE auth_email_challenges SET created_at=NOW()-INTERVAL '61 seconds' WHERE email=$1`, email); err != nil {
+	f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": code, "password": password}, "", 400)
+	if _, err := f.db.ExecContext(context.Background(), `UPDATE auth_email_limits SET created_at=NOW()-INTERVAL '61 seconds' WHERE email=$1 AND kind='send'`, email); err != nil {
 		t.Fatal(err)
 	}
 	begin()
@@ -386,12 +392,12 @@ func TestAuthHTTPVerificationExpiryAttemptsAndResend(t *testing.T) {
 	// Uniform six-digit codes can coincide. Always assert challenge replacement;
 	// check rejection of the old digits only when the new digits differ.
 	if newCode != code {
-		f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": code}, "", 400)
+		f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": code, "password": password}, "", 400)
 	}
 	if _, err := f.db.ExecContext(context.Background(), `UPDATE auth_email_challenges SET expires_at=NOW()-INTERVAL '1 second' WHERE email=$1`, email); err != nil {
 		t.Fatal(err)
 	}
-	f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": newCode}, "", 400)
+	f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": newCode, "password": password}, "", 400)
 	t.Log("D03 passed via local HTTP: five attempts, replacement invalidation, expiry")
 }
 

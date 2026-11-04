@@ -229,6 +229,10 @@ func (h *Handler) CreateSummary(c *gin.Context) {
 		return
 	}
 
+	if !h.allowAIModel(c, req.Model) {
+		return
+	}
+
 	// Verify the transcript exists and is completed
 	actor := getActorOwnership(c)
 	t, err := h.DB.GetTranscriptForActor(c.Request.Context(), req.TranscriptID, actor.UserID, actor.APIKeyID)

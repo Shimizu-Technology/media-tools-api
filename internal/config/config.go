@@ -23,6 +23,8 @@ type Config struct {
 	ResendFromEmail                    string
 	PublicSignupEnabled                bool
 	TrustedProxyCIDRs                  []string
+	RenderClientIPEnabled              bool
+	NetlifyProxySignatureSecret        string
 	DefaultMonthlyTranscriptionMinutes int
 	DefaultMonthlyAIRequests           int
 	OwnerUserID                        string
@@ -127,6 +129,8 @@ func Load() (*Config, error) {
 		ResendFromEmail:                    getEnv("RESEND_FROM_EMAIL", ""),
 		PublicSignupEnabled:                getEnvBool("PUBLIC_SIGNUP_ENABLED", false),
 		TrustedProxyCIDRs:                  strings.Split(getEnv("TRUSTED_PROXY_CIDRS", ""), ","),
+		RenderClientIPEnabled:              getEnvBool("RENDER_CLIENT_IP_ENABLED", false),
+		NetlifyProxySignatureSecret:        getEnv("NETLIFY_PROXY_SIGNATURE_SECRET", ""),
 		DefaultMonthlyTranscriptionMinutes: getEnvInt("DEFAULT_MONTHLY_TRANSCRIPTION_MINUTES", 300),
 		DefaultMonthlyAIRequests:           getEnvInt("DEFAULT_MONTHLY_AI_REQUESTS", 1000),
 		OwnerUserID:                        getEnv("OWNER_USER_ID", ""),

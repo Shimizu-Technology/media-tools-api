@@ -292,6 +292,10 @@ func (h *Handler) PostCollectionChat(c *gin.Context) {
 		})
 		return
 	}
+	if !h.allowAIModel(c, req.Model) {
+		return
+	}
+
 	req.Message = strings.TrimSpace(req.Message)
 	if req.Message == "" {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{

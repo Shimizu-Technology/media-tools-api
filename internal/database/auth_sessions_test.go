@@ -129,11 +129,11 @@ func TestFirstPartyRefreshRecoversLostResponse(t *testing.T) {
 	if _, err := db.RefreshFirstPartySessionWithSuccessor(ctx, next, third); err != nil {
 		t.Fatalf("advance to third credential: %v", err)
 	}
-	if _, err := db.RefreshFirstPartySessionWithSuccessor(ctx, initial.RefreshToken, next); !errors.Is(err, ErrSessionAlreadyRotated) {
+	if _, err := db.RefreshFirstPartySessionWithSuccessor(ctx, initial.RefreshToken, next); !errors.Is(err, ErrSessionInvalid) {
 		t.Fatalf("stale recovery after successor was spent = %v", err)
 	}
-	if _, _, err := db.GetUserByFirstPartyAccessToken(ctx, recovered.AccessToken); err != nil {
-		t.Fatalf("stale recovery revoked device: %v", err)
+	if _, _, err := db.GetUserByFirstPartyAccessToken(ctx, recovered.AccessToken); !errors.Is(err, ErrSessionInvalid) {
+		t.Fatalf("reuse after successor consumption did not revoke device: %v", err)
 	}
 }
 

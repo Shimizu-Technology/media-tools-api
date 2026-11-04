@@ -29,6 +29,8 @@ type RouterConfig struct {
 	Email                              *emailservice.Service
 	PublicSignupEnabled                bool
 	TrustedProxyCIDRs                  []string
+	RenderClientIPEnabled              bool
+	NetlifyProxySignatureSecret        string
 	DefaultMonthlyTranscriptionMinutes int
 	DefaultMonthlyAIRequests           int
 	OwnerUserID                        string
@@ -67,7 +69,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	r := gin.New()
 	// Disable Gin's implicit trust-all forwarding; only our allowlist chooses IPs.
 	_ = r.SetTrustedProxies(nil)
-	r.Use(middleware.ClientIP(cfg.TrustedProxyCIDRs))
+	r.Use(middleware.ClientIP(cfg.TrustedProxyCIDRs, middleware.ClientIPOptions{RenderPublicEdge: cfg.RenderClientIPEnabled, NetlifySignatureSecret: cfg.NetlifyProxySignatureSecret}))
 
 	// Keep multipart parsing memory bounded; larger uploads are streamed to temp files.
 	r.MaxMultipartMemory = 120 << 20
@@ -152,11 +154,12 @@ func Setup(cfg RouterConfig) *gin.Engine {
 
 			h.PasswordAuthEnabled = true
 			passwordLogin := r.Group("/api/v1/auth/password")
-			passwordLogin.Use(rateLimiter.RateLimitUnauthenticated("password", 20))
+			// Correct passwords remain usable even during attacks; wrong attempts
+			// are limited durably per account inside rejectPassword.
 			passwordLogin.POST("/login", h.LoginWithPassword)
 			if h.Email != nil {
 				proof := r.Group("/api/v1/auth")
-				proof.Use(rateLimiter.RateLimitUnauthenticated("email-proof", 30))
+				// Durable per-address send and guessing budgets survive proxy changes.
 				proof.POST("/signup", h.Signup)
 				proof.POST("/signup/verify", h.VerifySignup)
 				proof.POST("/password/forgot", h.ForgotPassword)
@@ -196,7 +199,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			webRecovery.POST("/finish", web.FinishRecoveryCodeLogin)
 			if cfg.FirstPartyPasswordAuthEnabled {
 				webPassword := r.Group("/api/v1/auth/web/session/password")
-				webPassword.Use(rateLimiter.RateLimitUnauthenticated("web-password", 20))
+				// The finish handler shares the native per-account password budget.
 				webPassword.POST("/prepare", web.PreparePasswordLogin)
 				webPassword.POST("/finish", web.FinishPasswordLogin)
 			}

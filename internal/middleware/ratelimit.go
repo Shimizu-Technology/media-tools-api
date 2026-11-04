@@ -140,6 +140,13 @@ func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 // when no proxy is trusted. Spoofed headers cannot supply fresh buckets.
 func (rl *RateLimiter) RateLimitUnauthenticated(scope string, limit int) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// An unconfigured reverse proxy can put every user behind one socket.
+		// Never turn that fallback into a site-wide authentication kill switch.
+		// Password failures and email proofs have durable per-account controls.
+		if verified, _ := c.Get("auth_client_ip_verified"); verified != true {
+			c.Next()
+			return
+		}
 		peer := AuthClientIP(c)
 		result := rl.allow("public-auth:"+scope+":"+peer, limit)
 		if !result.allowed {

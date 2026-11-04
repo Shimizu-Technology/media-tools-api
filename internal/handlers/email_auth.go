@@ -62,7 +62,8 @@ func (h *Handler) newPassword(c *gin.Context, raw string) (string, bool) {
 
 // requireCurrentPassword returns the exact verified snapshot, not just a bool.
 // The mutation checks it again while holding the account lock. A passwordless
-// deployed account can still enroll its first password with its existing session.
+// account has no current credential to reauthenticate. Enrollment separately
+// requires email proof, while passwordless account deletion stays available.
 func (h *Handler) requireCurrentPassword(c *gin.Context, userID, raw string) (string, bool) {
 	credential, err := h.DB.PasswordCredentialForUser(c.Request.Context(), userID)
 	if errors.Is(err, database.ErrPasswordCredentialInvalid) {
@@ -104,13 +105,6 @@ func (h *Handler) beginEmailProof(c *gin.Context, purpose string) {
 		return
 	}
 	ch := database.EmailChallenge{ID: uuid.NewString(), Purpose: purpose, Email: req.Email, Name: strings.TrimSpace(req.Name)}
-	if purpose == "signup" {
-		hash, ok := h.newPassword(c, req.Password)
-		if !ok {
-			return
-		}
-		ch.PasswordHash = hash
-	}
 	if purpose == "verify" || purpose == "email_change" {
 		user := firstPartyAccount(c)
 		if user == nil {
@@ -194,7 +188,7 @@ func (h *Handler) finishEmailProof(c *gin.Context, purpose string) {
 		}
 	}
 	hash := ""
-	if purpose == "reset" {
+	if purpose == "reset" || purpose == "signup" {
 		var ok bool
 		hash, ok = h.newPassword(c, req.Password)
 		if !ok {

@@ -164,6 +164,17 @@ func (h *Handler) SetPassword(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if snapshot == "" {
+		verified, verifyErr := h.DB.EmailVerified(c.Request.Context(), user.ID)
+		if verifyErr != nil {
+			authError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Try again shortly")
+			return
+		}
+		if !verified {
+			authError(c, http.StatusForbidden, "email_verification_required", "Verify your email or use forgot password before setting a password")
+			return
+		}
+	}
 	hash, ok := h.newPassword(c, req.Password)
 	if !ok {
 		return

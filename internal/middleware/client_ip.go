@@ -1,20 +1,27 @@
 package middleware
 
 import (
+	"github.com/golang-jwt/jwt/v5"
 	"net"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
-// ClientIP trusts X-Forwarded-For only when the socket peer belongs to an
-// explicitly configured proxy network. Walk from the nearest hop backwards,
-// stopping at the first untrusted address. Never use the leftmost value or
-// X-Nf-Client-Connection-Ip on a publicly reachable Render origin: a direct
-// caller can supply either. Both Render AND Netlify hops must be allowlisted
-// before a proxied browser's address becomes the limit key. Empty config is
-// deliberately safe (socket peer only), though it may share a proxy bucket.
-func ClientIP(trustedCIDRs []string) gin.HandlerFunc {
+// ClientIP supports explicitly trusted socket proxies and opt-in public Render
+// edge headers. Netlify's client address requires its own signed proxy proof.
+// Other deployments must never enable RenderPublicEdge: a directly reachable
+// socket or private Render peer could forge CF-Connecting-IP.
+type ClientIPOptions struct {
+	RenderPublicEdge       bool
+	NetlifySignatureSecret string
+}
+
+func ClientIP(trustedCIDRs []string, options ...ClientIPOptions) gin.HandlerFunc {
+	var opts ClientIPOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	networks := make([]*net.IPNet, 0, len(trustedCIDRs))
 	for _, cidr := range trustedCIDRs {
 		if strings.TrimSpace(cidr) == "" {
@@ -43,6 +50,7 @@ func ClientIP(trustedCIDRs []string) gin.HandlerFunc {
 			peer = c.Request.RemoteAddr
 		}
 		ip := net.ParseIP(peer)
+		verifiedSource := false
 		if ip != nil && trusted(ip) {
 			parts := strings.Split(strings.Join(c.Request.Header.Values("X-Forwarded-For"), ","), ",")
 			// Bound work and fall back completely when a trusted proxy sends malformed
@@ -58,11 +66,33 @@ func ClientIP(trustedCIDRs []string) gin.HandlerFunc {
 					}
 					candidate = next
 				}
-				if valid {
+				if valid && len(parts) > 0 && parts[0] != "" {
+					verifiedSource = true
 					ip = candidate
 				}
 			}
 		}
+		// Render documents that its PUBLIC Cloudflare edge overwrites this
+		// header on every request, unlike X-Forwarded-For which can be appended
+		// to a caller-controlled chain. Enable only on that ingress topology:
+		// https://render.com/articles/host-pocketbase-on-render
+		if opts.RenderPublicEdge {
+			if edgeIP := singleHeaderIP(c, "CF-Connecting-IP"); edgeIP != nil {
+				ip = edgeIP
+				verifiedSource = true
+			}
+		}
+		// A direct caller can forge X-Nf-Client-Connection-Ip. Accept it only
+		// after validating Netlify's HS256 issuer, signature and required expiry.
+		// The JWT authenticates proxy origin, not a user; it never grants access.
+		// https://docs.netlify.com/manage/routing/redirects/rewrites-proxies/
+		if validNetlifySignature(c, opts.NetlifySignatureSecret) {
+			if netlifyIP := singleHeaderIP(c, "X-Nf-Client-Connection-Ip"); netlifyIP != nil {
+				ip = netlifyIP
+				verifiedSource = true
+			}
+		}
+		c.Set("auth_client_ip_verified", verifiedSource)
 		if ip != nil {
 			c.Set("auth_client_ip", ip.String())
 		} else {
@@ -80,4 +110,23 @@ func AuthClientIP(c *gin.Context) string {
 		return c.Request.RemoteAddr
 	}
 	return peer
+}
+
+func singleHeaderIP(c *gin.Context, name string) net.IP {
+	values := c.Request.Header.Values(name)
+	if len(values) != 1 {
+		return nil
+	}
+	return net.ParseIP(strings.TrimSpace(values[0]))
+}
+func validNetlifySignature(c *gin.Context, secret string) bool {
+	if secret == "" {
+		return false
+	}
+	values := c.Request.Header.Values("X-Nf-Sign")
+	if len(values) != 1 || len(values[0]) > 4096 {
+		return false
+	}
+	token, err := jwt.Parse(values[0], func(token *jwt.Token) (any, error) { return []byte(secret), nil }, jwt.WithValidMethods([]string{"HS256"}), jwt.WithIssuer("netlify"), jwt.WithExpirationRequired())
+	return err == nil && token.Valid
 }

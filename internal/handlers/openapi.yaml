@@ -417,7 +417,7 @@ paths:
     post:
       tags: [Authentication]
       summary: Start signup (also resend); generic accepted response
-      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts per challenge and ten wrong codes per email/purpose in a rolling 24 hours. Sends are capped at five per rolling 24 hours with increasing resend delays. Initiation responses never disclose eligibility or suppression.
       security: []
       requestBody:
         required: true
@@ -425,16 +425,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email, password]
+              required: [email]
               properties:
                 email:
                   type: string
                   format: email
-                password:
-                  type: string
-                  format: password
-                  maxLength: 128
-                  minLength: 12
                 name:
                   type: string
       responses:
@@ -457,7 +452,7 @@ paths:
     post:
       tags: [Authentication]
       summary: Verify signup; completes email/password onboarding
-      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts per challenge and ten wrong codes per email/purpose in a rolling 24 hours. Sends are capped at five per rolling 24 hours with increasing resend delays. Initiation responses never disclose eligibility or suppression.
       security: []
       requestBody:
         required: true
@@ -465,11 +460,16 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email, code]
+              required: [email, code, password]
               properties:
                 email:
                   type: string
                   format: email
+                password:
+                  type: string
+                  format: password
+                  minLength: 12
+                  maxLength: 128
                 code:
                   type: string
                   pattern: "^[0-9]{6}$"
@@ -493,7 +493,7 @@ paths:
     post:
       tags: [Authentication]
       summary: Request a reset, including a passwordless linked account
-      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts per challenge and ten wrong codes per email/purpose in a rolling 24 hours. Sends are capped at five per rolling 24 hours with increasing resend delays. Initiation responses never disclose eligibility or suppression.
       security: []
       requestBody:
         required: true
@@ -526,7 +526,7 @@ paths:
     post:
       tags: [Authentication]
       summary: Prove email, replace password and revoke all sessions
-      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts per challenge and ten wrong codes per email/purpose in a rolling 24 hours. Sends are capped at five per rolling 24 hours with increasing resend delays. Initiation responses never disclose eligibility or suppression.
       security: []
       requestBody:
         required: true
@@ -549,7 +549,7 @@ paths:
                   minLength: 12
       responses:
         '200':
-          description: Proof accepted; sign in again after signup, reset or email change.
+          description: Proof accepted; all account sessions and API keys (classic, scoped and capture) revoked atomically; notice queued. Sign in and create replacement keys.
         '202':
           description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
         '400':
@@ -567,7 +567,7 @@ paths:
     post:
       tags: [Authentication]
       summary: Reauthenticate and send proof to the new email
-      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts per challenge and ten wrong codes per email/purpose in a rolling 24 hours. Sends are capped at five per rolling 24 hours with increasing resend delays. Initiation responses never disclose eligibility or suppression.
       security: [{BearerAuth: []}]
       requestBody:
         required: true
@@ -604,7 +604,7 @@ paths:
     post:
       tags: [Authentication]
       summary: Prove new email and revoke all sessions
-      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts per challenge and ten wrong codes per email/purpose in a rolling 24 hours. Sends are capped at five per rolling 24 hours with increasing resend delays. Initiation responses never disclose eligibility or suppression.
       security: [{BearerAuth: []}]
       requestBody:
         required: true
@@ -622,7 +622,7 @@ paths:
                   pattern: "^[0-9]{6}$"
       responses:
         '200':
-          description: Proof accepted; sign in again after signup, reset or email change.
+          description: Proof accepted; all account sessions and API keys (classic, scoped and capture) revoked atomically; notice queued. Sign in and create replacement keys.
         '202':
           description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
         '400':
@@ -640,7 +640,7 @@ paths:
     post:
       tags: [Authentication]
       summary: Request proof for the signed-in account email
-      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts per challenge and ten wrong codes per email/purpose in a rolling 24 hours. Sends are capped at five per rolling 24 hours with increasing resend delays. Initiation responses never disclose eligibility or suppression.
       security: [{BearerAuth: []}]
       requestBody:
         required: true
@@ -673,7 +673,7 @@ paths:
     post:
       tags: [Authentication]
       summary: Verify the signed-in account email
-      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts per challenge and ten wrong codes per email/purpose in a rolling 24 hours. Sends are capped at five per rolling 24 hours with increasing resend delays. Initiation responses never disclose eligibility or suppression.
       security: [{BearerAuth: []}]
       requestBody:
         required: true
@@ -1081,7 +1081,7 @@ paths:
                   example: "What are the main takeaways?"
                 model:
                   type: string
-                  description: Optional model override
+                  description: Optional server-allowlisted model override; unknown values return 400 invalid_model. Owner accounts may request any model.
                   example: "openai/gpt-4o-mini"
       responses:
         "200":
@@ -1134,8 +1134,8 @@ paths:
                   example: "Summarize the key takeaways."
                 model:
                   type: string
-                  description: Optional model override
-                  example: "anthropic/claude-4.5-opus-20251124"
+                  description: Optional server-allowlisted model override; unknown values return 400 invalid_model. Owner accounts may request any model.
+                  example: "google/gemini-2.5-flash"
       responses:
         "200":
           description: User + assistant messages
@@ -1187,8 +1187,8 @@ paths:
                   example: "What are the main points in this document?"
                 model:
                   type: string
-                  description: Optional model override
-                  example: "anthropic/claude-4.5-opus-20251124"
+                  description: Optional server-allowlisted model override; unknown values return 400 invalid_model. Owner accounts may request any model.
+                  example: "google/gemini-2.5-flash"
       responses:
         "200":
           description: User + assistant messages
@@ -1302,7 +1302,7 @@ paths:
                   default: bullet
                 model:
                   type: string
-                  description: Override the default AI model
+                  description: Override with a server-allowlisted AI model; unknown values return 400 invalid_model. Owner accounts may request any model.
                   example: "openai/gpt-4o"
       responses:
         "202":
@@ -1708,7 +1708,7 @@ paths:
       tags: [Authentication]
       summary: Create or replace the signed-in account password
       security: [{BearerAuth: []}]
-      description: Requires current_password when a password exists. Replacing a password revokes every other device session and queues a notice.
+      description: Requires current_password when a password exists and verified stored email for first enrollment. Replacing a password revokes every other device session, preserves API keys and queues a notice.
       requestBody:
         required: true
         content:
@@ -1720,7 +1720,8 @@ paths:
                 password: {type: string, minLength: 12, maxLength: 128}
                 current_password: {type: string, format: password, description: Required for replacement, optional for first enrollment}
       responses:
-        "200": {description: Password saved}
+        "200": {description: Password saved; first enrollment requires verified stored email. Ordinary changes preserve API keys.}
+        "403": {description: email_verification_required}
         "400": {description: weak_password or password_compromised}
         "401": {description: current_password_required}
         "409": {description: credential_changed}
@@ -2127,10 +2128,11 @@ paths:
     post:
       tags: [Audio]
       summary: Format a completed transcript for readability
-      description: Queues a durable, word-preserving capitalization, punctuation, and paragraph pass while retaining the original transcript.
+      description: Queues a durable, word-preserving capitalization, punctuation, and paragraph pass while retaining the original transcript. Manual and automatic formatting consume the monthly AI cap. Capped automatic work exposes formatting_status skipped and a limit message without failing the transcription.
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
         "202": {description: Readability formatting queued}
+        "402": {description: monthly_ai_cap}
         "404": {description: Audio transcription not found}
         "409": {description: Transcript is not ready or formatting is already active}
   /audio/transcriptions/{id}/audio:
@@ -2151,7 +2153,7 @@ paths:
     post:
       tags: [Audio]
       summary: Queue an audio summary
-      description: Returns immediately while evidence-grounded summarization continues in the durable background queue.
+      description: Returns immediately while evidence-grounded summarization continues in the durable background queue. Charges the monthly AI cap. Automatic title and summary operations count separately and expose summary_status skipped with a limit message when capped. Client model overrides must be server-allowlisted unless the account is the exact configured owner.
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
       responses: {"202": {description: Audio summary queued}}
   /pdf/extract:

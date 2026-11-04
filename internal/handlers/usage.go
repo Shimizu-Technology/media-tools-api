@@ -8,6 +8,7 @@ import (
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/gin-gonic/gin"
 )
 
@@ -21,7 +22,7 @@ func usageAccount(c *gin.Context) string {
 	return ""
 }
 func (h *Handler) ensureUsage(c *gin.Context, userID string) bool {
-	if err := h.DB.EnsureUsagePolicy(c.Request.Context(), userID, h.MonthlyMinutes, h.MonthlyAIRequests, h.OwnerUserID, h.OwnerAPIKeyID, h.OwnerAPIKeyPrefix); err != nil {
+	if err := h.DB.EnsureUsagePolicy(c.Request.Context(), userID, h.MonthlyMinutes, h.MonthlyAIRequests, h.OwnerUserID, h.OwnerAPIKeyID); err != nil {
 		authError(c, 503, "usage_unavailable", "Could not check account usage; retry")
 		c.Abort()
 		return false
@@ -58,7 +59,8 @@ func (h *Handler) UsageGuard() gin.HandlerFunc {
 		}
 		route := c.FullPath()
 		transcription := route == "/api/v1/transcripts" || route == "/api/v1/transcripts/batch" || route == "/api/v1/audio/transcribe" || route == "/api/v1/audio/uploads/presign" || route == "/api/v1/audio/uploads/complete" || strings.HasSuffix(route, "/retry")
-		ai := route == "/api/v1/summaries" || strings.HasSuffix(route, "/summarize") || strings.HasSuffix(route, "/chat") || strings.HasSuffix(route, "/messages")
+		formatting := route == "/api/v1/audio/transcriptions/:id/format"
+		ai := formatting || route == "/api/v1/summaries" || strings.HasSuffix(route, "/summarize") || strings.HasSuffix(route, "/chat") || strings.HasSuffix(route, "/messages")
 		userID := usageAccount(c)
 		if userID == "" || (!transcription && !ai) {
 			c.Next()
@@ -82,7 +84,15 @@ func (h *Handler) UsageGuard() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		if ai {
+		if formatting {
+			// Formatting is charged by its durable worker, for both manual and
+			// automatic jobs. Do not double-charge the HTTP enqueue operation.
+			if usage.AIRequests >= usage.AIRequestLimit {
+				authError(c, 402, "monthly_ai_cap", "Monthly AI limit reached; try again next month")
+				c.Abort()
+				return
+			}
+		} else if ai {
 			if err = h.DB.ReserveAIRequest(c.Request.Context(), userID); err != nil {
 				if database.IsUsageCap(err) {
 					authError(c, 402, "monthly_ai_cap", "Monthly summary and chat limit reached; try again next month")
@@ -92,8 +102,10 @@ func (h *Handler) UsageGuard() gin.HandlerFunc {
 				c.Abort()
 				return
 			}
+			ctx, providerCalled := summary.TrackProviderCall(c.Request.Context())
+			c.Request = c.Request.WithContext(ctx)
 			defer func() {
-				if c.Writer.Status() >= 400 {
+				if c.Writer.Status() >= 400 && !providerCalled.Load() {
 					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
 					_ = h.DB.RefundAIRequest(ctx, userID, usage.Month)

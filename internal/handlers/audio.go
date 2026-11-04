@@ -798,6 +798,10 @@ func (h *Handler) FormatAudioTranscript(c *gin.Context) {
 	}
 
 	if err := h.DB.QueueAudioTranscriptFormatting(c.Request.Context(), at.ID); err != nil {
+		if database.IsUsageCap(err) {
+			authError(c, 402, "monthly_ai_cap", "Monthly AI limit reached; try again next month")
+			return
+		}
 		if errors.Is(err, database.ErrAudioFormattingNotQueueable) {
 			c.JSON(http.StatusConflict, models.ErrorResponse{
 				Error: "already_processing", Message: "Readable formatting is already in progress.", Code: http.StatusConflict,
@@ -992,6 +996,10 @@ func (h *Handler) SummarizeAudio(c *gin.Context) {
 	// Parse request body
 	var req models.SummarizeAudioRequest
 	c.ShouldBindJSON(&req) // Optional body — ok if empty
+
+	if !h.allowAIModel(c, req.Model) {
+		return
+	}
 
 	// Validate content type
 	contentType := models.AudioContentType(req.ContentType)

@@ -167,5 +167,9 @@ func CodeMessage(to, code, purpose string) Message {
 	return Message{To: to, Subject: "Your Media Tools code", Text: "Your Media Tools " + label + " code is " + code + ". It expires in 10 minutes. If you did not request this, ignore this email."}
 }
 func Notice(to, action string) Message {
-	return Message{To: to, Subject: "Media Tools account updated", Text: "Your Media Tools " + action + " was changed. If this was not you, reset your password and contact support."}
+	text := "Your Media Tools " + action + " was changed."
+	if action == "password reset" || action == "email recovery" {
+		text += " All sessions and API keys, including capture and agent keys, were revoked. Sign in again and create replacement keys."
+	}
+	return Message{To: to, Subject: "Media Tools account updated", Text: text + " If this was not you, reset your password and contact support."}
 }

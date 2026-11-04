@@ -31,7 +31,7 @@ type Usage struct {
 // Policy defaults are captured on first use, so a future per-account override
 // is not overwritten by every request. Exemption is derived from explicit
 // owner configuration, never an email, client flag, or first-created account.
-func (db *DB) EnsureUsagePolicy(ctx context.Context, userID string, minutes, ai int, ownerID, ownerKeyID, ownerPrefix string) error {
+func (db *DB) EnsureUsagePolicy(ctx context.Context, userID string, minutes, ai int, ownerID, ownerKeyID string) error {
 	if minutes <= 0 {
 		minutes = 300
 	}
@@ -39,8 +39,8 @@ func (db *DB) EnsureUsagePolicy(ctx context.Context, userID string, minutes, ai 
 		ai = 1000
 	}
 	_, err := db.ExecContext(ctx, `INSERT INTO account_usage_policies(user_id,transcription_limit_seconds,ai_request_limit,exempt)
- VALUES($1,$2,$3, COALESCE($1::text=NULLIF($4,''),FALSE) OR EXISTS(SELECT 1 FROM api_keys WHERE user_id=$1 AND (id::text=NULLIF($5,'') OR key_prefix=NULLIF($6,''))))
- ON CONFLICT(user_id) DO UPDATE SET exempt=EXCLUDED.exempt`, userID, int64(minutes)*60, ai, ownerID, ownerKeyID, ownerPrefix)
+ VALUES($1,$2,$3, COALESCE($1::text=NULLIF($4,''),FALSE) OR EXISTS(SELECT 1 FROM api_keys WHERE user_id=$1 AND id::text=NULLIF($5,'')))
+ ON CONFLICT(user_id) DO UPDATE SET exempt=EXCLUDED.exempt`, userID, int64(minutes)*60, ai, ownerID, ownerKeyID)
 	return err
 }
 func (db *DB) AccountUsage(ctx context.Context, userID string) (*Usage, error) {
@@ -131,7 +131,14 @@ func (db *DB) CreateBatchWithTranscripts(ctx context.Context, b *models.Batch, t
 // ReserveAutomaticAIRequest is the non-HTTP counterpart of ReserveAIRequest.
 // The ledger insert and quota increment share one transaction, so a restarted
 // worker can safely repeat a logical operation without spending a second unit.
-func (db *DB) ReserveAutomaticAIRequest(ctx context.Context, userID, apiKeyID *string, key string) error {
+type UsageDefaults struct {
+	MonthlyMinutes    int
+	MonthlyAIRequests int
+	OwnerUserID       string
+	OwnerKeyID        string
+}
+
+func (db *DB) ReserveAutomaticAIRequest(ctx context.Context, userID, apiKeyID *string, key string, defaults ...UsageDefaults) error {
 	account := ""
 	if userID != nil {
 		account = *userID
@@ -143,6 +150,19 @@ func (db *DB) ReserveAutomaticAIRequest(ctx context.Context, userID, apiKeyID *s
 	if account == "" {
 		return nil
 	}
+	if len(defaults) > 0 {
+		policy := defaults[0]
+		if err := db.EnsureUsagePolicy(ctx, account, policy.MonthlyMinutes, policy.MonthlyAIRequests, policy.OwnerUserID, policy.OwnerKeyID); err != nil {
+			return err
+		}
+	} else {
+		// Jobs admitted before the quota rollout still need a policy. Preserve
+		// existing overrides/exemptions for callers without server configuration.
+		if _, err := db.ExecContext(ctx, `INSERT INTO account_usage_policies(user_id,transcription_limit_seconds,ai_request_limit) VALUES($1,18000,1000) ON CONFLICT DO NOTHING`, account); err != nil {
+			return err
+		}
+	}
+
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -151,9 +171,6 @@ func (db *DB) ReserveAutomaticAIRequest(ctx context.Context, userID, apiKeyID *s
 	var exempt bool
 	var limit int64
 	err = tx.QueryRowContext(ctx, `SELECT exempt,ai_request_limit FROM account_usage_policies WHERE user_id=$1 FOR UPDATE`, account).Scan(&exempt, &limit)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
 	if err != nil {
 		return err
 	}

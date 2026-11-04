@@ -33,7 +33,7 @@ func TestEmailChallengeConcurrentSingleUseAndPurge(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results <- db.CompleteEmailChallenge(ctx, "signup", address, "456789", "", service.CodeHash, func(to, action string) (string, error) { return service.Seal(emailservice.Notice(to, action)) })
+			results <- db.CompleteEmailChallenge(ctx, "signup", address, "456789", "synthetic-verified-password-hash", service.CodeHash, func(to, action string) (string, error) { return service.Seal(emailservice.Notice(to, action)) })
 		}()
 	}
 	wg.Wait()

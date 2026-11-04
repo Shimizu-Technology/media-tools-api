@@ -48,11 +48,14 @@ func (db *DB) IssueEmailChallenge(ctx context.Context, ch EmailChallenge, sealed
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, ch.Email); err != nil {
 		return false, err
 	}
-	var recent bool
-	if err = tx.GetContext(ctx, &recent, `SELECT EXISTS(SELECT 1 FROM auth_email_challenges WHERE purpose=$1 AND email=$2 AND created_at>NOW()-INTERVAL '60 seconds')`, ch.Purpose, ch.Email); err != nil {
+	// This history survives challenge replacement. Reserve sends before queueing,
+	// so concurrent initiations and provider retries cannot reset the daily cap.
+	var sends int
+	var last sql.NullTime
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*),MAX(created_at) FROM auth_email_limits WHERE purpose=$1 AND email=$2 AND kind='send' AND created_at>NOW()-INTERVAL '24 hours'`, ch.Purpose, ch.Email).Scan(&sends, &last); err != nil {
 		return false, err
 	}
-	if recent {
+	if sends >= 5 || (last.Valid && time.Since(last.Time) < time.Minute*time.Duration(1<<max(0, sends-1))) {
 		return false, nil
 	}
 	var user struct {
@@ -100,7 +103,10 @@ func (db *DB) IssueEmailChallenge(ctx context.Context, ch EmailChallenge, sealed
 	if _, err = tx.ExecContext(ctx, `DELETE FROM auth_email_challenges WHERE purpose=$1 AND email=$2`, ch.Purpose, ch.Email); err != nil {
 		return false, err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO auth_email_challenges(id,purpose,email,user_id,code_hash,password_hash,credential_snapshot,name) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, ch.ID, ch.Purpose, ch.Email, ch.UserID, ch.CodeHash, ch.PasswordHash, ch.CredentialSnapshot, ch.Name); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO auth_email_challenges(id,purpose,email,user_id,code_hash,password_hash,credential_snapshot,name) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, ch.ID, ch.Purpose, ch.Email, ch.UserID, ch.CodeHash, "", ch.CredentialSnapshot, ch.Name); err != nil {
+		return false, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO auth_email_limits(purpose,email,kind) VALUES($1,$2,'send')`, ch.Purpose, ch.Email); err != nil {
 		return false, err
 	}
 	if err = queueAuthEmailTx(ctx, tx, ch.ID, &ch.ID, ch.UserID, sealed, time.Now().Add(10*time.Minute)); err != nil {
@@ -124,11 +130,29 @@ func (db *DB) CompleteEmailChallenge(ctx context.Context, purpose, email, code, 
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, email); err != nil {
 		return err
 	}
+	var wrong int
+	if err = tx.GetContext(ctx, &wrong, `SELECT COUNT(*) FROM auth_email_limits WHERE purpose=$1 AND email=$2 AND kind='wrong' AND created_at>NOW()-INTERVAL '24 hours'`, purpose, email); err != nil {
+		return err
+	}
+	if wrong >= 10 {
+		return ErrEmailCodeInvalid
+	}
+	// Commit invalid attempts independently of challenge lifetime. Correct codes
+	// also fail after the daily budget; a stranger can delay recovery, not login.
+	reject := func() error {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO auth_email_limits(purpose,email,kind) VALUES($1,$2,'wrong')`, purpose, email); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		return ErrEmailCodeInvalid
+	}
 	// Read the owner before locking the challenge to keep user→challenge lock
 	// ordering consistent with account deletion and challenge creation.
 	var owner *string
 	if err = tx.GetContext(ctx, &owner, `SELECT user_id FROM auth_email_challenges WHERE purpose=$1 AND email=$2`, purpose, email); errors.Is(err, sql.ErrNoRows) {
-		return ErrEmailCodeInvalid
+		return reject()
 	} else if err != nil {
 		return err
 	}
@@ -143,16 +167,13 @@ func (db *DB) CompleteEmailChallenge(ctx context.Context, purpose, email, code, 
 		return err
 	}
 	if ch.ConsumedAt != nil || !time.Now().Before(ch.ExpiresAt) || ch.Attempts >= 5 {
-		return ErrEmailCodeInvalid
+		return reject()
 	}
 	if subtle.ConstantTimeCompare([]byte(ch.CodeHash), []byte(hashCode(ch.ID, code))) != 1 {
 		if _, err = tx.ExecContext(ctx, `UPDATE auth_email_challenges SET attempts=attempts+1 WHERE id=$1`, ch.ID); err != nil {
 			return err
 		}
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-		return ErrEmailCodeInvalid
+		return reject()
 	}
 	userID := ""
 	if ch.UserID != nil {
@@ -168,7 +189,6 @@ func (db *DB) CompleteEmailChallenge(ctx context.Context, purpose, email, code, 
 		if err != nil {
 			return err
 		}
-		newHash = ch.PasswordHash
 	case "reset", "verify":
 		if NormalizeLoginEmail(oldEmail) != email {
 			return ErrEmailCodeInvalid
@@ -220,14 +240,17 @@ func (db *DB) CompleteEmailChallenge(ctx context.Context, purpose, email, code, 
 		if _, err = tx.ExecContext(ctx, `UPDATE auth_sessions SET revoked_at=COALESCE(revoked_at,NOW()) WHERE user_id=$1`, userID); err != nil {
 			return err
 		}
+		if _, err = tx.ExecContext(ctx, `UPDATE api_keys SET active=FALSE WHERE user_id=$1`, userID); err != nil {
+			return err
+		}
 		// Invalidate every other outstanding proof for this account. A later reset
 		// to an old email or a pre-password-change email proof cannot survive.
 		if _, err = tx.ExecContext(ctx, `UPDATE auth_email_challenges SET consumed_at=NOW() WHERE user_id=$1 AND consumed_at IS NULL`, userID); err != nil {
 			return err
 		}
-		action := "password"
+		action := "password reset"
 		if purpose == "email_change" {
-			action = "email"
+			action = "email recovery"
 		}
 		sealed, err := notice(oldEmail, action)
 		if err != nil {
@@ -288,6 +311,7 @@ func (db *DB) PurgeAuth(ctx context.Context) error {
 		`DELETE FROM auth_email_challenges WHERE expires_at<NOW()-INTERVAL '1 day'`,
 		`DELETE FROM auth_email_outbox WHERE expires_at<NOW() OR sent_at<NOW()-INTERVAL '1 day'`,
 		`DELETE FROM auth_failure_buckets WHERE started_at<NOW()-INTERVAL '1 day'`,
+		`DELETE FROM auth_email_limits WHERE created_at<NOW()-INTERVAL '24 hours'`,
 		`DELETE FROM auth_events WHERE created_at<NOW()-INTERVAL '90 days'`,
 	} {
 		if _, err := db.ExecContext(ctx, query); err != nil {

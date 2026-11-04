@@ -14,7 +14,7 @@ func TestUsageAtomicConcurrentCapsMonthAndOwner(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
 	ctx := context.Background()
 	userID := createPasswordTestUser(t, db)
-	if err := db.EnsureUsagePolicy(ctx, userID, 2, 3, "", "", ""); err != nil {
+	if err := db.EnsureUsagePolicy(ctx, userID, 2, 3, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	var passed atomic.Int32
@@ -59,7 +59,7 @@ func TestUsageAtomicConcurrentCapsMonthAndOwner(t *testing.T) {
 	if err != nil || usage.TranscriptionSeconds != 0 || usage.AIRequests != 0 {
 		t.Fatal("calendar month did not reset")
 	}
-	if err := db.EnsureUsagePolicy(ctx, userID, 2, 3, userID, "", ""); err != nil {
+	if err := db.EnsureUsagePolicy(ctx, userID, 2, 3, userID, ""); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 5; i++ {
@@ -75,7 +75,7 @@ func TestUsageAdmissionBatchRollbackAndFailedProvisionalRefund(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
 	ctx := context.Background()
 	userID := createPasswordTestUser(t, db)
-	if err := db.EnsureUsagePolicy(ctx, userID, 1, 2, "", "", ""); err != nil {
+	if err := db.EnsureUsagePolicy(ctx, userID, 1, 2, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	batch := &models.Batch{Status: models.StatusPending, TotalCount: 2, UserID: &userID}
@@ -114,7 +114,7 @@ func TestAutomaticAIReservationsShareCapAndRecoverWithoutDoubleCharge(t *testing
 	db := openPostgresIntegrationDB(t)
 	ctx := context.Background()
 	userID := createPasswordTestUser(t, db)
-	if err := db.EnsureUsagePolicy(ctx, userID, 300, 2, "", "", ""); err != nil {
+	if err := db.EnsureUsagePolicy(ctx, userID, 300, 2, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
