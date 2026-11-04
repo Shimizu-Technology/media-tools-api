@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { MotionConfig } from 'framer-motion'
-import { createBrowserRouter, Link, Navigate, Outlet, RouterProvider, ScrollRestoration, useLocation, type RouteObject } from 'react-router-dom'
+import { createBrowserRouter, Navigate, Outlet, RouterProvider, ScrollRestoration, useLocation, type RouteObject } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { AuthProvider } from './contexts/AuthContext'
@@ -11,7 +11,7 @@ import { announceSessionChange, sessionAccountChanged, subscribeSessionChanges }
 import { getSessionPhase, isWebSessionActive, localApiKeyMode, logoutWebSession, restoreWebSession, setSessionPhase, setWebOnboardingRequired, setWebSessionActive, subscribeWebSession, webSessionStateChanged } from './lib/webSession'
 import { clearPasskeySignInJournal, recoverPendingPasskeySignIn } from './lib/passkeys'
 import { isJoinSetupPath } from './lib/onboarding'
-import { Mark } from './components/ui/Mark'
+import { PublicFooter, PublicHeader } from './components/PublicChrome'
 
 const LibraryPage = lazy(() => import('./pages/LibraryPage').then((module) => ({ default: module.LibraryPage })))
 const CapturePage = lazy(() => import('./pages/CapturePage').then((module) => ({ default: module.CapturePage })))
@@ -110,41 +110,11 @@ function LandingOrSharedLink() {
 
 function PublicLayout() {
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--color-bg)' }}>
-      <header className="sticky top-0 z-50 border-b backdrop-blur" style={{ backgroundColor: 'var(--color-bar)', borderColor: 'var(--color-separator)' }}>
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-          <Link to="/" className="flex items-center gap-3">
-            <Mark size={36} />
-            <div>
-              <div className="font-semibold" style={{ color: 'var(--color-text)' }}>Media Tools</div>
-              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>AI media workspace</div>
-            </div>
-          </Link>
-          <nav className="flex items-center gap-2">
-            <Link to="/docs" className="min-h-11 rounded-md px-4 py-3 text-sm font-semibold transition-colors hover:bg-[var(--color-fill)]" style={{ color: 'var(--color-text-secondary)' }}>API docs</Link>
-            <Link to="/app" className="min-h-11 rounded-md px-4 py-3 text-sm font-semibold transition-colors hover:opacity-90" style={{ backgroundColor: 'var(--color-accent-fill)', color: 'var(--color-on-accent)' }}>Open app</Link>
-          </nav>
-        </div>
-      </header>
-      <Outlet />
-      <AppFooter />
+    <div className="flex min-h-dvh flex-col bg-bg text-text">
+      <PublicHeader />
+      <div className="flex-1"><Outlet /></div>
+      <PublicFooter />
     </div>
-  )
-}
-
-function AppFooter() {
-  return (
-    <footer className="py-8 text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-      <span>Built with Go + React by{' '}<a href="https://github.com/Shimizu-Technology" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)' }}>Shimizu Technology</a></span>
-      <span className="mx-2" aria-hidden="true">·</span>
-      <Link to="/privacy" style={{ color: 'var(--color-accent)' }}>Privacy</Link>
-      <span className="mx-2" aria-hidden="true">·</span>
-      <Link to="/terms" style={{ color: 'var(--color-accent)' }}>Terms</Link>
-      <span className="mx-2" aria-hidden="true">·</span>
-      <Link to="/support" style={{ color: 'var(--color-accent)' }}>Support</Link>
-      <span className="mx-2" aria-hidden="true">·</span>
-      <Link to="/delete-account" style={{ color: 'var(--color-accent)' }}>Delete account</Link>
-    </footer>
   )
 }
 

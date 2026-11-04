@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Check, Copy, Download, KeyRound, Loader2, LockKeyhole, ShieldCheck } from 'lucide-react';
+import { Check, Copy, Download, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthContext } from '../contexts/useAuthContext';
 import { passkeysSupported, PasskeyError, registerPasskey } from '../lib/passkeys';
@@ -153,10 +153,8 @@ export function JoinPage() {
         </header>
 
         <section className="mt-6 overflow-hidden rounded-xl border shadow-overlay sm:mt-10" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
-          <div className="border-b px-6 py-7 sm:px-10 sm:py-9" style={{ borderColor: 'var(--color-separator)', background: 'linear-gradient(135deg, var(--color-accent-tint), var(--color-surface) 58%)' }}>
-            <div className="flex h-14 w-14 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--color-accent-fill)', color: 'var(--color-on-accent)' }}><LockKeyhole className="h-6 w-6" /></div>
-            <p className="mt-5 text-xs font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--color-accent)' }}>Private, durable access</p>
-            <h1 className="mt-2 max-w-2xl text-3xl font-semibold tracking-tight sm:text-4xl">Set up the ways you will sign in and recover your account.</h1>
+          <div className="border-b px-6 py-7 sm:px-10 sm:py-9" style={{ borderColor: 'var(--color-separator)' }}>
+            <h1 className="max-w-2xl text-title sm:text-[2.25rem] sm:leading-[2.75rem]">Set up the ways you will sign in and recover your account.</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 sm:text-base" style={{ color: 'var(--color-text-secondary)' }}>Your passkey handles everyday sign-in. Recovery codes keep you from getting locked out if that device is unavailable.</p>
           </div>
 

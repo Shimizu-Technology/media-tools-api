@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
+import { BackToSettings } from '../components/settings/BackToSettings';
+import { Button } from '../components/ui/Button';
 import {
-  Webhook as WebhookIcon, Plus, Trash2, ToggleLeft, ToggleRight,
+  Plus, Trash2, ToggleLeft, ToggleRight,
   CheckCircle, XCircle, Clock, Send, AlertCircle,
 } from 'lucide-react';
 import {
@@ -106,67 +107,37 @@ export function WebhooksPage() {
 
   return (
     <main className="relative pb-16">
-      <div className="max-w-5xl mx-auto">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8"
-        >
+      <div className="mx-auto max-w-2xl">
+        <BackToSettings />
+        <div className="mb-6 mt-1 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <div
-              className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium mb-3"
-              style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}
-            >
-              <WebhookIcon className="w-3.5 h-3.5" />
-              Integrations
-            </div>
-            <div className="flex items-center gap-3 mb-2">
-              <WebhookIcon className="w-6 h-6" style={{ color: 'var(--color-accent)' }} />
-              <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight" style={{ color: 'var(--color-text)' }}>
-                Webhooks
-              </h1>
-            </div>
-            <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-              Receive HTTP notifications when jobs complete or fail.
-            </p>
+            <h1 className="text-large-title">Webhooks</h1>
+            <p className="mt-2 text-callout text-text-secondary">Media Tools sends an HTTP request to your URL when a job finishes or fails.</p>
           </div>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-md px-4 text-sm font-medium text-on-accent transition-colors sm:w-auto"
-            style={{ backgroundColor: 'var(--color-accent-fill)' }}
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Webhook</span>
-          </button>
-        </motion.div>
+          <Button variant="primary" onClick={() => setShowForm(!showForm)} icon={<Plus className="h-4 w-4" />}>Add a webhook</Button>
+        </div>
 
         {/* Error display */}
         {error && !showForm && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
+          <div
             className="mb-6 p-3 rounded-md border flex items-center gap-2"
             style={{
-              backgroundColor: 'rgba(239, 68, 68, 0.12)',
-              borderColor: 'rgba(239, 68, 68, 0.3)',
+              backgroundColor: 'var(--color-fill)',
+              borderColor: 'var(--color-separator)',
             }}
           >
             <AlertCircle className="w-4 h-4 shrink-0" style={{ color: 'var(--color-danger)' }} />
             <span className="text-sm" style={{ color: 'var(--color-danger)' }}>{error}</span>
-          </motion.div>
+          </div>
         )}
 
         {/* Secret display */}
         {createdSecret && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
+          <div
             className="mb-6 p-4 rounded-md border"
             style={{
-              backgroundColor: 'rgba(24, 185, 133, 0.08)',
-              borderColor: 'rgba(24, 185, 133, 0.24)',
+              backgroundColor: 'var(--color-fill)',
+              borderColor: 'var(--color-separator)',
             }}
           >
             <p className="text-sm font-medium mb-1" style={{ color: 'var(--color-text)' }}>
@@ -182,14 +153,12 @@ export function WebhooksPage() {
             >
               Dismiss
             </button>
-          </motion.div>
+          </div>
         )}
 
         {/* Create form */}
         {showForm && (
-          <motion.form
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
+          <form
             onSubmit={handleCreate}
             className="mb-6 p-6 rounded-md border space-y-4"
             style={{
@@ -260,7 +229,7 @@ export function WebhooksPage() {
                 Cancel
               </button>
             </div>
-          </motion.form>
+          </form>
         )}
 
         {/* Webhooks list */}
@@ -273,10 +242,8 @@ export function WebhooksPage() {
               <p className="text-sm">No webhooks registered yet.</p>
             </div>
           ) : webhooks.map((wh) => (
-            <motion.div
+            <div
               key={wh.id}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
               className="flex flex-col items-stretch justify-between gap-4 rounded-lg border p-4 sm:flex-row sm:items-center"
               style={{
                 backgroundColor: 'var(--color-surface)',
@@ -311,7 +278,7 @@ export function WebhooksPage() {
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
-            </motion.div>
+            </div>
           ))}
         </div>
 

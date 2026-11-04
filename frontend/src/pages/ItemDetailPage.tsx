@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { AlertCircle, Archive, ChevronLeft, Copy, Download, ExternalLink, FolderPlus, Loader2, MessageSquare, MoreHorizontal, Pencil, Play, RefreshCw, Sparkles, Square, Star, Tag, Trash2, X } from 'lucide-react';
+import { AlertCircle, AlignLeft, Archive, ChevronLeft, Copy, Download, ExternalLink, FolderPlus, Loader2, MessageSquare, MoreHorizontal, Pencil, Play, RefreshCw, RotateCcw, Square, Star, Tag, Trash2, X } from 'lucide-react';
 import {
   cancelAudioTranscription,
   createSummary,
@@ -380,10 +380,10 @@ export function ItemDetailPage() {
     ...(type === 'audio' ? [{ label: 'Rename', icon: <Pencil />, onSelect: () => setDialog('rename') }] : []),
     ...(view.sourceURL ? [{ label: 'Open the source', icon: <ExternalLink />, onSelect: () => window.open(view.sourceURL, '_blank', 'noopener,noreferrer') }] : []),
     ...(complete && type !== 'pdf' && summary && !isActive(summary.status)
-      ? [{ label: summary.status === 'completed' ? 'Summarize again' : 'Summarize', icon: <Sparkles />, onSelect: () => (type === 'audio' ? setDialog('summarize') : void summarize()) }]
+      ? [{ label: summary.status === 'completed' ? 'Summarize again' : 'Summarize', icon: <RotateCcw />, onSelect: () => (type === 'audio' ? setDialog('summarize') : void summarize()) }]
       : []),
     ...(audio && complete && (audio.formatting_status === 'none' || audio.formatting_status === 'failed')
-      ? [{ label: 'Tidy into paragraphs', icon: <Sparkles />, onSelect: formatTranscript }]
+      ? [{ label: 'Tidy into paragraphs', icon: <AlignLeft />, onSelect: formatTranscript }]
       : []),
     ...(audio && isActive(status) ? [{ label: 'Stop processing', icon: <Square />, onSelect: stopProcessing }] : []),
     { label: preferences.archived ? 'Move out of archive' : 'Archive', icon: <Archive />, onSelect: () => void savePreferences({ archived: !preferences.archived }) },
