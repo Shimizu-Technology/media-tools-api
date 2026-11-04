@@ -45,16 +45,16 @@ func acceptedEmail(c *gin.Context) {
 func (h *Handler) newPassword(c *gin.Context, raw string) (string, bool) {
 	password, err := accountservice.NormalizeNewPassword(raw)
 	if err != nil {
-		authError(c, 400, "weak_password", "Use a password of 12 to 128 characters")
+		authError(c, http.StatusBadRequest, "weak_password", "Use a password of 12 to 128 characters")
 		return "", false
 	}
 	if h.Pwned != nil && h.Pwned.Compromised(c.Request.Context(), password) {
-		authError(c, 400, "password_compromised", "Choose a password that has not appeared in a data breach")
+		authError(c, http.StatusBadRequest, "password_compromised", "Choose a password that has not appeared in a data breach")
 		return "", false
 	}
 	hash, err := h.Passwords.Hash(c.Request.Context(), password)
 	if err != nil {
-		authError(c, 503, "authentication_unavailable", "Try again shortly")
+		authError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Try again shortly")
 		return "", false
 	}
 	return hash, true
@@ -69,20 +69,20 @@ func (h *Handler) requireCurrentPassword(c *gin.Context, userID, raw string) (st
 		return "", true
 	}
 	if err != nil || h.Passwords == nil {
-		authError(c, 503, "authentication_unavailable", "Try again shortly")
+		authError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Try again shortly")
 		return "", false
 	}
 	if len(raw) > 1024 || !utf8.ValidString(raw) {
-		authError(c, 401, "current_password_required", "Enter your current password")
+		authError(c, http.StatusUnauthorized, "current_password_required", "Enter your current password")
 		return "", false
 	}
 	verified, err := h.Passwords.Verify(c.Request.Context(), credential.PasswordHash, raw)
 	if err != nil {
-		authError(c, 503, "authentication_unavailable", "Try again shortly")
+		authError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Try again shortly")
 		return "", false
 	}
 	if !verified.Valid {
-		authError(c, 401, "current_password_required", "Enter your current password")
+		authError(c, http.StatusUnauthorized, "current_password_required", "Enter your current password")
 		return "", false
 	}
 	return credential.PasswordHash, true
@@ -90,17 +90,17 @@ func (h *Handler) requireCurrentPassword(c *gin.Context, userID, raw string) (st
 
 func (h *Handler) beginEmailProof(c *gin.Context, purpose string) {
 	if purpose == "signup" && !h.PublicSignupEnabled {
-		authError(c, 403, "signup_disabled", "Sign-up is not available yet")
+		authError(c, http.StatusForbidden, "signup_disabled", "Sign-up is not available yet")
 		return
 	}
 	var req emailProofRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		authError(c, 400, "invalid_request", "Enter a valid email")
+		authError(c, http.StatusBadRequest, "invalid_request", "Enter a valid email")
 		return
 	}
 	req.Email = database.NormalizeLoginEmail(req.Email)
 	if !validEmail(req.Email) || len(req.Name) > 200 || !utf8.ValidString(req.Name) {
-		authError(c, 400, "invalid_request", "Enter a valid email and name")
+		authError(c, http.StatusBadRequest, "invalid_request", "Enter a valid email and name")
 		return
 	}
 	ch := database.EmailChallenge{ID: uuid.NewString(), Purpose: purpose, Email: req.Email, Name: strings.TrimSpace(req.Name)}
@@ -119,7 +119,7 @@ func (h *Handler) beginEmailProof(c *gin.Context, purpose string) {
 		ch.UserID = &user.ID
 		if purpose == "verify" {
 			if database.NormalizeLoginEmail(user.Email) != req.Email {
-				authError(c, 400, "invalid_request", "Use your account email")
+				authError(c, http.StatusBadRequest, "invalid_request", "Use your account email")
 				return
 			}
 		}
@@ -129,7 +129,7 @@ func (h *Handler) beginEmailProof(c *gin.Context, purpose string) {
 				return
 			}
 			if snapshot == "" {
-				authError(c, 409, "password_required", "Set a password before changing email")
+				authError(c, http.StatusConflict, "password_required", "Set a password before changing email")
 				return
 			}
 			ch.CredentialSnapshot = snapshot
@@ -137,18 +137,18 @@ func (h *Handler) beginEmailProof(c *gin.Context, purpose string) {
 	}
 	code, err := emailservice.NewCode()
 	if err != nil {
-		authError(c, 503, "authentication_unavailable", "Try again shortly")
+		authError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Try again shortly")
 		return
 	}
 	ch.CodeHash = h.Email.CodeHash(ch.ID, code)
 	sealed, err := h.Email.Seal(emailservice.CodeMessage(req.Email, code, purpose))
 	if err != nil {
-		authError(c, 503, "authentication_unavailable", "Try again shortly")
+		authError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Try again shortly")
 		return
 	}
 	_, err = h.DB.IssueEmailChallenge(c.Request.Context(), ch, sealed)
 	if err != nil {
-		authError(c, 503, "authentication_unavailable", "Try again shortly")
+		authError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Try again shortly")
 		return
 	}
 	if h.Worker != nil {
@@ -163,17 +163,17 @@ func (h *Handler) BeginEmailVerification(c *gin.Context) { h.beginEmailProof(c, 
 
 func (h *Handler) finishEmailProof(c *gin.Context, purpose string) {
 	if purpose == "signup" && !h.PublicSignupEnabled {
-		authError(c, 403, "signup_disabled", "Sign-up is not available yet")
+		authError(c, http.StatusForbidden, "signup_disabled", "Sign-up is not available yet")
 		return
 	}
 	var req emailProofRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		authError(c, 400, "invalid_request", "Enter the email and six-digit code")
+		authError(c, http.StatusBadRequest, "invalid_request", "Enter the email and six-digit code")
 		return
 	}
 	req.Email = database.NormalizeLoginEmail(req.Email)
 	if !validEmail(req.Email) || len(req.Code) != 6 || strings.IndexFunc(req.Code, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
-		authError(c, 400, "invalid_code", "Code is invalid or expired")
+		authError(c, http.StatusBadRequest, "invalid_code", "Code is invalid or expired")
 		return
 	}
 	if purpose == "email_change" || purpose == "verify" {
@@ -185,11 +185,11 @@ func (h *Handler) finishEmailProof(c *gin.Context, purpose string) {
 		var owned bool
 		err := h.DB.GetContext(c.Request.Context(), &owned, `SELECT EXISTS(SELECT 1 FROM auth_email_challenges WHERE purpose=$1 AND email=$2 AND user_id=$3)`, purpose, req.Email, user.ID)
 		if err != nil {
-			authError(c, 503, "authentication_unavailable", "Try again shortly")
+			authError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Try again shortly")
 			return
 		}
 		if !owned {
-			authError(c, 400, "invalid_code", "Code is invalid or expired")
+			authError(c, http.StatusBadRequest, "invalid_code", "Code is invalid or expired")
 			return
 		}
 	}
@@ -203,18 +203,18 @@ func (h *Handler) finishEmailProof(c *gin.Context, purpose string) {
 	}
 	err := h.DB.CompleteEmailChallenge(c.Request.Context(), purpose, req.Email, req.Code, hash, h.Email.CodeHash, func(to, action string) (string, error) { return h.Email.Seal(emailservice.Notice(to, action)) })
 	if errors.Is(err, database.ErrEmailCodeInvalid) {
-		authError(c, 400, "invalid_code", "Code is invalid or expired")
+		authError(c, http.StatusBadRequest, "invalid_code", "Code is invalid or expired")
 		return
 	}
 	if err != nil {
-		authError(c, 503, "authentication_unavailable", "Try again shortly")
+		authError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Try again shortly")
 		return
 	}
 	if h.Worker != nil {
 		h.Worker.Wake()
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(200, gin.H{"verified": true, "sign_in_required": purpose != "verify"})
+	c.JSON(http.StatusOK, gin.H{"verified": true, "sign_in_required": purpose != "verify"})
 }
 func (h *Handler) VerifySignup(c *gin.Context)            { h.finishEmailProof(c, "signup") }
 func (h *Handler) ResetPassword(c *gin.Context)           { h.finishEmailProof(c, "reset") }
@@ -228,13 +228,13 @@ func (h *Handler) rejectPassword(c *gin.Context, email string) {
 	}
 	allowed, err := h.DB.RecordAuthFailure(c.Request.Context(), h.Email.CodeHash("login-failure", database.NormalizeLoginEmail(email)))
 	if err != nil {
-		authError(c, 503, "authentication_unavailable", "Try again shortly")
+		authError(c, http.StatusServiceUnavailable, "authentication_unavailable", "Try again shortly")
 		return
 	}
 	_ = h.DB.RecordAuthEvent(c.Request.Context(), "", "password_login_failed")
 	if !allowed {
 		c.Header("Retry-After", "900")
-		authError(c, 429, "rate_limit_exceeded", "Too many unsuccessful attempts; use your correct password or try again later")
+		authError(c, http.StatusTooManyRequests, "rate_limit_exceeded", "Too many unsuccessful attempts; use your correct password or try again later")
 		return
 	}
 	passwordCredentialsRejected(c)

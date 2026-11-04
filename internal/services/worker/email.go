@@ -2,8 +2,9 @@ package worker
 
 import (
 	"errors"
-	emailservice "github.com/Shimizu-Technology/media-tools-api/internal/services/email"
 	"time"
+
+	emailservice "github.com/Shimizu-Technology/media-tools-api/internal/services/email"
 )
 
 func (p *Pool) SetEmailService(service *emailservice.Service) { p.email = service }

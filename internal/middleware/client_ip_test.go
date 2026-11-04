@@ -33,3 +33,18 @@ func TestClientIPTrustBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestClientIPMultipleForwardedHeadersUseNearestAppendedHop(t *testing.T) {
+	engine := gin.New()
+	engine.Use(ClientIP([]string{"10.0.0.0/24"}))
+	engine.GET("/", func(c *gin.Context) {
+		if AuthClientIP(c) != "203.0.113.9" {
+			t.Fatal("spoofed first header bypassed the nearest appended hop")
+		}
+	})
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "10.0.0.2:123"
+	req.Header.Add("X-Forwarded-For", "1.2.3.4")
+	req.Header.Add("X-Forwarded-For", "203.0.113.9")
+	engine.ServeHTTP(httptest.NewRecorder(), req)
+}

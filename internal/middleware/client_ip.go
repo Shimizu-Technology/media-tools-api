@@ -44,7 +44,7 @@ func ClientIP(trustedCIDRs []string) gin.HandlerFunc {
 		}
 		ip := net.ParseIP(peer)
 		if ip != nil && trusted(ip) {
-			parts := strings.Split(c.GetHeader("X-Forwarded-For"), ",")
+			parts := strings.Split(strings.Join(c.Request.Header.Values("X-Forwarded-For"), ","), ",")
 			// Bound work and fall back completely when a trusted proxy sends malformed
 			// data; skipping a bad hop would let a spoofed value jump the trust boundary.
 			if len(parts) <= 16 {

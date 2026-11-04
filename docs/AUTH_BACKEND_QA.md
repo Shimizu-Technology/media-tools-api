@@ -1,6 +1,6 @@
 # Auth backend acceptance
 
-Workstream D, agent-executed backend QA. Base: origin/main `0fc219e`, 2026-11-04.
+Workstream D, agent-executed backend QA. Initial base: `0fc219e`; rebased onto origin/main `d570f70`, 2026-11-04.
 Media Tools saves recordings, video transcripts and PDFs into an account library
 for search, summaries and chat. Sources: repo AGENTS.md, v1 release plan section D,
 PASSKEY_AUTH.md, INVITE_ONBOARDING.md, WEB_SESSION_ROLLOUT.md, and Brain Dump
@@ -21,6 +21,35 @@ Required scenarios (local PostgreSQL 16 `mta_test_auth`, HTTP and integration te
 - D09: monthly transcription and summary/chat caps reject excess work; owner bypass; concurrent reservations.
 - D10: purge removes expired tokens while preserving usable refresh recovery.
 
-Run status: preparation. Native/browser UI is out of scope; client UI acceptance
-belongs to E/F/G. iOS checks run in CI. Local email delivery is log only; codes
-are observed only by a Go `_test.go` HTTP harness, absent from shipped binaries.
+Focused acceptance: **10/10 passed**. Full gate is in progress on the rebased
+source; final results will be recorded below. Execution uses local PostgreSQL 16,
+full Gin routes over ephemeral loopback HTTP listeners, and synthetic accounts.
+
+| Case | Result and evidence |
+| --- | --- |
+| D01 | Passed: `TestAuthHTTPDefaultsEnumerationAndVerification`, `TestEmailSignupAndQuotaDefaults` |
+| D02 | Passed: same HTTP test; persisted verified account, successful native login, no passkey/recovery setup |
+| D03 | Passed: `TestAuthHTTPVerificationExpiryAttemptsAndResend`, `TestEmailChallengeConcurrentSingleUseAndPurge` |
+| D04 | Passed: `TestAuthHTTPPasswordlessResetChangesAndDeletion`; seeded passwordless Clerk-linked account, proved stored email, preserved stable ID/link, invalidated old session |
+| D05 | Passed: same HTTP test plus `TestEmailProofBoundToCredentialSnapshotAndAccount`; missing/wrong password rejected, current session retained on password replacement, other sessions revoked, three notices queued, email change revoked all sessions, deletion persisted |
+| D06 | Passed: `TestAuthHTTPFailedGuessesDoNotLockCorrectPassword`, `TestClientIPTrustBoundary`; failed guesses reach 429 and correct password succeeds; untrusted forwarded headers ignored |
+| D07 | Passed: `TestAuthHTTPBrowserCSRFAndStalePendingRecovery` and session database regression tests; extended CSRF cookie, cleared stale pending cookie and completed fresh sign-in; stale refresh did not revoke successor |
+| D08 | Passed: email service tests and `TestDurableAuthEmailRequeueAndDelivery`; fake Resend 429 requeued durably with Retry-After, replacement worker completed with stable idempotency key, ciphertext cleared, log delivery contained neither address nor code |
+| D09 | Passed: `TestAuthHTTPUsageAndOwnerExemption`, `TestUsageAtomicConcurrentCapsMonthAndOwner`, `TestUsageAdmissionBatchRollbackAndFailedProvisionalRefund`; two HTTP submissions completed through a synthetic extractor and exhausted 120 seconds, next transcription rejected 402, summary/chat rejected at their cap, owner bypassed cap, concurrent reservations respected limits, rejected batch left no items/jobs |
+| D10 | Passed: `TestEmailChallengeConcurrentSingleUseAndPurge`; expired access/refresh rows removed, usable exact-successor recovery retained |
+
+The browser API test originally failed because its shared cookie helper filters
+out deletion cookies. Inspecting all Set-Cookie values fixed the assertion;
+the fresh-preparation retry passes. An early migration draft used the wrong
+formatting job name; the integration gate caught it and the migration now
+retains the existing `audio_transcript_formatting` type.
+
+Native/browser UI is not run: E/F/G own client UI acceptance. iOS checks run in
+CI. The HTTP harness uses `EMAIL_DELIVERY=log`; a code-reading route is defined
+only in `_test.go` and cannot compile into the shipped server. Resend/HIBP are
+fake transports; real delivery and the production proxy chain are not tested.
+No Resend key was sought. No production configuration or data was read.
+
+Limits to release acceptance: configure and verify proxy CIDRs, a verified
+Resend sender, owner exemption and client reauthentication inputs before public
+signup. These are rollout tasks, not claimed production verification.
