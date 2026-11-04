@@ -148,14 +148,14 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-5xl mx-auto p-8 rounded-2xl border text-center"
+        className="w-full max-w-5xl mx-auto p-8 rounded-lg border text-center"
         style={{
-          backgroundColor: 'var(--color-surface-elevated)',
-          borderColor: 'var(--color-border)',
+          backgroundColor: 'var(--color-surface)',
+          borderColor: 'var(--color-separator)',
         }}
       >
-        <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" style={{ color: 'var(--color-brand-500)' }} />
-        <p className="text-lg font-medium" style={{ color: 'var(--color-text-primary)' }}>
+        <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" style={{ color: 'var(--color-accent)' }} />
+        <p className="text-lg font-medium" style={{ color: 'var(--color-text)' }}>
           Extracting transcript...
         </p>
         <p className="text-sm mt-2" style={{ color: 'var(--color-text-secondary)' }}>
@@ -170,15 +170,15 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-5xl mx-auto p-8 rounded-2xl border"
+        className="w-full max-w-5xl mx-auto p-8 rounded-lg border"
         style={{
-          backgroundColor: 'var(--color-surface-elevated)',
-          borderColor: 'var(--color-error)',
+          backgroundColor: 'var(--color-surface)',
+          borderColor: 'var(--color-danger)',
         }}
       >
         <div className="flex items-center gap-3 mb-3">
-          <AlertCircle className="w-6 h-6 shrink-0" style={{ color: 'var(--color-error)' }} />
-          <p className="text-lg font-medium" style={{ color: 'var(--color-text-primary)' }}>
+          <AlertCircle className="w-6 h-6 shrink-0" style={{ color: 'var(--color-danger)' }} />
+          <p className="text-lg font-medium" style={{ color: 'var(--color-text)' }}>
             Extraction failed
           </p>
         </div>
@@ -209,15 +209,15 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="p-6 rounded-2xl border mb-4"
+        className="p-6 rounded-lg border mb-4"
         style={{
-          backgroundColor: 'var(--color-surface-elevated)',
-          borderColor: 'var(--color-border)',
+          backgroundColor: 'var(--color-surface)',
+          borderColor: 'var(--color-separator)',
         }}
       >
         <h2
           className="text-xl font-semibold mb-4 tracking-tight"
-          style={{ color: 'var(--color-text-primary)' }}
+          style={{ color: 'var(--color-text)' }}
         >
           {transcript.title || 'Untitled Video'}
         </h2>
@@ -307,7 +307,7 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
 
         {/* Export row - separate line for cleaner mobile layout */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+          <span className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
             <FileDown className="w-3.5 h-3.5" />
             Export:
           </span>
@@ -319,11 +319,11 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
                 whileTap={{ scale: 0.95 }}
                 onClick={() => handleDownload(format)}
                 disabled={downloading === format}
-                className="px-3 py-2 rounded-lg text-xs font-medium uppercase transition-colors duration-200 disabled:opacity-50"
+                className="px-3 py-2 rounded-sm text-xs font-medium uppercase transition-colors duration-200 disabled:opacity-50"
                 style={{
-                  backgroundColor: 'var(--color-surface-overlay)',
+                  backgroundColor: 'var(--color-fill)',
                   color: 'var(--color-text-secondary)',
-                  border: '1px solid var(--color-border)',
+                  border: '1px solid var(--color-separator)',
                   minHeight: '44px',
                 }}
                 title={`Download as ${format.toUpperCase()}`}
@@ -344,29 +344,29 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
-        className="p-6 rounded-2xl border"
+        className="p-6 rounded-lg border"
         style={{
-          backgroundColor: 'var(--color-surface-elevated)',
-          borderColor: 'var(--color-border)',
+          backgroundColor: 'var(--color-surface)',
+          borderColor: 'var(--color-separator)',
         }}
       >
         <div className="flex items-center justify-between mb-4">
           <h3
             className="text-base font-semibold flex items-center gap-2"
-            style={{ color: 'var(--color-text-primary)' }}
+            style={{ color: 'var(--color-text)' }}
           >
-            <FileText className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
+            <FileText className="w-4 h-4" style={{ color: 'var(--color-accent)' }} />
             Transcript
           </h3>
           <div className="flex items-center gap-2 sm:gap-3">
             {/* Copy button */}
             <button
               onClick={handleCopy}
-              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-sm text-xs font-medium border transition-colors"
               style={{
-                backgroundColor: copied ? 'var(--color-success)' : 'var(--color-surface-overlay)',
+                backgroundColor: copied ? 'var(--color-accent)' : 'var(--color-fill)',
                 color: copied ? 'white' : 'var(--color-text-secondary)',
-                borderColor: copied ? 'var(--color-success)' : 'var(--color-border)',
+                borderColor: copied ? 'var(--color-accent)' : 'var(--color-separator)',
                 minHeight: '44px',
               }}
             >
@@ -378,13 +378,13 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
               <button
                 onClick={() => setExpanded(false)}
                 className="flex items-center gap-1 text-xs font-medium transition-colors"
-                style={{ color: 'var(--color-brand-500)', minHeight: '44px', minWidth: '44px' }}
+                style={{ color: 'var(--color-accent)', minHeight: '44px', minWidth: '44px' }}
               >
                 <ChevronUp className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Collapse</span>
               </button>
             )}
-            <span className="text-xs hidden sm:inline" style={{ color: 'var(--color-text-muted)' }}>
+            <span className="text-xs hidden sm:inline" style={{ color: 'var(--color-text-secondary)' }}>
               {transcript.word_count.toLocaleString()} words
             </span>
           </div>
@@ -411,7 +411,7 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
                 >
                   <span
                     className="shrink-0 text-xs font-mono pt-0.5 w-14 text-right"
-                    style={{ color: 'var(--color-brand-500)' }}
+                    style={{ color: 'var(--color-accent)' }}
                   >
                     {seg.time}
                   </span>
@@ -435,7 +435,7 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
               <TranscriptText text={displayText || ''} />
 
               {isLong && !expanded && (
-                <span style={{ color: 'var(--color-text-muted)' }}>...</span>
+                <span style={{ color: 'var(--color-text-secondary)' }}>...</span>
               )}
             </motion.div>
           )}
@@ -448,7 +448,7 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
             animate={{ opacity: 1 }}
             onClick={() => setExpanded(!expanded)}
             className="flex items-center gap-1.5 mt-4 text-sm font-medium transition-colors duration-200"
-            style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
+            style={{ color: 'var(--color-accent)', minHeight: '44px' }}
           >
             {expanded ? (
               <>
@@ -473,9 +473,9 @@ export function TranscriptDisplay({ transcript }: TranscriptDisplayProps) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg"
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-3 rounded-md shadow-overlay"
             style={{
-              backgroundColor: 'var(--color-success)',
+              backgroundColor: 'var(--color-accent)',
               color: 'white',
             }}
           >
@@ -509,11 +509,11 @@ function TranscriptText({ text }: { text: string }) {
           return (
             <code
               key={i}
-              className="px-1.5 py-0.5 rounded text-xs font-mono"
+              className="px-1.5 py-0.5 rounded-sm text-xs font-mono"
               style={{
-                backgroundColor: 'var(--color-surface)',
-                color: 'var(--color-brand-500)',
-                border: '1px solid var(--color-border)',
+                backgroundColor: 'var(--color-bg)',
+                color: 'var(--color-accent)',
+                border: '1px solid var(--color-separator)',
               }}
             >
               {part.slice(1, -1)}
@@ -543,11 +543,11 @@ function ActionButton({
       whileHover={{ scale: 1.03 }}
       whileTap={{ scale: 0.97 }}
       onClick={onClick}
-      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200"
+      className="flex items-center gap-1.5 px-3 py-2 rounded-sm text-sm font-medium transition-colors duration-200"
       style={{
-        backgroundColor: active ? 'var(--color-success)' : 'var(--color-surface-overlay)',
+        backgroundColor: active ? 'var(--color-accent)' : 'var(--color-fill)',
         color: active ? 'white' : 'var(--color-text-secondary)',
-        border: `1px solid ${active ? 'var(--color-success)' : 'var(--color-border)'}`,
+        border: `1px solid ${active ? 'var(--color-accent)' : 'var(--color-separator)'}`,
         minHeight: '44px', // Touch target
       }}
     >
@@ -574,11 +574,11 @@ function ActionLink({
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200"
+      className="flex items-center gap-1.5 px-3 py-2 rounded-sm text-sm font-medium transition-colors duration-200"
       style={{
-        backgroundColor: 'var(--color-surface-overlay)',
+        backgroundColor: 'var(--color-fill)',
         color: 'var(--color-text-secondary)',
-        border: '1px solid var(--color-border)',
+        border: '1px solid var(--color-separator)',
         minHeight: '44px', // Touch target
       }}
     >
@@ -592,10 +592,10 @@ function ActionLink({
 function MetadataItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <div className="flex items-center gap-2">
-      <span style={{ color: 'var(--color-text-muted)' }}>{icon}</span>
+      <span style={{ color: 'var(--color-text-secondary)' }}>{icon}</span>
       <div>
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{label}</p>
-        <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>{value}</p>
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{label}</p>
+        <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>{value}</p>
       </div>
     </div>
   );

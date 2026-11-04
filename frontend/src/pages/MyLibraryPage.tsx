@@ -261,10 +261,10 @@ export function MyLibraryPage() {
   };
 
   const statusColors: Record<string, { bg: string; text: string }> = {
-    completed: { bg: 'var(--color-success-subtle)', text: 'var(--color-success)' },
-    processing: { bg: 'var(--color-brand-50)', text: 'var(--color-brand-500)' },
-    pending: { bg: 'var(--color-warning-subtle)', text: 'var(--color-warning)' },
-    failed: { bg: 'var(--color-error-subtle)', text: 'var(--color-error)' },
+    completed: { bg: 'var(--color-accent-tint)', text: 'var(--color-accent)' },
+    processing: { bg: 'var(--color-accent-tint)', text: 'var(--color-accent)' },
+    pending: { bg: 'var(--color-fill)', text: 'var(--color-text)' },
+    failed: { bg: 'var(--color-fill)', text: 'var(--color-danger)' },
   };
 
   const typeIcons: Record<string, React.ReactNode> = {
@@ -274,9 +274,9 @@ export function MyLibraryPage() {
   };
 
   const typeColors: Record<string, { bg: string; text: string }> = {
-    youtube: { bg: 'var(--color-error-subtle)', text: 'var(--color-error)' },
-    audio: { bg: 'var(--color-brand-50)', text: 'var(--color-brand-500)' },
-    pdf: { bg: 'var(--color-warning-subtle)', text: 'var(--color-warning)' },
+    youtube: { bg: 'var(--color-fill)', text: 'var(--color-danger)' },
+    audio: { bg: 'var(--color-accent-tint)', text: 'var(--color-accent)' },
+    pdf: { bg: 'var(--color-fill)', text: 'var(--color-text)' },
   };
 
   return (
@@ -289,7 +289,7 @@ export function MyLibraryPage() {
       <div className="mb-8">
         <div
           className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium mb-3"
-          style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
+          style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}
         >
           <Library className="w-3.5 h-3.5" />
           Workspace
@@ -298,7 +298,7 @@ export function MyLibraryPage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="text-3xl sm:text-4xl font-semibold tracking-tight mb-2"
-          style={{ color: 'var(--color-text-primary)' }}
+          style={{ color: 'var(--color-text)' }}
         >
           My Library
         </motion.h1>
@@ -317,17 +317,17 @@ export function MyLibraryPage() {
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-6 flex flex-col items-stretch justify-between gap-3 rounded-2xl p-4 sm:flex-row sm:items-center"
-          style={{ backgroundColor: 'var(--color-error-subtle)', border: '1px solid var(--color-error-border)' }}
+          className="mb-6 flex flex-col items-stretch justify-between gap-3 rounded-lg p-4 sm:flex-row sm:items-center"
+          style={{ backgroundColor: 'var(--color-fill)', border: '1px solid var(--color-separator)' }}
         >
           <div className="flex items-center gap-3">
-            <span className="text-sm font-medium" style={{ color: 'var(--color-error)' }}>
+            <span className="text-sm font-medium" style={{ color: 'var(--color-danger)' }}>
               {selectedItems.size} selected
             </span>
             <button
               onClick={clearSelection}
-              className="min-h-11 rounded-xl px-3 text-sm transition-colors"
-              style={{ color: 'var(--color-text-muted)' }}
+              className="min-h-11 rounded-md px-3 text-sm transition-colors"
+              style={{ color: 'var(--color-text-secondary)' }}
             >
               Clear
             </button>
@@ -335,8 +335,8 @@ export function MyLibraryPage() {
           <button
             onClick={handleBulkDelete}
             disabled={isDeleting}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
-            style={{ backgroundColor: 'var(--color-error)', minHeight: '44px' }}
+            className="flex items-center gap-2 px-4 py-2 rounded-sm text-sm font-medium text-on-accent transition-colors disabled:opacity-50"
+            style={{ backgroundColor: 'var(--color-danger)', minHeight: '44px' }}
           >
             {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
             Delete Selected
@@ -350,7 +350,7 @@ export function MyLibraryPage() {
           { value: 'favorites', label: 'Starred', icon: Star },
           { value: 'archive', label: 'Archive', icon: Archive },
         ] as { value: WorkspaceFilter; label: string; icon: typeof Library }[]).map(({ value, label, icon: Icon }) => (
-          <button key={value} onClick={() => handleWorkspaceFilterChange(value)} className="inline-flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-xl border px-2 text-xs font-semibold sm:gap-2 sm:px-4 sm:text-sm" style={{ borderColor: workspaceFilter === value ? 'var(--color-brand-500)' : 'var(--color-border)', backgroundColor: workspaceFilter === value ? 'var(--color-brand-50)' : 'var(--color-surface-elevated)', color: workspaceFilter === value ? 'var(--color-brand-500)' : 'var(--color-text-secondary)' }}><Icon className="h-4 w-4 shrink-0" /><span className="truncate">{label}</span></button>
+          <button key={value} onClick={() => handleWorkspaceFilterChange(value)} className="inline-flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-semibold sm:gap-2 sm:px-4 sm:text-sm" style={{ borderColor: workspaceFilter === value ? 'var(--color-accent)' : 'var(--color-separator)', backgroundColor: workspaceFilter === value ? 'var(--color-accent-tint)' : 'var(--color-surface)', color: workspaceFilter === value ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}><Icon className="h-4 w-4 shrink-0" /><span className="truncate">{label}</span></button>
         ))}
       </div>
 
@@ -364,7 +364,7 @@ export function MyLibraryPage() {
         <div className="relative flex-1">
           <Search
             className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5"
-            style={{ color: 'var(--color-text-muted)' }}
+            style={{ color: 'var(--color-text-secondary)' }}
           />
           <input
             type="text"
@@ -372,19 +372,19 @@ export function MyLibraryPage() {
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search your library…"
             aria-label="Search your library"
-            className="w-full pl-12 pr-10 py-3 rounded-xl border text-sm outline-none transition-colors"
+            className="w-full pl-12 pr-10 py-3 rounded-md border text-sm outline-none transition-colors"
             style={{
-              backgroundColor: 'var(--color-surface-elevated)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-primary)',
+              backgroundColor: 'var(--color-surface)',
+              borderColor: 'var(--color-separator)',
+              color: 'var(--color-text)',
               minHeight: '44px',
             }}
           />
           {searchInput && (
             <button
               onClick={() => setSearchInput('')}
-              className="absolute right-1 top-1/2 flex min-h-11 min-w-11 -translate-y-1/2 items-center justify-center rounded-lg"
-              style={{ color: 'var(--color-text-muted)' }}
+              className="absolute right-1 top-1/2 flex min-h-11 min-w-11 -translate-y-1/2 items-center justify-center rounded-sm"
+              style={{ color: 'var(--color-text-secondary)' }}
               aria-label="Clear search"
             >
               <X className="w-4 h-4" />
@@ -398,15 +398,15 @@ export function MyLibraryPage() {
             <select
               value={activeTab}
               onChange={(event) => handleTabChange(event.target.value as ContentType)}
-              className="min-h-11 w-full appearance-none rounded-xl border py-2 pl-4 pr-9 text-sm font-medium outline-none"
-              style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              className="min-h-11 w-full appearance-none rounded-md border py-2 pl-4 pr-9 text-sm font-medium outline-none"
+              style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }}
             >
               <option value="all">All media</option>
               <option value="youtube">Video</option>
               <option value="audio">Recordings</option>
               <option value="pdf">PDFs</option>
             </select>
-            <SlidersHorizontal className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: 'var(--color-text-muted)' }} aria-hidden="true" />
+            <SlidersHorizontal className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: 'var(--color-text-secondary)' }} aria-hidden="true" />
           </label>
 
           <label className="relative min-w-0 sm:min-w-40">
@@ -414,28 +414,28 @@ export function MyLibraryPage() {
             <select
               value={statusFilter}
               onChange={(event) => handleStatusChange(event.target.value as StatusFilter)}
-              className="min-h-11 w-full appearance-none rounded-xl border py-2 pl-4 pr-9 text-sm font-medium capitalize outline-none"
-              style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              className="min-h-11 w-full appearance-none rounded-md border py-2 pl-4 pr-9 text-sm font-medium capitalize outline-none"
+              style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }}
             >
               <option value="all">Any status</option>
               <option value="completed">Completed</option>
               <option value="processing">Processing</option>
               <option value="failed">Failed</option>
             </select>
-            <SlidersHorizontal className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: 'var(--color-text-muted)' }} aria-hidden="true" />
+            <SlidersHorizontal className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: 'var(--color-text-secondary)' }} aria-hidden="true" />
           </label>
 
           <button
             onClick={() => setSortDir(sortDir === 'desc' ? 'asc' : 'desc')}
-            className="col-span-2 flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition-colors sm:col-auto"
-            style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+            className="col-span-2 flex min-h-11 items-center justify-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors sm:col-auto"
+            style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }}
           >
             <ArrowUpDown className="h-4 w-4" />
             {sortDir === 'desc' ? 'Newest first' : 'Oldest first'}
           </button>
 
           {!isLoading && (
-            <span className="col-span-2 px-1 text-sm sm:ml-auto" style={{ color: 'var(--color-text-muted)' }}>
+            <span className="col-span-2 px-1 text-sm sm:ml-auto" style={{ color: 'var(--color-text-secondary)' }}>
               {totalItems.toLocaleString()} {totalItems === 1 ? 'item' : 'items'}
             </span>
           )}
@@ -443,8 +443,8 @@ export function MyLibraryPage() {
           {hasActiveFilters && (
             <button
               onClick={clearFilters}
-              className="col-span-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold sm:col-auto"
-              style={{ color: 'var(--color-brand-500)' }}
+              className="col-span-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold sm:col-auto"
+              style={{ color: 'var(--color-accent)' }}
             >
               <X className="h-4 w-4" />
               Clear filters
@@ -456,7 +456,7 @@ export function MyLibraryPage() {
       {/* Loading */}
       {isLoading && (
         <div className="flex items-center justify-center py-16">
-          <Loader2 className="w-8 h-8 animate-spin" style={{ color: 'var(--color-brand-500)' }} />
+          <Loader2 className="w-8 h-8 animate-spin" style={{ color: 'var(--color-accent)' }} />
         </div>
       )}
 
@@ -465,21 +465,21 @@ export function MyLibraryPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col items-start gap-4 rounded-2xl border p-6 sm:flex-row sm:items-center"
+          className="flex flex-col items-start gap-4 rounded-lg border p-6 sm:flex-row sm:items-center"
           style={{
-            backgroundColor: 'var(--color-error-soft)',
-            borderColor: 'var(--color-error-border)',
+            backgroundColor: 'var(--color-fill)',
+            borderColor: 'var(--color-separator)',
           }}
         >
-          <AlertCircle className="h-5 w-5 shrink-0" style={{ color: 'var(--color-error)' }} />
+          <AlertCircle className="h-5 w-5 shrink-0" style={{ color: 'var(--color-danger)' }} />
           <div className="flex-1">
-            <p className="text-sm font-semibold" style={{ color: 'var(--color-error)' }}>Library unavailable</p>
+            <p className="text-sm font-semibold" style={{ color: 'var(--color-danger)' }}>Library unavailable</p>
             <p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>{error}</p>
           </div>
           <button
             onClick={() => setRefreshToken((value) => value + 1)}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold"
-            style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-error-border)', color: 'var(--color-error)' }}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border px-4 text-sm font-semibold"
+            style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)', color: 'var(--color-danger)' }}
           >
             <RefreshCw className="h-4 w-4" />
             Try again
@@ -495,20 +495,20 @@ export function MyLibraryPage() {
           className="text-center py-16"
         >
           <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
-            style={{ backgroundColor: 'var(--color-surface-elevated)' }}
+            className="w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4"
+            style={{ backgroundColor: 'var(--color-surface)' }}
           >
             {activeTab === 'all' ? (
-              <Library className="w-8 h-8" style={{ color: 'var(--color-text-muted)' }} />
+              <Library className="w-8 h-8" style={{ color: 'var(--color-text-secondary)' }} />
             ) : activeTab === 'youtube' ? (
-              <Youtube className="w-8 h-8" style={{ color: 'var(--color-text-muted)' }} />
+              <Youtube className="w-8 h-8" style={{ color: 'var(--color-text-secondary)' }} />
             ) : activeTab === 'audio' ? (
-              <Mic className="w-8 h-8" style={{ color: 'var(--color-text-muted)' }} />
+              <Mic className="w-8 h-8" style={{ color: 'var(--color-text-secondary)' }} />
             ) : (
-              <FileType2 className="w-8 h-8" style={{ color: 'var(--color-text-muted)' }} />
+              <FileType2 className="w-8 h-8" style={{ color: 'var(--color-text-secondary)' }} />
             )}
           </div>
-          <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text-primary)' }}>
+          <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text)' }}>
             {hasActiveFilters ? 'No items match these filters' : 'Your library is ready'}
           </h3>
           <p className="text-sm mb-6" style={{ color: 'var(--color-text-secondary)' }}>
@@ -519,8 +519,8 @@ export function MyLibraryPage() {
           {hasActiveFilters ? (
             <button
               onClick={clearFilters}
-              className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-5 text-sm font-semibold"
-              style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+              className="inline-flex min-h-11 items-center gap-2 rounded-md border px-5 text-sm font-semibold"
+              style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)', color: 'var(--color-text)' }}
             >
               <X className="h-4 w-4" />
               Clear filters
@@ -528,8 +528,8 @@ export function MyLibraryPage() {
           ) : (
             <button
               onClick={() => navigate('/app/new')}
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-white font-medium text-sm"
-              style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-md text-on-accent font-medium text-sm"
+              style={{ backgroundColor: 'var(--color-accent-fill)', minHeight: '44px' }}
             >
               <FileText className="h-4 w-4" />
               Add media
@@ -569,17 +569,17 @@ export function MyLibraryPage() {
                 }}
                 role="link"
                 tabIndex={0}
-                className="group relative p-5 rounded-2xl border cursor-pointer transition-all duration-200 hover:scale-[1.01]"
+                className="group relative p-5 rounded-lg border cursor-pointer transition-colors"
                 style={{
-                  backgroundColor: isSelected ? 'var(--color-brand-50)' : 'var(--color-surface-elevated)',
-                  borderColor: isSelected ? 'var(--color-brand-500)' : 'var(--color-border)',
+                  backgroundColor: isSelected ? 'var(--color-accent-tint)' : 'var(--color-surface)',
+                  borderColor: isSelected ? 'var(--color-accent)' : 'var(--color-separator)',
                 }}
               >
                 {/* Selection checkbox - shown on hover or when items are selected */}
                 <button
                   onClick={(e) => { e.stopPropagation(); toggleSelection(item); }}
-				  className={`absolute top-2 left-2 flex min-h-11 min-w-11 items-center justify-center rounded-lg transition-opacity ${selectedItems.size > 0 ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100'}`}
-                  style={{ color: isSelected ? 'var(--color-brand-500)' : 'var(--color-text-muted)' }}
+				  className={`absolute top-2 left-2 flex min-h-11 min-w-11 items-center justify-center rounded-sm transition-opacity ${selectedItems.size > 0 ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100'}`}
+                  style={{ color: isSelected ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}
                   aria-label={isSelected ? `Deselect ${item.title}` : `Select ${item.title}`}
                 >
                   {isSelected ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
@@ -590,8 +590,8 @@ export function MyLibraryPage() {
                   {/* Add to collection - shown on hover */}
                   <button
                     onClick={(e) => { e.stopPropagation(); setCollectionModal({ type: item.type === 'youtube' ? 'transcript' : item.type, id: item.id, title: item.title }); }}
-					className="flex min-h-11 min-w-11 items-center justify-center rounded-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
-                    style={{ color: 'var(--color-text-muted)' }}
+					className="flex min-h-11 min-w-11 items-center justify-center rounded-sm opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
+                    style={{ color: 'var(--color-text-secondary)' }}
                     title="Add to collection"
                     aria-label={`Add ${item.title} to a collection`}
                   >
@@ -600,15 +600,15 @@ export function MyLibraryPage() {
                   {/* Delete button - shown on hover */}
                   <button
                     onClick={(e) => handleDelete(item, e)}
-					className="flex min-h-11 min-w-11 items-center justify-center rounded-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
-                    style={{ color: 'var(--color-text-muted)' }}
+					className="flex min-h-11 min-w-11 items-center justify-center rounded-sm opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
+                    style={{ color: 'var(--color-text-secondary)' }}
                     title="Delete"
                     aria-label={`Delete ${item.title}`}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
                   <div
-                    className="p-1.5 rounded-lg"
+                    className="p-1.5 rounded-sm"
                     style={{ backgroundColor: typeColors[item.type].bg, color: typeColors[item.type].text }}
                     title={item.type.charAt(0).toUpperCase() + item.type.slice(1)}
                   >
@@ -619,14 +619,14 @@ export function MyLibraryPage() {
                 {/* Title */}
                 <h3
                   className="text-sm font-semibold mb-1.5 pr-16 pl-6 line-clamp-2 leading-snug"
-                  style={{ color: 'var(--color-text-primary)' }}
+                  style={{ color: 'var(--color-text)' }}
                 >
                   {item.title}
                 </h3>
 
                 {/* Subtitle */}
                 <div className="flex items-center gap-1.5 mb-3 pl-6">
-                  {item.type === 'youtube' && <User className="w-3.5 h-3.5" style={{ color: 'var(--color-text-muted)' }} />}
+                  {item.type === 'youtube' && <User className="w-3.5 h-3.5" style={{ color: 'var(--color-text-secondary)' }} />}
                   <span className="text-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>
                     {item.subtitle}
                   </span>
@@ -636,7 +636,7 @@ export function MyLibraryPage() {
                 <div className="flex items-center gap-2 flex-wrap pl-6">
                   {/* Status badge */}
                   <span
-                    className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium"
+                    className="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium"
                     style={{ backgroundColor: colors.bg, color: colors.text }}
                   >
                     {item.status}
@@ -645,27 +645,27 @@ export function MyLibraryPage() {
                   {/* Summary badge */}
                   {item.hasSummary && (
                     <span
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium"
-                      style={{ backgroundColor: 'var(--color-summary-subtle)', color: 'var(--color-summary)' }}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs font-medium"
+                      style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}
                     >
                       <Sparkles className="w-3 h-3" />
                       Summarized
                     </span>
                   )}
 
-                  {item.favorite && <span className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}><Star className="h-3 w-3" /> Starred</span>}
+                  {item.favorite && <span className="inline-flex items-center gap-1 rounded-sm px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}><Star className="h-3 w-3" /> Starred</span>}
 
-                  {item.tags.slice(0, 2).map((tag) => <span key={tag} className="rounded-md px-2 py-0.5 text-xs" style={{ backgroundColor: 'var(--color-surface-subtle)', color: 'var(--color-text-secondary)' }}>{tag}</span>)}
+                  {item.tags.slice(0, 2).map((tag) => <span key={tag} className="rounded-sm px-2 py-0.5 text-xs" style={{ backgroundColor: 'var(--color-fill)', color: 'var(--color-text-secondary)' }}>{tag}</span>)}
 
                   {/* Date */}
-                  <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     <Clock className="w-3 h-3" />
                     {formatDate(item.createdAt)}
                   </span>
 
                   {/* Word count */}
                   {item.wordCount > 0 && (
-                    <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                    <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       <FileText className="w-3 h-3" />
                       {item.wordCount.toLocaleString()}
                     </span>
@@ -687,10 +687,10 @@ export function MyLibraryPage() {
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="flex min-h-11 items-center justify-center gap-1 rounded-xl border px-3 text-sm font-medium disabled:opacity-40 sm:px-4"
+            className="flex min-h-11 items-center justify-center gap-1 rounded-md border px-3 text-sm font-medium disabled:opacity-40 sm:px-4"
             style={{
-              backgroundColor: 'var(--color-surface-elevated)',
-              borderColor: 'var(--color-border)',
+              backgroundColor: 'var(--color-surface)',
+              borderColor: 'var(--color-separator)',
               color: 'var(--color-text-secondary)',
               minHeight: '44px',
             }}
@@ -698,16 +698,16 @@ export function MyLibraryPage() {
             <ChevronLeft className="w-4 h-4" />
             Previous
           </button>
-          <span className="px-1 text-center text-xs sm:px-4 sm:text-sm" style={{ color: 'var(--color-text-muted)' }}>
+          <span className="px-1 text-center text-xs sm:px-4 sm:text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             Page {page} of {totalPages}
           </span>
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="flex min-h-11 items-center justify-center gap-1 rounded-xl border px-3 text-sm font-medium disabled:opacity-40 sm:px-4"
+            className="flex min-h-11 items-center justify-center gap-1 rounded-md border px-3 text-sm font-medium disabled:opacity-40 sm:px-4"
             style={{
-              backgroundColor: 'var(--color-surface-elevated)',
-              borderColor: 'var(--color-border)',
+              backgroundColor: 'var(--color-surface)',
+              borderColor: 'var(--color-separator)',
               color: 'var(--color-text-secondary)',
               minHeight: '44px',
             }}

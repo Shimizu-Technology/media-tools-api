@@ -101,8 +101,8 @@ export function HomePage() {
       {transcript && (
         <button
           onClick={handleReset}
-          className="mb-6 flex min-h-11 items-center gap-1.5 rounded-xl pr-3 text-sm font-medium"
-          style={{ color: 'var(--color-brand-500)' }}
+          className="mb-6 flex min-h-11 items-center gap-1.5 rounded-md pr-3 text-sm font-medium"
+          style={{ color: 'var(--color-accent)' }}
         >
           <ArrowLeft className="w-4 h-4" />
           New transcript
@@ -112,25 +112,25 @@ export function HomePage() {
       {/* Auth / API Key Setup */}
       {!transcript && accountAuthEnabled && !isAuthLoading && !isAuthenticated && (
         <div
-          className="max-w-md mx-auto mb-8 p-6 rounded-2xl border text-center"
-          style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}
+          className="max-w-md mx-auto mb-8 p-6 rounded-lg border text-center"
+          style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}
         >
           <div
-            className="w-10 h-10 mx-auto mb-3 rounded-xl flex items-center justify-center"
-            style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
+            className="w-10 h-10 mx-auto mb-3 rounded-md flex items-center justify-center"
+            style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}
           >
             <LogIn className="w-5 h-5" />
           </div>
-          <h3 className="text-base font-semibold mb-1" style={{ color: 'var(--color-text-primary)' }}>
+          <h3 className="text-base font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
             Sign in to extract transcripts
           </h3>
-          <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>
+          <p className="text-sm mb-4" style={{ color: 'var(--color-text-secondary)' }}>
             Your videos, recordings, PDFs, chats, and collections stay tied to your account.
           </p>
           <Link
             to="/sign-in?next=%2Fapp%2Fvideo"
-            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90"
-            style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
+            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-md text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
+            style={{ backgroundColor: 'var(--color-accent-fill)', minHeight: '44px' }}
           >
             <LogIn className="w-4 h-4" />
             Sign in
@@ -139,7 +139,7 @@ export function HomePage() {
       )}
 
       {!transcript && accountAuthEnabled && isAuthLoading && (
-        <div className="max-w-2xl mx-auto h-16 rounded-2xl animate-pulse" style={{ backgroundColor: 'var(--color-surface-elevated)' }} />
+        <div className="max-w-2xl mx-auto h-16 rounded-lg animate-pulse" style={{ backgroundColor: 'var(--color-surface)' }} />
       )}
 
       {!transcript && !accountAuthEnabled && !apiKey && (
@@ -156,10 +156,10 @@ export function HomePage() {
       {/* Error */}
       {error && (
         <div
-          className="max-w-2xl mx-auto mt-6 p-4 rounded-lg text-sm text-center"
+          className="max-w-2xl mx-auto mt-6 p-4 rounded-sm text-sm text-center"
           style={{
             backgroundColor: 'rgba(239, 68, 68, 0.12)',
-            color: 'var(--color-error)',
+            color: 'var(--color-danger)',
           }}
         >
           {error}
@@ -172,7 +172,7 @@ export function HomePage() {
           <TranscriptDisplay transcript={transcript} />
           {transcript.status === 'completed' && transcript.transcript_text && (
             <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_0.9fr]">
-              <div className="lg:col-span-2 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
+              <div className="lg:col-span-2 h-px" style={{ backgroundColor: 'var(--color-separator)' }} />
               <SummaryPanel
                 transcriptId={transcript.id}
                 transcriptText={transcript.transcript_text}

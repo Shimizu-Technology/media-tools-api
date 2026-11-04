@@ -5,8 +5,8 @@ import { TermsSection } from '../components/legal/TermsSection';
 export function TermsPage() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
-      <h1 className="text-3xl font-bold" style={{ color: 'var(--color-text-primary)' }}>Terms of Use</h1>
-      <p className="mt-2 text-sm" style={{ color: 'var(--color-text-muted)' }}>Effective August 22, 2026</p>
+      <h1 className="text-3xl font-bold" style={{ color: 'var(--color-text)' }}>Terms of Use</h1>
+      <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>Effective August 22, 2026</p>
 
       <div className="mt-10 space-y-8 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
         <TermsSection title="Agreement and eligibility">
@@ -15,7 +15,7 @@ export function TermsPage() {
 
         <TermsSection title="Your recordings and content">
           <p>You keep ownership of content you submit. You give us the limited permission needed to host, process, transcribe, format, summarize, and return that content at your direction.</p>
-          <p className="mt-3"><strong style={{ color: 'var(--color-text-primary)' }}>You are responsible for having all rights and permissions required to record, upload, or process content.</strong> Recording and consent laws vary by location. Do not secretly or unlawfully record another person.</p>
+          <p className="mt-3"><strong style={{ color: 'var(--color-text)' }}>You are responsible for having all rights and permissions required to record, upload, or process content.</strong> Recording and consent laws vary by location. Do not secretly or unlawfully record another person.</p>
         </TermsSection>
 
         <TermsSection title="Acceptable use">
@@ -23,7 +23,7 @@ export function TermsPage() {
         </TermsSection>
 
         <TermsSection title="AI features">
-          <p>AI-generated transcripts, formatting, summaries, citations, and answers can be incomplete or wrong. Review important output against the original source and do not rely on it as professional medical, legal, financial, or safety advice. Use the in-app report control for harmful, deceptive, privacy-invasive, or otherwise inappropriate AI output. Media Tools asks before sharing content with third-party AI providers; processing, reporting, and revocation details are in the <Link to="/privacy#ai-processing" className="underline" style={{ color: 'var(--color-brand-500)' }}>Privacy Policy</Link>.</p>
+          <p>AI-generated transcripts, formatting, summaries, citations, and answers can be incomplete or wrong. Review important output against the original source and do not rely on it as professional medical, legal, financial, or safety advice. Use the in-app report control for harmful, deceptive, privacy-invasive, or otherwise inappropriate AI output. Media Tools asks before sharing content with third-party AI providers; processing, reporting, and revocation details are in the <Link to="/privacy#ai-processing" className="underline" style={{ color: 'var(--color-accent)' }}>Privacy Policy</Link>.</p>
         </TermsSection>
 
         <TermsSection title="Service availability and changes">
@@ -31,7 +31,7 @@ export function TermsPage() {
         </TermsSection>
 
         <TermsSection title="Account deletion and termination">
-          <p>You can permanently delete your account in iPhone or web Settings. Public instructions are available on the <Link to="/delete-account" className="underline" style={{ color: 'var(--color-brand-500)' }}>account deletion page</Link>. We may suspend or terminate access for material violations of these terms, security threats, or legal requirements.</p>
+          <p>You can permanently delete your account in iPhone or web Settings. Public instructions are available on the <Link to="/delete-account" className="underline" style={{ color: 'var(--color-accent)' }}>account deletion page</Link>. We may suspend or terminate access for material violations of these terms, security threats, or legal requirements.</p>
         </TermsSection>
 
         <TermsSection title="Liability">
@@ -39,7 +39,7 @@ export function TermsPage() {
         </TermsSection>
 
         <TermsSection title="Governing law and contact">
-          <p>These terms are governed by the laws applicable in Guam, without regard to conflict-of-law rules. Questions can be sent through our <Link to="/support" className="underline" style={{ color: 'var(--color-brand-500)' }}>support page</Link> or to <a href="mailto:shimizutechnology@gmail.com" className="underline" style={{ color: 'var(--color-brand-500)' }}>shimizutechnology@gmail.com</a>.</p>
+          <p>These terms are governed by the laws applicable in Guam, without regard to conflict-of-law rules. Questions can be sent through our <Link to="/support" className="underline" style={{ color: 'var(--color-accent)' }}>support page</Link> or to <a href="mailto:shimizutechnology@gmail.com" className="underline" style={{ color: 'var(--color-accent)' }}>shimizutechnology@gmail.com</a>.</p>
         </TermsSection>
       </div>
     </main>

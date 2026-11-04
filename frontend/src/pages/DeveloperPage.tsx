@@ -143,24 +143,24 @@ export function DeveloperPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <section className="rounded-[2rem] border p-6 sm:p-8" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-        <div className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.2em]" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
+      <section className="rounded-xl border p-6 sm:p-8" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
+        <div className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.2em]" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}>
           <ShieldCheck className="h-3.5 w-3.5" />
           Developer settings
         </div>
         <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_0.6fr] lg:items-end">
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl" style={{ color: 'var(--color-text-primary)' }}>API keys live here now.</h1>
+            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl" style={{ color: 'var(--color-text)' }}>API keys live here now.</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
               Normal users can stay in the workspace. Developers can create API keys, configure webhooks, and read integration docs from this section.
             </p>
           </div>
           <div className="flex flex-wrap justify-start gap-3 lg:justify-end">
-            <Link to="/docs" className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
+            <Link to="/docs" className="inline-flex min-h-11 items-center gap-2 rounded-md border px-4 text-sm font-semibold transition-colors hover:bg-fill" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text)' }}>
               API docs
               <ExternalLink className="h-4 w-4" />
             </Link>
-            <Link to="/app/developer/webhooks" className="inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+            <Link to="/app/developer/webhooks" className="inline-flex min-h-11 items-center gap-2 rounded-md px-4 text-sm font-semibold text-on-accent transition-colors hover:opacity-90" style={{ backgroundColor: 'var(--color-accent-fill)' }}>
               Webhooks
               <Webhook className="h-4 w-4" />
             </Link>
@@ -169,23 +169,23 @@ export function DeveloperPage() {
       </section>
 
       {!accountAuthEnabled && !localKeyConfigured && (
-        <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+        <section className="rounded-xl border p-6" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
           <LocalApiKeySetup onKeySet={() => setLocalKeyConfigured(true)} hasKey={false} />
         </section>
       )}
 
       {accountAuthEnabled && (
-        <section className="rounded-[2rem] border p-6 sm:p-8" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+        <section className="rounded-xl border p-6 sm:p-8" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
           <div className="flex items-start gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}>
               <KeyRound className="h-5 w-5" />
             </div>
             <div className="flex-1">
-              <h2 className="text-xl font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>Create a developer API key</h2>
+              <h2 className="text-xl font-semibold tracking-tight" style={{ color: 'var(--color-text)' }}>Create a developer API key</h2>
               <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
                 The raw key is shown once. Store it in your integration's secret manager, not in browser code.
               </p>
-              <div className="mt-5 inline-flex rounded-xl border p-1" role="radiogroup" aria-label="Key type" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="mt-5 inline-flex rounded-md border p-1" role="radiogroup" aria-label="Key type" style={{ borderColor: 'var(--color-separator)' }}>
                 {([['standard', 'Standard key'], ['agent', 'Agent key']] as const).map(([value, label]) => (
                   <button
                     key={value}
@@ -193,8 +193,8 @@ export function DeveloperPage() {
                     role="radio"
                     aria-checked={keyType === value}
                     onClick={() => setKeyType(value)}
-                    className="inline-flex min-h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition"
-                    style={keyType === value ? { backgroundColor: 'var(--color-brand-500)', color: '#fff' } : { color: 'var(--color-text-secondary)' }}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-sm px-4 text-sm font-semibold transition-colors"
+                    style={keyType === value ? { backgroundColor: 'var(--color-accent-fill)', color: '#fff' } : { color: 'var(--color-text-secondary)' }}
                   >
                     {value === 'agent' && <Bot className="h-4 w-4" />}
                     {label}
@@ -202,24 +202,24 @@ export function DeveloperPage() {
                 ))}
               </div>
               {keyType === 'agent' && (
-                <fieldset className="mt-4 rounded-2xl border p-4" style={{ backgroundColor: 'var(--color-surface-subtle)', borderColor: 'var(--color-border)' }}>
-                  <legend className="px-2 text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>What can this agent do with your library?</legend>
+                <fieldset className="mt-4 rounded-lg border p-4" style={{ backgroundColor: 'var(--color-fill)', borderColor: 'var(--color-separator)' }}>
+                  <legend className="px-2 text-sm font-semibold" style={{ color: 'var(--color-text)' }}>What can this agent do with your library?</legend>
                   <p className="mb-3 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
                     An agent key acts as your account for the checked actions and nothing else. It can never manage keys, passwords, sessions, or webhooks.
                   </p>
                   <div className="mb-3 flex flex-wrap gap-2">
                     {SCOPE_PRESETS.map((preset) => (
-                      <button key={preset.id} type="button" onClick={() => setScopes(preset.scopes)} className="min-h-11 rounded-xl border px-3 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
+                      <button key={preset.id} type="button" onClick={() => setScopes(preset.scopes)} className="min-h-11 rounded-md border px-3 text-sm font-semibold transition-colors hover:bg-fill" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text)' }}>
                         {preset.label}
                       </button>
                     ))}
                   </div>
                   <div className="space-y-1">
                     {SCOPE_OPTIONS.map((option) => (
-                      <label key={option.id} className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl p-2">
+                      <label key={option.id} className="flex min-h-11 cursor-pointer items-start gap-3 rounded-md p-2">
                         <input type="checkbox" className="mt-1 h-4 w-4" checked={scopes.includes(option.id)} onChange={() => setScopes((current) => toggleScope(current, option.id))} />
                         <span>
-                          <span className="block text-sm font-semibold" style={{ color: option.id === 'library:delete' ? 'var(--color-danger)' : 'var(--color-text-primary)' }}>{option.label}</span>
+                          <span className="block text-sm font-semibold" style={{ color: option.id === 'library:delete' ? 'var(--color-danger)' : 'var(--color-text)' }}>{option.label}</span>
                           <span className="block text-xs leading-5" style={{ color: 'var(--color-text-secondary)' }}>{option.description}</span>
                         </span>
                       </label>
@@ -231,8 +231,8 @@ export function DeveloperPage() {
                 <input
                   value={name}
                   onChange={(event) => setName(event.target.value)}
-                  className="min-h-11 flex-1 rounded-xl border px-4 text-sm outline-none transition focus:border-[var(--color-brand-500)]"
-                  style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+                  className="min-h-11 flex-1 rounded-md border px-4 text-sm outline-none transition-colors focus:border-[var(--color-accent)]"
+                  style={{ backgroundColor: 'var(--color-bg)', borderColor: 'var(--color-separator)', color: 'var(--color-text)' }}
                   placeholder={keyType === 'agent' ? 'Agent name, for example Brain Dump agent' : 'Key name'}
                   aria-label="Key name"
                 />
@@ -240,8 +240,8 @@ export function DeveloperPage() {
                   type="button"
                   onClick={handleCreate}
                   disabled={isCreating || !name.trim() || (keyType === 'agent' && scopes.length === 0)}
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60"
-                  style={{ backgroundColor: 'var(--color-brand-500)' }}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold text-on-accent transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                  style={{ backgroundColor: 'var(--color-accent-fill)' }}
                 >
                   {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                   Create key
@@ -249,15 +249,15 @@ export function DeveloperPage() {
               </div>
 
               {createdKey && (
-                <div className="mt-5 rounded-2xl border p-4" style={{ backgroundColor: 'var(--color-surface-subtle)', borderColor: 'var(--color-border)' }}>
-                  <div role="status" className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--color-success)' }}>
+                <div className="mt-5 rounded-lg border p-4" style={{ backgroundColor: 'var(--color-fill)', borderColor: 'var(--color-separator)' }}>
+                  <div role="status" className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--color-accent)' }}>
                     <Check className="h-4 w-4" />
                     Copy this key now. It will not be shown again.
                   </div>
-                  <div className="flex items-center gap-3 rounded-xl border p-3 font-mono text-xs" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
+                  <div className="flex items-center gap-3 rounded-md border p-3 font-mono text-xs" style={{ backgroundColor: 'var(--color-bg)', borderColor: 'var(--color-separator)', color: 'var(--color-text)' }}>
                     <span className="min-w-0 flex-1 break-all">{createdKey}</span>
-                    <button type="button" onClick={handleCopy} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border" style={{ borderColor: 'var(--color-border)' }} aria-label="Copy API key">
-                      {copied ? <Check className="h-4 w-4" style={{ color: 'var(--color-success)' }} /> : <Copy className="h-4 w-4" />}
+                    <button type="button" onClick={handleCopy} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border" style={{ borderColor: 'var(--color-separator)' }} aria-label="Copy API key">
+                      {copied ? <Check className="h-4 w-4" style={{ color: 'var(--color-accent)' }} /> : <Copy className="h-4 w-4" />}
                     </button>
                   </div>
                 </div>
@@ -268,55 +268,55 @@ export function DeveloperPage() {
       )}
 
       {error && (
-        <div className="flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm" style={{ backgroundColor: 'rgba(239,68,68,0.08)', borderColor: 'var(--color-danger)', color: 'var(--color-danger)' }}>
+        <div className="flex items-center gap-2 rounded-lg border px-4 py-3 text-sm" style={{ backgroundColor: 'rgba(239,68,68,0.08)', borderColor: 'var(--color-danger)', color: 'var(--color-danger)' }}>
           <AlertTriangle className="h-4 w-4" />
           {error}
         </div>
       )}
 
-      <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+      <section className="rounded-xl border p-6" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-xl font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>Your API keys</h2>
+            <h2 className="text-xl font-semibold tracking-tight" style={{ color: 'var(--color-text)' }}>Your API keys</h2>
             <p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>Keys are scoped to your account when created from this page.</p>
           </div>
-          <button type="button" onClick={loadKeys} className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
+          <button type="button" onClick={loadKeys} className="inline-flex min-h-11 items-center gap-2 rounded-md border px-4 text-sm font-semibold transition-colors hover:bg-fill" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text)' }}>
             <RefreshCw className="h-4 w-4" />
             Refresh
           </button>
         </div>
 
         {isLoading ? (
-          <div className="flex items-center gap-3 rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+          <div className="flex items-center gap-3 rounded-lg border p-4" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }}>
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading API keys...
           </div>
         ) : apiKeys.length > 0 ? (
-          <div className="overflow-hidden rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
-            <div className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="overflow-hidden rounded-lg border" style={{ borderColor: 'var(--color-separator)' }}>
+            <div className="divide-y" style={{ borderColor: 'var(--color-separator)' }}>
               {apiKeys.map((key) => (
-                <div key={key.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between" style={{ backgroundColor: 'var(--color-surface-subtle)' }}>
+                <div key={key.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between" style={{ backgroundColor: 'var(--color-fill)' }}>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>{key.name}</p>
-                      <span className="rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-surface-overlay)', color: key.active ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
+                      <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{key.name}</p>
+                      <span className="rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-fill)', color: key.active ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}>
                         {key.active ? 'Active' : 'Revoked'}
                       </span>
                     </div>
-                    <p className="mt-1 break-words font-mono text-xs" style={{ color: 'var(--color-text-muted)' }}>{key.key_prefix} · {key.rate_limit} req/hr · created {formatDate(key.created_at)}{key.last_used_at ? ` · last used ${formatDate(key.last_used_at)}` : ''}</p>
+                    <p className="mt-1 break-words font-mono text-xs" style={{ color: 'var(--color-text-secondary)' }}>{key.key_prefix} · {key.rate_limit} req/hr · created {formatDate(key.created_at)}{key.last_used_at ? ` · last used ${formatDate(key.last_used_at)}` : ''}</p>
                     {isScopedKey(key) && (
                       <div className="mt-2 flex flex-wrap items-center gap-1.5" aria-label={`Scopes for ${key.name}`}>
-                        <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
+                        <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}>
                           <Bot className="h-3 w-3" />
                           Agent
                         </span>
                         {key.scopes?.map((scope) => (
-                          <span key={scope} className="rounded-full border px-2 py-0.5 text-xs" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>{scopeLabel(scope)}</span>
+                          <span key={scope} className="rounded-full border px-2 py-0.5 text-xs" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }}>{scopeLabel(scope)}</span>
                         ))}
                       </div>
                     )}
                   </div>
-                  <button type="button" onClick={() => handleRevoke(key.id)} disabled={!key.active} aria-label={`Revoke ${key.name}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50" style={{ borderColor: 'var(--color-border)', color: 'var(--color-danger)' }}>
+                  <button type="button" onClick={() => handleRevoke(key.id)} disabled={!key.active} aria-label={`Revoke ${key.name}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-danger)' }}>
                     <Trash2 className="h-4 w-4" />
                     Revoke
                   </button>
@@ -325,54 +325,54 @@ export function DeveloperPage() {
             </div>
           </div>
         ) : (
-          <div className="rounded-2xl border border-dashed p-8 text-center" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}>
-            <KeyRound className="mx-auto mb-3 h-8 w-8" style={{ color: 'var(--color-brand-500)' }} />
-            <p className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>No API keys yet</p>
+          <div className="rounded-lg border border-dashed p-8 text-center" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-fill)' }}>
+            <KeyRound className="mx-auto mb-3 h-8 w-8" style={{ color: 'var(--color-accent)' }} />
+            <p className="font-semibold" style={{ color: 'var(--color-text)' }}>No API keys yet</p>
             <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>Create one when you need CLI access, webhooks, or server-to-server integrations.</p>
           </div>
         )}
       </section>
 
       {accountAuthEnabled && (
-        <section className="rounded-[2rem] border p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+        <section className="rounded-xl border p-6" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="flex items-center gap-2 text-xl font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>
-                <Activity className="h-5 w-5" style={{ color: 'var(--color-brand-500)' }} />
+              <h2 className="flex items-center gap-2 text-xl font-semibold tracking-tight" style={{ color: 'var(--color-text)' }}>
+                <Activity className="h-5 w-5" style={{ color: 'var(--color-accent)' }} />
                 Recent agent activity
               </h2>
               <p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>Changes made with agent keys, and requests they were blocked from. Titles and transcript text are never logged.</p>
             </div>
-            <button type="button" onClick={() => void loadActivity()} className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
+            <button type="button" onClick={() => void loadActivity()} className="inline-flex min-h-11 items-center gap-2 rounded-md border px-4 text-sm font-semibold transition-colors hover:bg-fill" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text)' }}>
               <RefreshCw className={`h-4 w-4 ${isActivityLoading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
           </div>
           {activityError ? (
-            <div role="alert" className="flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: 'var(--color-danger)', color: 'var(--color-danger)' }}>
+            <div role="alert" className="flex items-center gap-2 rounded-lg border px-4 py-3 text-sm" style={{ borderColor: 'var(--color-danger)', color: 'var(--color-danger)' }}>
               <AlertTriangle className="h-4 w-4" />
               {activityError}
             </div>
           ) : activity.length > 0 ? (
-            <ul className="divide-y overflow-hidden rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
+            <ul className="divide-y overflow-hidden rounded-lg border" style={{ borderColor: 'var(--color-separator)' }}>
               {activity.map((row) => (
-                <li key={row.id} className="flex flex-col gap-1 p-4 sm:flex-row sm:items-center sm:justify-between" style={{ backgroundColor: 'var(--color-surface-subtle)', borderColor: 'var(--color-border)' }}>
+                <li key={row.id} className="flex flex-col gap-1 p-4 sm:flex-row sm:items-center sm:justify-between" style={{ backgroundColor: 'var(--color-fill)', borderColor: 'var(--color-separator)' }}>
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold" style={{ color: row.status_code >= 400 ? 'var(--color-danger)' : 'var(--color-text-primary)' }}>{describeActivity(row)}</p>
-                    <p className="mt-0.5 break-words text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                    <p className="text-sm font-semibold" style={{ color: row.status_code >= 400 ? 'var(--color-danger)' : 'var(--color-text)' }}>{describeActivity(row)}</p>
+                    <p className="mt-0.5 break-words text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       {row.api_key_name}
                       {activityItemLabel(row) ? ` · ${activityItemLabel(row)}` : ''}
                       {` · ${row.status_code}`}
                     </p>
                   </div>
-                  <time className="shrink-0 text-xs" dateTime={row.created_at} style={{ color: 'var(--color-text-muted)' }}>{formatDateTime(row.created_at)}</time>
+                  <time className="shrink-0 text-xs" dateTime={row.created_at} style={{ color: 'var(--color-text-secondary)' }}>{formatDateTime(row.created_at)}</time>
                 </li>
               ))}
             </ul>
           ) : (
-            <div className="rounded-2xl border border-dashed p-8 text-center" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}>
-              <Bot className="mx-auto mb-3 h-8 w-8" style={{ color: 'var(--color-brand-500)' }} />
-              <p className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>{isActivityLoading ? 'Loading activity...' : 'No agent activity yet'}</p>
+            <div className="rounded-lg border border-dashed p-8 text-center" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-fill)' }}>
+              <Bot className="mx-auto mb-3 h-8 w-8" style={{ color: 'var(--color-accent)' }} />
+              <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{isActivityLoading ? 'Loading activity...' : 'No agent activity yet'}</p>
               <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>When an agent key renames, files, or deletes something, it shows up here.</p>
             </div>
           )}
@@ -380,15 +380,15 @@ export function DeveloperPage() {
       )}
 
       <section className="grid gap-4 md:grid-cols-2">
-        <Link to="/docs" className="group rounded-3xl border p-5 transition hover:-translate-y-0.5" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-          <p className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>Public API documentation</p>
+        <Link to="/docs" className="group rounded-xl border p-5 transition-colors" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
+          <p className="font-semibold" style={{ color: 'var(--color-text)' }}>Public API documentation</p>
           <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>Review endpoints, request shapes, and curl examples.</p>
-          <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--color-brand-500)' }}>Open docs <ArrowRight className="h-4 w-4" /></span>
+          <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--color-accent)' }}>Open docs <ArrowRight className="h-4 w-4" /></span>
         </Link>
-        <Link to="/app/developer/webhooks" className="group rounded-3xl border p-5 transition hover:-translate-y-0.5" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-          <p className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>Webhook delivery settings</p>
+        <Link to="/app/developer/webhooks" className="group rounded-xl border p-5 transition-colors" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
+          <p className="font-semibold" style={{ color: 'var(--color-text)' }}>Webhook delivery settings</p>
           <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>Subscribe your integration to transcript, audio, PDF, and summary events.</p>
-          <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--color-brand-500)' }}>Configure webhooks <ArrowRight className="h-4 w-4" /></span>
+          <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--color-accent)' }}>Configure webhooks <ArrowRight className="h-4 w-4" /></span>
         </Link>
       </section>
     </div>

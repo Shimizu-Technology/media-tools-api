@@ -73,10 +73,10 @@ export function EmailSection({ hasPassword }: { hasPassword: boolean | null }) {
       title="Email"
       description={
         <>
-          <span className="break-all font-semibold" style={{ color: 'var(--color-text-primary)' }}>{user?.email ?? '—'}</span>
+          <span className="break-all font-semibold" style={{ color: 'var(--color-text)' }}>{user?.email ?? '—'}</span>
           {user && (verified
-            ? <span className="ml-2 inline-flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-success)' }}><BadgeCheck className="h-3.5 w-3.5" />Verified</span>
-            : <span className="ml-2 text-xs font-semibold" style={{ color: 'var(--color-warning)' }}>Not verified</span>)}
+            ? <span className="ml-2 inline-flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-accent)' }}><BadgeCheck className="h-3.5 w-3.5" />Verified</span>
+            : <span className="ml-2 text-xs font-semibold" style={{ color: 'var(--color-text)' }}>Not verified</span>)}
         </>
       }
       action={mode === 'idle' && user ? (

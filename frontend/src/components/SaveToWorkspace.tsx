@@ -46,11 +46,11 @@ export function SaveToWorkspace({ itemType, itemId }: SaveToWorkspaceProps) {
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.9 }}
-          className="flex min-h-11 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium"
+          className="flex min-h-11 items-center gap-1.5 rounded-sm border px-3 text-xs font-medium"
           style={{
             backgroundColor: 'rgba(239, 68, 68, 0.12)',
             borderColor: 'rgba(239, 68, 68, 0.3)',
-            color: 'var(--color-error)',
+            color: 'var(--color-danger)',
           }}
         >
           <AlertCircle className="w-3.5 h-3.5" />
@@ -64,11 +64,11 @@ export function SaveToWorkspace({ itemType, itemId }: SaveToWorkspaceProps) {
           exit={{ opacity: 0, scale: 0.9 }}
           onClick={handleSave}
           disabled={saved || saving}
-          className="flex min-h-11 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-all duration-200"
+          className="flex min-h-11 items-center gap-1.5 rounded-sm border px-3 text-xs font-medium transition-colors"
           style={{
-            backgroundColor: saved ? 'rgba(24, 185, 133, 0.12)' : 'var(--color-surface)',
-            borderColor: saved ? 'rgba(24, 185, 133, 0.3)' : 'var(--color-border)',
-            color: saved ? 'var(--color-success)' : 'var(--color-text-secondary)',
+            backgroundColor: saved ? 'rgba(24, 185, 133, 0.12)' : 'var(--color-bg)',
+            borderColor: saved ? 'rgba(24, 185, 133, 0.3)' : 'var(--color-separator)',
+            color: saved ? 'var(--color-accent)' : 'var(--color-text-secondary)',
           }}
         >
           {saved ? <BookmarkCheck className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}

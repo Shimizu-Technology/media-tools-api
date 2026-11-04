@@ -87,41 +87,41 @@ export function TranscriptChatPanel({ itemId, itemType, onCitationClick }: Trans
       >
         <div className="flex items-center gap-2">
           <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center"
-            style={{ backgroundColor: 'var(--color-surface-overlay)', color: 'var(--color-brand-500)' }}
+            className="w-9 h-9 rounded-md flex items-center justify-center"
+            style={{ backgroundColor: 'var(--color-fill)', color: 'var(--color-accent)' }}
           >
             <MessageCircle className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
               AI Chat
             </h3>
-            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               Ask follow-ups, clarify details, and summarize.
             </p>
           </div>
         </div>
         <span
           className="hidden sm:inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide"
-          style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
+          style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}
         >
           Context-aware
         </span>
       </motion.div>
 
       <div
-        className="rounded-xl border overflow-hidden"
+        className="rounded-md border overflow-hidden"
         style={{
-          backgroundColor: 'var(--color-surface-elevated)',
-          borderColor: 'var(--color-border)',
+          backgroundColor: 'var(--color-surface)',
+          borderColor: 'var(--color-separator)',
         }}
       >
-        <div className="h-1" style={{ backgroundColor: 'var(--color-brand-500)' }} />
+        <div className="h-1" style={{ backgroundColor: 'var(--color-accent-fill)' }} />
         {/* Messages */}
         <div className="p-4 sm:p-6 max-h-[50vh] sm:max-h-[420px] overflow-y-auto space-y-4">
           {isLoading && (
             <div className="flex items-center gap-3 py-6 justify-center">
-              <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'var(--color-text-muted)' }} />
+              <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'var(--color-text-secondary)' }} />
               <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
                 Loading chat…
               </span>
@@ -130,7 +130,7 @@ export function TranscriptChatPanel({ itemId, itemType, onCitationClick }: Trans
 
           {!isLoading && messages.length === 0 && (
             <div className="text-center py-8">
-              <MessageSquare className="w-8 h-8 mx-auto mb-3" style={{ color: 'var(--color-text-muted)' }} />
+              <MessageSquare className="w-8 h-8 mx-auto mb-3" style={{ color: 'var(--color-text-secondary)' }} />
               <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
                 Ask a question to start a conversation.
               </p>
@@ -149,17 +149,17 @@ export function TranscriptChatPanel({ itemId, itemType, onCitationClick }: Trans
                   className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className="max-w-[92%] sm:max-w-[75%] px-4 py-3 rounded-xl text-sm leading-relaxed"
+                    className="max-w-[92%] sm:max-w-[75%] px-4 py-3 rounded-md text-sm leading-relaxed"
                     style={{
-                      backgroundColor: isUser ? 'var(--color-brand-500)' : 'var(--color-surface-overlay)',
-                      color: isUser ? 'var(--color-on-brand)' : 'var(--color-text-secondary)',
-                      border: isUser ? 'none' : '1px solid var(--color-border)',
+                      backgroundColor: isUser ? 'var(--color-accent-fill)' : 'var(--color-fill)',
+                      color: isUser ? 'var(--color-on-accent)' : 'var(--color-text-secondary)',
+                      border: isUser ? 'none' : '1px solid var(--color-separator)',
                     }}
                   >
                     <MarkdownMessage content={m.content} isUser={isUser} />
                     {!isUser && <CitationRow citations={m.citations} onClick={openCitation} />}
                     {!isUser && (
-                      <div className="mt-2 border-t pt-1" style={{ borderColor: 'var(--color-border)' }}>
+                      <div className="mt-2 border-t pt-1" style={{ borderColor: 'var(--color-separator)' }}>
                         <AIContentReportButton
                           targetType="chat_message"
                           targetId={m.id}
@@ -176,11 +176,11 @@ export function TranscriptChatPanel({ itemId, itemType, onCitationClick }: Trans
           {isSending && (
             <div className="flex justify-start">
               <div
-                className="px-4 py-3 rounded-2xl text-sm flex items-center gap-2"
+                className="px-4 py-3 rounded-lg text-sm flex items-center gap-2"
                 style={{
-                  backgroundColor: 'var(--color-surface-overlay)',
+                  backgroundColor: 'var(--color-fill)',
                   color: 'var(--color-text-secondary)',
-                  border: '1px solid var(--color-border)',
+                  border: '1px solid var(--color-separator)',
                 }}
               >
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -196,7 +196,7 @@ export function TranscriptChatPanel({ itemId, itemType, onCitationClick }: Trans
         <div
           className="border-t p-3 sm:p-4"
           style={{
-            borderColor: 'var(--color-border)',
+            borderColor: 'var(--color-separator)',
             // Keep composer above iOS bottom safe area when keyboard opens.
             paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
           }}
@@ -213,11 +213,11 @@ export function TranscriptChatPanel({ itemId, itemType, onCitationClick }: Trans
               }}
               placeholder="Ask a question about this content…"
               rows={3}
-              className="flex-1 resize-none px-4 py-3 rounded-xl border text-base sm:text-sm outline-none transition-colors duration-200"
+              className="flex-1 resize-none px-4 py-3 rounded-md border text-base sm:text-sm outline-none transition-colors duration-200"
               style={{
-                backgroundColor: 'var(--color-surface-elevated)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text-primary)',
+                backgroundColor: 'var(--color-surface)',
+                borderColor: 'var(--color-separator)',
+                color: 'var(--color-text)',
                 minHeight: '44px',
                 lineHeight: 1.4,
               }}
@@ -226,8 +226,8 @@ export function TranscriptChatPanel({ itemId, itemType, onCitationClick }: Trans
               onClick={handleSend}
               aria-label="Send message"
               disabled={isSending || input.trim() === ''}
-              className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium text-white transition-all duration-200 disabled:opacity-50"
-              style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
+              className="flex items-center gap-2 px-4 py-3 rounded-md text-sm font-medium text-on-accent transition-colors disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-accent-fill)', minHeight: '44px' }}
             >
               <Send className="w-4 h-4" />
               <span className="hidden sm:inline">Send</span>
@@ -237,11 +237,11 @@ export function TranscriptChatPanel({ itemId, itemType, onCitationClick }: Trans
           {/* Error */}
           {error && (
             <div
-              className="flex items-center gap-2 mt-3 p-3 rounded-lg text-sm"
+              className="flex items-center gap-2 mt-3 p-3 rounded-sm text-sm"
               style={{
-                backgroundColor: 'var(--color-error-subtle)',
-                border: '1px solid var(--color-error-border)',
-                color: 'var(--color-error)',
+                backgroundColor: 'var(--color-fill)',
+                border: '1px solid var(--color-separator)',
+                color: 'var(--color-danger)',
               }}
             >
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -278,18 +278,18 @@ function MarkdownMessage({ content, isUser }: { content: string; isUser: boolean
             target="_blank"
             rel="noreferrer"
             className="underline underline-offset-2"
-            style={{ color: isUser ? 'var(--color-on-brand)' : 'var(--color-brand-400)' }}
+            style={{ color: isUser ? 'var(--color-on-accent)' : 'var(--color-accent)' }}
           >
             {children}
           </a>
         ),
         code: ({ children }) => (
           <code
-            className="px-1.5 py-0.5 rounded text-xs font-mono"
+            className="px-1.5 py-0.5 rounded-sm text-xs font-mono"
             style={{
-              backgroundColor: isUser ? 'var(--color-on-brand-overlay)' : 'var(--color-surface)',
-              color: isUser ? 'var(--color-on-brand)' : 'var(--color-brand-400)',
-              border: isUser ? 'none' : '1px solid var(--color-border)',
+              backgroundColor: isUser ? 'var(--color-fill)' : 'var(--color-bg)',
+              color: isUser ? 'var(--color-on-accent)' : 'var(--color-accent)',
+              border: isUser ? 'none' : '1px solid var(--color-separator)',
             }}
           >
             {children}
@@ -297,11 +297,11 @@ function MarkdownMessage({ content, isUser }: { content: string; isUser: boolean
         ),
         pre: ({ children }) => (
           <pre
-            className="p-3 rounded-lg text-xs overflow-x-auto mb-2 last:mb-0"
+            className="p-3 rounded-sm text-xs overflow-x-auto mb-2 last:mb-0"
             style={{
-              backgroundColor: isUser ? 'var(--color-on-brand-soft)' : 'var(--color-surface)',
-              border: isUser ? 'none' : '1px solid var(--color-border)',
-              color: isUser ? 'var(--color-on-brand)' : 'var(--color-text-secondary)',
+              backgroundColor: isUser ? 'var(--color-fill)' : 'var(--color-bg)',
+              border: isUser ? 'none' : '1px solid var(--color-separator)',
+              color: isUser ? 'var(--color-on-accent)' : 'var(--color-text-secondary)',
             }}
           >
             {children}
@@ -314,7 +314,7 @@ function MarkdownMessage({ content, isUser }: { content: string; isUser: boolean
           <blockquote
             className="pl-3 border-l-2 mb-2 last:mb-0"
             style={{
-              borderColor: isUser ? 'var(--color-on-brand-border)' : 'var(--color-border)',
+              borderColor: isUser ? 'var(--color-separator)' : 'var(--color-separator)',
             }}
           >
             {children}

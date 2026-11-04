@@ -153,12 +153,12 @@ export function HistoryPage() {
   const statusColors: Record<string, { bg: string; text: string; border: string }> = {
     completed: {
       bg: 'rgba(24, 185, 133, 0.12)',
-      text: 'var(--color-success)',
+      text: 'var(--color-accent)',
       border: 'rgba(24, 185, 133, 0.24)',
     },
     processing: {
-      bg: 'var(--color-brand-50)',
-      text: 'var(--color-brand-500)',
+      bg: 'var(--color-accent-tint)',
+      text: 'var(--color-accent)',
       border: 'rgba(47, 158, 143, 0.24)',
     },
     pending: {
@@ -168,7 +168,7 @@ export function HistoryPage() {
     },
     failed: {
       bg: 'rgba(239, 68, 68, 0.12)',
-      text: 'var(--color-error)',
+      text: 'var(--color-danger)',
       border: 'rgba(239, 68, 68, 0.24)',
     },
   };
@@ -198,7 +198,7 @@ export function HistoryPage() {
       <div className="mb-8">
         <div
           className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium mb-3"
-          style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
+          style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}
         >
           <FileText className="w-3.5 h-3.5" />
           Archive
@@ -208,7 +208,7 @@ export function HistoryPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
           className="text-3xl sm:text-4xl font-semibold tracking-tight mb-2"
-          style={{ color: 'var(--color-text-primary)' }}
+          style={{ color: 'var(--color-text)' }}
         >
           Transcript History
         </motion.h1>
@@ -236,26 +236,26 @@ export function HistoryPage() {
           <div className="relative flex-1">
             <Search
               className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5"
-              style={{ color: 'var(--color-text-muted)' }}
+              style={{ color: 'var(--color-text-secondary)' }}
             />
             <input
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search by title or channel..."
-              className="w-full pl-12 pr-4 py-3 rounded-xl border text-sm outline-none transition-colors duration-200"
+              className="w-full pl-12 pr-4 py-3 rounded-md border text-sm outline-none transition-colors duration-200"
               style={{
-                backgroundColor: 'var(--color-surface-elevated)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text-primary)',
+                backgroundColor: 'var(--color-surface)',
+                borderColor: 'var(--color-separator)',
+                color: 'var(--color-text)',
                 minHeight: '44px',
               }}
             />
             {searchInput && (
               <button
                 onClick={() => setSearchInput('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-md hover:opacity-80"
-                style={{ color: 'var(--color-text-muted)' }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-sm hover:opacity-80"
+                style={{ color: 'var(--color-text-secondary)' }}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -265,10 +265,10 @@ export function HistoryPage() {
           {/* Filter Toggle */}
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className="flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-colors duration-200"
+            className="flex items-center gap-2 px-4 py-3 rounded-md border text-sm font-medium transition-colors duration-200"
             style={{
-              backgroundColor: showFilters ? 'var(--color-brand-500)' : 'var(--color-surface-elevated)',
-              borderColor: showFilters ? 'var(--color-brand-500)' : 'var(--color-border)',
+              backgroundColor: showFilters ? 'var(--color-accent)' : 'var(--color-surface)',
+              borderColor: showFilters ? 'var(--color-accent)' : 'var(--color-separator)',
               color: showFilters ? 'white' : 'var(--color-text-secondary)',
               minHeight: '44px',
             }}
@@ -280,10 +280,10 @@ export function HistoryPage() {
           {/* Sort Toggle */}
           <button
             onClick={() => setSortDir(sortDir === 'desc' ? 'asc' : 'desc')}
-            className="flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-colors duration-200"
+            className="flex items-center gap-2 px-4 py-3 rounded-md border text-sm font-medium transition-colors duration-200"
             style={{
-              backgroundColor: 'var(--color-surface-elevated)',
-              borderColor: 'var(--color-border)',
+              backgroundColor: 'var(--color-surface)',
+              borderColor: 'var(--color-separator)',
               color: 'var(--color-text-secondary)',
               minHeight: '44px',
             }}
@@ -304,14 +304,14 @@ export function HistoryPage() {
               className="overflow-hidden"
             >
               <div
-                className="flex flex-wrap gap-3 p-4 rounded-xl border"
+                className="flex flex-wrap gap-3 p-4 rounded-md border"
                 style={{
-                  backgroundColor: 'var(--color-surface-elevated)',
-                  borderColor: 'var(--color-border)',
+                  backgroundColor: 'var(--color-surface)',
+                  borderColor: 'var(--color-separator)',
                 }}
               >
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                  <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
                     Status
                   </label>
                   <div className="flex gap-2">
@@ -319,11 +319,11 @@ export function HistoryPage() {
                       <button
                         key={s}
                         onClick={() => { setStatusFilter(s); setPage(1); }}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors duration-200"
+                        className="px-3 py-1.5 rounded-sm text-xs font-medium transition-colors duration-200"
                         style={{
-                          backgroundColor: statusFilter === s ? 'var(--color-brand-500)' : 'var(--color-surface)',
+                          backgroundColor: statusFilter === s ? 'var(--color-accent)' : 'var(--color-bg)',
                           color: statusFilter === s ? 'white' : 'var(--color-text-secondary)',
-                          border: `1px solid ${statusFilter === s ? 'var(--color-brand-500)' : 'var(--color-border)'}`,
+                          border: `1px solid ${statusFilter === s ? 'var(--color-accent)' : 'var(--color-separator)'}`,
                         }}
                       >
                         {s || 'All'}
@@ -333,7 +333,7 @@ export function HistoryPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                  <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
                     Sort by
                   </label>
                   <div className="flex gap-2">
@@ -345,11 +345,11 @@ export function HistoryPage() {
                       <button
                         key={opt.value}
                         onClick={() => setSortBy(opt.value)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors duration-200"
+                        className="px-3 py-1.5 rounded-sm text-xs font-medium transition-colors duration-200"
                         style={{
-                          backgroundColor: sortBy === opt.value ? 'var(--color-brand-500)' : 'var(--color-surface)',
+                          backgroundColor: sortBy === opt.value ? 'var(--color-accent)' : 'var(--color-bg)',
                           color: sortBy === opt.value ? 'white' : 'var(--color-text-secondary)',
-                          border: `1px solid ${sortBy === opt.value ? 'var(--color-brand-500)' : 'var(--color-border)'}`,
+                          border: `1px solid ${sortBy === opt.value ? 'var(--color-accent)' : 'var(--color-separator)'}`,
                         }}
                       >
                         {opt.label}
@@ -369,22 +369,22 @@ export function HistoryPage() {
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="flex items-center gap-3 p-3 rounded-xl border"
+              className="flex items-center gap-3 p-3 rounded-md border"
               style={{
-                backgroundColor: 'var(--color-surface-elevated)',
-                borderColor: 'var(--color-brand-500)',
+                backgroundColor: 'var(--color-surface)',
+                borderColor: 'var(--color-accent)',
               }}
             >
-              <span className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
+              <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
                 {selectedIds.size} selected
               </span>
               <div className="flex gap-2 ml-auto">
                 <button
                   onClick={handleExportSelected}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors duration-200"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-sm font-medium transition-colors duration-200"
                   style={{
-                    backgroundColor: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
+                    backgroundColor: 'var(--color-bg)',
+                    border: '1px solid var(--color-separator)',
                     color: 'var(--color-text-secondary)',
                     minHeight: '36px',
                   }}
@@ -395,11 +395,11 @@ export function HistoryPage() {
                 <button
                   onClick={handleBulkDelete}
                   disabled={isDeleting}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors duration-200"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-sm font-medium transition-colors duration-200"
                   style={{
                     backgroundColor: 'rgba(239, 68, 68, 0.12)',
                     border: '1px solid rgba(239, 68, 68, 0.24)',
-                    color: 'var(--color-error)',
+                    color: 'var(--color-danger)',
                     minHeight: '36px',
                   }}
                 >
@@ -418,10 +418,10 @@ export function HistoryPage() {
           <button
             onClick={selectAll}
             className="flex items-center gap-2 text-sm transition-colors duration-200"
-            style={{ color: 'var(--color-text-muted)', minHeight: '44px' }}
+            style={{ color: 'var(--color-text-secondary)', minHeight: '44px' }}
           >
             {selectedIds.size === sortedTranscripts.length ? (
-              <CheckSquare className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
+              <CheckSquare className="w-4 h-4" style={{ color: 'var(--color-accent)' }} />
             ) : (
               <Square className="w-4 h-4" />
             )}
@@ -436,33 +436,33 @@ export function HistoryPage() {
           {Array.from({ length: 6 }).map((_, i) => (
             <div
               key={i}
-              className="p-5 rounded-2xl border"
+              className="p-5 rounded-lg border"
               style={{
-                backgroundColor: 'var(--color-surface-elevated)',
-                borderColor: 'var(--color-border)',
+                backgroundColor: 'var(--color-surface)',
+                borderColor: 'var(--color-separator)',
               }}
             >
               <div className="space-y-3">
                 <div
-                  className="h-5 rounded-lg relative overflow-hidden"
-                  style={{ backgroundColor: 'var(--color-border)', width: '75%' }}
+                  className="h-5 rounded-sm relative overflow-hidden"
+                  style={{ backgroundColor: 'var(--color-separator)', width: '75%' }}
                 >
-                  <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-linear-to-r from-transparent via-white/10 to-transparent" />
+                  <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-linear-to-r from-transparent via-fill to-transparent" />
                 </div>
                 <div
-                  className="h-4 rounded-lg relative overflow-hidden"
-                  style={{ backgroundColor: 'var(--color-border)', width: '50%' }}
+                  className="h-4 rounded-sm relative overflow-hidden"
+                  style={{ backgroundColor: 'var(--color-separator)', width: '50%' }}
                 >
-                  <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-linear-to-r from-transparent via-white/10 to-transparent" />
+                  <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-linear-to-r from-transparent via-fill to-transparent" />
                 </div>
                 <div className="flex gap-3 pt-2">
                   <div
-                    className="h-3 rounded-lg"
-                    style={{ backgroundColor: 'var(--color-border)', width: '60px' }}
+                    className="h-3 rounded-sm"
+                    style={{ backgroundColor: 'var(--color-separator)', width: '60px' }}
                   />
                   <div
-                    className="h-3 rounded-lg"
-                    style={{ backgroundColor: 'var(--color-border)', width: '80px' }}
+                    className="h-3 rounded-sm"
+                    style={{ backgroundColor: 'var(--color-separator)', width: '80px' }}
                   />
                 </div>
               </div>
@@ -476,14 +476,14 @@ export function HistoryPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex items-center gap-3 p-6 rounded-2xl border text-center"
+          className="flex items-center gap-3 p-6 rounded-lg border text-center"
           style={{
             backgroundColor: 'rgba(239, 68, 68, 0.08)',
             borderColor: 'rgba(239, 68, 68, 0.24)',
           }}
         >
-          <AlertCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--color-error)' }} />
-          <p className="text-sm" style={{ color: 'var(--color-error)' }}>{error}</p>
+          <AlertCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--color-danger)' }} />
+          <p className="text-sm" style={{ color: 'var(--color-danger)' }}>{error}</p>
         </motion.div>
       )}
 
@@ -495,12 +495,12 @@ export function HistoryPage() {
           className="text-center py-16"
         >
           <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
-            style={{ backgroundColor: 'var(--color-surface-elevated)' }}
+            className="w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4"
+            style={{ backgroundColor: 'var(--color-surface)' }}
           >
-            <FileText className="w-8 h-8" style={{ color: 'var(--color-text-muted)' }} />
+            <FileText className="w-8 h-8" style={{ color: 'var(--color-text-secondary)' }} />
           </div>
-          <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text-primary)' }}>
+          <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text)' }}>
             {hasHistory ? 'No results found' : 'No transcripts yet'}
           </h3>
           <p className="text-sm mb-6" style={{ color: 'var(--color-text-secondary)' }}>
@@ -511,8 +511,8 @@ export function HistoryPage() {
           {!hasHistory && (
             <button
               onClick={() => navigate('/app/video')}
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-white font-medium text-sm transition-all duration-200 hover:opacity-90"
-              style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-md text-on-accent font-medium text-sm transition-colors hover:opacity-90"
+              style={{ backgroundColor: 'var(--color-accent-fill)', minHeight: '44px' }}
             >
               <FileText className="w-4 h-4" />
               Extract a transcript
@@ -547,10 +547,10 @@ export function HistoryPage() {
                     transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] },
                   },
                 }}
-                className="group relative p-5 rounded-2xl border cursor-pointer transition-all duration-200"
+                className="group relative p-5 rounded-lg border cursor-pointer transition-colors"
                 style={{
-                  backgroundColor: 'var(--color-surface-elevated)',
-                  borderColor: isSelected ? 'var(--color-brand-500)' : 'var(--color-border)',
+                  backgroundColor: 'var(--color-surface)',
+                  borderColor: isSelected ? 'var(--color-accent)' : 'var(--color-separator)',
                 }}
                 onClick={() => navigate(`/?id=${t.id}`)}
               >
@@ -560,10 +560,10 @@ export function HistoryPage() {
                     e.stopPropagation();
                     toggleSelect(t.id);
                   }}
-                  className="absolute top-4 right-4 p-1 rounded transition-opacity duration-200"
+                  className="absolute top-4 right-4 p-1 rounded-sm transition-opacity duration-200"
                   style={{
                     opacity: isSelected ? 1 : undefined,
-                    color: isSelected ? 'var(--color-brand-500)' : 'var(--color-text-muted)',
+                    color: isSelected ? 'var(--color-accent)' : 'var(--color-text-secondary)',
                     minHeight: '32px',
                     minWidth: '32px',
                     display: 'flex',
@@ -581,14 +581,14 @@ export function HistoryPage() {
                 {/* Title */}
                 <h3
                   className="text-sm font-semibold mb-1.5 pr-8 line-clamp-2 leading-snug"
-                  style={{ color: 'var(--color-text-primary)' }}
+                  style={{ color: 'var(--color-text)' }}
                 >
                   {t.title || 'Untitled Video'}
                 </h3>
 
                 {/* Channel */}
                 <div className="flex items-center gap-1.5 mb-3">
-                  <User className="w-3.5 h-3.5" style={{ color: 'var(--color-text-muted)' }} />
+                  <User className="w-3.5 h-3.5" style={{ color: 'var(--color-text-secondary)' }} />
                   <span className="text-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>
                     {t.channel_name || 'Unknown channel'}
                   </span>
@@ -598,7 +598,7 @@ export function HistoryPage() {
                 <div className="flex items-center gap-3 flex-wrap">
                   {/* Status badge */}
                   <span
-                    className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium"
+                    className="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium"
                     style={{
                       backgroundColor: colors.bg,
                       color: colors.text,
@@ -609,14 +609,14 @@ export function HistoryPage() {
                   </span>
 
                   {/* Date */}
-                  <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     <Clock className="w-3 h-3" />
                     {formatDate(t.created_at)}
                   </span>
 
                   {/* Word count */}
                   {t.word_count > 0 && (
-                    <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                    <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       <FileText className="w-3 h-3" />
                       {t.word_count.toLocaleString()} words
                     </span>
@@ -639,10 +639,10 @@ export function HistoryPage() {
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="flex items-center gap-1 px-4 py-2.5 rounded-xl border text-sm font-medium transition-colors duration-200 disabled:opacity-40"
+            className="flex items-center gap-1 px-4 py-2.5 rounded-md border text-sm font-medium transition-colors duration-200 disabled:opacity-40"
             style={{
-              backgroundColor: 'var(--color-surface-elevated)',
-              borderColor: 'var(--color-border)',
+              backgroundColor: 'var(--color-surface)',
+              borderColor: 'var(--color-separator)',
               color: 'var(--color-text-secondary)',
               minHeight: '44px',
             }}
@@ -650,16 +650,16 @@ export function HistoryPage() {
             <ChevronLeft className="w-4 h-4" />
             Previous
           </button>
-          <span className="text-sm px-4" style={{ color: 'var(--color-text-muted)' }}>
+          <span className="text-sm px-4" style={{ color: 'var(--color-text-secondary)' }}>
             Page {page} of {totalPages}
           </span>
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="flex items-center gap-1 px-4 py-2.5 rounded-xl border text-sm font-medium transition-colors duration-200 disabled:opacity-40"
+            className="flex items-center gap-1 px-4 py-2.5 rounded-md border text-sm font-medium transition-colors duration-200 disabled:opacity-40"
             style={{
-              backgroundColor: 'var(--color-surface-elevated)',
-              borderColor: 'var(--color-border)',
+              backgroundColor: 'var(--color-surface)',
+              borderColor: 'var(--color-separator)',
               color: 'var(--color-text-secondary)',
               minHeight: '44px',
             }}

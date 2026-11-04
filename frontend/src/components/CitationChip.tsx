@@ -20,8 +20,8 @@ export function CitationChip({ citation, onClick }: {
       type="button"
       onClick={() => onClick(citation)}
       title={citation.item_title ? `Open source: ${citation.item_title}` : 'Open source evidence'}
-      className="inline-flex min-h-11 items-center gap-1.5 rounded-full border px-2.5 text-xs font-semibold transition hover:-translate-y-0.5 hover:bg-[var(--color-brand-50)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-500)]"
-      style={{ borderColor: 'var(--color-border)', color: 'var(--color-brand-500)', backgroundColor: 'var(--color-surface-subtle)' }}
+      className="inline-flex min-h-11 items-center gap-1.5 rounded-full border px-2.5 text-xs font-semibold transition-colors hover:bg-[var(--color-accent-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+      style={{ borderColor: 'var(--color-separator)', color: 'var(--color-accent)', backgroundColor: 'var(--color-fill)' }}
     >
       <Icon className="h-3.5 w-3.5" />
       {label}

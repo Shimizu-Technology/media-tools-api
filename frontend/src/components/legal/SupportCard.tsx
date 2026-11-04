@@ -9,15 +9,15 @@ interface SupportCardProps {
 export function SupportCard({ title, children }: SupportCardProps) {
   return (
     <section
-      className="rounded-2xl border p-5"
+      className="rounded-lg border p-5"
       style={{
-        backgroundColor: 'var(--color-surface-elevated)',
-        borderColor: 'var(--color-border)',
+        backgroundColor: 'var(--color-surface)',
+        borderColor: 'var(--color-separator)',
       }}
     >
       <h2
         className="text-lg font-semibold"
-        style={{ color: 'var(--color-text-primary)' }}
+        style={{ color: 'var(--color-text)' }}
       >
         {title}
       </h2>

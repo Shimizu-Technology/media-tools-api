@@ -179,10 +179,10 @@ export function PdfPage() {
             role="button"
             tabIndex={0}
             aria-label="Choose a PDF to extract"
-            className="relative cursor-pointer rounded-2xl border-2 border-dashed p-12 text-center transition-all duration-300"
+            className="relative cursor-pointer rounded-lg border-2 border-dashed p-12 text-center transition-colors"
             style={{
-              borderColor: isDragging ? 'var(--color-brand-500)' : 'var(--color-border)',
-              backgroundColor: isDragging ? 'var(--color-brand-50)' : 'var(--color-surface-elevated)',
+              borderColor: isDragging ? 'var(--color-accent)' : 'var(--color-separator)',
+              backgroundColor: isDragging ? 'var(--color-accent-tint)' : 'var(--color-surface)',
             }}
           >
             <input
@@ -202,14 +202,14 @@ export function PdfPage() {
             >
               <Upload
                 className="w-12 h-12 mx-auto mb-4"
-                style={{ color: isDragging ? 'var(--color-brand-500)' : 'var(--color-text-muted)' }}
+                style={{ color: isDragging ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}
               />
             </motion.div>
 
-            <p className="text-base font-medium mb-2" style={{ color: 'var(--color-text-primary)' }}>
+            <p className="text-base font-medium mb-2" style={{ color: 'var(--color-text)' }}>
               {isDragging ? 'Drop your PDF here' : 'Drag and drop a PDF, or click to browse'}
             </p>
-            <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+            <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               PDF files only — Max {maxSizeMB}MB
             </p>
           </div>
@@ -221,18 +221,18 @@ export function PdfPage() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="mt-4 p-4 rounded-xl border flex items-center gap-3"
+                className="mt-4 p-4 rounded-md border flex items-center gap-3"
                 style={{
-                  backgroundColor: 'var(--color-surface-elevated)',
-                  borderColor: 'var(--color-border)',
+                  backgroundColor: 'var(--color-surface)',
+                  borderColor: 'var(--color-separator)',
                 }}
               >
-                <FileText className="w-5 h-5 shrink-0" style={{ color: 'var(--color-brand-500)' }} />
+                <FileText className="w-5 h-5 shrink-0" style={{ color: 'var(--color-accent)' }} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>
+                  <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>
                     {file.name}
                   </p>
-                  <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     {(file.size / 1024 / 1024).toFixed(2)} MB
                   </p>
                 </div>
@@ -241,8 +241,8 @@ export function PdfPage() {
                     e.stopPropagation();
                     setFile(null);
                   }}
-                  className="p-1.5 rounded-lg transition-colors hover:opacity-70"
-                  style={{ color: 'var(--color-text-muted)' }}
+                  className="p-1.5 rounded-sm transition-colors hover:opacity-70"
+                  style={{ color: 'var(--color-text-secondary)' }}
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -261,9 +261,9 @@ export function PdfPage() {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={handleSubmit}
-                className="px-8 py-3 rounded-xl text-white font-medium text-base transition-colors duration-200"
+                className="px-8 py-3 rounded-md text-on-accent font-medium text-base transition-colors duration-200"
                 style={{
-                  backgroundColor: 'var(--color-brand-500)',
+                  backgroundColor: 'var(--color-accent-fill)',
                   minHeight: '48px',
                 }}
               >
@@ -282,14 +282,14 @@ export function PdfPage() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="max-w-2xl mx-auto p-8 rounded-2xl border text-center"
+          className="max-w-2xl mx-auto p-8 rounded-lg border text-center"
           style={{
-            backgroundColor: 'var(--color-surface-elevated)',
-            borderColor: 'var(--color-border)',
+            backgroundColor: 'var(--color-surface)',
+            borderColor: 'var(--color-separator)',
           }}
         >
-          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" style={{ color: 'var(--color-brand-500)' }} />
-          <p className="text-lg font-medium" style={{ color: 'var(--color-text-primary)' }}>
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" style={{ color: 'var(--color-accent)' }} />
+          <p className="text-lg font-medium" style={{ color: 'var(--color-text)' }}>
             Extracting text from PDF...
           </p>
           <p className="text-sm mt-2" style={{ color: 'var(--color-text-secondary)' }}>
@@ -303,11 +303,11 @@ export function PdfPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="max-w-2xl mx-auto mt-6 p-4 rounded-xl text-sm flex items-center gap-3"
+          className="max-w-2xl mx-auto mt-6 p-4 rounded-md text-sm flex items-center gap-3"
           style={{
             backgroundColor: 'rgba(239, 68, 68, 0.12)',
             border: '1px solid rgba(239, 68, 68, 0.24)',
-            color: 'var(--color-error)',
+            color: 'var(--color-danger)',
           }}
         >
           <AlertCircle className="w-5 h-5 shrink-0" />
@@ -331,7 +331,7 @@ export function PdfPage() {
               animate={{ opacity: 1 }}
               onClick={handleReset}
               className="flex items-center gap-1.5 text-sm font-medium mb-6 transition-colors"
-              style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
+              style={{ color: 'var(--color-accent)', minHeight: '44px' }}
             >
               <FileText className="w-4 h-4" />
               New extraction
@@ -339,17 +339,17 @@ export function PdfPage() {
 
             {/* Metadata card */}
             <div
-              className="p-6 rounded-2xl border mb-4"
+              className="p-6 rounded-lg border mb-4"
               style={{
-                backgroundColor: 'var(--color-surface-elevated)',
-                borderColor: 'var(--color-border)',
+                backgroundColor: 'var(--color-surface)',
+                borderColor: 'var(--color-separator)',
               }}
             >
               <h2
                 className="text-xl font-semibold mb-4 tracking-tight flex items-center gap-2"
-                style={{ color: 'var(--color-text-primary)' }}
+                style={{ color: 'var(--color-text)' }}
               >
-                <FileText className="w-5 h-5" style={{ color: 'var(--color-brand-500)' }} />
+                <FileText className="w-5 h-5" style={{ color: 'var(--color-accent)' }} />
                 {result.original_name}
               </h2>
 
@@ -380,30 +380,30 @@ export function PdfPage() {
             </div>
 
             <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_0.9fr]">
-              <div className="lg:col-span-2 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
+              <div className="lg:col-span-2 h-px" style={{ backgroundColor: 'var(--color-separator)' }} />
               {/* Extracted text with page breaks */}
               <div
-                className="p-6 rounded-2xl border"
+                className="p-6 rounded-lg border"
                 style={{
-                  backgroundColor: 'var(--color-surface-elevated)',
-                  borderColor: 'var(--color-border)',
+                  backgroundColor: 'var(--color-surface)',
+                  borderColor: 'var(--color-separator)',
                 }}
               >
                 <div className="flex items-center justify-between mb-4">
                   <h3
                     className="text-base font-semibold flex items-center gap-2"
-                    style={{ color: 'var(--color-text-primary)' }}
+                    style={{ color: 'var(--color-text)' }}
                   >
-                    <BookOpen className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
+                    <BookOpen className="w-4 h-4" style={{ color: 'var(--color-accent)' }} />
                     Extracted Text
                   </h3>
                   <button
                     onClick={handleCopy}
-                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+                    className="flex items-center gap-1 px-2 py-1.5 rounded-sm text-xs font-medium border transition-colors"
                     style={{
-                      backgroundColor: copied ? 'var(--color-success)' : 'var(--color-surface-overlay)',
+                      backgroundColor: copied ? 'var(--color-accent)' : 'var(--color-fill)',
                       color: copied ? 'white' : 'var(--color-text-secondary)',
-                      borderColor: copied ? 'var(--color-success)' : 'var(--color-border)',
+                      borderColor: copied ? 'var(--color-accent)' : 'var(--color-separator)',
                       minHeight: '44px',
                     }}
                   >
@@ -423,18 +423,18 @@ export function PdfPage() {
                       >
                         {i > 0 && (
                           <div className="flex items-center gap-3 mb-3">
-                            <div className="flex-1 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
+                            <div className="flex-1 h-px" style={{ backgroundColor: 'var(--color-separator)' }} />
                             <span
                               className="text-xs font-medium px-2 py-1 rounded-full"
                               style={{
-                                backgroundColor: 'var(--color-surface)',
-                                color: 'var(--color-text-muted)',
-                                border: '1px solid var(--color-border)',
+                                backgroundColor: 'var(--color-bg)',
+                                color: 'var(--color-text-secondary)',
+                                border: '1px solid var(--color-separator)',
                               }}
                             >
                               Page {i + 1}
                             </span>
-                            <div className="flex-1 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
+                            <div className="flex-1 h-px" style={{ backgroundColor: 'var(--color-separator)' }} />
                           </div>
                         )}
                         <div
@@ -473,8 +473,8 @@ export function PdfPage() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg"
-            style={{ backgroundColor: 'var(--color-success)', color: 'white' }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-3 rounded-md shadow-overlay"
+            style={{ backgroundColor: 'var(--color-accent)', color: 'white' }}
           >
             <Check className="w-4 h-4" />
             <span className="text-sm font-medium">Text copied to clipboard</span>
@@ -488,10 +488,10 @@ export function PdfPage() {
 function MetaItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <div className="flex items-center gap-2">
-      <span style={{ color: 'var(--color-text-muted)' }}>{icon}</span>
+      <span style={{ color: 'var(--color-text-secondary)' }}>{icon}</span>
       <div>
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{label}</p>
-        <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{value}</p>
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{label}</p>
+        <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{value}</p>
       </div>
     </div>
   );
@@ -513,11 +513,11 @@ function ActionBtn({
       whileHover={{ scale: 1.03 }}
       whileTap={{ scale: 0.97 }}
       onClick={onClick}
-      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200"
+      className="flex items-center gap-1.5 px-3 py-2 rounded-sm text-sm font-medium transition-colors duration-200"
       style={{
-        backgroundColor: active ? 'var(--color-success)' : 'var(--color-surface-overlay)',
+        backgroundColor: active ? 'var(--color-accent)' : 'var(--color-fill)',
         color: active ? 'white' : 'var(--color-text-secondary)',
-        border: `1px solid ${active ? 'var(--color-success)' : 'var(--color-border)'}`,
+        border: `1px solid ${active ? 'var(--color-accent)' : 'var(--color-separator)'}`,
         minHeight: '44px',
       }}
     >

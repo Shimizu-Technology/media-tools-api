@@ -19,7 +19,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        // Concurrent sessions run the API on another port: MTA_API_PROXY_TARGET=http://localhost:18080
+        target: process.env.MTA_API_PROXY_TARGET || 'http://localhost:8080',
         changeOrigin: true,
       },
     },

@@ -29,20 +29,20 @@ export function CapturePageHeader({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       className="mb-8 border-b pb-8 sm:mb-10"
-      style={{ borderColor: 'var(--color-border-subtle)' }}
+      style={{ borderColor: 'var(--color-separator)' }}
     >
       <div className="mb-4 flex items-center justify-between gap-4">
         <div
           className="inline-flex min-h-8 items-center gap-2 rounded-full px-4 text-xs font-semibold uppercase tracking-[0.14em]"
-          style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-600)' }}
+          style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}
         >
           <Icon className="h-4 w-4" aria-hidden="true" />
           {eyebrow}
         </div>
         <Link
           to={historyTo}
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm font-semibold"
-          style={{ color: 'var(--color-brand-500)' }}
+          className="inline-flex min-h-11 items-center gap-2 rounded-md px-2 text-sm font-semibold"
+          style={{ color: 'var(--color-accent)' }}
         >
           <span className="hidden sm:inline">{historyLabel}</span>
           <span className="sm:hidden">Library</span>
@@ -52,7 +52,7 @@ export function CapturePageHeader({
 
       <h1
         className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight sm:text-4xl lg:text-5xl"
-        style={{ color: 'var(--color-text-primary)' }}
+        style={{ color: 'var(--color-text)' }}
       >
         {title}
       </h1>
@@ -70,7 +70,7 @@ export function CapturePageHeader({
             className="inline-flex items-center gap-2 text-sm"
             style={{ color: 'var(--color-text-secondary)' }}
           >
-            <Check className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} aria-hidden="true" />
+            <Check className="h-4 w-4" style={{ color: 'var(--color-accent)' }} aria-hidden="true" />
             {highlight}
           </li>
         ))}

@@ -102,12 +102,12 @@ export function DashboardPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-8">
       <section className="grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
-        <div className="rounded-[2rem] border p-6 sm:p-8" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-          <div className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.2em]" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
+        <div className="rounded-xl border p-6 sm:p-8" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
+          <div className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.2em]" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}>
             <Sparkles className="h-3.5 w-3.5" />
             Workspace
           </div>
-          <h1 className="mt-5 max-w-2xl text-3xl font-semibold tracking-tight sm:text-5xl" style={{ color: 'var(--color-text-primary)' }}>
+          <h1 className="mt-5 max-w-2xl text-3xl font-semibold tracking-tight sm:text-5xl" style={{ color: 'var(--color-text)' }}>
             Welcome back{user?.name ? `, ${user.name.split(' ')[0]}` : ''}.
           </h1>
           <p className="mt-4 max-w-2xl text-base leading-7" style={{ color: 'var(--color-text-secondary)' }}>
@@ -129,17 +129,17 @@ export function DashboardPage() {
       </section>
 
       {error && (
-        <div className="rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: 'var(--color-danger)', color: 'var(--color-danger)', backgroundColor: 'rgba(239, 68, 68, 0.08)' }}>
+        <div className="rounded-lg border px-4 py-3 text-sm" style={{ borderColor: 'var(--color-danger)', color: 'var(--color-danger)', backgroundColor: 'rgba(239, 68, 68, 0.08)' }}>
           {error}
         </div>
       )}
 
       <section className="grid gap-6 lg:grid-cols-[1fr_0.72fr]">
-        <Panel title="Recent library items" action={<Link to="/app/library" className="inline-flex min-h-11 items-center gap-1 rounded-xl px-2 text-sm font-semibold" style={{ color: 'var(--color-brand-500)' }}>View library <ArrowRight className="h-4 w-4" /></Link>}>
+        <Panel title="Recent library items" action={<Link to="/app/library" className="inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm font-semibold" style={{ color: 'var(--color-accent)' }}>View library <ArrowRight className="h-4 w-4" /></Link>}>
           {isLoading ? (
             <LoadingRows />
           ) : recentItems.length > 0 ? (
-            <div className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+            <div className="divide-y" style={{ borderColor: 'var(--color-separator)' }}>
               {recentItems.map((item) => <RecentItemRow key={`${item.type}-${item.id}`} item={item} />)}
             </div>
           ) : (
@@ -147,23 +147,23 @@ export function DashboardPage() {
           )}
         </Panel>
 
-        <Panel title="Collections" action={<Link to="/app/collections" className="inline-flex min-h-11 items-center gap-1 rounded-xl px-2 text-sm font-semibold" style={{ color: 'var(--color-brand-500)' }}>Manage <ArrowRight className="h-4 w-4" /></Link>}>
+        <Panel title="Collections" action={<Link to="/app/collections" className="inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm font-semibold" style={{ color: 'var(--color-accent)' }}>Manage <ArrowRight className="h-4 w-4" /></Link>}>
           {isLoading ? (
             <LoadingRows compact />
           ) : data.collections.length > 0 ? (
             <div className="space-y-3">
               {data.collections.slice(0, 5).map((collection) => (
-                <Link key={collection.id} to={`/app/collections/${collection.id}`} className="flex items-center justify-between rounded-2xl border p-4 transition hover:-translate-y-0.5" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}>
+                <Link key={collection.id} to={`/app/collections/${collection.id}`} className="flex items-center justify-between rounded-lg border p-4 transition-colors" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-fill)' }}>
                   <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ backgroundColor: 'var(--color-surface-overlay)', color: 'var(--color-brand-500)' }}>
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: 'var(--color-fill)', color: 'var(--color-accent)' }}>
                       <FolderOpen className="h-4 w-4" />
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{collection.name}</p>
-                      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{collection.item_count} items</p>
+                      <p className="truncate text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{collection.name}</p>
+                      <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{collection.item_count} items</p>
                     </div>
                   </div>
-                  <ArrowRight className="h-4 w-4 shrink-0" style={{ color: 'var(--color-text-muted)' }} />
+                  <ArrowRight className="h-4 w-4 shrink-0" style={{ color: 'var(--color-text-secondary)' }} />
                 </Link>
               ))}
             </div>
@@ -180,11 +180,11 @@ function QuickAction({ to, icon: Icon, label, primary = false }: { to: string; i
   return (
     <Link
       to={to}
-      className={`inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold transition hover:-translate-y-0.5 ${primary ? 'text-white' : ''}`}
+      className={`inline-flex min-h-11 items-center gap-2 rounded-md px-4 text-sm font-semibold transition-colors ${primary ? 'text-on-accent' : ''}`}
       style={{
-        backgroundColor: primary ? 'var(--color-brand-500)' : 'var(--color-surface-subtle)',
-        color: primary ? '#fff' : 'var(--color-text-primary)',
-        border: primary ? '1px solid transparent' : '1px solid var(--color-border)',
+        backgroundColor: primary ? 'var(--color-accent)' : 'var(--color-fill)',
+        color: primary ? '#fff' : 'var(--color-text)',
+        border: primary ? '1px solid transparent' : '1px solid var(--color-separator)',
       }}
     >
       {primary ? <Plus className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
@@ -195,20 +195,20 @@ function QuickAction({ to, icon: Icon, label, primary = false }: { to: string; i
 
 function MetricCard({ label, value, icon: Icon, tone = 'default', to }: { label: string; value: number; icon: ComponentType<{ className?: string }>; tone?: 'default' | 'warning' | 'success' | 'danger'; to: string }) {
   const colors = {
-    default: 'var(--color-brand-500)',
-    warning: 'var(--color-warning)',
-    success: 'var(--color-success)',
+    default: 'var(--color-accent)',
+    warning: 'var(--color-text)',
+    success: 'var(--color-accent)',
     danger: 'var(--color-danger)',
   };
 
   return (
-    <Link to={to} className="block rounded-3xl border p-4 transition hover:-translate-y-0.5 sm:p-5" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+    <Link to={to} className="block rounded-xl border p-4 transition-colors sm:p-5" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
       <div className="flex items-center justify-between gap-4">
         <div>
           <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{label}</p>
-          <p className="mt-2 text-3xl font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>{value}</p>
+          <p className="mt-2 text-3xl font-semibold tracking-tight" style={{ color: 'var(--color-text)' }}>{value}</p>
         </div>
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-surface-subtle)', color: colors[tone] }}>
+        <div className="flex h-12 w-12 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--color-fill)', color: colors[tone] }}>
           <Icon className="h-5 w-5" />
         </div>
       </div>
@@ -218,9 +218,9 @@ function MetricCard({ label, value, icon: Icon, tone = 'default', to }: { label:
 
 function Panel({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <section className="rounded-[2rem] border p-5 sm:p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+    <section className="rounded-xl border p-5 sm:p-6" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
       <div className="mb-5 flex items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>{title}</h2>
+        <h2 className="text-lg font-semibold tracking-tight" style={{ color: 'var(--color-text)' }}>{title}</h2>
         {action}
       </div>
       {children}
@@ -230,32 +230,32 @@ function Panel({ title, action, children }: { title: string; action?: ReactNode;
 
 function RecentItemRow({ item }: { item: RecentItem }) {
   return (
-    <Link to={item.href} className="flex items-center justify-between gap-4 py-4 transition hover:translate-x-1">
+    <Link to={item.href} className="flex items-center justify-between gap-4 py-4 transition-colors">
       <div className="min-w-0">
         <div className="mb-1 flex items-center gap-2">
-          <span className="rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-surface-subtle)', color: 'var(--color-text-secondary)' }}>{item.type}</span>
+          <span className="rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-fill)', color: 'var(--color-text-secondary)' }}>{item.type}</span>
           <StatusBadge status={item.status} />
         </div>
-        <p className="truncate text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{item.title}</p>
-        <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>{formatDate(item.createdAt)}</p>
+        <p className="truncate text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{item.title}</p>
+        <p className="mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{formatDate(item.createdAt)}</p>
       </div>
-      <ArrowRight className="h-4 w-4 shrink-0" style={{ color: 'var(--color-text-muted)' }} />
+      <ArrowRight className="h-4 w-4 shrink-0" style={{ color: 'var(--color-text-secondary)' }} />
     </Link>
   );
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const tone = status === 'completed' ? 'var(--color-success)' : status === 'failed' ? 'var(--color-danger)' : 'var(--color-warning)';
-  return <span className="rounded-full px-2 py-0.5 text-xs font-semibold capitalize" style={{ backgroundColor: 'var(--color-surface-subtle)', color: tone }}>{status}</span>;
+  const tone = status === 'completed' ? 'var(--color-accent)' : status === 'failed' ? 'var(--color-danger)' : 'var(--color-text)';
+  return <span className="rounded-full px-2 py-0.5 text-xs font-semibold capitalize" style={{ backgroundColor: 'var(--color-fill)', color: tone }}>{status}</span>;
 }
 
 function EmptyPanel({ icon: Icon, title, body }: { icon: ComponentType<{ className?: string }>; title: string; body: string }) {
   return (
-    <div className="rounded-3xl border border-dashed p-8 text-center" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}>
-      <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-surface-overlay)', color: 'var(--color-brand-500)' }}>
+    <div className="rounded-xl border border-dashed p-8 text-center" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-fill)' }}>
+      <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--color-fill)', color: 'var(--color-accent)' }}>
         <Icon className="h-5 w-5" />
       </div>
-      <p className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>{title}</p>
+      <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{title}</p>
       <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{body}</p>
     </div>
   );
@@ -265,9 +265,9 @@ function LoadingRows({ compact = false }: { compact?: boolean }) {
   return (
     <div className="space-y-3">
       {Array.from({ length: compact ? 3 : 5 }).map((_, index) => (
-        <div key={index} className="flex items-center gap-3 rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}>
-          <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-text-muted)' }} />
-          <div className="h-3 flex-1 rounded-full" style={{ backgroundColor: 'var(--color-surface-overlay)' }} />
+        <div key={index} className="flex items-center gap-3 rounded-lg border p-4" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-fill)' }}>
+          <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-text-secondary)' }} />
+          <div className="h-3 flex-1 rounded-full" style={{ backgroundColor: 'var(--color-fill)' }} />
         </div>
       ))}
     </div>

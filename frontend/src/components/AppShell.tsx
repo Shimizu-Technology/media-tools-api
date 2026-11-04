@@ -6,7 +6,7 @@ import {
   ChevronRight,
   Code2,
   FilePlus2,
-  FileText,
+
   FolderOpen,
   Home,
   Library,
@@ -24,6 +24,7 @@ import { LibraryActivityProvider } from '../contexts/LibraryActivityContext';
 import { useLibraryActivity } from '../contexts/useLibraryActivity';
 import { getHealth } from '../lib/api';
 import { AccountMenu } from './AccountMenu';
+import { Mark } from './ui/Mark';
 
 const SIDEBAR_COLLAPSED_KEY = 'mta-app-sidebar-collapsed';
 
@@ -151,45 +152,45 @@ function AppShellContent() {
   const userName = user?.name || user?.email || 'Media workspace';
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}>
-      <aside className={`fixed inset-y-0 left-0 z-40 hidden border-r backdrop-blur-xl transition-[width] duration-200 lg:flex lg:flex-col ${collapsed ? 'w-20' : 'w-64'}`} style={{ backgroundColor: 'var(--color-sidebar-bg)', borderColor: 'var(--color-border)' }}>
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}>
+      <aside className={`fixed inset-y-0 left-0 z-40 hidden border-r backdrop-blur-xl transition-[width] duration-200 lg:flex lg:flex-col ${collapsed ? 'w-20' : 'w-64'}`} style={{ backgroundColor: 'var(--color-bar)', borderColor: 'var(--color-separator)' }}>
         <SidebarContent collapsed={collapsed} onToggleCollapsed={toggleCollapsed} userName={userName} accountAuthEnabled={accountAuthEnabled} activeJobs={activeJobCount} />
       </aside>
 
       {mobileOpen && (
         <div ref={mobileDialogRef} className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Workspace navigation">
-          <button tabIndex={-1} className="absolute inset-0 backdrop-blur-sm" style={{ backgroundColor: 'var(--color-modal-scrim)' }} aria-label="Close navigation" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[340px] flex-col border-r shadow-2xl" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+          <button tabIndex={-1} className="absolute inset-0 backdrop-blur-sm" style={{ backgroundColor: 'var(--color-scrim)' }} aria-label="Close navigation" onClick={() => setMobileOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[340px] flex-col border-r shadow-overlay" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
             <SidebarContent collapsed={false} onToggleCollapsed={toggleCollapsed} userName={userName} accountAuthEnabled={accountAuthEnabled} activeJobs={activeJobCount} mobile onNavigate={() => setMobileOpen(false)} />
           </aside>
-          <button className="absolute left-[calc(min(86vw,340px)+0.75rem)] top-4 flex h-11 w-11 items-center justify-center rounded-full border backdrop-blur" style={{ backgroundColor: 'var(--color-modal-control)', borderColor: 'var(--color-modal-control-border)', color: 'var(--color-on-brand)' }} onClick={() => setMobileOpen(false)} aria-label="Close navigation">
+          <button className="absolute left-[calc(min(86vw,340px)+0.75rem)] top-4 flex h-11 w-11 items-center justify-center rounded-full border backdrop-blur" style={{ backgroundColor: 'var(--color-scrim)', borderColor: 'var(--color-separator)', color: 'var(--color-on-accent)' }} onClick={() => setMobileOpen(false)} aria-label="Close navigation">
             <X className="h-5 w-5" />
           </button>
         </div>
       )}
 
       <div className={`transition-[padding] duration-200 ${collapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
-        <header className="sticky top-0 z-30 border-b backdrop-blur-xl" style={{ backgroundColor: 'var(--color-header-bg)', borderColor: 'var(--color-border)' }}>
+        <header className="sticky top-0 z-30 border-b backdrop-blur-xl" style={{ backgroundColor: 'var(--color-bar)', borderColor: 'var(--color-separator)' }}>
           <div className="flex h-16 items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
             <div className="flex min-w-0 items-center gap-3">
-              <button className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors hover:bg-[var(--color-nav-hover)] lg:hidden" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={() => setMobileOpen(true)} aria-label="Open navigation">
+              <button className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border transition-colors hover:bg-[var(--color-fill)] lg:hidden" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }} onClick={() => setMobileOpen(true)} aria-label="Open navigation">
                 <Menu className="h-5 w-5" />
               </button>
               <div className="min-w-0">
-                <p className="truncate text-[0.65rem] font-semibold uppercase tracking-[0.2em]" style={{ color: 'var(--color-text-muted)' }}>{page.eyebrow}</p>
-                <p className="truncate text-base font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>{page.title}</p>
+                <p className="truncate text-[0.65rem] font-semibold uppercase tracking-[0.2em]" style={{ color: 'var(--color-text-secondary)' }}>{page.eyebrow}</p>
+                <p className="truncate text-base font-semibold tracking-tight" style={{ color: 'var(--color-text)' }}>{page.title}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
               {activeJobCount > 0 && (
-                <Link to="/app/processing" className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-3 text-xs font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface-elevated)' }}>
-                  <span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-brand-500)] opacity-50" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--color-brand-500)]" /></span>
+                <Link to="/app/processing" className="inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-xs font-semibold" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
+                  <span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-fill opacity-50" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent-fill" /></span>
                   <span className="hidden sm:inline">{activeJobCount} active</span>
                   <span className="sm:hidden">{activeJobCount}</span>
                 </Link>
               )}
               {location.pathname !== '/app/new' && (
-                <Link to="/app/new" className="hidden min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold transition hover:-translate-y-0.5 sm:inline-flex" style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)' }}>
+                <Link to="/app/new" className="hidden min-h-11 items-center gap-2 rounded-md px-4 text-sm font-semibold transition-colors sm:inline-flex" style={{ backgroundColor: 'var(--color-accent-fill)', color: 'var(--color-on-accent)' }}>
                   <Plus className="h-4 w-4" /> Add media
                 </Link>
               )}
@@ -220,23 +221,21 @@ function SidebarContent({ collapsed, onToggleCollapsed, userName, accountAuthEna
 }) {
   return (
     <div className="flex h-full flex-col p-3">
-      <div className={`flex items-center gap-3 border-b pb-4 ${collapsed ? 'justify-center' : 'px-2'}`} style={{ borderColor: 'var(--color-border)' }}>
-        <Link to="/app" onClick={onNavigate} className="flex min-h-11 min-w-0 items-center gap-3 rounded-2xl focus-visible:outline-none">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-500)', boxShadow: 'var(--shadow-brand-action)' }}>
-            <FileText className="h-5 w-5" style={{ color: 'var(--color-on-brand)' }} />
-          </div>
-          {!collapsed && <div className="min-w-0"><p className="truncate text-base font-semibold tracking-tight">Media Tools</p><p className="truncate text-xs" style={{ color: 'var(--color-text-muted)' }}>Private workspace</p></div>}
+      <div className={`flex items-center gap-3 border-b pb-4 ${collapsed ? 'justify-center' : 'px-2'}`} style={{ borderColor: 'var(--color-separator)' }}>
+        <Link to="/app" onClick={onNavigate} className="flex min-h-11 min-w-0 items-center gap-3 rounded-lg focus-visible:outline-none">
+          <Mark size={40} />
+          {!collapsed && <div className="min-w-0"><p className="truncate text-base font-semibold tracking-tight">Media Tools</p><p className="truncate text-xs" style={{ color: 'var(--color-text-secondary)' }}>Private workspace</p></div>}
         </Link>
         {!mobile && !collapsed && (
-          <button className="ml-auto hidden h-11 w-11 items-center justify-center rounded-xl border transition-colors hover:bg-[var(--color-nav-hover)] lg:flex" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Collapse sidebar"><PanelLeftClose className="h-4 w-4" /></button>
+          <button className="ml-auto hidden h-11 w-11 items-center justify-center rounded-md border transition-colors hover:bg-[var(--color-fill)] lg:flex" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Collapse sidebar"><PanelLeftClose className="h-4 w-4" /></button>
         )}
       </div>
 
       {!mobile && collapsed && (
-        <button className="mx-auto mt-3 flex h-11 w-11 items-center justify-center rounded-xl border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Expand sidebar"><PanelLeftOpen className="h-4 w-4" /></button>
+        <button className="mx-auto mt-3 flex h-11 w-11 items-center justify-center rounded-md border" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Expand sidebar"><PanelLeftOpen className="h-4 w-4" /></button>
       )}
 
-      <Link to="/app/new" onClick={onNavigate} title={collapsed ? 'Add media' : undefined} className={`mt-4 flex min-h-12 items-center rounded-2xl font-semibold transition hover:-translate-y-0.5 ${collapsed ? 'justify-center' : 'gap-3 px-4'}`} style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)', boxShadow: 'var(--shadow-brand-action)' }}>
+      <Link to="/app/new" onClick={onNavigate} title={collapsed ? 'Add media' : undefined} className={`mt-4 flex min-h-12 items-center rounded-lg font-semibold transition-colors ${collapsed ? 'justify-center' : 'gap-3 px-4'}`} style={{ backgroundColor: 'var(--color-accent-fill)', color: 'var(--color-on-accent)', boxShadow: 'var(--shadow-raised)' }}>
         <FilePlus2 className="h-5 w-5 shrink-0" />
         {!collapsed && <><span>Add media</span><ChevronRight className="ml-auto h-4 w-4 opacity-70" /></>}
       </Link>
@@ -247,9 +246,9 @@ function SidebarContent({ collapsed, onToggleCollapsed, userName, accountAuthEna
         <NavSection items={accountAuthEnabled ? developerNav : [...developerNav, opsNav]} collapsed={collapsed} onNavigate={onNavigate} />
       </nav>
 
-      <div className={`mt-4 border-t pt-4 ${collapsed ? 'px-0' : 'px-2'}`} style={{ borderColor: 'var(--color-border)' }}>
+      <div className={`mt-4 border-t pt-4 ${collapsed ? 'px-0' : 'px-2'}`} style={{ borderColor: 'var(--color-separator)' }}>
         <NavLink to="/app/settings" onClick={onNavigate} className={({ isActive }) => navClass(isActive, collapsed)} title="Settings"><Settings className="h-5 w-5 shrink-0" />{!collapsed && <span>Settings</span>}</NavLink>
-        {!collapsed && <div className="mt-3 rounded-2xl border p-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}><p className="truncate text-sm font-semibold">{userName}</p><p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>{accountAuthEnabled ? 'Durable browser session' : 'API key development mode'}</p></div>}
+        {!collapsed && <div className="mt-3 rounded-lg border p-3" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-fill)' }}><p className="truncate text-sm font-semibold">{userName}</p><p className="mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{accountAuthEnabled ? 'Durable browser session' : 'API key development mode'}</p></div>}
       </div>
     </div>
   );
@@ -257,19 +256,19 @@ function SidebarContent({ collapsed, onToggleCollapsed, userName, accountAuthEna
 
 function MobileBottomNav({ activeJobs }: { activeJobs: number }) {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl lg:hidden" style={{ backgroundColor: 'var(--color-mobile-nav-bg)', borderColor: 'var(--color-border)' }} aria-label="Primary">
+    <nav className="fixed inset-x-0 bottom-0 z-40 border-t px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl lg:hidden" style={{ backgroundColor: 'var(--color-bar)', borderColor: 'var(--color-separator)' }} aria-label="Primary">
       <div className="mx-auto grid max-w-xl grid-cols-5">
         {mobileNav.map((item) => {
           const Icon = item.icon;
           const isAdd = item.to === '/app/new';
           return (
-            <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => `relative flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 text-[0.65rem] font-semibold transition ${isAdd ? '-mt-5' : ''} ${isActive ? 'text-[var(--color-brand-500)]' : 'text-[var(--color-text-muted)]'}`}>
+            <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => `relative flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1 text-[0.65rem] font-semibold transition-colors ${isAdd ? '-mt-5' : ''} ${isActive ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)]'}`}>
               {isAdd ? (
-                <span className="flex h-13 w-13 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)', boxShadow: 'var(--shadow-floating-action)' }}><Icon className="h-6 w-6" /></span>
+                <span className="flex h-13 w-13 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--color-accent-fill)', color: 'var(--color-on-accent)', boxShadow: 'var(--shadow-overlay)' }}><Icon className="h-6 w-6" /></span>
               ) : (
-                <span className="relative"><Icon className="h-5 w-5" />{item.to === '/app/processing' && activeJobs > 0 && <span className="absolute -right-2 -top-1 h-2.5 w-2.5 rounded-full bg-[var(--color-brand-500)] ring-2 ring-[var(--color-mobile-nav-bg)]" />}</span>
+                <span className="relative"><Icon className="h-5 w-5" />{item.to === '/app/processing' && activeJobs > 0 && <span className="absolute -right-2 -top-1 h-2.5 w-2.5 rounded-full bg-accent-fill ring-2 ring-[var(--color-bar)]" />}</span>
               )}
-              <span className={isAdd ? 'text-[var(--color-brand-500)]' : 'truncate'}>{item.shortLabel || item.label}</span>
+              <span className={isAdd ? 'text-[var(--color-accent)]' : 'truncate'}>{item.shortLabel || item.label}</span>
             </NavLink>
           );
         })}
@@ -279,15 +278,15 @@ function MobileBottomNav({ activeJobs }: { activeJobs: number }) {
 }
 
 function NavSection({ items, collapsed, onNavigate, activeJobs = 0 }: { items: NavItem[]; collapsed: boolean; onNavigate?: () => void; activeJobs?: number }) {
-  return <div className="space-y-1">{items.map((item) => { const Icon = item.icon; return <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={({ isActive }) => navClass(isActive, collapsed)} title={collapsed ? item.label : undefined}><Icon className="h-5 w-5 shrink-0" />{!collapsed && <span>{item.label}</span>}{!collapsed && item.to === '/app/processing' && activeJobs > 0 ? <span className="ml-auto rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>{activeJobs}</span> : !collapsed && <ChevronRight className="ml-auto h-4 w-4 opacity-40" />}{collapsed && item.to === '/app/processing' && activeJobs > 0 && <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[var(--color-brand-500)] ring-2 ring-[var(--color-sidebar-bg)]" />}</NavLink>; })}</div>;
+  return <div className="space-y-1">{items.map((item) => { const Icon = item.icon; return <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={({ isActive }) => navClass(isActive, collapsed)} title={collapsed ? item.label : undefined}><Icon className="h-5 w-5 shrink-0" />{!collapsed && <span>{item.label}</span>}{!collapsed && item.to === '/app/processing' && activeJobs > 0 ? <span className="ml-auto rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}>{activeJobs}</span> : !collapsed && <ChevronRight className="ml-auto h-4 w-4 opacity-40" />}{collapsed && item.to === '/app/processing' && activeJobs > 0 && <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-accent-fill ring-2 ring-[var(--color-bar)]" />}</NavLink>; })}</div>;
 }
 
 function Divider({ collapsed, label }: { collapsed: boolean; label: string }) {
-  if (collapsed) return <div className="my-4 h-px" style={{ backgroundColor: 'var(--color-border)' }} />;
-  return <div className="px-3 pb-1 pt-5 text-[0.65rem] font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--color-text-muted)' }}>{label}</div>;
+  if (collapsed) return <div className="my-4 h-px" style={{ backgroundColor: 'var(--color-separator)' }} />;
+  return <div className="px-3 pb-1 pt-5 text-[0.65rem] font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--color-text-secondary)' }}>{label}</div>;
 }
 
 function navClass(isActive: boolean, collapsed: boolean) {
-  const base = collapsed ? 'group relative flex min-h-11 items-center justify-center rounded-2xl transition' : 'group flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm font-medium transition';
-  return `${base} ${isActive ? 'bg-[var(--color-nav-active)] text-[var(--color-brand-600)] dark:text-[var(--color-brand-400)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-nav-hover)] hover:text-[var(--color-text-primary)]'}`;
+  const base = collapsed ? 'group relative flex min-h-11 items-center justify-center rounded-lg transition-colors' : 'group flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors';
+  return `${base} ${isActive ? 'bg-[var(--color-accent-tint)] text-[var(--color-accent)] dark:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-fill)] hover:text-[var(--color-text)]'}`;
 }

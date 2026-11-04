@@ -69,8 +69,8 @@ export function AIContentReportButton({
         ref={triggerRef}
         type="button"
         onClick={open}
-        className="inline-flex min-h-11 items-center gap-2 rounded-lg px-2.5 text-xs font-semibold transition hover:bg-[var(--color-nav-hover)]"
-        style={{ color: 'var(--color-text-muted)' }}
+        className="inline-flex min-h-11 items-center gap-2 rounded-sm px-2.5 text-xs font-semibold transition-colors hover:bg-[var(--color-fill)]"
+        style={{ color: 'var(--color-text-secondary)' }}
       >
         <Flag className="h-3.5 w-3.5" />
         {label}
@@ -79,7 +79,7 @@ export function AIContentReportButton({
       {isOpen && createPortal((
         <div
           className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6"
-          style={{ backgroundColor: 'var(--color-modal-scrim)' }}
+          style={{ backgroundColor: 'var(--color-scrim)' }}
           onKeyDown={(event) => {
             if (event.key === 'Escape') close();
           }}
@@ -88,15 +88,15 @@ export function AIContentReportButton({
             role="dialog"
             aria-modal="true"
             aria-labelledby="ai-report-title"
-            className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border p-5 shadow-2xl sm:rounded-3xl sm:p-6"
+            className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-xl border p-5 shadow-overlay sm:rounded-xl sm:p-6"
             style={{
-              backgroundColor: 'var(--color-surface-elevated)',
-              borderColor: 'var(--color-border)',
+              backgroundColor: 'var(--color-surface)',
+              borderColor: 'var(--color-separator)',
             }}
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--color-brand-500)' }}>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--color-accent)' }}>
                   Safety report
                 </p>
                 <h2 id="ai-report-title" className="mt-2 text-xl font-semibold">
@@ -107,8 +107,8 @@ export function AIContentReportButton({
                 type="button"
                 onClick={close}
                 aria-label="Close report"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
-                style={{ color: 'var(--color-text-muted)' }}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md"
+                style={{ color: 'var(--color-text-secondary)' }}
               >
                 <X className="h-5 w-5" />
               </button>
@@ -116,7 +116,7 @@ export function AIContentReportButton({
 
             {submitted ? (
               <div className="py-8 text-center" role="status">
-                <CheckCircle2 className="mx-auto h-10 w-10" style={{ color: 'var(--color-success)' }} />
+                <CheckCircle2 className="mx-auto h-10 w-10" style={{ color: 'var(--color-accent)' }} />
                 <h3 className="mt-4 font-semibold">Report received</h3>
                 <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
                   Shimizu Technology can now review this output and use the report to improve safeguards.
@@ -124,8 +124,8 @@ export function AIContentReportButton({
                 <button
                   type="button"
                   onClick={close}
-                  className="mt-6 min-h-11 rounded-xl px-5 text-sm font-semibold"
-                  style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)' }}
+                  className="mt-6 min-h-11 rounded-md px-5 text-sm font-semibold"
+                  style={{ backgroundColor: 'var(--color-accent-fill)', color: 'var(--color-on-accent)' }}
                 >
                   Done
                 </button>
@@ -144,11 +144,11 @@ export function AIContentReportButton({
                   value={category}
                   onChange={(event) => setCategory(event.target.value as AIContentReportCategory)}
                   autoFocus
-                  className="mt-2 min-h-11 w-full rounded-xl border px-3 text-sm outline-none"
+                  className="mt-2 min-h-11 w-full rounded-md border px-3 text-sm outline-none"
                   style={{
-                    backgroundColor: 'var(--color-surface)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-primary)',
+                    backgroundColor: 'var(--color-bg)',
+                    borderColor: 'var(--color-separator)',
+                    color: 'var(--color-text)',
                   }}
                 >
                   {categories.map((option) => (
@@ -157,7 +157,7 @@ export function AIContentReportButton({
                 </select>
 
                 <label className="mt-5 block text-sm font-semibold" htmlFor={`ai-report-details-${targetId}`}>
-                  Note <span className="font-normal" style={{ color: 'var(--color-text-muted)' }}>(optional)</span>
+                  Note <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>(optional)</span>
                 </label>
                 <textarea
                   id={`ai-report-details-${targetId}`}
@@ -166,19 +166,19 @@ export function AIContentReportButton({
                   maxLength={1000}
                   rows={4}
                   placeholder="Tell us what concerned you. Do not add passwords, API keys, or source content."
-                  className="mt-2 w-full resize-y rounded-xl border p-3 text-base outline-none sm:text-sm"
+                  className="mt-2 w-full resize-y rounded-md border p-3 text-base outline-none sm:text-sm"
                   style={{
-                    backgroundColor: 'var(--color-surface)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-primary)',
+                    backgroundColor: 'var(--color-bg)',
+                    borderColor: 'var(--color-separator)',
+                    color: 'var(--color-text)',
                   }}
                 />
-                <p className="mt-1 text-right text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                <p className="mt-1 text-right text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                   {details.length}/1000
                 </p>
 
                 {error && (
-                  <div className="mt-4 flex items-start gap-2 rounded-xl border p-3 text-sm" role="alert" style={{ borderColor: 'var(--color-danger)', color: 'var(--color-danger)' }}>
+                  <div className="mt-4 flex items-start gap-2 rounded-md border p-3 text-sm" role="alert" style={{ borderColor: 'var(--color-danger)', color: 'var(--color-danger)' }}>
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                     {error}
                   </div>
@@ -189,8 +189,8 @@ export function AIContentReportButton({
                     type="button"
                     onClick={close}
                     disabled={isSubmitting}
-                    className="min-h-11 rounded-xl border px-4 text-sm font-semibold disabled:opacity-50"
-                    style={{ borderColor: 'var(--color-border)' }}
+                    className="min-h-11 rounded-md border px-4 text-sm font-semibold disabled:opacity-50"
+                    style={{ borderColor: 'var(--color-separator)' }}
                   >
                     Cancel
                   </button>
@@ -198,8 +198,8 @@ export function AIContentReportButton({
                     type="button"
                     onClick={() => void submit()}
                     disabled={isSubmitting}
-                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:opacity-50"
-                    style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)' }}
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold disabled:opacity-50"
+                    style={{ backgroundColor: 'var(--color-accent-fill)', color: 'var(--color-on-accent)' }}
                   >
                     {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
                     Submit report

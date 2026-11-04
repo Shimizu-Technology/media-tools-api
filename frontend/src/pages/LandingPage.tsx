@@ -2,6 +2,7 @@ import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { ArrowRight, BookOpen, CheckCircle2, FileText, Library, Lock, Mic, Sparkles } from 'lucide-react';
 import { useAuthContext } from '../contexts/useAuthContext';
 import { useAuthCapabilities } from '../hooks/useAuthCapabilities';
+import { Mark } from '../components/ui/Mark';
 
 const features = [
   { icon: FileText, title: 'Video transcripts', body: 'Capture transcripts from YouTube, Vimeo, and other supported video sites.' },
@@ -22,7 +23,7 @@ export function LandingPage() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}>
+    <main className="min-h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}>
       <div className="pointer-events-none fixed inset-0 opacity-70" aria-hidden="true">
         <div className="absolute left-1/2 top-[-10rem] h-[28rem] w-[28rem] -translate-x-1/2 rounded-full blur-3xl" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }} />
         <div className="absolute right-[-8rem] top-1/3 h-[24rem] w-[24rem] rounded-full blur-3xl" style={{ backgroundColor: 'rgba(14, 165, 233, 0.14)' }} />
@@ -30,28 +31,26 @@ export function LandingPage() {
 
       <header className="relative mx-auto flex max-w-7xl items-center justify-between px-4 py-5 sm:px-6 lg:px-8">
         <Link to="/" className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-            <FileText className="h-5 w-5 text-white" />
-          </div>
+          <Mark size={44} />
           <div>
             <p className="font-semibold tracking-tight">Media Tools</p>
-            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Shimizu Technology</p>
+            <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Shimizu Technology</p>
           </div>
         </Link>
         <nav className="flex items-center gap-2">
-          <Link to="/docs" className="hidden min-h-11 items-center rounded-xl px-4 text-sm font-medium transition hover:bg-white/[0.06] sm:inline-flex" style={{ color: 'var(--color-text-secondary)' }}>API docs</Link>
+          <Link to="/docs" className="hidden min-h-11 items-center rounded-md px-4 text-sm font-medium transition-colors hover:bg-fill sm:inline-flex" style={{ color: 'var(--color-text-secondary)' }}>API docs</Link>
           {isAuthenticated ? (
-            <Link to="/app" className="inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+            <Link to="/app" className="inline-flex min-h-11 items-center gap-2 rounded-md px-4 text-sm font-semibold text-on-accent transition-colors hover:opacity-90" style={{ backgroundColor: 'var(--color-accent-fill)' }}>
               Open app
               <ArrowRight className="h-4 w-4" />
             </Link>
           ) : accountAuthEnabled ? (
-            <Link to="/sign-in" className="inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+            <Link to="/sign-in" className="inline-flex min-h-11 items-center gap-2 rounded-md px-4 text-sm font-semibold text-on-accent transition-colors hover:opacity-90" style={{ backgroundColor: 'var(--color-accent-fill)' }}>
               Sign in
               <ArrowRight className="h-4 w-4" />
             </Link>
           ) : (
-            <Link to="/app" className="inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+            <Link to="/app" className="inline-flex min-h-11 items-center gap-2 rounded-md px-4 text-sm font-semibold text-on-accent transition-colors hover:opacity-90" style={{ backgroundColor: 'var(--color-accent-fill)' }}>
               Open dev app
               <ArrowRight className="h-4 w-4" />
             </Link>
@@ -61,7 +60,7 @@ export function LandingPage() {
 
       <section className="relative mx-auto grid max-w-7xl gap-10 px-4 pb-14 pt-10 sm:px-6 sm:pt-16 lg:grid-cols-[1.05fr_0.95fr] lg:px-8 lg:pb-24 lg:pt-20">
         <div className="max-w-3xl">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.2em]" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-elevated)', color: 'var(--color-brand-500)' }}>
+          <div className="mb-6 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.2em]" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-surface)', color: 'var(--color-accent)' }}>
             <Sparkles className="h-3.5 w-3.5" />
             AI media workspace
           </div>
@@ -73,36 +72,36 @@ export function LandingPage() {
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             {isAuthenticated ? (
-              <Link to="/app" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white transition hover:-translate-y-0.5" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+              <Link to="/app" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md px-5 text-sm font-semibold text-on-accent transition-colors" style={{ backgroundColor: 'var(--color-accent-fill)' }}>
                 Open workspace
                 <ArrowRight className="h-4 w-4" />
               </Link>
             ) : accountAuthEnabled ? (
               <>
-                <Link to="/sign-in" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white transition hover:-translate-y-0.5" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+                <Link to="/sign-in" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md px-5 text-sm font-semibold text-on-accent transition-colors" style={{ backgroundColor: 'var(--color-accent-fill)' }}>
                   Sign in
                   <ArrowRight className="h-4 w-4" />
                 </Link>
                 {canSignUp && (
-                  <Link to="/sign-up" className="inline-flex min-h-12 items-center justify-center rounded-xl border px-5 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
+                  <Link to="/sign-up" className="inline-flex min-h-12 items-center justify-center rounded-md border px-5 text-sm font-semibold transition-colors hover:bg-fill" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text)' }}>
                     Create an account
                   </Link>
                 )}
               </>
             ) : (
-              <Link to="/app" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white transition hover:-translate-y-0.5" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+              <Link to="/app" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md px-5 text-sm font-semibold text-on-accent transition-colors" style={{ backgroundColor: 'var(--color-accent-fill)' }}>
                 Open dev workspace
                 <ArrowRight className="h-4 w-4" />
               </Link>
             )}
-            <Link to="/docs" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border px-5 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
+            <Link to="/docs" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md border px-5 text-sm font-semibold transition-colors hover:bg-fill" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text)' }}>
               Read API docs
             </Link>
           </div>
           <div className="mt-8 grid gap-3 text-sm sm:grid-cols-3" style={{ color: 'var(--color-text-secondary)' }}>
             {['Private signed-in workspace', 'API access when you need it', 'Summaries, chat, and collections'].map((item) => (
               <div key={item} className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-success)' }} />
+                <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-accent)' }} />
                 {item}
               </div>
             ))}
@@ -110,14 +109,14 @@ export function LandingPage() {
         </div>
 
         <div className="relative">
-          <div className="rounded-[2rem] border p-4 shadow-2xl shadow-black/20" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-            <div className="rounded-[1.5rem] border p-5" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
+          <div className="rounded-xl border p-4 shadow-overlay " style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
+            <div className="rounded-xl border p-5" style={{ backgroundColor: 'var(--color-bg)', borderColor: 'var(--color-separator)' }}>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--color-text-muted)' }}>Today</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--color-text-secondary)' }}>Today</p>
                   <p className="mt-1 text-xl font-semibold">Workspace overview</p>
                 </div>
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
+                <div className="flex h-11 w-11 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}>
                   <Lock className="h-5 w-5" />
                 </div>
               </div>
@@ -125,8 +124,8 @@ export function LandingPage() {
                 {features.map((feature) => {
                   const Icon = feature.icon;
                   return (
-                    <div key={feature.title} className="rounded-2xl border p-4" style={{ backgroundColor: 'var(--color-surface-subtle)', borderColor: 'var(--color-border)' }}>
-                      <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl" style={{ backgroundColor: 'var(--color-surface-overlay)', color: 'var(--color-brand-500)' }}>
+                    <div key={feature.title} className="rounded-lg border p-4" style={{ backgroundColor: 'var(--color-fill)', borderColor: 'var(--color-separator)' }}>
+                      <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-md" style={{ backgroundColor: 'var(--color-fill)', color: 'var(--color-accent)' }}>
                         <Icon className="h-4 w-4" />
                       </div>
                       <p className="font-semibold">{feature.title}</p>

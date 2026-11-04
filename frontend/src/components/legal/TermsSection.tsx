@@ -11,7 +11,7 @@ export function TermsSection({ title, children }: TermsSectionProps) {
     <section>
       <h2
         className="mb-3 text-lg font-semibold"
-        style={{ color: 'var(--color-text-primary)' }}
+        style={{ color: 'var(--color-text)' }}
       >
         {title}
       </h2>

@@ -115,7 +115,7 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
         onClick={onClose}
       >
         {/* Backdrop */}
-        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+        <div className="absolute inset-0 bg-scrim backdrop-blur-sm" />
 
         {/* Modal */}
         <motion.div
@@ -123,50 +123,50 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95 }}
           onClick={e => e.stopPropagation()}
-          className="relative w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--bg)] shadow-2xl overflow-hidden"
+          className="relative w-full max-w-md rounded-lg border border-[var(--color-separator)] bg-[var(--color-bg)] shadow-overlay overflow-hidden"
         >
           {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b border-[var(--border)]">
+          <div className="flex items-center justify-between p-4 border-b border-[var(--color-separator)]">
             <div>
-				<h2 id="add-to-collection-title" className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">
-                <FolderOpen className="w-4.5 h-4.5 text-[var(--brand)]" />
+				<h2 id="add-to-collection-title" className="text-base font-semibold text-[var(--color-text)] flex items-center gap-2">
+                <FolderOpen className="w-4.5 h-4.5 text-[var(--color-accent)]" />
                 Add to Collection
               </h2>
               {itemTitle && (
-                <p className="text-xs text-[var(--text-tertiary)] mt-0.5 truncate max-w-[320px]">{itemTitle}</p>
+                <p className="text-xs text-[var(--color-text-secondary)] mt-0.5 truncate max-w-[320px]">{itemTitle}</p>
               )}
             </div>
-			<button onClick={onClose} aria-label="Close dialog" className="flex min-h-11 min-w-11 items-center justify-center rounded-md hover:bg-[var(--color-nav-hover)] text-[var(--text-tertiary)]">
+			<button onClick={onClose} aria-label="Close dialog" className="flex min-h-11 min-w-11 items-center justify-center rounded-sm hover:bg-[var(--color-fill)] text-[var(--color-text-secondary)]">
               <X className="w-4 h-4" />
             </button>
           </div>
 
           {/* Content */}
 		  <div className="p-2 max-h-80 overflow-y-auto">
-			{error && <p role="alert" className="m-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-500">{error}</p>}
+			{error && <p role="alert" className="m-2 rounded-sm border border-separator bg-fill px-3 py-2 text-sm text-danger">{error}</p>}
             {loading ? (
               <div className="flex items-center justify-center py-10">
-                <Loader2 className="w-5 h-5 animate-spin text-[var(--text-tertiary)]" />
+                <Loader2 className="w-5 h-5 animate-spin text-[var(--color-text-secondary)]" />
               </div>
             ) : (
               <>
                 {/* Create new inline */}
                 {showCreate ? (
-                  <div className="mb-1 rounded-xl bg-[var(--surface)] p-3">
+                  <div className="mb-1 rounded-md bg-[var(--color-surface)] p-3">
                     <input
                       autoFocus
                       value={newName}
                       onChange={e => setNewName(e.target.value)}
                       placeholder="Collection name..."
-                      className="mb-2 min-h-11 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 text-base text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                      className="mb-2 min-h-11 w-full rounded-sm border border-[var(--color-separator)] bg-transparent px-3 text-base text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-secondary)]"
                       onKeyDown={e => e.key === 'Enter' && handleCreate()}
                     />
                     <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
-                      <button onClick={() => setShowCreate(false)} className="min-h-11 rounded-lg px-3 text-sm text-[var(--text-secondary)] hover:bg-[var(--color-nav-hover)]">Cancel</button>
+                      <button onClick={() => setShowCreate(false)} className="min-h-11 rounded-sm px-3 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-fill)]">Cancel</button>
                       <button
                         onClick={handleCreate}
                         disabled={!newName.trim() || creating}
-                        className="flex min-h-11 items-center justify-center gap-1.5 rounded-lg bg-[var(--brand)] px-3 text-sm font-medium text-white disabled:opacity-50"
+                        className="flex min-h-11 items-center justify-center gap-1.5 rounded-sm bg-accent-fill px-3 text-sm font-medium text-on-accent disabled:opacity-50"
                       >
                         {creating && <Loader2 className="w-3 h-3 animate-spin" />}
                         Create & Add
@@ -176,7 +176,7 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
                 ) : (
                   <button
                     onClick={() => setShowCreate(true)}
-                    className="mb-1 flex min-h-11 w-full items-center gap-2.5 rounded-lg p-3 text-sm text-[var(--brand)] transition-colors hover:bg-[var(--brand)]/5"
+                    className="mb-1 flex min-h-11 w-full items-center gap-2.5 rounded-sm p-3 text-sm text-[var(--color-accent)] transition-colors hover:bg-accent-fill/5"
                   >
                     <Plus className="w-4 h-4" />
                     New Collection
@@ -185,7 +185,7 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
 
                 {/* Existing collections */}
                 {collections.length === 0 && !showCreate && (
-                  <p className="text-center text-sm text-[var(--text-tertiary)] py-6">No collections yet</p>
+                  <p className="text-center text-sm text-[var(--color-text-secondary)] py-6">No collections yet</p>
                 )}
                 {collections.map(col => {
                   const isAdded = added.has(col.id);
@@ -195,21 +195,21 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
                       key={col.id}
                       onClick={() => !isAdded && handleAdd(col.id)}
                       disabled={isAdded || isAdding}
-                      className="flex min-h-14 w-full items-center gap-3 rounded-lg p-3 text-left transition-colors hover:bg-white/3 disabled:opacity-70"
+                      className="flex min-h-14 w-full items-center gap-3 rounded-sm p-3 text-left transition-colors hover:bg-fill disabled:opacity-70"
                     >
-                      <div className="w-8 h-8 rounded-md bg-[var(--brand)]/10 flex items-center justify-center shrink-0">
-                        <FolderOpen className="w-4 h-4 text-[var(--brand)]" />
+                      <div className="w-8 h-8 rounded-sm bg-accent-fill/10 flex items-center justify-center shrink-0">
+                        <FolderOpen className="w-4 h-4 text-[var(--color-accent)]" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <span className="text-sm font-medium text-[var(--text-primary)] truncate block">{col.name}</span>
-                        <span className="text-xs text-[var(--text-tertiary)]">
+                        <span className="text-sm font-medium text-[var(--color-text)] truncate block">{col.name}</span>
+                        <span className="text-xs text-[var(--color-text-secondary)]">
                           {col.item_count} {col.item_count === 1 ? 'item' : 'items'}
                         </span>
                       </div>
                       {isAdding ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-[var(--text-tertiary)]" />
+                        <Loader2 className="w-4 h-4 animate-spin text-[var(--color-text-secondary)]" />
                       ) : isAdded ? (
-                        <Check className="w-4 h-4 text-emerald-400" />
+                        <Check className="w-4 h-4 text-accent" />
                       ) : null}
                     </button>
                   );

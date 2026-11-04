@@ -243,23 +243,23 @@ export function SummaryPanel({
       >
         <div className="flex items-center gap-2">
           <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center"
-            style={{ backgroundColor: 'var(--color-surface-overlay)', color: 'var(--color-brand-500)' }}
+            className="w-9 h-9 rounded-md flex items-center justify-center"
+            style={{ backgroundColor: 'var(--color-fill)', color: 'var(--color-accent)' }}
           >
             <Sparkles className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
               AI Summary
             </h3>
-            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               Key points, decisions, and a concise recap.
             </p>
           </div>
         </div>
         <span
           className="hidden sm:inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide"
-          style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
+          style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}
         >
           Auto-structured
         </span>
@@ -275,8 +275,8 @@ export function SummaryPanel({
         <button
           onClick={handleGenerateSummary}
           disabled={isGenerating}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm text-white transition-all duration-200 hover:opacity-90 disabled:opacity-50"
-          style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-md font-medium text-sm text-on-accent transition-colors hover:opacity-90 disabled:opacity-50"
+          style={{ backgroundColor: 'var(--color-accent-fill)', minHeight: '44px' }}
         >
           {isGenerating ? (
             <>
@@ -300,10 +300,10 @@ export function SummaryPanel({
         <div className="relative">
           <button
             onClick={() => setShowLengthMenu(!showLengthMenu)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-medium transition-colors duration-200"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-md border text-sm font-medium transition-colors duration-200"
             style={{
-              backgroundColor: 'var(--color-surface-elevated)',
-              borderColor: 'var(--color-border)',
+              backgroundColor: 'var(--color-surface)',
+              borderColor: 'var(--color-separator)',
               color: 'var(--color-text-secondary)',
               minHeight: '44px',
             }}
@@ -319,10 +319,10 @@ export function SummaryPanel({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 4, scale: 0.95 }}
                 transition={{ duration: 0.15 }}
-                className="absolute top-full left-0 mt-1.5 w-52 rounded-xl border shadow-lg overflow-hidden z-20"
+                className="absolute top-full left-0 mt-1.5 w-52 rounded-md border shadow-overlay overflow-hidden z-20"
                 style={{
-                  backgroundColor: 'var(--color-surface-overlay)',
-                  borderColor: 'var(--color-border)',
+                  backgroundColor: 'var(--color-fill)',
+                  borderColor: 'var(--color-separator)',
                 }}
               >
                 {lengthOptions.map((opt) => (
@@ -334,14 +334,14 @@ export function SummaryPanel({
                     }}
                     className="w-full px-4 py-3 text-left transition-colors duration-150 hover:brightness-95"
                     style={{
-                      backgroundColor: summaryLength === opt.value ? 'var(--color-surface-elevated)' : 'transparent',
+                      backgroundColor: summaryLength === opt.value ? 'var(--color-surface)' : 'transparent',
                       minHeight: '44px',
                     }}
                   >
-                    <div className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                    <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
                       {opt.label}
                     </div>
-                    <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                    <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       {opt.desc}
                     </div>
                   </button>
@@ -354,17 +354,17 @@ export function SummaryPanel({
 
       {/* Tabbed View */}
       <div
-        className="rounded-2xl border overflow-hidden"
+        className="rounded-lg border overflow-hidden"
         style={{
-          backgroundColor: 'var(--color-surface-elevated)',
-          borderColor: 'var(--color-border)',
+          backgroundColor: 'var(--color-surface)',
+          borderColor: 'var(--color-separator)',
         }}
       >
-        <div className="h-1" style={{ backgroundColor: 'var(--color-brand-500)' }} />
+        <div className="h-1" style={{ backgroundColor: 'var(--color-accent-fill)' }} />
         {/* Tab Bar */}
         <div
           className="flex border-b"
-          style={{ borderColor: 'var(--color-border)' }}
+          style={{ borderColor: 'var(--color-separator)' }}
         >
           {tabs.map((tab) => (
             <button
@@ -373,7 +373,7 @@ export function SummaryPanel({
               onClick={() => setActiveTab(tab.id)}
               className="relative flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors duration-200"
               style={{
-                color: activeTab === tab.id ? 'var(--color-brand-500)' : 'var(--color-text-muted)',
+                color: activeTab === tab.id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
                 minHeight: '44px',
               }}
             >
@@ -383,7 +383,7 @@ export function SummaryPanel({
                 <motion.div
                   layoutId="summaryTab"
                   className="absolute bottom-0 left-0 right-0 h-0.5"
-                  style={{ backgroundColor: 'var(--color-brand-500)' }}
+                  style={{ backgroundColor: 'var(--color-accent-fill)' }}
                   transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                 />
               )}
@@ -405,7 +405,7 @@ export function SummaryPanel({
                 className="text-sm leading-relaxed"
                 style={{ color: 'var(--color-text-secondary)' }}
               >
-                {hasTimestampedTranscript && <div className="mb-4"><div className="grid min-w-0 gap-2 sm:grid-cols-2"><div className="grid min-w-0 grid-cols-2 rounded-xl border p-1" role="group" aria-label="Transcript view" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}><button type="button" aria-pressed={transcriptMode === 'full'} onClick={() => setTranscriptMode('full')} className="min-h-11 min-w-0 rounded-lg px-3 text-sm font-semibold transition" style={{ backgroundColor: transcriptMode === 'full' ? 'var(--color-surface-elevated)' : undefined, color: transcriptMode === 'full' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: transcriptMode === 'full' ? 'var(--shadow-tab-active)' : undefined }}>Full</button><button type="button" aria-pressed={transcriptMode === 'timestamped'} onClick={() => setTranscriptMode('timestamped')} className="min-h-11 min-w-0 rounded-lg px-3 text-sm font-semibold transition" style={{ backgroundColor: transcriptMode === 'timestamped' ? 'var(--color-surface-elevated)' : undefined, color: transcriptMode === 'timestamped' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: transcriptMode === 'timestamped' ? 'var(--shadow-tab-active)' : undefined }}>Timestamped</button></div><button type="button" onClick={() => void copyTranscript()} disabled={!transcriptCopyText} className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)] disabled:opacity-40" style={{ borderColor: 'var(--color-border)' }}>{transcriptCopied ? <Check className="h-4 w-4 shrink-0" /> : <Copy className="h-4 w-4 shrink-0" />}<span className="truncate">{transcriptCopied ? 'Copied' : transcriptMode === 'timestamped' ? 'Copy timestamped' : 'Copy full transcript'}</span></button></div>{transcriptCopyError && <p role="status" className="mt-2 text-sm" style={{ color: 'var(--color-danger)' }}>{transcriptCopyError}</p>}</div>}
+                {hasTimestampedTranscript && <div className="mb-4"><div className="grid min-w-0 gap-2 sm:grid-cols-2"><div className="grid min-w-0 grid-cols-2 rounded-md border p-1" role="group" aria-label="Transcript view" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-fill)' }}><button type="button" aria-pressed={transcriptMode === 'full'} onClick={() => setTranscriptMode('full')} className="min-h-11 min-w-0 rounded-sm px-3 text-sm font-semibold transition-colors" style={{ backgroundColor: transcriptMode === 'full' ? 'var(--color-surface)' : undefined, color: transcriptMode === 'full' ? 'var(--color-text)' : 'var(--color-text-secondary)', boxShadow: transcriptMode === 'full' ? 'var(--shadow-raised)' : undefined }}>Full</button><button type="button" aria-pressed={transcriptMode === 'timestamped'} onClick={() => setTranscriptMode('timestamped')} className="min-h-11 min-w-0 rounded-sm px-3 text-sm font-semibold transition-colors" style={{ backgroundColor: transcriptMode === 'timestamped' ? 'var(--color-surface)' : undefined, color: transcriptMode === 'timestamped' ? 'var(--color-text)' : 'var(--color-text-secondary)', boxShadow: transcriptMode === 'timestamped' ? 'var(--shadow-raised)' : undefined }}>Timestamped</button></div><button type="button" onClick={() => void copyTranscript()} disabled={!transcriptCopyText} className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-semibold transition-colors hover:bg-[var(--color-fill)] disabled:opacity-40" style={{ borderColor: 'var(--color-separator)' }}>{transcriptCopied ? <Check className="h-4 w-4 shrink-0" /> : <Copy className="h-4 w-4 shrink-0" />}<span className="truncate">{transcriptCopied ? 'Copied' : transcriptMode === 'timestamped' ? 'Copy timestamped' : 'Copy full transcript'}</span></button></div>{transcriptCopyError && <p role="status" className="mt-2 text-sm" style={{ color: 'var(--color-danger)' }}>{transcriptCopyError}</p>}</div>}
                 <div className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap">
                 {transcriptMode === 'timestamped' && hasTimestampedTranscript ? (
                   <div className="space-y-1">
@@ -421,9 +421,9 @@ export function SummaryPanel({
                           end_ms: segment.end_ms,
                           page_number: segment.page_number,
                         })}
-                        className="grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-xl px-3 py-2 text-left transition hover:bg-[var(--color-surface-overlay)]"
+                        className="grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-md px-3 py-2 text-left transition-colors hover:bg-[var(--color-fill)]"
                       >
-                        <span className="font-mono text-xs font-semibold" style={{ color: 'var(--color-brand-500)' }}>
+                        <span className="font-mono text-xs font-semibold" style={{ color: 'var(--color-accent)' }}>
                           {typeof segment.start_ms === 'number' ? formatTimestamp(segment.start_ms) : 'Source'}
                         </span>
                         <span>{segment.text}</span>
@@ -446,7 +446,7 @@ export function SummaryPanel({
               >
                 {isGenerating && (
                   <div className="flex items-center gap-3 py-8 justify-center">
-                    <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'var(--color-brand-500)' }} />
+                    <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'var(--color-accent)' }} />
                     <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
                       Analyzing key points...
                     </span>
@@ -455,13 +455,13 @@ export function SummaryPanel({
 
                 {isLoadingSummaries && !isGenerating && (
                   <div className="flex items-center gap-3 py-8 justify-center">
-                    <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'var(--color-text-muted)' }} />
+                    <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'var(--color-text-secondary)' }} />
                   </div>
                 )}
 
                 {!isGenerating && !isLoadingSummaries && parsedKeyPoints.length === 0 && !isTyping && (
                   <div className="text-center py-8">
-                    <List className="w-8 h-8 mx-auto mb-3" style={{ color: 'var(--color-text-muted)' }} />
+                    <List className="w-8 h-8 mx-auto mb-3" style={{ color: 'var(--color-text-secondary)' }} />
                     <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
                       Generate a summary to see key points extracted from the transcript.
                     </p>
@@ -480,10 +480,10 @@ export function SummaryPanel({
                         className="flex items-start gap-3 text-sm"
                       >
                         <span
-                          className="shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-xs font-semibold mt-0.5"
+                          className="shrink-0 w-6 h-6 rounded-sm flex items-center justify-center text-xs font-semibold mt-0.5"
                           style={{
-                            backgroundColor: 'var(--color-brand-500)',
-                            color: 'var(--color-on-brand)',
+                            backgroundColor: 'var(--color-accent-fill)',
+                            color: 'var(--color-on-accent)',
                           }}
                         >
                           {i + 1}
@@ -510,11 +510,11 @@ export function SummaryPanel({
               >
                 {isGenerating && (
                   <div className="flex flex-col items-center gap-3 py-8">
-                    <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--color-brand-500)' }} />
+                    <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--color-accent)' }} />
                     <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
                       AI is generating your summary...
                     </p>
-                    <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                    <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       This usually takes 15-30 seconds
                     </p>
                   </div>
@@ -522,7 +522,7 @@ export function SummaryPanel({
 
                 {!isGenerating && !summary && !isLoadingSummaries && (
                   <div className="text-center py-8">
-                    <Sparkles className="w-8 h-8 mx-auto mb-3" style={{ color: 'var(--color-text-muted)' }} />
+                    <Sparkles className="w-8 h-8 mx-auto mb-3" style={{ color: 'var(--color-text-secondary)' }} />
                     <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
                       Click "Generate AI Summary" to create an intelligent summary of this transcript.
                     </p>
@@ -541,7 +541,7 @@ export function SummaryPanel({
                         animate={{ opacity: [1, 0] }}
                         transition={{ duration: 0.5, repeat: Infinity, repeatType: 'reverse' }}
                         className="inline-block w-0.5 h-4 ml-0.5 align-middle"
-                        style={{ backgroundColor: 'var(--color-brand-500)' }}
+                        style={{ backgroundColor: 'var(--color-accent-fill)' }}
                       />
                     )}
                     {!isTyping && <CitationRow citations={summary?.evidence?.summary} onClick={onCitationClick} />}
@@ -553,8 +553,8 @@ export function SummaryPanel({
                   <div
                     className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs"
                     style={{
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text-muted)',
+                      borderColor: 'var(--color-separator)',
+                      color: 'var(--color-text-secondary)',
                     }}
                   >
                     <span className="inline-flex items-center gap-2">
@@ -577,11 +577,11 @@ export function SummaryPanel({
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex items-center gap-2 mt-4 p-3 rounded-lg text-sm"
+              className="flex items-center gap-2 mt-4 p-3 rounded-sm text-sm"
               style={{
-                backgroundColor: 'var(--color-error-subtle)',
-                border: '1px solid var(--color-error-border)',
-                color: 'var(--color-error)',
+                backgroundColor: 'var(--color-fill)',
+                border: '1px solid var(--color-separator)',
+                color: 'var(--color-danger)',
               }}
             >
               <AlertCircle className="w-4 h-4 shrink-0" />

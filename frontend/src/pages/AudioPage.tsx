@@ -959,12 +959,12 @@ export function AudioPage() {
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="max-w-3xl mx-auto mb-6 p-4 rounded-2xl border"
-          style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}
+          className="max-w-3xl mx-auto mb-6 p-4 rounded-lg border"
+          style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}
         >
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
-              <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Recovered draft recording</p>
+              <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>Recovered draft recording</p>
               <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                 We restored an unsent recording from your device so you can upload it safely.
               </p>
@@ -972,15 +972,15 @@ export function AudioPage() {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setActiveTab('record')}
-                className="px-3 py-2 rounded-lg text-sm font-medium border"
-                style={{ borderColor: 'var(--color-brand-400)', color: 'var(--color-brand-500)', minHeight: '44px' }}
+                className="px-3 py-2 rounded-sm text-sm font-medium border"
+                style={{ borderColor: 'var(--color-accent)', color: 'var(--color-accent)', minHeight: '44px' }}
               >
                 Resume upload
               </button>
               <button
                 onClick={handleReset}
-                className="px-3 py-2 rounded-lg text-sm font-medium border"
-                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', minHeight: '44px' }}
+                className="px-3 py-2 rounded-sm text-sm font-medium border"
+                style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)', minHeight: '44px' }}
               >
                 Discard
               </button>
@@ -1003,14 +1003,14 @@ export function AudioPage() {
           className="max-w-2xl mx-auto"
         >
           {/* Tab switcher */}
-          <div className="flex gap-1 p-1 rounded-xl mb-6 max-w-xs mx-auto"
-            style={{ backgroundColor: 'var(--color-surface-overlay)' }}>
+          <div className="flex gap-1 p-1 rounded-md mb-6 max-w-xs mx-auto"
+            style={{ backgroundColor: 'var(--color-fill)' }}>
             <button
               onClick={() => setActiveTab('upload')}
-              className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-all"
+              className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-sm text-sm font-medium transition-colors"
               style={{
-                backgroundColor: activeTab === 'upload' ? 'var(--color-surface-elevated)' : 'transparent',
-                color: activeTab === 'upload' ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                backgroundColor: activeTab === 'upload' ? 'var(--color-surface)' : 'transparent',
+                color: activeTab === 'upload' ? 'var(--color-text)' : 'var(--color-text-secondary)',
                 boxShadow: activeTab === 'upload' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
                 minHeight: '44px',
               }}
@@ -1019,10 +1019,10 @@ export function AudioPage() {
             </button>
             <button
               onClick={() => setActiveTab('record')}
-              className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-all"
+              className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-sm text-sm font-medium transition-colors"
               style={{
-                backgroundColor: activeTab === 'record' ? 'var(--color-surface-elevated)' : 'transparent',
-                color: activeTab === 'record' ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                backgroundColor: activeTab === 'record' ? 'var(--color-surface)' : 'transparent',
+                color: activeTab === 'record' ? 'var(--color-text)' : 'var(--color-text-secondary)',
                 boxShadow: activeTab === 'record' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
                 minHeight: '44px',
               }}
@@ -1039,20 +1039,20 @@ export function AudioPage() {
                 onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                 onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
                 onClick={() => inputRef.current?.click()}
-                className="relative cursor-pointer rounded-2xl border-2 border-dashed p-12 text-center transition-all duration-300"
+                className="relative cursor-pointer rounded-lg border-2 border-dashed p-12 text-center transition-colors"
                 style={{
-                  borderColor: isDragging ? 'var(--color-brand-500)' : 'var(--color-border)',
-                  backgroundColor: isDragging ? 'var(--color-brand-50)' : 'var(--color-surface-elevated)',
+                  borderColor: isDragging ? 'var(--color-accent)' : 'var(--color-separator)',
+                  backgroundColor: isDragging ? 'var(--color-accent-tint)' : 'var(--color-surface)',
                 }}
               >
                 <input ref={inputRef} type="file" accept={ALLOWED_AUDIO_EXTENSIONS.join(',')}
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} className="hidden" />
                 <Upload className="w-12 h-12 mx-auto mb-4"
-                  style={{ color: isDragging ? 'var(--color-brand-500)' : 'var(--color-text-muted)' }} />
-                <p className="text-base font-medium mb-2" style={{ color: 'var(--color-text-primary)' }}>
+                  style={{ color: isDragging ? 'var(--color-accent)' : 'var(--color-text-secondary)' }} />
+                <p className="text-base font-medium mb-2" style={{ color: 'var(--color-text)' }}>
                   {isDragging ? 'Drop your recording here' : 'Drag and drop a recording, or click to browse'}
                 </p>
-                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
                   Zoom MP4/M4A, MP3, WAV, OGG, FLAC, WebM — Max {MAX_AUDIO_SIZE_MB}MB
                 </p>
               </div>
@@ -1061,15 +1061,15 @@ export function AudioPage() {
               <AnimatePresence>
                 {file && (
                   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                    className="mt-4 p-4 rounded-xl border flex items-center gap-3"
-                    style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-                    <FileAudio className="w-5 h-5 shrink-0" style={{ color: 'var(--color-brand-500)' }} />
+                    className="mt-4 p-4 rounded-md border flex items-center gap-3"
+                    style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
+                    <FileAudio className="w-5 h-5 shrink-0" style={{ color: 'var(--color-accent)' }} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>{file.name}</p>
-                      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                      <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>{file.name}</p>
+                      <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                     </div>
                     <button onClick={(e) => { e.stopPropagation(); setFile(null); }}
-                      className="p-1.5 rounded-lg transition-colors hover:opacity-70" style={{ color: 'var(--color-text-muted)' }}>
+                      className="p-1.5 rounded-sm transition-colors hover:opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
                       <X className="w-4 h-4" />
                     </button>
                   </motion.div>
@@ -1080,8 +1080,8 @@ export function AudioPage() {
 
           {/* Record tab (MTA-23) */}
           {activeTab === 'record' && (
-            <div className="rounded-2xl border p-8 text-center"
-              style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+            <div className="rounded-lg border p-8 text-center"
+              style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
               {!isRecording && !recordedBlob && (
                 <>
                   <motion.button
@@ -1090,12 +1090,12 @@ export function AudioPage() {
                     onClick={startRecording}
                     aria-label="Start recording"
                     className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 transition-colors"
-                    style={{ backgroundColor: 'var(--color-error)', color: 'white' }}
+                    style={{ backgroundColor: 'var(--color-danger)', color: 'white' }}
                   >
                     <Mic className="w-8 h-8" />
                   </motion.button>
-                  <p className="text-base font-medium" style={{ color: 'var(--color-text-primary)' }}>Tap to start recording</p>
-                  <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>Record meetings, memos, or anything else</p>
+                  <p className="text-base font-medium" style={{ color: 'var(--color-text)' }}>Tap to start recording</p>
+                  <p className="text-sm mt-1" style={{ color: 'var(--color-text-secondary)' }}>Record meetings, memos, or anything else</p>
                 </>
               )}
 
@@ -1106,16 +1106,16 @@ export function AudioPage() {
                     transition={isRecordingPaused ? undefined : { repeat: Infinity, duration: 1.5 }}
                     className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4"
                     style={{
-                      backgroundColor: isRecordingPaused ? 'var(--color-warning)' : 'var(--color-error)',
+                      backgroundColor: isRecordingPaused ? 'var(--color-text)' : 'var(--color-danger)',
                       color: 'white',
                     }}
                   >
                     {isRecordingPaused ? <Pause className="w-8 h-8" /> : <Mic className="w-8 h-8" />}
                   </motion.div>
-                  <p className="text-2xl font-mono font-bold mb-2" style={{ color: isRecordingPaused ? 'var(--color-warning)' : 'var(--color-error)' }}>
+                  <p className="text-2xl font-mono font-bold mb-2" style={{ color: isRecordingPaused ? 'var(--color-text)' : 'var(--color-danger)' }}>
                     {formatDuration(recordingTime)}
                   </p>
-                  <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>
+                  <p className="text-sm mb-4" style={{ color: 'var(--color-text-secondary)' }}>
                     {isRecordingPaused ? 'Paused — paused time is not included' : 'Recording...'}
                   </p>
                   <div className="flex flex-wrap items-center justify-center gap-3">
@@ -1123,10 +1123,10 @@ export function AudioPage() {
                       whileHover={{ scale: 1.03 }}
                       whileTap={{ scale: 0.97 }}
                       onClick={isRecordingPaused ? resumeRecording : pauseRecording}
-                      className="px-6 py-3 rounded-xl font-medium border"
+                      className="px-6 py-3 rounded-md font-medium border"
                       style={{
-                        borderColor: 'var(--color-brand-400)',
-                        color: 'var(--color-brand-500)',
+                        borderColor: 'var(--color-accent)',
+                        color: 'var(--color-accent)',
                         minHeight: '48px',
                       }}
                     >
@@ -1139,8 +1139,8 @@ export function AudioPage() {
                       whileHover={{ scale: 1.03 }}
                       whileTap={{ scale: 0.97 }}
                       onClick={stopRecording}
-                      className="px-6 py-3 rounded-xl font-medium text-white"
-                      style={{ backgroundColor: 'var(--color-error)', minHeight: '48px' }}
+                      className="px-6 py-3 rounded-md font-medium text-on-accent"
+                      style={{ backgroundColor: 'var(--color-danger)', minHeight: '48px' }}
                     >
                       <span className="flex items-center gap-2">
                         <Square className="w-4 h-4" /> Stop Recording
@@ -1152,13 +1152,13 @@ export function AudioPage() {
 
               {recordedBlob && !isRecording && (
                 <>
-                  <CheckCircle2 className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--color-success)' }} />
-                  <p className="text-base font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>Recording complete</p>
-                  <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>
+                  <CheckCircle2 className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--color-accent)' }} />
+                  <p className="text-base font-medium mb-1" style={{ color: 'var(--color-text)' }}>Recording complete</p>
+                  <p className="text-sm mb-4" style={{ color: 'var(--color-text-secondary)' }}>
                     {formatDuration(recordingTime)} — {(recordedBlob.size / 1024 / 1024).toFixed(2)} MB
                   </p>
                   {recordingCaptureWarning && (
-                    <p className="text-sm mb-3" style={{ color: 'var(--color-error)' }}>
+                    <p className="text-sm mb-3" style={{ color: 'var(--color-danger)' }}>
                       {recordingCaptureWarning}
                     </p>
                   )}
@@ -1169,7 +1169,7 @@ export function AudioPage() {
                     setRecordingCaptureWarning('');
                     clearPendingRecording().catch(() => {});
                   }}
-                    className="text-sm font-medium transition-colors" style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}>
+                    className="text-sm font-medium transition-colors" style={{ color: 'var(--color-accent)', minHeight: '44px' }}>
                     Discard and re-record
                   </button>
                 </>
@@ -1183,15 +1183,15 @@ export function AudioPage() {
               <div className="relative">
                 <button
                   onClick={() => setShowTypeDropdown(!showTypeDropdown)}
-                  className="w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm transition-colors"
-                  style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)', minHeight: '48px' }}
+                  className="w-full flex items-center justify-between px-4 py-3 rounded-md border text-sm transition-colors"
+                  style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)', color: 'var(--color-text)', minHeight: '48px' }}
                 >
                   <span className="flex items-center gap-2">
                     {CONTENT_TYPES.find(ct => ct.value === contentType)?.icon}
                     <span className="font-medium">{CONTENT_TYPES.find(ct => ct.value === contentType)?.label}</span>
-                    <span style={{ color: 'var(--color-text-muted)' }}>— {CONTENT_TYPES.find(ct => ct.value === contentType)?.desc}</span>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>— {CONTENT_TYPES.find(ct => ct.value === contentType)?.desc}</span>
                   </span>
-                  <ChevronDown className="w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
+                  <ChevronDown className="w-4 h-4" style={{ color: 'var(--color-text-secondary)' }} />
                 </button>
 
                 <AnimatePresence>
@@ -1200,8 +1200,8 @@ export function AudioPage() {
                       initial={{ opacity: 0, y: -8 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -8 }}
-                      className="absolute z-20 w-full mt-2 rounded-xl border shadow-lg overflow-hidden"
-                      style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}
+                      className="absolute z-20 w-full mt-2 rounded-md border shadow-overlay overflow-hidden"
+                      style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}
                     >
                       {CONTENT_TYPES.map((ct) => (
                         <button
@@ -1209,15 +1209,15 @@ export function AudioPage() {
                           onClick={() => { setContentType(ct.value); setShowTypeDropdown(false); }}
                           className="w-full flex items-center gap-3 px-4 py-3 text-sm transition-colors text-left"
                           style={{
-                            backgroundColor: ct.value === contentType ? 'var(--color-brand-50)' : 'transparent',
-                            color: 'var(--color-text-primary)',
+                            backgroundColor: ct.value === contentType ? 'var(--color-accent-tint)' : 'transparent',
+                            color: 'var(--color-text)',
                             minHeight: '44px',
                           }}
                         >
-                          <span style={{ color: ct.value === contentType ? 'var(--color-brand-500)' : 'var(--color-text-muted)' }}>{ct.icon}</span>
+                          <span style={{ color: ct.value === contentType ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}>{ct.icon}</span>
                           <div>
                             <p className="font-medium">{ct.label}</p>
-                            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{ct.desc}</p>
+                            <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{ct.desc}</p>
                           </div>
                         </button>
                       ))}
@@ -1225,7 +1225,7 @@ export function AudioPage() {
                   )}
                 </AnimatePresence>
               </div>
-              <p className="text-xs mt-2" style={{ color: 'var(--color-text-muted)' }}>
+              <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
                 Content type tunes AI summary structure only (it does not change transcription accuracy).
               </p>
             </motion.div>
@@ -1238,8 +1238,8 @@ export function AudioPage() {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={handleSubmit}
-                className="px-8 py-3 rounded-xl text-white font-medium text-base transition-colors duration-200"
-                style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '48px' }}
+                className="px-8 py-3 rounded-md text-on-accent font-medium text-base transition-colors duration-200"
+                style={{ backgroundColor: 'var(--color-accent-fill)', minHeight: '48px' }}
               >
                 <span className="flex items-center gap-2">
                   <Sparkles className="w-5 h-5" />
@@ -1267,10 +1267,10 @@ export function AudioPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mx-auto mt-4 flex max-w-2xl flex-col items-stretch justify-between gap-3 rounded-xl border p-3 sm:flex-row sm:items-center"
+          className="mx-auto mt-4 flex max-w-2xl flex-col items-stretch justify-between gap-3 rounded-md border p-3 sm:flex-row sm:items-center"
           style={{
-            backgroundColor: 'var(--color-surface-elevated)',
-            borderColor: 'var(--color-border)',
+            backgroundColor: 'var(--color-surface)',
+            borderColor: 'var(--color-separator)',
           }}
         >
           <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
@@ -1281,10 +1281,10 @@ export function AudioPage() {
               <button
                 onClick={handleRetryStoredAudio}
                 disabled={isRetrying}
-                className="px-3 py-2 rounded-lg text-sm font-medium border"
+                className="px-3 py-2 rounded-sm text-sm font-medium border"
                 style={{
-                  borderColor: 'var(--color-brand-400)',
-                  color: 'var(--color-brand-500)',
+                  borderColor: 'var(--color-accent)',
+                  color: 'var(--color-accent)',
                   minHeight: '44px',
                 }}
               >
@@ -1296,9 +1296,9 @@ export function AudioPage() {
             )}
             <button
               onClick={handleReset}
-              className="px-3 py-2 rounded-lg text-sm font-medium border"
+              className="px-3 py-2 rounded-sm text-sm font-medium border"
               style={{
-                borderColor: 'var(--color-border)',
+                borderColor: 'var(--color-separator)',
                 color: 'var(--color-text-secondary)',
                 minHeight: '44px',
               }}
@@ -1312,10 +1312,10 @@ export function AudioPage() {
       {/* Processing state */}
       {isProcessing && (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-          className="max-w-2xl mx-auto p-8 rounded-2xl border text-center"
-          style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" style={{ color: 'var(--color-brand-500)' }} />
-          <p className="text-lg font-medium" style={{ color: 'var(--color-text-primary)' }}>
+          className="max-w-2xl mx-auto p-8 rounded-lg border text-center"
+          style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" style={{ color: 'var(--color-accent)' }} />
+          <p className="text-lg font-medium" style={{ color: 'var(--color-text)' }}>
             {processingLabel}
           </p>
           <p className="text-sm mt-2" style={{ color: 'var(--color-text-secondary)' }}>
@@ -1323,32 +1323,32 @@ export function AudioPage() {
           </p>
           {isDirectUploading && directUploadProgress > 0 && (
             <div className="mt-4 max-w-md mx-auto">
-              <div className="h-2 rounded-full" style={{ backgroundColor: 'var(--color-surface-subtle)' }}>
+              <div className="h-2 rounded-full" style={{ backgroundColor: 'var(--color-fill)' }}>
                 <div
-                  className="h-2 rounded-full transition-all"
+                  className="h-2 rounded-full transition-colors"
                   style={{
                     width: `${Math.min(100, Math.max(0, directUploadProgress))}%`,
-                    backgroundColor: 'var(--color-brand-500)',
+                    backgroundColor: 'var(--color-accent-fill)',
                   }}
                 />
               </div>
-              <p className="text-xs mt-2" style={{ color: 'var(--color-text-muted)' }}>
+              <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
                 {directUploadProgress}% uploaded
               </p>
             </div>
           )}
           {typeof result?.processing_progress === 'number' && result.processing_progress > 0 && (
             <div className="mt-4 max-w-md mx-auto">
-              <div className="h-2 rounded-full" style={{ backgroundColor: 'var(--color-surface-subtle)' }}>
+              <div className="h-2 rounded-full" style={{ backgroundColor: 'var(--color-fill)' }}>
                 <div
-                  className="h-2 rounded-full transition-all"
+                  className="h-2 rounded-full transition-colors"
                   style={{
                     width: `${Math.min(100, Math.max(0, result.processing_progress))}%`,
-                    backgroundColor: 'var(--color-brand-500)',
+                    backgroundColor: 'var(--color-accent-fill)',
                   }}
                 />
               </div>
-              <p className="text-xs mt-2" style={{ color: 'var(--color-text-muted)' }}>
+              <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
                 {result.processing_progress}% complete
               </p>
             </div>
@@ -1357,9 +1357,9 @@ export function AudioPage() {
             <button
               onClick={handleCancelTranscription}
               disabled={isCanceling}
-              className="mt-5 px-4 py-2 rounded-lg text-sm font-medium border"
+              className="mt-5 px-4 py-2 rounded-sm text-sm font-medium border"
               style={{
-                borderColor: 'var(--color-border)',
+                borderColor: 'var(--color-separator)',
                 color: 'var(--color-text-secondary)',
                 minHeight: '44px',
               }}
@@ -1371,15 +1371,15 @@ export function AudioPage() {
             <div className="mt-5 flex flex-wrap justify-center gap-2">
               <button
                 onClick={handleReset}
-                className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 text-sm font-semibold"
-                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                className="inline-flex min-h-11 items-center gap-2 rounded-md border px-4 text-sm font-semibold"
+                style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }}
               >
                 <Mic className="h-4 w-4" /> Start another
               </button>
               <Link
                 to="/app/processing"
-                className="inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold"
-                style={{ color: 'var(--color-brand-500)' }}
+                className="inline-flex min-h-11 items-center gap-2 rounded-md px-4 text-sm font-semibold"
+                style={{ color: 'var(--color-accent)' }}
               >
                 <History className="h-4 w-4" /> View all jobs
               </Link>
@@ -1391,8 +1391,8 @@ export function AudioPage() {
       {/* Error */}
       {error && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-          className="max-w-2xl mx-auto mt-6 p-4 rounded-xl text-sm flex items-center gap-3"
-          style={{ backgroundColor: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.24)', color: 'var(--color-error)' }}>
+          className="max-w-2xl mx-auto mt-6 p-4 rounded-md text-sm flex items-center gap-3"
+          style={{ backgroundColor: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.24)', color: 'var(--color-danger)' }}>
           <AlertCircle className="w-5 h-5 shrink-0" />
           {error}
         </motion.div>
@@ -1410,14 +1410,14 @@ export function AudioPage() {
               <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                 onClick={handleReset}
                 className="flex items-center gap-1.5 text-sm font-medium transition-colors"
-                style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}>
+                style={{ color: 'var(--color-accent)', minHeight: '44px' }}>
                 <Mic className="w-4 h-4" /> New transcription
               </motion.button>
 
               <button
                 onClick={handleLoadPlayback}
                 className="flex items-center gap-1.5 text-sm font-medium transition-colors"
-                style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
+                style={{ color: 'var(--color-accent)', minHeight: '44px' }}
               >
                 <FileAudio className="w-4 h-4" />
                 {isLoadingPlayback ? 'Loading audio...' : showPlayback ? 'Hide recording' : 'Replay recording'}
@@ -1428,7 +1428,7 @@ export function AudioPage() {
                   onClick={handleRetryStoredAudio}
                   disabled={isRetrying}
                   className="flex items-center gap-1.5 text-sm font-medium transition-colors disabled:opacity-60"
-                  style={{ color: 'var(--color-brand-500)', minHeight: '44px' }}
+                  style={{ color: 'var(--color-accent)', minHeight: '44px' }}
                   title="Run transcription again from the saved original recording"
                 >
                   <RefreshCw className={`w-4 h-4 ${isRetrying ? 'animate-spin' : ''}`} />
@@ -1440,15 +1440,15 @@ export function AudioPage() {
               <div className="relative">
                 <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                   onClick={() => setShowExportMenu(!showExportMenu)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors"
-                  style={{ backgroundColor: 'var(--color-surface-overlay)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', minHeight: '44px' }}>
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-sm text-sm font-medium border transition-colors"
+                  style={{ backgroundColor: 'var(--color-fill)', borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)', minHeight: '44px' }}>
                   <Download className="w-4 h-4" /> Export <ChevronDown className="w-3 h-3" />
                 </motion.button>
                 <AnimatePresence>
                   {showExportMenu && (
                     <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-                      className="absolute right-0 z-20 mt-2 w-48 rounded-xl border shadow-lg overflow-hidden"
-                      style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+                      className="absolute right-0 z-20 mt-2 w-48 rounded-md border shadow-overlay overflow-hidden"
+                      style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
                       {[
                         { format: 'txt' as const, label: 'Transcript (.txt)', icon: <FileText className="w-4 h-4" /> },
                         { format: 'md' as const, label: 'Summary (.md)', icon: <Sparkles className="w-4 h-4" /> },
@@ -1456,7 +1456,7 @@ export function AudioPage() {
                       ].map(({ format, label, icon }) => (
                         <button key={format} onClick={() => handleExport(format)}
                           className="w-full flex items-center gap-2 px-4 py-3 text-sm transition-colors text-left hover:opacity-80"
-                          style={{ color: 'var(--color-text-primary)', minHeight: '44px' }}>
+                          style={{ color: 'var(--color-text)', minHeight: '44px' }}>
                           {icon} {label}
                         </button>
                       ))}
@@ -1467,15 +1467,15 @@ export function AudioPage() {
             </div>
 
             {showPlayback && playbackUrl && (
-              <div className="mb-4 rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-elevated)' }}>
+              <div className="mb-4 rounded-lg border p-4" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-surface)' }}>
                 <div className="flex items-center justify-between mb-3">
-                  <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+                  <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
                     Original Recording
                   </p>
                   <button
                     onClick={() => setShowPlayback(false)}
-                    className="text-xs px-2 py-1 rounded-md border"
-                    style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                    className="text-xs px-2 py-1 rounded-sm border"
+                    style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }}
                   >
                     Close
                   </button>
@@ -1486,23 +1486,23 @@ export function AudioPage() {
 
             {result.quality_warning && (
               <div
-                className="mb-4 rounded-2xl border p-4"
+                className="mb-4 rounded-lg border p-4"
                 style={{
-                  borderColor: 'color-mix(in srgb, var(--color-warning) 35%, transparent)',
-                  backgroundColor: 'color-mix(in srgb, var(--color-warning) 10%, transparent)',
+                  borderColor: 'color-mix(in srgb, var(--color-text) 35%, transparent)',
+                  backgroundColor: 'color-mix(in srgb, var(--color-text) 10%, transparent)',
                 }}
               >
                 <div className="flex items-start gap-3">
-                  <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" style={{ color: 'var(--color-warning)' }} />
+                  <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" style={{ color: 'var(--color-text)' }} />
                   <div>
-                    <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
                       Transcript recovered with gaps
                     </p>
                     <p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
                       {result.quality_warning}
                     </p>
                     {result.omitted_ranges && result.omitted_ranges.length > 0 && (
-                      <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                      <p className="mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                         Omitted: {result.omitted_ranges.map((range) => (
                           `${formatDuration(Math.max(0, Math.floor(range.start)))}–${formatDuration(Math.max(0, Math.ceil(range.end)))}`
                         )).join(', ')}
@@ -1514,10 +1514,10 @@ export function AudioPage() {
             )}
 
             {/* Metadata card */}
-            <div className="p-6 rounded-2xl border mb-4"
-              style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+            <div className="p-6 rounded-lg border mb-4"
+              style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
               <div className="mb-4 flex items-center gap-3">
-                <FileAudio className="w-5 h-5 shrink-0" style={{ color: 'var(--color-brand-500)' }} />
+                <FileAudio className="w-5 h-5 shrink-0" style={{ color: 'var(--color-accent)' }} />
                 {isRenaming ? (
                   <div className="flex flex-1 flex-col gap-2 sm:flex-row">
                     <input
@@ -1528,19 +1528,19 @@ export function AudioPage() {
                         if (e.key === 'Enter') void saveRename();
                         if (e.key === 'Escape') setIsRenaming(false);
                       }}
-                      className="min-w-0 flex-1 rounded-xl border px-3 py-2 text-base font-semibold outline-none"
+                      className="min-w-0 flex-1 rounded-md border px-3 py-2 text-base font-semibold outline-none"
                       style={{
-                        backgroundColor: 'var(--color-surface)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text-primary)',
+                        backgroundColor: 'var(--color-bg)',
+                        borderColor: 'var(--color-separator)',
+                        color: 'var(--color-text)',
                         minHeight: '44px',
                       }}
                     />
                     <button
                       onClick={() => void saveRename()}
                       disabled={isSavingRename}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                      style={{ backgroundColor: 'var(--color-brand-500)', minHeight: '44px' }}
+                      className="inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-on-accent disabled:opacity-50"
+                      style={{ backgroundColor: 'var(--color-accent-fill)', minHeight: '44px' }}
                     >
                       {isSavingRename ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                       Save
@@ -1549,13 +1549,13 @@ export function AudioPage() {
                 ) : (
                   <>
                     <h2 className="min-w-0 flex-1 text-xl font-semibold tracking-tight truncate"
-                      style={{ color: 'var(--color-text-primary)' }}>
+                      style={{ color: 'var(--color-text)' }}>
                       {result.original_name}
                     </h2>
                     <button
                       onClick={startRename}
-                      className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium"
-                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', minHeight: '44px' }}
+                      className="inline-flex items-center gap-1.5 rounded-sm border px-3 py-2 text-sm font-medium"
+                      style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)', minHeight: '44px' }}
                     >
                       <Pencil className="w-4 h-4" />
                       Rename
@@ -1575,18 +1575,18 @@ export function AudioPage() {
             {result.summary_status !== 'completed' && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-4">
                 {/* Content type selector for summarization */}
-                <div className="p-4 rounded-2xl border mb-3"
-                  style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-                  <p className="text-sm font-medium mb-2" style={{ color: 'var(--color-text-primary)' }}>Content type for summary:</p>
+                <div className="p-4 rounded-lg border mb-3"
+                  style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
+                  <p className="text-sm font-medium mb-2" style={{ color: 'var(--color-text)' }}>Content type for summary:</p>
                   <div className="flex flex-wrap gap-2">
                     {CONTENT_TYPES.map((ct) => (
                       <button key={ct.value}
                         onClick={() => setContentType(ct.value)}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-all"
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-sm text-xs font-medium border transition-colors"
                         style={{
-                          backgroundColor: ct.value === contentType ? 'var(--color-brand-50)' : 'var(--color-surface)',
-                          borderColor: ct.value === contentType ? 'var(--color-brand-500)' : 'var(--color-border)',
-                          color: ct.value === contentType ? 'var(--color-brand-500)' : 'var(--color-text-secondary)',
+                          backgroundColor: ct.value === contentType ? 'var(--color-accent-tint)' : 'var(--color-bg)',
+                          borderColor: ct.value === contentType ? 'var(--color-accent)' : 'var(--color-separator)',
+                          color: ct.value === contentType ? 'var(--color-accent)' : 'var(--color-text-secondary)',
                           minHeight: '44px',
                         }}>
                         {ct.icon} {ct.label}
@@ -1600,8 +1600,8 @@ export function AudioPage() {
                   whileTap={{ scale: 0.98 }}
                   onClick={handleSummarize}
                   disabled={isSummarizing || result.summary_status === 'pending' || result.summary_status === 'processing'}
-                  className="w-full px-6 py-3 rounded-xl text-white font-medium text-base transition-colors duration-200 flex items-center justify-center gap-2"
-                  style={{ backgroundColor: isSummarizing ? '#9ca3af' : 'var(--color-brand-500)', minHeight: '48px' }}>
+                  className="w-full px-6 py-3 rounded-md text-on-accent font-medium text-base transition-colors duration-200 flex items-center justify-center gap-2"
+                  style={{ backgroundColor: isSummarizing ? '#9ca3af' : 'var(--color-accent)', minHeight: '48px' }}>
                   {isSummarizing || result.summary_status === 'pending' || result.summary_status === 'processing' ? (
                     <><Loader2 className="w-5 h-5 animate-spin" /> Generating in background...</>
                   ) : (
@@ -1616,12 +1616,12 @@ export function AudioPage() {
                 {result.summary_status === 'failed' && (
                   <div
                     role="alert"
-                    className="mt-3 flex items-start gap-3 rounded-xl border p-4 text-left"
+                    className="mt-3 flex items-start gap-3 rounded-md border p-4 text-left"
                     style={{ borderColor: 'rgba(239, 68, 68, 0.3)', backgroundColor: 'rgba(239, 68, 68, 0.08)' }}
                   >
                     <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" style={{ color: 'var(--color-danger)' }} />
                     <div>
-                      <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Summary couldn't be generated</p>
+                      <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>Summary couldn't be generated</p>
                       <p className="mt-1 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
                         {getSummaryErrorMessage(result.summary_error_message)}
                       </p>
@@ -1635,7 +1635,7 @@ export function AudioPage() {
             {result.summary_status === 'completed' && result.summary_text && (
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4 mb-4">
                 <div className="flex justify-end">
-                  <Link to={`/app/items/audio/${result.id}`} className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 text-sm font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-brand-500)' }}>
+                  <Link to={`/app/items/audio/${result.id}`} className="inline-flex min-h-11 items-center gap-2 rounded-md border px-4 text-sm font-semibold" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-accent)' }}>
                     <Clock className="h-4 w-4" /> Open timestamped summary
                   </Link>
                 </div>
@@ -1687,7 +1687,7 @@ export function AudioPage() {
                 )}
 
                 {result.summary_model && (
-                  <p className="text-xs text-right" style={{ color: 'var(--color-text-muted)' }}>
+                  <p className="text-xs text-right" style={{ color: 'var(--color-text-secondary)' }}>
                     Generated with {result.summary_model}
                   </p>
                 )}
@@ -1695,23 +1695,23 @@ export function AudioPage() {
             )}
 
             <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_0.9fr]">
-              <div className="lg:col-span-2 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
+              <div className="lg:col-span-2 h-px" style={{ backgroundColor: 'var(--color-separator)' }} />
               {/* Full Transcript */}
-              <div className="p-6 rounded-2xl border"
-                style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+              <div className="p-6 rounded-lg border"
+                style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-base font-semibold flex items-center gap-2"
-                    style={{ color: 'var(--color-text-primary)' }}>
-                    <Mic className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
+                    style={{ color: 'var(--color-text)' }}>
+                    <Mic className="w-4 h-4" style={{ color: 'var(--color-accent)' }} />
                     Full Transcript
                   </h3>
                   <button
                     onClick={() => handleCopy(result.formatting_status === 'completed' && result.formatted_transcript_text ? result.formatted_transcript_text : result.transcript_text, 'transcript')}
-                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+                    className="flex items-center gap-1 px-2 py-1.5 rounded-sm text-xs font-medium border transition-colors"
                     style={{
-                      backgroundColor: copied === 'transcript' ? 'var(--color-success)' : 'var(--color-surface-overlay)',
+                      backgroundColor: copied === 'transcript' ? 'var(--color-accent)' : 'var(--color-fill)',
                       color: copied === 'transcript' ? 'white' : 'var(--color-text-secondary)',
-                      borderColor: copied === 'transcript' ? 'var(--color-success)' : 'var(--color-border)',
+                      borderColor: copied === 'transcript' ? 'var(--color-accent)' : 'var(--color-separator)',
                       minHeight: '44px',
                     }}>
                     {copied === 'transcript' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
@@ -1722,8 +1722,8 @@ export function AudioPage() {
                   style={{ color: 'var(--color-text-secondary)' }}>
                   {result.formatting_status === 'completed' && result.formatted_transcript_text ? result.formatted_transcript_text : result.transcript_text}
                 </div>
-                {(result.formatting_status === 'pending' || result.formatting_status === 'processing') && <p className="mt-3 flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-muted)' }}><Loader2 className="h-3.5 w-3.5 animate-spin" />Formatting for readability… The original transcript is available now.</p>}
-                {result.formatting_status === 'failed' && <p className="mt-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>Readable formatting could not finish, so the original transcript is shown. You can retry from the recording details.</p>}
+                {(result.formatting_status === 'pending' || result.formatting_status === 'processing') && <p className="mt-3 flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}><Loader2 className="h-3.5 w-3.5 animate-spin" />Formatting for readability… The original transcript is available now.</p>}
+                {result.formatting_status === 'failed' && <p className="mt-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>Readable formatting could not finish, so the original transcript is shown. You can retry from the recording details.</p>}
               </div>
 
               {/* AI Chat */}
@@ -1742,8 +1742,8 @@ export function AudioPage() {
             initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg"
-            style={{ backgroundColor: 'var(--color-success)', color: 'white' }}>
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-3 rounded-md shadow-overlay"
+            style={{ backgroundColor: 'var(--color-accent)', color: 'white' }}>
             <Check className="w-4 h-4" />
             <span className="text-sm font-medium">Copied to clipboard</span>
           </motion.div>
@@ -1775,15 +1775,15 @@ function ActiveTranscriptionsPanel({
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       aria-labelledby="active-transcriptions-heading"
-      className="mx-auto mt-8 max-w-4xl overflow-hidden rounded-[1.75rem] border"
-      style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}
+      className="mx-auto mt-8 max-w-4xl overflow-hidden rounded-xl border"
+      style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}
     >
-      <div className="flex flex-col justify-between gap-4 border-b px-5 py-5 sm:flex-row sm:items-center sm:px-6" style={{ borderColor: 'var(--color-border)' }}>
+      <div className="flex flex-col justify-between gap-4 border-b px-5 py-5 sm:flex-row sm:items-center sm:px-6" style={{ borderColor: 'var(--color-separator)' }}>
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 id="active-transcriptions-heading" className="text-lg font-semibold">Active transcriptions</h2>
             {jobs.length > 0 && (
-              <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
+              <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}>
                 {jobs.length} {jobs.length === 1 ? 'job' : 'jobs'}
               </span>
             )}
@@ -1796,8 +1796,8 @@ function ActiveTranscriptionsPanel({
           type="button"
           onClick={onRefresh}
           disabled={isLoading}
-          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)] disabled:opacity-50"
-          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md border px-4 text-sm font-semibold transition-colors hover:bg-[var(--color-fill)] disabled:opacity-50"
+          style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }}
         >
           <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
           Refresh
@@ -1805,7 +1805,7 @@ function ActiveTranscriptionsPanel({
       </div>
 
       {error && (
-        <div role="status" className="border-b px-5 py-3 text-sm sm:px-6" style={{ borderColor: 'var(--color-border)', color: 'var(--color-warning)' }}>
+        <div role="status" className="border-b px-5 py-3 text-sm sm:px-6" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text)' }}>
           {error}
         </div>
       )}
@@ -1815,7 +1815,7 @@ function ActiveTranscriptionsPanel({
           <Loader2 className="h-5 w-5 animate-spin" /> Checking active jobs...
         </div>
       ) : jobs.length > 0 ? (
-        <div className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="divide-y" style={{ borderColor: 'var(--color-separator)' }}>
           {jobs.map((job) => {
             const progress = getAudioProcessingProgress(job);
             const statusLabel = job.status === 'pending' ? 'Queued' : 'In progress';
@@ -1824,18 +1824,18 @@ function ActiveTranscriptionsPanel({
                 type="button"
                 key={job.id}
                 onClick={() => onOpen(job)}
-                className="group grid min-h-28 w-full gap-4 px-5 py-5 text-left transition hover:bg-[var(--color-nav-hover)] sm:grid-cols-[minmax(0,1fr)_auto] sm:px-6"
+                className="group grid min-h-28 w-full gap-4 px-5 py-5 text-left transition-colors hover:bg-[var(--color-fill)] sm:grid-cols-[minmax(0,1fr)_auto] sm:px-6"
               >
                 <div className="min-w-0">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <FileAudio className="h-4 w-4 shrink-0" style={{ color: 'var(--color-brand-500)' }} />
-                    <p className="min-w-0 truncate text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{job.original_name}</p>
-                    <span className="rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-surface-subtle)', color: job.status === 'pending' ? 'var(--color-warning)' : 'var(--color-brand-500)' }}>
+                    <FileAudio className="h-4 w-4 shrink-0" style={{ color: 'var(--color-accent)' }} />
+                    <p className="min-w-0 truncate text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{job.original_name}</p>
+                    <span className="rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-fill)', color: job.status === 'pending' ? 'var(--color-text)' : 'var(--color-accent)' }}>
                       {statusLabel}
                     </span>
                   </div>
 
-                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />{formatElapsedTime(job.created_at, now)}</span>
                     <span>{getAudioProcessingLabel(job)}</span>
                     <span>{progress}% complete</span>
@@ -1848,17 +1848,17 @@ function ActiveTranscriptionsPanel({
                     aria-valuemin={0}
                     aria-valuemax={100}
                     aria-valuenow={progress}
-                    style={{ backgroundColor: 'var(--color-surface-subtle)' }}
+                    style={{ backgroundColor: 'var(--color-fill)' }}
                   >
                     <div
                       className="h-full rounded-full transition-[width] duration-500 ease-out"
-                      style={{ width: `${progress}%`, backgroundColor: 'var(--color-brand-500)' }}
+                      style={{ width: `${progress}%`, backgroundColor: 'var(--color-accent-fill)' }}
                     />
                   </div>
                 </div>
 
-                <span className="inline-flex min-h-11 items-center gap-2 self-center text-sm font-semibold" style={{ color: 'var(--color-brand-500)' }}>
-                  Open <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
+                <span className="inline-flex min-h-11 items-center gap-2 self-center text-sm font-semibold" style={{ color: 'var(--color-accent)' }}>
+                  Open <ArrowRight className="h-4 w-4 transition-transform duration-200" />
                 </span>
               </button>
             );
@@ -1872,10 +1872,10 @@ function ActiveTranscriptionsPanel({
 function MetaItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <div className="flex items-center gap-2">
-      <span style={{ color: 'var(--color-text-muted)' }}>{icon}</span>
+      <span style={{ color: 'var(--color-text-secondary)' }}>{icon}</span>
       <div>
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{label}</p>
-        <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{value}</p>
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{label}</p>
+        <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{value}</p>
       </div>
     </div>
   );
@@ -1894,20 +1894,20 @@ function SectionCard({
   onCopy: () => void;
 }) {
   return (
-    <div className="p-5 rounded-2xl border"
-      style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
+    <div className="p-5 rounded-lg border"
+      style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-base font-semibold flex items-center gap-2"
-          style={{ color: 'var(--color-text-primary)' }}>
-          <span style={{ color: 'var(--color-brand-500)' }}>{icon}</span>
+          style={{ color: 'var(--color-text)' }}>
+          <span style={{ color: 'var(--color-accent)' }}>{icon}</span>
           {title}
         </h3>
         <button onClick={onCopy}
-          className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+          className="flex items-center gap-1 px-2 py-1.5 rounded-sm text-xs font-medium border transition-colors"
           style={{
-            backgroundColor: copied === copyLabel ? 'var(--color-success)' : 'var(--color-surface-overlay)',
+            backgroundColor: copied === copyLabel ? 'var(--color-accent)' : 'var(--color-fill)',
             color: copied === copyLabel ? 'white' : 'var(--color-text-secondary)',
-            borderColor: copied === copyLabel ? 'var(--color-success)' : 'var(--color-border)',
+            borderColor: copied === copyLabel ? 'var(--color-accent)' : 'var(--color-separator)',
             minHeight: '44px',
           }}>
           {copied === copyLabel ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
@@ -1924,9 +1924,9 @@ function SectionCard({
           {items.map((item, i) => (
             <li key={i} className="flex items-start gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               {isChecklist ? (
-                <Square className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--color-text-muted)' }} />
+                <Square className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--color-text-secondary)' }} />
               ) : (
-                <span className="w-1.5 h-1.5 rounded-full shrink-0 mt-2" style={{ backgroundColor: 'var(--color-brand-500)' }} />
+                <span className="w-1.5 h-1.5 rounded-full shrink-0 mt-2" style={{ backgroundColor: 'var(--color-accent-fill)' }} />
               )}
               {item}
             </li>

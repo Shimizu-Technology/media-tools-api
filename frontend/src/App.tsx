@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { MotionConfig } from 'framer-motion'
 import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
-import { FileText } from 'lucide-react'
 import { AppShell } from './components/AppShell'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { ScrollToTop } from './components/ScrollToTop'
@@ -11,6 +11,7 @@ import { announceSessionChange, sessionAccountChanged, subscribeSessionChanges }
 import { getSessionPhase, isWebSessionActive, localApiKeyMode, logoutWebSession, restoreWebSession, setSessionPhase, setWebOnboardingRequired, setWebSessionActive, subscribeWebSession, webSessionStateChanged } from './lib/webSession'
 import { clearPasskeySignInJournal, recoverPendingPasskeySignIn } from './lib/passkeys'
 import { isJoinSetupPath } from './lib/onboarding'
+import { Mark } from './components/ui/Mark'
 
 const HomePage = lazy(() => import('./pages/HomePage').then((module) => ({ default: module.HomePage })))
 const MyLibraryPage = lazy(() => import('./pages/MyLibraryPage').then((module) => ({ default: module.MyLibraryPage })))
@@ -101,7 +102,7 @@ function AppRoutes() {
 }
 
 function RouteLoading() {
-  return <div className="flex min-h-[45vh] items-center justify-center" role="status"><div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-brand-500)]" /><span className="sr-only">Loading page</span></div>
+  return <div className="flex min-h-[45vh] items-center justify-center" role="status"><div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--color-separator)] border-t-[var(--color-accent)]" /><span className="sr-only">Loading page</span></div>
 }
 
 function LegacyRedirect({ to, includePathTail = false }: { to: string; includePathTail?: boolean }) {
@@ -124,21 +125,19 @@ function mergeSearch(baseSearch: string, currentSearch: string) {
 
 function PublicLayout() {
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--color-surface)' }}>
-      <header className="sticky top-0 z-50 border-b backdrop-blur" style={{ backgroundColor: 'var(--color-header-bg)', borderColor: 'var(--color-border)' }}>
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--color-bg)' }}>
+      <header className="sticky top-0 z-50 border-b backdrop-blur" style={{ backgroundColor: 'var(--color-bar)', borderColor: 'var(--color-separator)' }}>
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
           <Link to="/" className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-              <FileText className="h-5 w-5" style={{ color: 'var(--color-on-brand)' }} />
-            </div>
+            <Mark size={36} />
             <div>
-              <div className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>Media Tools</div>
-              <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>AI media workspace</div>
+              <div className="font-semibold" style={{ color: 'var(--color-text)' }}>Media Tools</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>AI media workspace</div>
             </div>
           </Link>
           <nav className="flex items-center gap-2">
-            <Link to="/docs" className="min-h-11 rounded-xl px-4 py-3 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)]" style={{ color: 'var(--color-text-secondary)' }}>API docs</Link>
-            <Link to="/app" className="min-h-11 rounded-xl px-4 py-3 text-sm font-semibold transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)' }}>Open app</Link>
+            <Link to="/docs" className="min-h-11 rounded-md px-4 py-3 text-sm font-semibold transition-colors hover:bg-[var(--color-fill)]" style={{ color: 'var(--color-text-secondary)' }}>API docs</Link>
+            <Link to="/app" className="min-h-11 rounded-md px-4 py-3 text-sm font-semibold transition-colors hover:opacity-90" style={{ backgroundColor: 'var(--color-accent-fill)', color: 'var(--color-on-accent)' }}>Open app</Link>
           </nav>
         </div>
       </header>
@@ -150,16 +149,16 @@ function PublicLayout() {
 
 function AppFooter() {
   return (
-    <footer className="py-8 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
-      <span>Built with Go + React by{' '}<a href="https://github.com/Shimizu-Technology" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-brand-500)' }}>Shimizu Technology</a></span>
+    <footer className="py-8 text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+      <span>Built with Go + React by{' '}<a href="https://github.com/Shimizu-Technology" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)' }}>Shimizu Technology</a></span>
       <span className="mx-2" aria-hidden="true">·</span>
-      <Link to="/privacy" style={{ color: 'var(--color-brand-500)' }}>Privacy</Link>
+      <Link to="/privacy" style={{ color: 'var(--color-accent)' }}>Privacy</Link>
       <span className="mx-2" aria-hidden="true">·</span>
-      <Link to="/terms" style={{ color: 'var(--color-brand-500)' }}>Terms</Link>
+      <Link to="/terms" style={{ color: 'var(--color-accent)' }}>Terms</Link>
       <span className="mx-2" aria-hidden="true">·</span>
-      <Link to="/support" style={{ color: 'var(--color-brand-500)' }}>Support</Link>
+      <Link to="/support" style={{ color: 'var(--color-accent)' }}>Support</Link>
       <span className="mx-2" aria-hidden="true">·</span>
-      <Link to="/delete-account" style={{ color: 'var(--color-brand-500)' }}>Delete account</Link>
+      <Link to="/delete-account" style={{ color: 'var(--color-accent)' }}>Delete account</Link>
     </footer>
   )
 }
@@ -412,9 +411,12 @@ async function fingerprintAPIKey(apiKey: string): Promise<string | null> {
 
 function App() {
   return (
-    <BrowserRouter>
-      {localApiKeyMode ? <LocalApiKeyApp /> : <AccountAppContent />}
-    </BrowserRouter>
+    // Framer Motion drops transform animation for people who ask for less motion.
+    <MotionConfig reducedMotion="user">
+      <BrowserRouter>
+        {localApiKeyMode ? <LocalApiKeyApp /> : <AccountAppContent />}
+      </BrowserRouter>
+    </MotionConfig>
   )
 }
 

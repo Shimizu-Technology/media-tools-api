@@ -117,14 +117,14 @@ export function WebhooksPage() {
           <div>
             <div
               className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium mb-3"
-              style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}
+              style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}
             >
               <WebhookIcon className="w-3.5 h-3.5" />
               Integrations
             </div>
             <div className="flex items-center gap-3 mb-2">
-              <WebhookIcon className="w-6 h-6" style={{ color: 'var(--color-brand-500)' }} />
-              <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>
+              <WebhookIcon className="w-6 h-6" style={{ color: 'var(--color-accent)' }} />
+              <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight" style={{ color: 'var(--color-text)' }}>
                 Webhooks
               </h1>
             </div>
@@ -134,8 +134,8 @@ export function WebhooksPage() {
           </div>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium text-white transition-all sm:w-auto"
-            style={{ backgroundColor: 'var(--color-brand-500)' }}
+            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-md px-4 text-sm font-medium text-on-accent transition-colors sm:w-auto"
+            style={{ backgroundColor: 'var(--color-accent-fill)' }}
           >
             <Plus className="w-4 h-4" />
             <span>Add Webhook</span>
@@ -147,14 +147,14 @@ export function WebhooksPage() {
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-6 p-3 rounded-xl border flex items-center gap-2"
+            className="mb-6 p-3 rounded-md border flex items-center gap-2"
             style={{
               backgroundColor: 'rgba(239, 68, 68, 0.12)',
               borderColor: 'rgba(239, 68, 68, 0.3)',
             }}
           >
-            <AlertCircle className="w-4 h-4 shrink-0" style={{ color: 'var(--color-error)' }} />
-            <span className="text-sm" style={{ color: 'var(--color-error)' }}>{error}</span>
+            <AlertCircle className="w-4 h-4 shrink-0" style={{ color: 'var(--color-danger)' }} />
+            <span className="text-sm" style={{ color: 'var(--color-danger)' }}>{error}</span>
           </motion.div>
         )}
 
@@ -163,22 +163,22 @@ export function WebhooksPage() {
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-6 p-4 rounded-xl border"
+            className="mb-6 p-4 rounded-md border"
             style={{
               backgroundColor: 'rgba(24, 185, 133, 0.08)',
               borderColor: 'rgba(24, 185, 133, 0.24)',
             }}
           >
-            <p className="text-sm font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>
+            <p className="text-sm font-medium mb-1" style={{ color: 'var(--color-text)' }}>
               Webhook Secret (save this — shown only once):
             </p>
-            <code className="text-xs break-all" style={{ color: 'var(--color-brand-500)' }}>
+            <code className="text-xs break-all" style={{ color: 'var(--color-accent)' }}>
               {createdSecret}
             </code>
             <button
               onClick={() => setCreatedSecret('')}
-              className="mt-2 inline-flex min-h-11 items-center rounded-lg text-xs underline"
-              style={{ color: 'var(--color-text-muted)' }}
+              className="mt-2 inline-flex min-h-11 items-center rounded-sm text-xs underline"
+              style={{ color: 'var(--color-text-secondary)' }}
             >
               Dismiss
             </button>
@@ -191,10 +191,10 @@ export function WebhooksPage() {
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             onSubmit={handleCreate}
-            className="mb-6 p-6 rounded-xl border space-y-4"
+            className="mb-6 p-6 rounded-md border space-y-4"
             style={{
-              backgroundColor: 'var(--color-surface-elevated)',
-              borderColor: 'var(--color-border)',
+              backgroundColor: 'var(--color-surface)',
+              borderColor: 'var(--color-separator)',
             }}
           >
             <div>
@@ -207,11 +207,11 @@ export function WebhooksPage() {
                 onChange={(e) => setNewUrl(e.target.value)}
                 placeholder="https://example.com/webhook"
                 required
-                className="min-h-11 w-full rounded-xl border px-4 text-base outline-none sm:text-sm"
+                className="min-h-11 w-full rounded-md border px-4 text-base outline-none sm:text-sm"
                 style={{
-                  backgroundColor: 'var(--color-surface)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text-primary)',
+                  backgroundColor: 'var(--color-bg)',
+                  borderColor: 'var(--color-separator)',
+                  color: 'var(--color-text)',
                 }}
               />
             </div>
@@ -226,11 +226,11 @@ export function WebhooksPage() {
                     key={event}
                     type="button"
                     onClick={() => toggleEvent(event)}
-                    className="min-h-11 rounded-xl border px-3 text-xs font-medium transition-all"
+                    className="min-h-11 rounded-md border px-3 text-xs font-medium transition-colors"
                     style={{
-                      backgroundColor: selectedEvents.includes(event) ? 'var(--color-brand-500)' : 'var(--color-surface)',
+                      backgroundColor: selectedEvents.includes(event) ? 'var(--color-accent)' : 'var(--color-bg)',
                       color: selectedEvents.includes(event) ? 'white' : 'var(--color-text-secondary)',
-                      borderColor: selectedEvents.includes(event) ? 'var(--color-brand-500)' : 'var(--color-border)',
+                      borderColor: selectedEvents.includes(event) ? 'var(--color-accent)' : 'var(--color-separator)',
                     }}
                   >
                     {event}
@@ -240,22 +240,22 @@ export function WebhooksPage() {
             </div>
 
             {error && (
-              <p className="text-sm text-red-500">{error}</p>
+              <p className="text-sm text-danger">{error}</p>
             )}
 
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="submit"
-                className="min-h-11 rounded-xl px-4 text-sm font-medium text-white"
-                style={{ backgroundColor: 'var(--color-brand-500)' }}
+                className="min-h-11 rounded-md px-4 text-sm font-medium text-on-accent"
+                style={{ backgroundColor: 'var(--color-accent-fill)' }}
               >
                 Create Webhook
               </button>
               <button
                 type="button"
                 onClick={() => setShowForm(false)}
-                className="min-h-11 rounded-xl border px-4 text-sm font-medium"
-                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                className="min-h-11 rounded-md border px-4 text-sm font-medium"
+                style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }}
               >
                 Cancel
               </button>
@@ -266,9 +266,9 @@ export function WebhooksPage() {
         {/* Webhooks list */}
         <div className="space-y-3 mb-10">
           {loading ? (
-            <div className="text-center py-8" style={{ color: 'var(--color-text-muted)' }}>Loading...</div>
+            <div className="text-center py-8" style={{ color: 'var(--color-text-secondary)' }}>Loading...</div>
           ) : webhooks.length === 0 ? (
-            <div className="text-center py-12" style={{ color: 'var(--color-text-muted)' }}>
+            <div className="text-center py-12" style={{ color: 'var(--color-text-secondary)' }}>
               <Send className="w-8 h-8 mx-auto mb-3 opacity-50" />
               <p className="text-sm">No webhooks registered yet.</p>
             </div>
@@ -277,18 +277,18 @@ export function WebhooksPage() {
               key={wh.id}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="flex flex-col items-stretch justify-between gap-4 rounded-2xl border p-4 sm:flex-row sm:items-center"
+              className="flex flex-col items-stretch justify-between gap-4 rounded-lg border p-4 sm:flex-row sm:items-center"
               style={{
-                backgroundColor: 'var(--color-surface-elevated)',
-                borderColor: 'var(--color-border)',
+                backgroundColor: 'var(--color-surface)',
+                borderColor: 'var(--color-separator)',
                 opacity: wh.active ? 1 : 0.6,
               }}
             >
               <div className="min-w-0 flex-1">
-                <p className="font-mono text-sm truncate" style={{ color: 'var(--color-text-primary)' }}>{wh.url}</p>
+                <p className="font-mono text-sm truncate" style={{ color: 'var(--color-text)' }}>{wh.url}</p>
                 <div className="flex flex-wrap gap-1 mt-2">
                   {wh.events.map((e) => (
-                    <span key={e} className="px-2 py-0.5 rounded text-xs" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-muted)' }}>
+                    <span key={e} className="px-2 py-0.5 rounded-sm text-xs" style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text-secondary)' }}>
                       {e}
                     </span>
                   ))}
@@ -297,15 +297,15 @@ export function WebhooksPage() {
               <div className="flex items-center gap-2 shrink-0">
                 <button
                   onClick={() => handleToggle(wh.id, wh.active)}
-                  className="flex min-h-11 min-w-11 items-center justify-center rounded-lg transition-colors"
-                  style={{ color: wh.active ? 'var(--color-brand-500)' : 'var(--color-text-muted)' }}
+                  className="flex min-h-11 min-w-11 items-center justify-center rounded-sm transition-colors"
+                  style={{ color: wh.active ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}
                   title={wh.active ? 'Deactivate' : 'Activate'}
                 >
                   {wh.active ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
                 </button>
                 <button
                   onClick={() => handleDelete(wh.id)}
-                  className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-red-500 transition-colors hover:opacity-80"
+                  className="flex min-h-11 min-w-11 items-center justify-center rounded-sm text-danger transition-colors hover:opacity-80"
                   title="Delete webhook"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -318,26 +318,26 @@ export function WebhooksPage() {
         {/* Recent Deliveries */}
         {deliveries.length > 0 && (
           <div>
-            <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>
+            <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--color-text)' }}>
               Recent Deliveries
             </h2>
             <div className="space-y-2">
               {deliveries.slice(0, 20).map((d) => (
                 <div
                   key={d.id}
-                  className="rounded-lg border p-3 flex items-center gap-3 text-sm"
+                  className="rounded-sm border p-3 flex items-center gap-3 text-sm"
                   style={{
-                    backgroundColor: 'var(--color-surface-elevated)',
-                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-surface)',
+                    borderColor: 'var(--color-separator)',
                   }}
                 >
-                  {d.status === 'success' && <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />}
-                  {d.status === 'failed' && <XCircle className="w-4 h-4 text-red-500 shrink-0" />}
-                  {d.status === 'pending' && <Clock className="w-4 h-4 shrink-0" style={{ color: 'var(--color-text-muted)' }} />}
-                  <span className="font-mono text-xs flex-1 truncate" style={{ color: 'var(--color-text-primary)' }}>
+                  {d.status === 'success' && <CheckCircle className="w-4 h-4 text-accent shrink-0" />}
+                  {d.status === 'failed' && <XCircle className="w-4 h-4 text-danger shrink-0" />}
+                  {d.status === 'pending' && <Clock className="w-4 h-4 shrink-0" style={{ color: 'var(--color-text-secondary)' }} />}
+                  <span className="font-mono text-xs flex-1 truncate" style={{ color: 'var(--color-text)' }}>
                     {d.event}
                   </span>
-                  <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     {d.response_code > 0 && `HTTP ${d.response_code} · `}
                     {formatDate(d.created_at)}
                   </span>

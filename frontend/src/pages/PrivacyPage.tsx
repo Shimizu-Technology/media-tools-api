@@ -11,13 +11,13 @@ export function PrivacyPage() {
     <div className="max-w-3xl mx-auto px-6 py-16">
       <h1
         className="text-3xl font-bold mb-2"
-        style={{ color: 'var(--color-text-primary)' }}
+        style={{ color: 'var(--color-text)' }}
       >
         Privacy Policy
       </h1>
       <p
         className="text-sm mb-10"
-        style={{ color: 'var(--color-text-muted)' }}
+        style={{ color: 'var(--color-text-secondary)' }}
       >
         Last updated: August 22, 2026
       </p>
@@ -35,34 +35,34 @@ export function PrivacyPage() {
         <PrivacySection title="Information We Collect">
           <ul className="list-disc pl-5 space-y-2">
             <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Account information</strong> —
+              <strong style={{ color: 'var(--color-text)' }}>Account information</strong> —
               When you create an account or sign in, we receive your email
               address and, optionally, your name. We store a salted hash of your
               password, never the password itself.
             </li>
             <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Media content</strong> —
+              <strong style={{ color: 'var(--color-text)' }}>Media content</strong> —
               Audio recordings, video URLs, and PDF files you upload for
               transcription and analysis. Audio files are stored securely on
               Amazon S3.
             </li>
             <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Transcriptions and summaries</strong> —
+              <strong style={{ color: 'var(--color-text)' }}>Transcriptions and summaries</strong> —
               Text generated from your media content, including AI-generated
               summaries, key points, and action items.
             </li>
             <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Chat conversations</strong> —
+              <strong style={{ color: 'var(--color-text)' }}>Chat conversations</strong> —
               Messages you send when chatting with AI about your content.
             </li>
             <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>AI output reports</strong> —
+              <strong style={{ color: 'var(--color-text)' }}>AI output reports</strong> —
               If you report an AI response or summary, we keep the selected output,
               report category, optional note, and review status. We do not attach a
               separate copy of the source recording, transcript, or document.
             </li>
             <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Microphone access</strong> —
+              <strong style={{ color: 'var(--color-text)' }}>Microphone access</strong> —
               The iOS app requests microphone permission solely for recording
               audio after you deliberately start a recording. An active recording
               can continue while the app is in the background or the screen is
@@ -83,7 +83,7 @@ export function PrivacyPage() {
         </PrivacySection>
 
         <section id="ai-processing" className="scroll-mt-24">
-          <h2 className="mb-3 text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+          <h2 className="mb-3 text-lg font-semibold" style={{ color: 'var(--color-text)' }}>
             AI Processing and Your Permission
           </h2>
           <div className="space-y-3 leading-relaxed">
@@ -96,13 +96,13 @@ export function PrivacyPage() {
             </p>
             <ul className="list-disc space-y-2 pl-5">
               <li>
-                <strong style={{ color: 'var(--color-text-primary)' }}>OpenAI</strong> receives
+                <strong style={{ color: 'var(--color-text)' }}>OpenAI</strong> receives
                 audio segments for speech-to-text transcription. If OpenRouter is
                 unavailable, OpenAI may also receive transcript or document text
                 and chat prompts as a fallback for summaries, formatting, or answers.
               </li>
               <li>
-                <strong style={{ color: 'var(--color-text-primary)' }}>OpenRouter and the model provider it selects</strong> receive
+                <strong style={{ color: 'var(--color-text)' }}>OpenRouter and the model provider it selects</strong> receive
                 transcript or document text, relevant source excerpts, and your chat
                 prompts to produce readable formatting, summaries, citations, and answers.
                 Media Tools requires OpenRouter to route these requests only to
@@ -129,37 +129,37 @@ export function PrivacyPage() {
         <PrivacySection title="Third-Party Services">
           <ul className="list-disc pl-5 space-y-2">
             <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Resend</strong> —
+              <strong style={{ color: 'var(--color-text)' }}>Resend</strong> —
               Sends the sign-up, verification, and password-reset emails you
               request, so it receives your email address and the message.{' '}
-              <a href="https://resend.com/legal/privacy-policy" className="underline" style={{ color: 'var(--color-brand-500)' }}>
+              <a href="https://resend.com/legal/privacy-policy" className="underline" style={{ color: 'var(--color-accent)' }}>
                 Privacy policy
               </a>
             </li>
             <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Clerk</strong> —
+              <strong style={{ color: 'var(--color-text)' }}>Clerk</strong> —
               The previous sign-in provider, still used by older versions of
               the iOS app while they update.{' '}
-              <a href="https://clerk.com/privacy" className="underline" style={{ color: 'var(--color-brand-500)' }}>
+              <a href="https://clerk.com/privacy" className="underline" style={{ color: 'var(--color-accent)' }}>
                 Privacy policy
               </a>
             </li>
             <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>OpenAI (Whisper)</strong> —
+              <strong style={{ color: 'var(--color-text)' }}>OpenAI (Whisper)</strong> —
               Audio transcription and fallback text processing.{' '}
-              <a href="https://openai.com/enterprise-privacy/" className="underline" style={{ color: 'var(--color-brand-500)' }}>
+              <a href="https://openai.com/enterprise-privacy/" className="underline" style={{ color: 'var(--color-accent)' }}>
                 API privacy details
               </a>
             </li>
             <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>OpenRouter</strong> —
+              <strong style={{ color: 'var(--color-text)' }}>OpenRouter</strong> —
               Zero-data-retention routing for AI chat, summaries, and readable formatting.{' '}
-              <a href="https://openrouter.ai/privacy" className="underline" style={{ color: 'var(--color-brand-500)' }}>
+              <a href="https://openrouter.ai/privacy" className="underline" style={{ color: 'var(--color-accent)' }}>
                 Privacy policy
               </a>
             </li>
             <li>
-              <strong style={{ color: 'var(--color-text-primary)' }}>Amazon S3</strong> —
+              <strong style={{ color: 'var(--color-text)' }}>Amazon S3</strong> —
               Secure file storage for uploaded audio.
             </li>
           </ul>
@@ -189,7 +189,7 @@ export function PrivacyPage() {
             You can access, export, or delete your data at any time through the
             app. Complete account deletion is available in Settings on iPhone
             and web. See the{' '}
-            <Link to="/delete-account" className="underline" style={{ color: 'var(--color-brand-500)' }}>
+            <Link to="/delete-account" className="underline" style={{ color: 'var(--color-accent)' }}>
               account deletion instructions
             </Link>{' '}
             without needing to contact support.
@@ -200,14 +200,14 @@ export function PrivacyPage() {
           <p>
             If you have questions about this privacy policy, need help, or want
             to report a safety concern, visit our{' '}
-            <Link to="/support" className="underline" style={{ color: 'var(--color-brand-500)' }}>
+            <Link to="/support" className="underline" style={{ color: 'var(--color-accent)' }}>
               support page
             </Link>{' '}
             or contact us at:{' '}
             <a
               href="mailto:shimizutechnology@gmail.com"
               className="underline"
-              style={{ color: 'var(--color-brand-500)' }}
+              style={{ color: 'var(--color-accent)' }}
             >
               shimizutechnology@gmail.com
             </a>

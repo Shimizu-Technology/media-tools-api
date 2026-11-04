@@ -9,7 +9,7 @@ interface PrivacySectionProps {
 export function PrivacySection({ title, children }: PrivacySectionProps) {
   return (
     <section>
-      <h2 className="mb-3 text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+      <h2 className="mb-3 text-lg font-semibold" style={{ color: 'var(--color-text)' }}>
         {title}
       </h2>
       <div className="leading-relaxed">{children}</div>

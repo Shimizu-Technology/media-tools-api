@@ -19,9 +19,9 @@ export function ConnectionBanner() {
   };
 
   return (
-    <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 text-sm sm:px-6 lg:px-8" style={{ backgroundColor: 'var(--color-warning-subtle)', borderColor: 'var(--color-warning-border)', color: 'var(--color-text-primary)' }}>
+    <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 text-sm sm:px-6 lg:px-8" style={{ backgroundColor: 'var(--color-fill)', borderColor: 'var(--color-separator)', color: 'var(--color-text)' }}>
       <span className="flex items-center gap-2"><WifiOff className="h-4 w-4 shrink-0" />Can’t reach Media Tools right now. You are still signed in, and nothing was lost.</span>
-      <button type="button" onClick={() => void retry()} disabled={busy} className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 font-semibold disabled:opacity-60" style={{ borderColor: 'var(--color-warning-border)' }}>
+      <button type="button" onClick={() => void retry()} disabled={busy} className="inline-flex min-h-11 items-center gap-2 rounded-md border px-4 font-semibold disabled:opacity-60" style={{ borderColor: 'var(--color-separator)' }}>
         {busy && <Loader2 className="h-4 w-4 animate-spin" />}{busy ? 'Trying…' : 'Try again'}
       </button>
     </div>
