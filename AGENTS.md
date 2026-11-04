@@ -75,6 +75,28 @@ make run                # Go server on :8080
 make frontend-dev       # React on :5173
 ```
 
+## Validation
+
+- Complete gate: `make gate` or `./scripts/gate.sh`.
+- The gate covers credential scanning, Go formatting/vet/race tests, frontend lint/build/audit, and available iOS tests.
+- If a task or gate boots an iOS simulator, record its exact UDID and shut down only that simulator when the task finishes. A simulator already booted at session start is borrowed.
+
+## Local Development Lifecycle
+
+- Manual API: `make run` on port `8080`; override with `PORT` when running concurrent sessions.
+- Manual frontend: `make frontend-dev` on port `5173`; use an explicit alternate Vite port for concurrent sessions.
+- Docker stack: `make docker-up`; exact stop command: `make docker-down`. The default Compose project is derived from this repository directory and is not a shared home-server stack.
+- Claim servers, browser tabs, simulator UDIDs, and containers started by the task through the `local-dev-lifecycle` skill. Clean only the exact owned resources.
+- Existing listeners, tabs, simulators, and containers are borrowed. Never use broad process, simulator, browser, or Docker cleanup.
+- Media Tools API has no intentionally persistent local development service. A deliberate resource handoff must name the owner, reason, and expected lifetime.
+
+## Parallel Sessions and Handoffs
+
+- Give every independently writable session a separate Git worktree and branch. Do not run two writing sessions in this worktree.
+- Split concurrent work into non-overlapping vertical slices with explicit blockers and acceptance criteria.
+- Use the `handoff` skill before unfinished work changes session, agent, worktree, or device.
+- Same-machine handoffs live under `.codex/handoffs/` and are local by default. A receiving session verifies the repository, branch, commit, tests, and runtime state before continuing.
+
 ## Environment
 
 See `.env.example` for all configuration options.

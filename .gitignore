@@ -54,3 +54,6 @@ starter-app/
 recipe-api/
 frontend/.env
 frontend/.env.local
+
+# Local Codex session handoffs; share deliberately when another device needs one.
+.codex/handoffs/
