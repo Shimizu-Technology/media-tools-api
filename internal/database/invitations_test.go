@@ -2,9 +2,7 @@ package database
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -58,15 +56,15 @@ func TestInvitationRedeemCreatesNativeUserSessionOnce(t *testing.T) {
 	}
 
 	var user struct {
-		ID      string  `db:"id"`
-		ClerkID *string `db:"clerk_id"`
+		ID         string  `db:"id"`
+		ProviderID *string `db:"clerk_id"`
 	}
 	if err := db.GetContext(ctx, &user, `SELECT id, clerk_id FROM users WHERE email = $1`, email); err != nil {
 		t.Fatalf("load invited user: %v", err)
 	}
 	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, user.ID) })
-	if user.ClerkID != nil {
-		t.Fatalf("invitation linked Clerk ID: %#v", user.ClerkID)
+	if user.ProviderID != nil {
+		t.Fatalf("invitation linked retired provider ID: %#v", user.ProviderID)
 	}
 	var sessions int
 	if err := db.GetContext(ctx, &sessions, `SELECT COUNT(*) FROM auth_sessions WHERE user_id = $1`, user.ID); err != nil || sessions != 1 {
@@ -196,30 +194,6 @@ func TestInvitationReplayedSuccessorCreatesNothing(t *testing.T) {
 	}
 	if users != 0 || consumed != 0 {
 		t.Fatalf("replayed successor changed state: users=%d consumed=%d", users, consumed)
-	}
-}
-
-func TestFindOrCreateClerkUserDoesNotLinkByEmail(t *testing.T) {
-	db := openPostgresIntegrationDB(t)
-	ctx := context.Background()
-	email := uuid.NewString() + "@example.com"
-	var nativeID string
-	if err := db.QueryRowContext(ctx, `
-		INSERT INTO users (email, password_hash, name)
-		VALUES ($1, '', 'Native User') RETURNING id`, email).Scan(&nativeID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, nativeID) })
-
-	if _, err := db.FindOrCreateClerkUser(ctx, "user_"+uuid.NewString(), strings.ToLower(email), "Clerk User"); !errors.Is(err, ErrClerkEmailConflict) {
-		t.Fatalf("Clerk email conflict error = %v", err)
-	}
-	var linked sql.NullString
-	if err := db.GetContext(ctx, &linked, `SELECT clerk_id FROM users WHERE id = $1`, nativeID); err != nil {
-		t.Fatal(err)
-	}
-	if linked.Valid {
-		t.Fatalf("native account was linked to Clerk ID %#v", linked.String)
 	}
 }
 

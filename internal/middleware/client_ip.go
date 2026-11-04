@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"github.com/golang-jwt/jwt/v5"
+	"log"
 	"net"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,6 +18,8 @@ type ClientIPOptions struct {
 	RenderPublicEdge       bool
 	NetlifySignatureSecret string
 }
+
+var netlifyValidOnce, netlifyInvalidOnce sync.Once
 
 func ClientIP(trustedCIDRs []string, options ...ClientIPOptions) gin.HandlerFunc {
 	var opts ClientIPOptions
@@ -94,7 +98,16 @@ func ClientIP(trustedCIDRs []string, options ...ClientIPOptions) gin.HandlerFunc
 		// after validating Netlify's HS256 issuer, signature and required expiry.
 		// The JWT authenticates proxy origin, not a user; it never grants access.
 		// https://docs.netlify.com/manage/routing/redirects/rewrites-proxies/
-		if validNetlifySignature(c, opts.NetlifySignatureSecret) {
+		validSignature := validNetlifySignature(c, opts.NetlifySignatureSecret)
+		if validSignature {
+			netlifyValidOnce.Do(func() { log.Print("Netlify proxy signature verified") })
+		}
+		if (c.GetHeader("X-Nf-Sign") != "" || c.GetHeader("X-Nf-Request-Id") != "") && (!validSignature || singleHeaderIP(c, "X-Nf-Client-Connection-Ip") == nil) {
+			netlifyInvalidOnce.Do(func() {
+				log.Print("Netlify proxy headers observed: signature invalid or client address missing/invalid; source unverified")
+			})
+		}
+		if validSignature {
 			if netlifyIP := singleHeaderIP(c, "X-Nf-Client-Connection-Ip"); netlifyIP != nil {
 				ip = netlifyIP
 				verifiedSource = true

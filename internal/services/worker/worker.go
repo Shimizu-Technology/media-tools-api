@@ -155,10 +155,6 @@ type AudioPayload struct {
 	OriginalName string `json:"original_name"`
 }
 
-type IdentityDeleter interface {
-	DeleteUser(context.Context, string) error
-}
-
 // Pool manages a pool of worker goroutines.
 type Pool struct {
 	usageDefaults          database.UsageDefaults
@@ -179,7 +175,6 @@ type Pool struct {
 	audioTranscriber       *audio.Transcriber // Audio transcription via Whisper
 	transcriptFormatter    *transcriptformat.Formatter
 	audioStorage           *storage.S3
-	identityDeleter        IdentityDeleter
 	chunkConcurrency       int
 	transcriptionSem       chan struct{}
 	webhooks               *webhookservice.Service // MTA-18: webhook notifications
@@ -212,10 +207,6 @@ func (p *Pool) SetTranscriptFormatter(formatter *transcriptformat.Formatter) {
 
 func (p *Pool) SetAudioStorage(as *storage.S3) {
 	p.audioStorage = as
-}
-
-func (p *Pool) SetIdentityDeleter(deleter IdentityDeleter) {
-	p.identityDeleter = deleter
 }
 
 // Wake asks an event-driven worker to inspect the durable queue. The account

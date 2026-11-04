@@ -11,8 +11,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
-	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
-	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
 
 type recoveryRotationResponse struct {
@@ -60,10 +58,7 @@ func TestRecoveryCodeRotationAndRedemptionHTTP(t *testing.T) {
 	beginPath := "/api/v1/auth/recovery/rotation/begin"
 	confirmPath := "/api/v1/auth/recovery/rotation/confirm"
 	redeemPath := "/api/v1/auth/recovery/redeem"
-	legacy, err := middleware.GenerateJWT(&models.User{ID: userID, Email: "legacy@example.com"}, "test-only")
-	if err != nil {
-		t.Fatal(err)
-	}
+	legacy := "retired-token"
 
 	for _, path := range []string{beginPath, confirmPath} {
 		if response := postPasskeyJSON(t, engine, path, map[string]any{"rotation_id": uuid.NewString()}, legacy); response.Code != http.StatusUnauthorized {

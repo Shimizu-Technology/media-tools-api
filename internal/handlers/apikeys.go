@@ -116,7 +116,7 @@ func adminKeyMatches(provided, expected string) bool {
 	return subtle.ConstantTimeCompare(providedHash[:], expectedHash[:]) == 1
 }
 
-// CreateUserAPIKey generates a new API key owned by the signed-in Clerk/JWT user.
+// CreateUserAPIKey generates a new API key owned by the signed-in session user.
 // POST /api/v1/user/keys
 //
 // This is the app-facing developer flow. The public POST /keys endpoint remains

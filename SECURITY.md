@@ -7,7 +7,7 @@
 - Keep backend secrets only in local ignored `.env` files and the deployment
   provider's encrypted environment settings.
 - Variables prefixed with `VITE_` are included in the browser bundle. Only
-  public client configuration, such as a Clerk publishable key, belongs there.
+  public client configuration, such as a public application URL, belongs there.
 - iOS binaries also cannot hold secrets. Public migration-provider
   configuration and the API URL are configuration, not credentials;
   backend/AI/admin secrets must stay on the server.
@@ -50,17 +50,12 @@ file is exempted wholesale.
 When `GIN_MODE=release`, startup refuses:
 
 - a missing, default, or shorter-than-32-character `JWT_SECRET`;
-- a missing or shorter-than-32-character `ADMIN_API_KEY`; or
-- Clerk authentication without an audience/authorized-party boundary (or a
-  single explicit production `CORS_ORIGIN` from which one can be inferred).
+- a missing or shorter-than-32-character `ADMIN_API_KEY`.
 
-First-party password auth additionally requires first-party sessions and may
-not run alongside the legacy bcrypt/JWT routes. Production should keep
-`LEGACY_AUTH_ENABLED=false`; Clerk should remain in migration-only mode until
-the linked owner account has verified password, recovery, relaunch, and
-sign-out flows on a physical device.
+First-party password auth requires first-party sessions. Retired provider JWTs
+and legacy shared-secret bearer tokens are no longer accepted.
 
-Generate independent random values; do not reuse a Clerk, OpenAI, OpenRouter,
+Generate independent random values; do not reuse an OpenAI, OpenRouter,
 AWS, database, or Media Tools API credential.
 
 ```bash
@@ -68,7 +63,7 @@ openssl rand -base64 48  # JWT_SECRET
 openssl rand -hex 32     # ADMIN_API_KEY
 ```
 
-The bootstrap admin-key comparison uses constant-time digest comparison. Clerk
+The bootstrap admin-key comparison uses constant-time digest comparison. Session
 and API-key protected media routes still enforce record ownership in the API;
 clients are not trusted to filter another user's data.
 

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -98,96 +97,6 @@ func (h *WebSessionHandler) rejectCSRF(c *gin.Context) bool {
 	return true
 }
 
-// Bootstrap exchanges an already verified Clerk identity for a same-origin
-// browser session. PrepareBootstrap has already stored the exact refresh
-// successor outside JavaScript, so an identical retry recovers the same
-// session instead of creating an orphan after a lost response.
-func (h *WebSessionHandler) Bootstrap(c *gin.Context) {
-	if h.rejectCSRF(c) {
-		return
-	}
-	user := middleware.GetUser(c)
-	if user == nil || user.ClerkID == nil || strings.TrimSpace(*user.ClerkID) == "" {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{Error: "unauthorized", Message: "A verified account is required", Code: http.StatusUnauthorized})
-		return
-	}
-	successor, err := c.Cookie(middleware.WebPendingCookie)
-	if err != nil || !database.ValidFirstPartyRefreshToken(successor) {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "session_not_prepared", Message: "Prepare browser sign-in first", Code: http.StatusBadRequest})
-		return
-	}
-	csrf, err := webRandomToken("mta_csrf_")
-	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "session_creation_failed", Message: "Could not create browser session", Code: http.StatusServiceUnavailable})
-		return
-	}
-	pair, err := h.db.CreateOrRecoverClerkMigrationSession(c.Request.Context(), user.ID, *user.ClerkID, "web", "Browser", successor)
-	if errors.Is(err, database.ErrClerkIdentityUnknown) {
-		h.clearPending(c)
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{Error: "unauthorized", Message: "This Clerk account is no longer linked", Code: http.StatusUnauthorized})
-		return
-	}
-	if errors.Is(err, database.ErrIdentityOwnedByOther) {
-		h.clearPending(c)
-		c.JSON(http.StatusConflict, models.ErrorResponse{Error: "identity_conflict", Message: "Could not link this identity to the account", Code: http.StatusConflict})
-		return
-	}
-	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "session_creation_failed", Message: "Could not create browser session", Code: http.StatusServiceUnavailable})
-		return
-	}
-	h.setPair(c, pair)
-	h.clearOnboardingAll(c)
-	h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
-	c.JSON(http.StatusCreated, gin.H{"authenticated": true, "user_id": user.ID, "clerk_id": *user.ClerkID, "onboarding_required": user.OnboardingRequired, "access_expires_at": pair.AccessExpiresAt})
-}
-
-// PrepareBootstrap writes the refresh successor and CSRF secret before Clerk
-// session exchange. Exact Origin is the signed-out request's CSRF boundary;
-// the commit then requires the double-submit token too.
-func (h *WebSessionHandler) PrepareBootstrap(c *gin.Context) {
-	if !h.validOrigin(c) {
-		c.JSON(http.StatusForbidden, models.ErrorResponse{Error: "origin_invalid", Message: "Use the Media Tools app to sign in", Code: http.StatusForbidden})
-		return
-	}
-	csrf, err := webRandomToken("mta_csrf_")
-	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not prepare browser sign-in", Code: http.StatusServiceUnavailable})
-		return
-	}
-	if pending, err := c.Cookie(middleware.WebPendingCookie); err == nil && database.ValidFirstPartyRefreshToken(pending) {
-		if err := h.revokeCookieSessions(c, middleware.WebRecoveryPendingCookie, middleware.WebOnboardingPendingCookie); err != nil {
-			log.Printf("revoke interrupted recovery before Clerk bootstrap retry: %v", err)
-			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not prepare this browser for sign-in; retry", Code: http.StatusServiceUnavailable})
-			return
-		}
-		h.clearRecoveryPending(c)
-		h.clearOnboardingAll(c)
-		h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
-		c.Header("Cache-Control", "no-store")
-		c.Status(http.StatusNoContent)
-		return
-	}
-	if err := h.revokeCookieSessions(c, middleware.WebRefreshCookie, middleware.WebRecoveryPendingCookie, middleware.WebOnboardingPendingCookie); err != nil {
-		log.Printf("revoke browser session before Clerk bootstrap: %v", err)
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not prepare this browser for sign-in; retry", Code: http.StatusServiceUnavailable})
-		return
-	}
-	successor, err := webRandomToken("mta_rt_")
-	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not prepare browser sign-in", Code: http.StatusServiceUnavailable})
-		return
-	}
-	h.setCookie(c, middleware.WebAccessCookie, "", -1, true, "/api/v1")
-	h.setCookie(c, middleware.WebRefreshCookie, "", -1, true, "/api/v1/auth/web/session")
-	h.setCookie(c, middleware.WebPendingCookie, successor, 24*60*60, true, "/api/v1/auth/web/session")
-	h.clearRecoveryPending(c)
-	h.clearOnboardingAll(c)
-	h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
-	c.Header("Cache-Control", "no-store")
-	c.Status(http.StatusNoContent)
-}
-
 func (h *WebSessionHandler) Status(c *gin.Context) {
 	credential, err := c.Cookie(middleware.WebAccessCookie)
 	if err != nil {
@@ -205,7 +114,7 @@ func (h *WebSessionHandler) Status(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, gin.H{"authenticated": true, "user_id": user.ID, "clerk_id": user.ClerkID, "onboarding_required": user.OnboardingRequired})
+	c.JSON(http.StatusOK, gin.H{"authenticated": true, "user_id": user.ID, "clerk_id": user.ProviderID, "onboarding_required": user.OnboardingRequired})
 }
 
 // Prepare journals the successor credential in an HttpOnly cookie before the

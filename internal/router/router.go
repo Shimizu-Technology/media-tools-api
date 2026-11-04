@@ -43,7 +43,6 @@ type RouterConfig struct {
 	Webhooks                      *webhookservice.Service
 	Summarizer                    *summary.Service
 	JWTSecret                     string
-	LegacyAuthEnabled             bool
 	FirstPartyAuthEnabled         bool
 	FirstPartyPasswordAuthEnabled bool
 	WebCookieAuthEnabled          bool
@@ -51,13 +50,6 @@ type RouterConfig struct {
 	AdminAPIKey                   string
 	OwnerKeyID                    string
 	OwnerKeyPrefix                string
-	ClerkJWKSURL                  string
-	ClerkSecretKey                string
-	ClerkIssuer                   string
-	ClerkAudience                 string
-	ClerkAuthorizedParty          string
-	ClerkMigrationOnly            bool
-	ClerkAccountDeletionEnabled   bool
 	AllowedOrigins                []string
 	DefaultRateLimit              int
 	DefaultBrowserReadRateLimit   int
@@ -95,7 +87,6 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	if h.Pwned == nil {
 		h.Pwned = accountservice.NewPwnedChecker()
 	}
-	h.ClerkAccountDeletionEnabled = cfg.ClerkAccountDeletionEnabled
 	rateLimiter := middleware.NewRateLimiter(
 		cfg.OwnerKeyID,
 		cfg.OwnerKeyPrefix,
@@ -105,12 +96,6 @@ func Setup(cfg RouterConfig) *gin.Engine {
 
 	if cfg.DB != nil && cfg.Email != nil {
 		r.Use(h.AuthAudit())
-	}
-
-	// Initialize Clerk JWKS cache if configured
-	var jwksCache *middleware.JWKSCache
-	if cfg.ClerkJWKSURL != "" {
-		jwksCache = middleware.NewJWKSCache(cfg.ClerkJWKSURL, cfg.ClerkIssuer, cfg.ClerkAudience, cfg.ClerkAuthorizedParty)
 	}
 
 	// --- Public Routes (no auth required) ---
@@ -127,14 +112,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	r.GET("/api/docs", h.ServeSwaggerUI)
 	r.GET("/api/docs/openapi.yaml", h.ServeOpenAPISpec)
 
-	// --- Legacy Auth Routes (MTA-20) ---
-	// Browser auth is Clerk-first. Legacy email/password auth is kept only when
-	// explicitly enabled (local/dev compatibility) so production cannot bypass
-	// Clerk by registering directly against the API.
-	if cfg.LegacyAuthEnabled {
-		r.POST("/api/v1/auth/register", h.Register)
-		r.POST("/api/v1/auth/login", h.Login)
-	}
+	// First-party authentication routes.
 	if cfg.FirstPartyAuthEnabled && cfg.DB != nil {
 		passkeys, err := handlers.NewPasskeyAuthenticator()
 		if err != nil {
@@ -170,16 +148,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			}
 		}
 		web := handlers.NewWebSessionHandler(cfg.DB, h, cfg.WebCookieSecure, cfg.AllowedOrigins)
-		// A still-valid Clerk identity is the bridge to the same existing user.
 		// Never exchange an API key or a legacy JWT for a device session.
-		if jwksCache != nil {
-			clerkSession := r.Group("/api/v1/auth")
-			clerkSession.Use(middleware.ClerkAuth(cfg.DB, jwksCache, cfg.ClerkSecretKey, cfg.ClerkMigrationOnly))
-			clerkSession.POST("/session/bootstrap", h.BootstrapFirstPartySession)
-			if cfg.WebCookieAuthEnabled {
-				clerkSession.POST("/web/session/bootstrap", web.Bootstrap)
-			}
-		}
 		r.POST("/api/v1/auth/invitations", h.CreateInvitation)
 		r.POST("/api/v1/auth/invitations/redeem", rateLimiter.RateLimitUnauthenticated("invitation", 20), h.RedeemInvitation)
 		r.POST("/api/v1/auth/onboarding/reissues", h.CreateOnboardingReissue)
@@ -191,7 +160,6 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		passkeyLogin.POST("/finish", h.FinishPasskeyLogin)
 		r.POST("/api/v1/auth/recovery/redeem", rateLimiter.RateLimitUnauthenticated("recovery", 20), h.RedeemRecoveryCode)
 		if cfg.WebCookieAuthEnabled {
-			r.POST("/api/v1/auth/web/session/bootstrap/prepare", web.PrepareBootstrap)
 			r.GET("/api/v1/auth/web/session/status", web.Status)
 			r.POST("/api/v1/auth/web/session/prepare", web.Prepare)
 			r.POST("/api/v1/auth/web/session/refresh", web.Refresh)
@@ -223,19 +191,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 
 	// --- User-scoped routes — accepts only explicitly enabled bearer auth ---
 	jwtProtected := r.Group("/api/v1")
-	if jwksCache != nil {
-		jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey, cfg.FirstPartyAuthEnabled, cfg.LegacyAuthEnabled, cfg.ClerkMigrationOnly))
-	} else {
-		if cfg.FirstPartyAuthEnabled {
-			jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, nil, "", true, cfg.LegacyAuthEnabled, false))
-		} else if cfg.LegacyAuthEnabled {
-			jwtProtected.Use(middleware.JWTAuth(cfg.DB, cfg.JWTSecret))
-		} else {
-			// Keep the routes registered for a stable API surface, but fail
-			// closed when no bearer authentication provider is configured.
-			jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.JWTSecret, nil, "", false, false, false))
-		}
-	}
+	jwtProtected.Use(middleware.BearerOnlyAuth(cfg.DB, cfg.FirstPartyAuthEnabled))
 	{
 		jwtProtected.GET("/auth/me", h.GetMe)
 		jwtProtected.GET("/account/processing-preferences", h.ProcessingPreferences)
@@ -251,8 +207,6 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			jwtProtected.GET("/auth/recovery", h.RecoveryCodeStatus)
 			jwtProtected.POST("/auth/recovery/rotation/begin", h.BeginRecoveryCodeRotation)
 			jwtProtected.POST("/auth/recovery/rotation/confirm", h.ConfirmRecoveryCodeRotation)
-			jwtProtected.GET("/auth/clerk-detachment", h.ClerkDetachmentStatus)
-			jwtProtected.POST("/auth/clerk-detachment", h.DetachClerk)
 			if cfg.FirstPartyPasswordAuthEnabled {
 				jwtProtected.GET("/auth/password", h.PasswordStatus)
 				jwtProtected.POST("/auth/password", rateLimiter.RateLimit(), h.SetPassword)
@@ -265,19 +219,11 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			}
 		}
 		jwtProtected.DELETE("/account", rateLimiter.RateLimit(), h.DeleteAccount)
-		if cfg.LegacyAuthEnabled {
-			jwtProtected.POST("/auth/refresh", h.RefreshToken)
-		}
-		workspace := jwtProtected.Group("/workspace")
-		workspace.Use(middleware.RequireCompletedOnboarding())
-		workspace.GET("", h.GetWorkspace)
-		workspace.POST("", h.SaveToWorkspace)
-		workspace.DELETE("/:type/:id", h.RemoveFromWorkspace)
 	}
 
 	// --- Protected Routes (API key or an explicitly enabled bearer provider) ---
 	protected := r.Group("/api/v1")
-	protected.Use(middleware.DualAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey, cfg.FirstPartyAuthEnabled, cfg.LegacyAuthEnabled, cfg.ClerkMigrationOnly))
+	protected.Use(middleware.DualAuth(cfg.DB, cfg.FirstPartyAuthEnabled))
 	protected.Use(middleware.RequireCompletedOnboarding())
 	protected.Use(rateLimiter.RateLimit())
 	// Scoped agent keys are allow-listed per route and audited; see

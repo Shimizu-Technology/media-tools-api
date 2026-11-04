@@ -13,53 +13,6 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
 
-type bootstrapSessionRequest struct {
-	ClientType       string `json:"client_type" binding:"required"`
-	DeviceName       string `json:"device_name"`
-	NextRefreshToken string `json:"next_refresh_token" binding:"required"`
-}
-
-// BootstrapFirstPartySession is reachable only after ClerkAuth has verified a
-// current Clerk identity. It preserves the mapped application user ID.
-func (h *Handler) BootstrapFirstPartySession(c *gin.Context) {
-	user := middleware.GetUser(c)
-	if user == nil || user.ClerkID == nil {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{Error: "unauthorized", Message: "A verified Clerk account is required", Code: http.StatusUnauthorized})
-		return
-	}
-	var req bootstrapSessionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		log.Printf("bootstrap request binding failed: %v", err)
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Client type and next refresh credential are required", Code: http.StatusBadRequest})
-		return
-	}
-	req.DeviceName = strings.TrimSpace(req.DeviceName)
-	if (req.ClientType != "ios" && req.ClientType != "android") || len(req.DeviceName) > 80 || !database.ValidFirstPartyRefreshToken(req.NextRefreshToken) {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Unsupported client type, device name, or refresh credential", Code: http.StatusBadRequest})
-		return
-	}
-	pair, err := h.DB.CreateOrRecoverClerkMigrationSession(c.Request.Context(), user.ID, *user.ClerkID, req.ClientType, req.DeviceName, req.NextRefreshToken)
-	if errors.Is(err, database.ErrClerkIdentityUnknown) {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{Error: "unauthorized", Message: "This Clerk account is no longer linked", Code: http.StatusUnauthorized})
-		return
-	}
-	if errors.Is(err, database.ErrIdentityOwnedByOther) {
-		c.JSON(http.StatusConflict, models.ErrorResponse{Error: "identity_conflict", Message: "Could not link this identity to the account", Code: http.StatusConflict})
-		return
-	}
-	if errors.Is(err, database.ErrInvalidSuccessorToken) || errors.Is(err, database.ErrSessionInvalid) {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "Could not create device session with this credential", Code: http.StatusBadRequest})
-		return
-	}
-	if err != nil {
-		log.Printf("bootstrap session creation failed for user %s: %v", user.ID, err)
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "session_creation_failed", Message: "Could not create device session", Code: http.StatusServiceUnavailable})
-		return
-	}
-	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusCreated, pair)
-}
-
 type refreshSessionRequest struct {
 	RefreshToken     string `json:"refresh_token" binding:"required"`
 	NextRefreshToken string `json:"next_refresh_token"`
@@ -99,6 +52,9 @@ func (h *Handler) ListFirstPartySessions(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not list devices", Code: http.StatusServiceUnavailable})
 		return
 	}
+	for i := range sessions {
+		sessions[i].Current = middleware.AuthSessionBinding(c) == "first-party:"+sessions[i].ID
+	}
 	c.JSON(http.StatusOK, gin.H{"sessions": sessions})
 }
 
@@ -118,4 +74,17 @@ func (h *Handler) RevokeFirstPartySession(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func firstPartyAccount(c *gin.Context) *models.User {
+	user := middleware.GetUser(c)
+	if user == nil || !strings.HasPrefix(middleware.AuthSessionBinding(c), "first-party:") {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "first_party_session_required",
+			Message: "A signed-in first-party device session is required.",
+			Code:    http.StatusUnauthorized,
+		})
+		return nil
+	}
+	return user
 }

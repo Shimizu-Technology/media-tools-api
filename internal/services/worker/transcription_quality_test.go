@@ -72,7 +72,7 @@ func TestForEachWordWindowVisitsFullTailWindow(t *testing.T) {
 
 func TestValidateTranscriptionQualityAllowsNaturalMeetingText(t *testing.T) {
 	text := strings.Join([]string{
-		"Leon walked through the updated authentication flow and explained how Clerk should own the browser session.",
+		"Leon walked through the updated authentication flow and explained how retired provider should own the browser session.",
 		"The team discussed direct uploads, saved recordings, transcription retries, summaries, action items, and collection chat.",
 		"Next steps are to deploy the audio normalization fix, reprocess the meeting, and verify the summary before sharing it.",
 		"Everyone agreed that failed or suspicious transcripts should surface a clear retry path instead of pretending the result is complete.",

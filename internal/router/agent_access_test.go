@@ -43,11 +43,9 @@ func registeredAPIRoutes(t *testing.T) []gin.RouteInfo {
 	// zero DB is never queried: the test only reads the route table.
 	engine := Setup(RouterConfig{
 		DB:                            &database.DB{},
-		LegacyAuthEnabled:             true,
 		FirstPartyAuthEnabled:         true,
 		FirstPartyPasswordAuthEnabled: true,
 		WebCookieAuthEnabled:          true,
-		ClerkJWKSURL:                  "https://clerk.example.invalid/.well-known/jwks.json",
 	})
 	var routes []gin.RouteInfo
 	for _, route := range engine.Routes() {

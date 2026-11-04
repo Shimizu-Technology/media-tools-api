@@ -15,7 +15,6 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/config"
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/router"
-	accountservice "github.com/Shimizu-Technology/media-tools-api/internal/services/account"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
 	emailservice "github.com/Shimizu-Technology/media-tools-api/internal/services/email"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
@@ -151,12 +150,6 @@ func main() {
 	} else {
 		log.Println("⚠️  Audio S3 storage not configured (raw recordings will not be durable across retries)")
 	}
-	clerkClient := accountservice.NewClerkClient(cfg.ClerkSecretKey)
-	if clerkClient.IsConfigured() {
-		log.Println("✅ Clerk account deletion enabled")
-	} else {
-		log.Println("⚠️  Clerk account deletion disabled (set CLERK_SECRET_KEY to enable)")
-	}
 
 	// Step 4: Create and Start Worker Pool
 	email, err := emailservice.New(cfg.EmailDelivery, cfg.ResendAPIKey, cfg.ResendFromEmail, cfg.JWTSecret)
@@ -169,9 +162,6 @@ func main() {
 	wp.SetAudioTranscriber(audioTranscriber) // Wire audio transcriber for async Whisper jobs
 	wp.SetTranscriptFormatter(transcriptFormatter)
 	wp.SetAudioStorage(audioStorage)
-	if clerkClient.IsConfigured() {
-		wp.SetIdentityDeleter(clerkClient)
-	}
 	wp.SetTranscriptionConcurrency(cfg.WhisperChunkConcurrency, cfg.WhisperGlobalConcurrency)
 	wp.SetEmailService(email)
 	wp.Start()
@@ -233,12 +223,6 @@ func main() {
 		}
 	}()
 
-	if cfg.LegacyAuthEnabled {
-		log.Println("⚠️  Legacy email/password auth routes are enabled")
-	} else {
-		log.Println("✅ Legacy email/password auth routes disabled (Clerk-first browser auth)")
-	}
-
 	// Log admin API key status
 	if cfg.AdminAPIKey != "" {
 		log.Println("✅ Admin API key configured (API key creation protected)")
@@ -264,7 +248,6 @@ func main() {
 		Webhooks:                           webhookService,
 		Summarizer:                         summarizer,
 		JWTSecret:                          cfg.JWTSecret,
-		LegacyAuthEnabled:                  cfg.LegacyAuthEnabled,
 		FirstPartyAuthEnabled:              cfg.FirstPartyAuthEnabled,
 		FirstPartyPasswordAuthEnabled:      cfg.FirstPartyPasswordAuthEnabled,
 		WebCookieAuthEnabled:               cfg.WebCookieAuthEnabled,
@@ -272,13 +255,6 @@ func main() {
 		AdminAPIKey:                        cfg.AdminAPIKey,
 		OwnerKeyID:                         cfg.OwnerAPIKeyID,
 		OwnerKeyPrefix:                     cfg.OwnerAPIKeyPrefix,
-		ClerkJWKSURL:                       cfg.ClerkJWKSURL,
-		ClerkSecretKey:                     cfg.ClerkSecretKey,
-		ClerkIssuer:                        cfg.ClerkIssuer,
-		ClerkAudience:                      cfg.ClerkAudience,
-		ClerkAuthorizedParty:               cfg.ClerkAuthorizedParty,
-		ClerkMigrationOnly:                 cfg.ClerkMigrationOnly,
-		ClerkAccountDeletionEnabled:        clerkClient.IsConfigured(),
 		AllowedOrigins:                     cfg.AllowedOrigins,
 		DefaultRateLimit:                   cfg.DefaultRateLimit,
 		DefaultBrowserReadRateLimit:        cfg.DefaultBrowserReadRateLimit,

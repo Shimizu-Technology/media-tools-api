@@ -30,7 +30,7 @@ type RateLimiter struct {
 	// reads vastly outnumber writes (which is true for rate limiting).
 	mu      sync.RWMutex
 	buckets map[string]*bucket
-	// Authenticated Clerk/JWT users do not have an APIKey.RateLimit row. Keep
+	// Authenticated session users do not have an APIKey.RateLimit row. Keep
 	// their mutation and read traffic in separate buckets so ordinary progress
 	// polling can never prevent them from starting, retrying, or canceling work.
 	defaultUserRateLimit     int
@@ -83,7 +83,7 @@ func NewRateLimiter(ownerKeyID, ownerKeyPrefix string, defaultUserRateLimit, def
 func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Get the actor from context (set by auth middleware). API keys carry their
-		// own configured limit; Clerk/legacy JWT users share the default limit so
+		// own configured limit; session users share the default limit so
 		// browser auth cannot bypass protection for expensive endpoints.
 		bucketID := ""
 		rateLimit := rl.defaultUserRateLimit

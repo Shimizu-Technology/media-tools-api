@@ -54,7 +54,6 @@ func TestWebSessionMutationsRejectInvalidCSRF(t *testing.T) {
 		{"prepare", h.Prepare},
 		{"refresh", h.Refresh},
 		{"logout", h.Logout},
-		{"bootstrap", h.Bootstrap},
 		{"passkey-finish", h.FinishPasskeyLogin},
 		{"password-finish", h.FinishPasswordLogin},
 		{"recovery-finish", h.FinishRecoveryCodeLogin},
@@ -74,43 +73,10 @@ func TestWebSessionMutationsRejectInvalidCSRF(t *testing.T) {
 	}
 }
 
-func TestPrepareWebBootstrapSetsOnlyHostCookies(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	h := NewWebSessionHandler(nil, nil, true, []string{"https://media.example.com"})
-	response := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(response)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/web/session/bootstrap/prepare", nil)
-	c.Request.Header.Set("Origin", "https://media.example.com")
-	h.PrepareBootstrap(c)
-	c.Writer.WriteHeaderNow()
-	if response.Code != http.StatusNoContent {
-		t.Fatalf("prepare bootstrap = %d: %s", response.Code, response.Body.String())
-	}
-	cookies := response.Result().Cookies()
-	var pending, csrf *http.Cookie
-	for _, cookie := range cookies {
-		if cookie.Domain != "" || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode {
-			t.Errorf("unsafe bootstrap cookie: %+v", cookie)
-		}
-		if cookie.Name == middleware.WebPendingCookie {
-			pending = cookie
-		}
-		if cookie.Name == middleware.WebCSRFCookie {
-			csrf = cookie
-		}
-	}
-	if pending == nil || !pending.HttpOnly || !database.ValidFirstPartyRefreshToken(pending.Value) {
-		t.Fatalf("missing safe pending successor: %+v", pending)
-	}
-	if csrf == nil || csrf.HttpOnly || !strings.HasPrefix(csrf.Value, "mta_csrf_") {
-		t.Fatalf("missing readable CSRF cookie: %+v", csrf)
-	}
-}
-
 func TestSignedOutWebAuthBeginsRejectWrongOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := NewWebSessionHandler(nil, nil, true, []string{"https://media.example.com"})
-	for _, call := range []func(*gin.Context){h.PrepareBootstrap, h.BeginPasskeyLogin, h.PreparePasswordLogin, h.PrepareRecoveryCodeLogin} {
+	for _, call := range []func(*gin.Context){h.BeginPasskeyLogin, h.PreparePasswordLogin, h.PrepareRecoveryCodeLogin} {
 		response := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(response)
 		c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/web/session/start", nil)

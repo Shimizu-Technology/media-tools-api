@@ -66,31 +66,15 @@ type Config struct {
 	OpenAITranscriptionPrompt   string
 	OpenAITranscriptFormatModel string
 
-	// JWT Authentication (MTA-20)
+	// Auth proof encryption and hashing key.
 	JWTSecret string
-	// Legacy email/password auth is kept for local/dev compatibility but should
-	// be disabled in production when Clerk is the browser auth source of truth.
-	LegacyAuthEnabled bool
-	// First-party sessions can be enabled for staged client migration. Clerk
-	// remains accepted until every installed client has moved.
+	// Enables opaque device sessions.
 	FirstPartyAuthEnabled bool
 	// FirstPartyPasswordAuthEnabled adds Argon2id credentials to the durable
 	// first-party session system. It never enables the legacy JWT routes.
 	FirstPartyPasswordAuthEnabled bool
 	// WebCookieAuthEnabled enables the staged, same-origin browser cookie flow.
 	WebCookieAuthEnabled bool
-
-	// Clerk Authentication
-	ClerkPublishableKey  string
-	ClerkSecretKey       string
-	ClerkJWKSURL         string
-	ClerkIssuer          string
-	ClerkAudience        string
-	ClerkAuthorizedParty string
-	// ClerkMigrationOnly limits Clerk to exact identities linked before the
-	// invite-only first-party rollout. It disables account creation and email
-	// matching from Clerk tokens.
-	ClerkMigrationOnly bool
 
 	// Admin API key for bootstrap operations (creating first API keys)
 	// This protects the API key creation endpoint in production.
@@ -176,19 +160,9 @@ func Load() (*Config, error) {
 
 		// JWT Authentication
 		JWTSecret:                     getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),
-		LegacyAuthEnabled:             getEnvBool("LEGACY_AUTH_ENABLED", ginMode != "release"),
 		FirstPartyAuthEnabled:         getEnvBool("FIRST_PARTY_AUTH_ENABLED", false),
 		FirstPartyPasswordAuthEnabled: getEnvBool("FIRST_PARTY_PASSWORD_AUTH_ENABLED", false),
 		WebCookieAuthEnabled:          getEnvBool("WEB_COOKIE_AUTH_ENABLED", false),
-
-		// Clerk Authentication
-		ClerkPublishableKey:  getEnv("CLERK_PUBLISHABLE_KEY", ""),
-		ClerkSecretKey:       getEnv("CLERK_SECRET_KEY", ""),
-		ClerkJWKSURL:         getEnv("CLERK_JWKS_URL", ""),
-		ClerkIssuer:          getEnv("CLERK_ISSUER", ""),
-		ClerkAudience:        getEnv("CLERK_AUDIENCE", ""),
-		ClerkAuthorizedParty: getEnv("CLERK_AUTHORIZED_PARTY", ""),
-		ClerkMigrationOnly:   getEnvBool("CLERK_MIGRATION_ONLY", false),
 
 		// Admin API key for bootstrap — optional in dev, required in production
 		AdminAPIKey: getEnv("ADMIN_API_KEY", ""),
@@ -212,13 +186,6 @@ func Load() (*Config, error) {
 		AllowedOrigins: parseAllowedOrigins(getEnv("CORS_ORIGIN", "http://localhost:5173")),
 	}
 
-	if cfg.GinMode == "release" && cfg.ClerkJWKSURL != "" && cfg.ClerkAudience == "" && cfg.ClerkAuthorizedParty == "" {
-		if origin, ok := os.LookupEnv("CORS_ORIGIN"); ok && strings.TrimSpace(origin) != "" && !strings.Contains(origin, ",") {
-			cfg.ClerkAuthorizedParty = normalizeOrigin(origin)
-		} else {
-			return nil, fmt.Errorf("CLERK_AUDIENCE, CLERK_AUTHORIZED_PARTY, or single CORS_ORIGIN must be set in production when Clerk auth is enabled")
-		}
-	}
 	if cfg.EmailDelivery != "log" && cfg.EmailDelivery != "resend" {
 		return nil, fmt.Errorf("EMAIL_DELIVERY must be log or resend")
 	}
@@ -243,15 +210,6 @@ func Load() (*Config, error) {
 	}
 	if cfg.FirstPartyPasswordAuthEnabled && !cfg.FirstPartyAuthEnabled {
 		return nil, fmt.Errorf("FIRST_PARTY_PASSWORD_AUTH_ENABLED requires FIRST_PARTY_AUTH_ENABLED")
-	}
-	if cfg.FirstPartyPasswordAuthEnabled && cfg.LegacyAuthEnabled {
-		return nil, fmt.Errorf("FIRST_PARTY_PASSWORD_AUTH_ENABLED cannot be combined with LEGACY_AUTH_ENABLED")
-	}
-	// Once first-party auth is public, Clerk must be a bridge for accounts that
-	// were linked already. Otherwise a valid Clerk signup could bypass the
-	// application's invite-only onboarding policy.
-	if cfg.GinMode == "release" && cfg.FirstPartyAuthEnabled && cfg.ClerkJWKSURL != "" && !cfg.ClerkMigrationOnly {
-		return nil, fmt.Errorf("CLERK_MIGRATION_ONLY must be enabled before FIRST_PARTY_AUTH_ENABLED when Clerk auth is configured in production")
 	}
 
 	// Validate required configuration

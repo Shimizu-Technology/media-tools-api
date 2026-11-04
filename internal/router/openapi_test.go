@@ -12,7 +12,7 @@ import (
 // hand-authored developer spec is never updated.
 func TestEveryAPIRouteIsDocumented(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	r := Setup(RouterConfig{LegacyAuthEnabled: true})
+	r := Setup(RouterConfig{})
 	specBytes, err := os.ReadFile("../handlers/openapi.yaml")
 	if err != nil {
 		t.Fatal(err)

@@ -52,22 +52,10 @@ func (p *Pool) processAccountDeletion(job Job) error {
 		}
 	}
 
-	if request.ClerkDeletedAt == nil {
-		if request.ClerkUserID == nil || *request.ClerkUserID == "" {
-			return fmt.Errorf("account deletion is missing its Clerk identity")
-		}
-		if p.identityDeleter == nil {
-			err := fmt.Errorf("Clerk account deletion is unavailable")
-			_ = p.db.RecordAccountDeletionError(p.ctx, request.ID, err.Error())
-			return retryAccountDeletion(err, 5*time.Minute)
-		}
-		if err := p.identityDeleter.DeleteUser(p.ctx, *request.ClerkUserID); err != nil {
-			wrapped := fmt.Errorf("delete Clerk identity: %w", err)
-			_ = p.db.RecordAccountDeletionError(p.ctx, request.ID, wrapped.Error())
-			return retryAccountDeletion(wrapped, 5*time.Minute)
-		}
+	if request.ProviderDeletedAt == nil {
+		// The retired provider needs no remote cleanup. Finish pre-rollout requests too.
 		if err := p.db.MarkAccountIdentityDeleted(p.ctx, request.ID); err != nil {
-			return retryAccountDeletion(fmt.Errorf("record Clerk deletion: %w", err), 30*time.Second)
+			return retryAccountDeletion(fmt.Errorf("record retired provider completion: %w", err), 30*time.Second)
 		}
 	}
 
