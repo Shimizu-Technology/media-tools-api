@@ -218,6 +218,7 @@ export function ItemDetailPage() {
   // points at (player, video, page text) exists. It is used up once per item and
   // place, so a second citation to another spot is followed too.
   const consumedLink = useRef('');
+  const landingRef = useRef<Citation | null>(null);
   const isCurrentItem = Boolean(item && item.id === itemId);
   const hasVideo = type === 'transcript' && Boolean((item as Transcript | null)?.youtube_id);
   useEffect(() => {
@@ -233,13 +234,22 @@ export function ItemDetailPage() {
     });
     if (action === 'wait') return;
     consumedLink.current = link.key;
+    // Clearing the address changes the location, and the router resets scroll
+    // when it does. Land after that, in the effect below, not before it.
     if (action === 'go' && link.target) {
-      openCitation('seconds' in link.target
+      landingRef.current = 'seconds' in link.target
         ? { segment_id: 'link', item_type: type, item_id: item.id, start_ms: link.target.seconds * 1000 }
-        : { segment_id: 'link', item_type: type, item_id: item.id, page_number: link.target.page });
+        : { segment_id: 'link', item_type: type, item_id: item.id, page_number: link.target.page };
     }
     setSearchParams({}, { replace: true });
-  }, [audioURL, audioUnavailable, complete, hasVideo, isCurrentItem, item, itemId, openCitation, searchParams, segmentsLoaded, setSearchParams, type]);
+  }, [audioURL, audioUnavailable, complete, hasVideo, isCurrentItem, item, itemId, searchParams, segmentsLoaded, setSearchParams, type]);
+
+  useEffect(() => {
+    if (!landingRef.current || searchParams.has('t') || searchParams.has('page')) return;
+    const citation = landingRef.current;
+    landingRef.current = null;
+    openCitation(citation);
+  }, [openCitation, searchParams]);
 
   if (!validType) return <Navigate to={APP_ROUTES.library} replace />;
 

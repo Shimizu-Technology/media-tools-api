@@ -149,8 +149,8 @@ export function CapturePage() {
     }
     const entry = { recording: result.recording, warning: result.warning, savedOnDevice: result.savedOnDevice };
     hold(entry);
-    if (result.warning || !result.savedOnDevice) {
-      // Let the person hear it, or download it, before anything is uploaded.
+    if (result.warning) {
+      // Let the person hear it before it is uploaded.
       await refreshDrafts();
       return;
     }
