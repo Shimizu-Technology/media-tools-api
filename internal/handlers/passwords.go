@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	emailservice "github.com/Shimizu-Technology/media-tools-api/internal/services/email"
 	"log"
 	"net/http"
 	"strings"
@@ -52,7 +53,7 @@ func (h *Handler) LoginWithPassword(c *gin.Context) {
 	}
 	pair, err := h.createPasswordSession(c.Request.Context(), req.Email, req.Password, req.ClientType, req.DeviceName, req.NextRefreshToken, nil)
 	if errors.Is(err, errPasswordRejected) {
-		passwordCredentialsRejected(c)
+		h.rejectPassword(c, req.Email)
 		return
 	}
 	if errors.Is(err, database.ErrInvalidSuccessorToken) || errors.Is(err, database.ErrSessionInvalid) {
@@ -115,6 +116,9 @@ func (h *Handler) createPasswordSession(ctx context.Context, email, rawPassword,
 	if errors.Is(err, database.ErrPasswordCredentialInvalid) || errors.Is(err, database.ErrPasswordCredentialChanged) || errors.Is(err, database.ErrPasswordCredentialLocked) {
 		return nil, errPasswordRejected
 	}
+	if err == nil {
+		_ = h.DB.RecordAuthEvent(ctx, credential.UserID, "password_login_succeeded")
+	}
 	return pair, err
 }
 
@@ -129,12 +133,16 @@ func (h *Handler) PasswordStatus(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not check password status", Code: http.StatusServiceUnavailable})
 		return
 	}
+	if h.Worker != nil {
+		h.Worker.Wake()
+	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, status)
 }
 
 type setPasswordRequest struct {
-	Password string `json:"password" binding:"required"`
+	Password        string `json:"password" binding:"required"`
+	CurrentPassword string `json:"current_password"`
 }
 
 func (h *Handler) SetPassword(c *gin.Context) {
@@ -152,17 +160,28 @@ func (h *Handler) SetPassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "invalid_request", Message: "A new password is required", Code: http.StatusBadRequest})
 		return
 	}
-	password, err := accountservice.NormalizeNewPassword(req.Password)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "weak_password", Message: "Use a password of 15 to 128 characters", Code: http.StatusBadRequest})
+	snapshot, ok := h.requireCurrentPassword(c, user.ID, req.CurrentPassword)
+	if !ok {
 		return
 	}
-	hash, err := h.Passwords.Hash(c.Request.Context(), password)
-	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not save the password", Code: http.StatusServiceUnavailable})
+	hash, ok := h.newPassword(c, req.Password)
+	if !ok {
 		return
 	}
-	status, err := h.DB.SetPasswordCredential(c.Request.Context(), user.ID, sessionID, hash)
+	notice := ""
+	if h.Email != nil {
+		var err error
+		notice, err = h.Email.Seal(emailservice.Notice(user.Email, "password"))
+		if err != nil {
+			authError(c, 503, "authentication_unavailable", "Try again shortly")
+			return
+		}
+	}
+	status, err := h.DB.SetPasswordCredential(c.Request.Context(), user.ID, sessionID, hash, database.PasswordChange{Snapshot: snapshot, Notice: notice})
+	if errors.Is(err, database.ErrPasswordCredentialChanged) {
+		authError(c, 409, "credential_changed", "Your password changed; sign in again")
+		return
+	}
 	if errors.Is(err, database.ErrSessionInvalid) {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{Error: "invalid_session", Message: "Sign in again to change the password", Code: http.StatusUnauthorized})
 		return
@@ -171,6 +190,9 @@ func (h *Handler) SetPassword(c *gin.Context) {
 		log.Printf("set password for user %s: %v", user.ID, err)
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not save the password", Code: http.StatusServiceUnavailable})
 		return
+	}
+	if h.Worker != nil {
+		h.Worker.Wake()
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, status)

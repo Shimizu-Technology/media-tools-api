@@ -260,7 +260,19 @@ func (h *WebSessionHandler) WebOnboardingStatus(c *gin.Context) {
 	response["session_ready"] = true
 	response["passkeys"] = passkeys
 	response["recovery_codes"] = recoveryCodes
-	response["complete"] = passkeys > 0 && recoveryCodes > 0
+	passwordStatus, err := h.db.GetPasswordStatus(c.Request.Context(), user.ID)
+	if err != nil {
+		authError(c, 503, "onboarding_unavailable", "Could not check account setup; retry")
+		return
+	}
+	verified, err := h.db.EmailVerified(c.Request.Context(), user.ID)
+	if err != nil {
+		authError(c, 503, "onboarding_unavailable", "Could not check account setup; retry")
+		return
+	}
+	response["email_verified"] = verified
+	response["password_configured"] = passwordStatus.Configured
+	response["complete"] = (verified && passwordStatus.Configured) || (passkeys > 0 && recoveryCodes > 0)
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, response)
 }
@@ -293,7 +305,7 @@ func (h *WebSessionHandler) CompleteWebOnboarding(c *gin.Context) {
 		return
 	}
 	if !completed {
-		c.JSON(http.StatusConflict, models.ErrorResponse{Error: "onboarding_incomplete", Message: "Add a passkey and save recovery codes before continuing", Code: http.StatusConflict})
+		c.JSON(http.StatusConflict, models.ErrorResponse{Error: "onboarding_incomplete", Message: "Verify your email and set a password before continuing", Code: http.StatusConflict})
 		return
 	}
 	h.clearOnboardingAll(c)

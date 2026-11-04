@@ -239,6 +239,9 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	}
 
 	if err := h.DB.CreateAudioTranscriptionWithJob(c.Request.Context(), at, tempFilePath); err != nil {
+		if quotaCreationError(c, err) {
+			return
+		}
 		os.Remove(tempFilePath) // Clean up temp file on error
 		log.Printf("Failed to create audio transcription record: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -512,6 +515,9 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		APIKeyID:           session.APIKeyID,
 	}
 	if err := h.DB.CompleteAudioUploadAndCreateTranscription(c.Request.Context(), session.ID, at); err != nil {
+		if quotaCreationError(c, err) {
+			return
+		}
 		if errors.Is(err, database.ErrAudioUploadSessionNotPending) {
 			// A concurrent completion request can read the session while it is
 			// still pending, then lose the conditional update after the winning

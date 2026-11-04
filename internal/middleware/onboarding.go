@@ -16,7 +16,7 @@ func RequireCompletedOnboarding() gin.HandlerFunc {
 		user := GetUser(c)
 		if user != nil && user.OnboardingRequired {
 			c.JSON(http.StatusPreconditionRequired, models.ErrorResponse{
-				Error: "onboarding_required", Message: "Finish passkey and recovery-code setup to continue", Code: http.StatusPreconditionRequired,
+				Error: "onboarding_required", Message: "Verify your email and set a password to continue", Code: http.StatusPreconditionRequired,
 			})
 			c.Abort()
 			return

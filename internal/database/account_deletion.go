@@ -67,6 +67,7 @@ func (db *DB) RequestAccountDeletionWithReceipt(
 	clerkUserID *string,
 	cleanupAfter time.Time,
 	receiptToken string,
+	verifiedPassword ...string,
 ) (*models.AccountDeletionRequest, error) {
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -85,6 +86,16 @@ func (db *DB) RequestAccountDeletionWithReceipt(
 			}
 		}
 		return nil, fmt.Errorf("lock account for deletion: %w", err)
+	}
+	if len(verifiedPassword) > 0 {
+		var current string
+		err := tx.GetContext(ctx, &current, `SELECT password_hash FROM auth_password_credentials WHERE user_id=$1`, userID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		if current != verifiedPassword[0] {
+			return nil, ErrPasswordCredentialChanged
+		}
 	}
 	var providerID any
 	var providerHash any

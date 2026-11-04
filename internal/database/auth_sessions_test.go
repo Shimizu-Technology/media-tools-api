@@ -76,14 +76,14 @@ func TestFirstPartySessionRotationReplayAndRevocation(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE auth_refresh_tokens SET consumed_at = $2 WHERE token_hash = $1`, oldHash, time.Now().Add(-duplicateRefreshGrace-time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.RefreshFirstPartySession(ctx, pair.RefreshToken); !errors.Is(err, ErrSessionReplay) {
+	if _, err := db.RefreshFirstPartySession(ctx, pair.RefreshToken); !errors.Is(err, ErrSessionAlreadyRotated) {
 		t.Fatalf("old credential replay = %v", err)
 	}
-	if _, _, err := db.GetUserByFirstPartyAccessToken(ctx, rotated.AccessToken); !errors.Is(err, ErrSessionInvalid) {
-		t.Fatalf("replayed session still has access: %v", err)
+	if _, _, err := db.GetUserByFirstPartyAccessToken(ctx, rotated.AccessToken); err != nil {
+		t.Fatalf("lost-response retry revoked usable access: %v", err)
 	}
-	if _, err := db.RefreshFirstPartySession(ctx, rotated.RefreshToken); !errors.Is(err, ErrSessionInvalid) {
-		t.Fatalf("replayed session still refreshes: %v", err)
+	if _, err := db.RefreshFirstPartySession(ctx, rotated.RefreshToken); err != nil {
+		t.Fatalf("lost-response retry revoked usable refresh: %v", err)
 	}
 }
 

@@ -16,6 +16,9 @@ func SecurityHeaders() gin.HandlerFunc {
 		h := c.Writer.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
+		// Also covers HTML served by the optional Go SPA. Netlify-hosted HTML
+		// needs the matching policy in workstream E's response headers.
+		h.Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' https://cdn.jsdelivr.net https://*.clerk.accounts.dev https://*.clerk.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https:; frame-src https://*.clerk.accounts.dev https://*.clerk.com; form-action 'self'")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.Set("Permissions-Policy", "camera=(), geolocation=(), payment=(), usb=()")
 		if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {

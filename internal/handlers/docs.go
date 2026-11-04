@@ -11,8 +11,11 @@
 package handlers
 
 import (
+	"crypto/sha256"
 	_ "embed"
+	"encoding/base64"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -71,5 +74,12 @@ func (h *Handler) ServeSwaggerUI(c *gin.Context) {
 </body>
 </html>`
 
+	// Authorize this one static bootstrap without permitting arbitrary inline JS.
+	if _, script, ok := strings.Cut(html, "<script>"); ok {
+		script, _, _ = strings.Cut(script, "</script>")
+		digest := sha256.Sum256([]byte(script))
+		policy := c.Writer.Header().Get("Content-Security-Policy")
+		c.Header("Content-Security-Policy", strings.Replace(policy, "script-src 'self'", "script-src 'self' 'sha256-"+base64.StdEncoding.EncodeToString(digest[:])+"'", 1))
+	}
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 }

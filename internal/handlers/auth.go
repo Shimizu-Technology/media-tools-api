@@ -147,7 +147,19 @@ func (h *Handler) GetMe(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, user)
+	verified := false
+	if h.Email != nil {
+		var err error
+		verified, err = h.DB.EmailVerified(c.Request.Context(), user.ID)
+		if err != nil {
+			authError(c, 503, "authentication_unavailable", "Could not check email verification; retry")
+			return
+		}
+	}
+	c.JSON(http.StatusOK, struct {
+		*models.User
+		EmailVerified bool `json:"email_verified"`
+	}{user, verified})
 }
 
 // RefreshToken issues a new JWT token for an authenticated user.

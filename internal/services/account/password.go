@@ -31,7 +31,7 @@ const (
 )
 
 var (
-	ErrPasswordInvalid = errors.New("password must be 15 to 128 characters")
+	ErrPasswordInvalid = errors.New("password must be 12 to 128 characters")
 	ErrHashInvalid     = errors.New("password hash is invalid")
 )
 
@@ -78,7 +78,7 @@ func NormalizeNewPassword(password string) (string, error) {
 	}
 	normalized := norm.NFC.String(password)
 	count := utf8.RuneCountInString(normalized)
-	if count < 15 || count > 128 {
+	if count < 12 || count > 128 {
 		return "", ErrPasswordInvalid
 	}
 	return normalized, nil

@@ -601,16 +601,10 @@ func (db *DB) RefreshFirstPartySessionWithSuccessor(ctx context.Context, credent
 		if !now.Before(row.TokenExpiresAt) {
 			return nil, ErrSessionInvalid
 		}
-		if now.Sub(row.ConsumedAt.Time) <= duplicateRefreshGrace {
-			return nil, ErrSessionAlreadyRotated
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE auth_sessions SET revoked_at = $2 WHERE id = $1`, row.SessionID, now); err != nil {
-			return nil, fmt.Errorf("revoke replayed session: %w", err)
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("commit replay revocation: %w", err)
-		}
-		return nil, ErrSessionReplay
+		// An old token proves neither theft nor receipt of its response. Reject
+		// stale rotations without revoking the device; only the still-unconsumed
+		// successor can rotate, and an exact old/new pair can recover above.
+		return nil, ErrSessionAlreadyRotated
 	}
 	var pair AuthTokenPair
 	var accessHash, refreshHash string

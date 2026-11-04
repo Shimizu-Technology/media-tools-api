@@ -11,7 +11,9 @@ package handlers
 
 import (
 	"context"
+	emailservice "github.com/Shimizu-Technology/media-tools-api/internal/services/email"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +38,13 @@ type readinessChecker interface {
 // variables or service locators, we pass dependencies explicitly.
 // This makes testing easy — just create a Handler with mock dependencies.
 type Handler struct {
+	MonthlyMinutes              int
+	MonthlyAIRequests           int
+	OwnerUserID                 string
+	Email                       *emailservice.Service
+	Pwned                       *accountservice.PwnedChecker
+	PublicSignupEnabled         bool
+	lastAuthPurge               atomic.Int64
 	DB                          *database.DB
 	Worker                      *worker.Pool
 	AudioTranscriber            *audio.Transcriber             // MTA-16: Whisper API transcriber
@@ -118,5 +127,7 @@ func (h *Handler) healthResponse(status, databaseStatus string) models.HealthRes
 		Workers:                workers,
 		YtDlpCookiesConfigured: h.YtDlpCookiesConfigured,
 		PasswordAuthEnabled:    h.PasswordAuthEnabled,
+		SignupEnabled:          h.PublicSignupEnabled,
+		AuthCapabilities:       map[string]bool{"email_codes": h.PasswordAuthEnabled && h.Email != nil, "password_reset": h.PasswordAuthEnabled && h.Email != nil, "optional_passkeys": h.PasswordAuthEnabled && h.Email != nil},
 	}
 }

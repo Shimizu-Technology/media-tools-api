@@ -246,8 +246,8 @@ func (db *DB) OnboardingSecurityStatus(ctx context.Context, userID string) (pass
 }
 
 // CompleteOnboarding serializes with recovery rotation and rescue redemption
-// on the user row, then clears the durable requirement only when both factors
-// are committed and usable. Repeating a successful completion is safe.
+// on the user row. Verified email plus password completes setup; the shipped
+// passkey/recovery path remains usable during the client transition.
 func (db *DB) CompleteOnboarding(ctx context.Context, userID string) (bool, error) {
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -262,17 +262,19 @@ func (db *DB) CompleteOnboarding(ctx context.Context, userID string) (bool, erro
 		return false, fmt.Errorf("lock onboarding account: %w", err)
 	}
 	var status struct {
-		Passkeys      int `db:"passkeys"`
-		RecoveryCodes int `db:"recovery_codes"`
+		Passkeys      int  `db:"passkeys"`
+		RecoveryCodes int  `db:"recovery_codes"`
+		EmailPassword bool `db:"email_password"`
 	}
 	if err := tx.GetContext(ctx, &status, `
 		SELECT
 			(SELECT COUNT(*) FROM auth_passkey_credentials WHERE user_id = $1) AS passkeys,
 			(SELECT COUNT(*) FROM auth_recovery_codes
-			 WHERE user_id = $1 AND active AND consumed_at IS NULL) AS recovery_codes`, lockedID); err != nil {
+			 WHERE user_id = $1 AND active AND consumed_at IS NULL) AS recovery_codes,
+ EXISTS(SELECT 1 FROM users u JOIN auth_password_credentials p ON p.user_id=u.id WHERE u.id=$1 AND EXISTS(SELECT 1 FROM auth_verified_emails v WHERE v.user_id=u.id AND v.email=lower(normalize(btrim(u.email),NFC)))) AS email_password`, lockedID); err != nil {
 		return false, fmt.Errorf("verify onboarding security factors: %w", err)
 	}
-	if status.Passkeys == 0 || status.RecoveryCodes == 0 {
+	if !status.EmailPassword && (status.Passkeys == 0 || status.RecoveryCodes == 0) {
 		return false, nil
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET onboarding_required = FALSE WHERE id = $1`, lockedID); err != nil {

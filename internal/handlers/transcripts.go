@@ -102,6 +102,9 @@ func (h *Handler) CreateTranscript(c *gin.Context) {
 	}
 
 	if err := h.DB.CreateTranscript(c.Request.Context(), t); err != nil {
+		if quotaCreationError(c, err) {
+			return
+		}
 		log.Printf("❌ Failed to create transcript record: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "database_error",

@@ -90,11 +90,11 @@ func TestPasswordHasherRejectsMalformedOrOversizedPHC(t *testing.T) {
 }
 
 func TestNormalizeNewPassword(t *testing.T) {
-	if _, err := NormalizeNewPassword(strings.Repeat("a", 14)); err == nil {
-		t.Fatal("accepted 14 characters")
+	if _, err := NormalizeNewPassword(strings.Repeat("a", 11)); err == nil {
+		t.Fatal("accepted 11 characters")
 	}
-	if got, err := NormalizeNewPassword(strings.Repeat("a", 15)); err != nil || len(got) != 15 {
-		t.Fatalf("15 chars = %q, %v", got, err)
+	if got, err := NormalizeNewPassword(strings.Repeat("a", 12)); err != nil || len(got) != 12 {
+		t.Fatalf("12 chars = %q, %v", got, err)
 	}
 	if _, err := NormalizeNewPassword(strings.Repeat("a", 128)); err != nil {
 		t.Fatal(err)

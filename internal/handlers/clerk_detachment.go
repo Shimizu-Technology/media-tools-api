@@ -33,7 +33,7 @@ func (h *Handler) ClerkDetachmentStatus(c *gin.Context) {
 	if user == nil {
 		return
 	}
-	status, err := h.DB.GetClerkDetachmentReadiness(c.Request.Context(), user.ID, h.Passwords != nil)
+	status, err := h.DB.GetClerkDetachmentReadiness(c.Request.Context(), user.ID, h.PasswordAuthEnabled)
 	if err != nil {
 		log.Printf("check Clerk detachment for user %s: %v", user.ID, err)
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "authentication_unavailable", Message: "Could not check account security readiness.", Code: http.StatusServiceUnavailable})
@@ -51,7 +51,7 @@ func (h *Handler) DetachClerk(c *gin.Context) {
 	if user == nil {
 		return
 	}
-	status, err := h.DB.DetachClerkIdentity(c.Request.Context(), user.ID, h.Passwords != nil)
+	status, err := h.DB.DetachClerkIdentity(c.Request.Context(), user.ID, h.PasswordAuthEnabled)
 	if errors.Is(err, database.ErrClerkDetachmentNotReady) {
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusConflict, gin.H{

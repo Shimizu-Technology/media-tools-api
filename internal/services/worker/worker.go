@@ -43,6 +43,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
+	emailservice "github.com/Shimizu-Technology/media-tools-api/internal/services/email"
 	evidenceservice "github.com/Shimizu-Technology/media-tools-api/internal/services/evidence"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
@@ -160,6 +161,7 @@ type IdentityDeleter interface {
 
 // Pool manages a pool of worker goroutines.
 type Pool struct {
+	email                  *emailservice.Service
 	wake                   chan struct{}
 	workers                int
 	instanceID             string
@@ -954,6 +956,8 @@ func (p *Pool) dispatchJob(job Job) (err error) {
 		return p.processAudioSummary(job)
 	case JobAudioTranscriptFormat:
 		return p.processAudioTranscriptFormatting(job)
+	case JobType("auth_email"):
+		return p.processAuthEmail(job)
 	case JobAccountDeletion:
 		return p.processAccountDeletion(job)
 	default:
@@ -983,6 +987,9 @@ func (p *Pool) processTranscript(job Job) error {
 		return fmt.Errorf("failed to update status: %w", err)
 	}
 
+	ctx = transcript.WithDurationGuard(ctx, func(seconds float64) error {
+		return p.db.ReserveTranscriptionDuration(ctx, t.UserID, t.APIKeyID, t.ID, seconds)
+	})
 	// Extract the transcript (supports YouTube, Vimeo, and other yt-dlp sites)
 	result, err := p.extractor.ExtractFromURL(ctx, t.YouTubeURL, t.YouTubeID)
 	if err != nil {
@@ -998,6 +1005,12 @@ func (p *Pool) processTranscript(job Job) error {
 
 	t.Title = result.Title
 	t.ChannelName = result.ChannelName
+	if err := p.db.ReserveTranscriptionDuration(ctx, t.UserID, t.APIKeyID, t.ID, float64(result.Duration)); err != nil {
+		t.Status = models.StatusFailed
+		t.ErrorMessage = "Monthly transcription limit reached or duration unavailable"
+		_ = p.db.UpdateTranscript(ctx, t)
+		return err
+	}
 	t.Duration = result.Duration
 	t.Language = result.Language
 	t.TranscriptText = result.Transcript
@@ -1353,6 +1366,12 @@ func (p *Pool) processAudioTranscription(job Job) error {
 		log.Printf("⏱️  Audio job %s source duration: %.1fs", at.ID, sourceDuration)
 	}
 
+	if err := p.db.ReserveTranscriptionDuration(ctx, at.UserID, at.APIKeyID, at.ID, sourceDuration); err != nil {
+		if saveErr := p.persistAudioFailure(ctx, at, "monthly_transcription_cap", "Monthly transcription limit reached or duration unavailable"); saveErr != nil {
+			return saveErr
+		}
+		return err
+	}
 	var transcriptionParts []string
 	chunkSeconds := 0
 	// If duration probing fails, prefer safe chunking. Splitting a short file into

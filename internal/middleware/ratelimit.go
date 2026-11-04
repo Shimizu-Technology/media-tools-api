@@ -13,7 +13,6 @@ package middleware
 import (
 	"fmt"
 	"math"
-	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -141,10 +140,7 @@ func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 // header cannot give an attacker unlimited fresh buckets.
 func (rl *RateLimiter) RateLimitUnauthenticated(scope string, limit int) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		peer, _, err := net.SplitHostPort(c.Request.RemoteAddr)
-		if err != nil {
-			peer = c.Request.RemoteAddr
-		}
+		peer := AuthClientIP(c)
 		result := rl.allow("public-auth:"+scope+":"+peer, limit)
 		if !result.allowed {
 			c.Header("Retry-After", strconv.Itoa(max(1, int(math.Ceil(result.retryAfter.Seconds())))))

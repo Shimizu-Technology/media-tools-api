@@ -17,6 +17,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/router"
 	accountservice "github.com/Shimizu-Technology/media-tools-api/internal/services/account"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
+	emailservice "github.com/Shimizu-Technology/media-tools-api/internal/services/email"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/transcript"
@@ -155,6 +156,10 @@ func main() {
 	}
 
 	// Step 4: Create and Start Worker Pool
+	email, err := emailservice.New(cfg.EmailDelivery, cfg.ResendAPIKey, cfg.ResendFromEmail, cfg.JWTSecret)
+	if err != nil {
+		log.Fatal("invalid email delivery configuration")
+	}
 	wp := worker.NewPool(cfg.WorkerCount, cfg.JobQueueSize, db, extractor, summarizer)
 	wp.SetWebhookService(webhookService)     // MTA-18: wire webhooks into worker for job notifications
 	wp.SetAudioTranscriber(audioTranscriber) // Wire audio transcriber for async Whisper jobs
@@ -164,12 +169,16 @@ func main() {
 		wp.SetIdentityDeleter(clerkClient)
 	}
 	wp.SetTranscriptionConcurrency(cfg.WhisperChunkConcurrency, cfg.WhisperGlobalConcurrency)
+	wp.SetEmailService(email)
 	wp.Start()
 
 	recoveryCtx, stopRecovery := context.WithCancel(context.Background())
 	recoveryDone := make(chan struct{})
 	go func() {
 		defer close(recoveryDone)
+		if err := db.PurgeAuth(recoveryCtx); err != nil {
+			log.Print("Auth token cleanup deferred until next auth request")
+		}
 		// Recovery repairs any legacy/interrupted resource that is missing its
 		// durable queue row. It runs behind server startup so a backlog cannot
 		// delay health checks, and shutdown cancellation stops every database
@@ -235,33 +244,39 @@ func main() {
 
 	// Step 5: Setup HTTP Router
 	r := router.Setup(router.RouterConfig{
-		Version:                       Version,
-		DB:                            db,
-		WorkerPool:                    wp,
-		AudioTranscriber:              audioTranscriber,
-		AudioStorage:                  audioStorage,
-		Webhooks:                      webhookService,
-		Summarizer:                    summarizer,
-		JWTSecret:                     cfg.JWTSecret,
-		LegacyAuthEnabled:             cfg.LegacyAuthEnabled,
-		FirstPartyAuthEnabled:         cfg.FirstPartyAuthEnabled,
-		FirstPartyPasswordAuthEnabled: cfg.FirstPartyPasswordAuthEnabled,
-		WebCookieAuthEnabled:          cfg.WebCookieAuthEnabled,
-		WebCookieSecure:               cfg.GinMode == "release",
-		AdminAPIKey:                   cfg.AdminAPIKey,
-		OwnerKeyID:                    cfg.OwnerAPIKeyID,
-		OwnerKeyPrefix:                cfg.OwnerAPIKeyPrefix,
-		ClerkJWKSURL:                  cfg.ClerkJWKSURL,
-		ClerkSecretKey:                cfg.ClerkSecretKey,
-		ClerkIssuer:                   cfg.ClerkIssuer,
-		ClerkAudience:                 cfg.ClerkAudience,
-		ClerkAuthorizedParty:          cfg.ClerkAuthorizedParty,
-		ClerkMigrationOnly:            cfg.ClerkMigrationOnly,
-		ClerkAccountDeletionEnabled:   clerkClient.IsConfigured(),
-		AllowedOrigins:                cfg.AllowedOrigins,
-		DefaultRateLimit:              cfg.DefaultRateLimit,
-		DefaultBrowserReadRateLimit:   cfg.DefaultBrowserReadRateLimit,
-		YtDlpCookiesConfigured:        ytDlpCookiesConfigured,
+		Version:                            Version,
+		Email:                              email,
+		PublicSignupEnabled:                cfg.PublicSignupEnabled,
+		TrustedProxyCIDRs:                  cfg.TrustedProxyCIDRs,
+		DefaultMonthlyTranscriptionMinutes: cfg.DefaultMonthlyTranscriptionMinutes,
+		DefaultMonthlyAIRequests:           cfg.DefaultMonthlyAIRequests,
+		OwnerUserID:                        cfg.OwnerUserID,
+		DB:                                 db,
+		WorkerPool:                         wp,
+		AudioTranscriber:                   audioTranscriber,
+		AudioStorage:                       audioStorage,
+		Webhooks:                           webhookService,
+		Summarizer:                         summarizer,
+		JWTSecret:                          cfg.JWTSecret,
+		LegacyAuthEnabled:                  cfg.LegacyAuthEnabled,
+		FirstPartyAuthEnabled:              cfg.FirstPartyAuthEnabled,
+		FirstPartyPasswordAuthEnabled:      cfg.FirstPartyPasswordAuthEnabled,
+		WebCookieAuthEnabled:               cfg.WebCookieAuthEnabled,
+		WebCookieSecure:                    cfg.GinMode == "release",
+		AdminAPIKey:                        cfg.AdminAPIKey,
+		OwnerKeyID:                         cfg.OwnerAPIKeyID,
+		OwnerKeyPrefix:                     cfg.OwnerAPIKeyPrefix,
+		ClerkJWKSURL:                       cfg.ClerkJWKSURL,
+		ClerkSecretKey:                     cfg.ClerkSecretKey,
+		ClerkIssuer:                        cfg.ClerkIssuer,
+		ClerkAudience:                      cfg.ClerkAudience,
+		ClerkAuthorizedParty:               cfg.ClerkAuthorizedParty,
+		ClerkMigrationOnly:                 cfg.ClerkMigrationOnly,
+		ClerkAccountDeletionEnabled:        clerkClient.IsConfigured(),
+		AllowedOrigins:                     cfg.AllowedOrigins,
+		DefaultRateLimit:                   cfg.DefaultRateLimit,
+		DefaultBrowserReadRateLimit:        cfg.DefaultBrowserReadRateLimit,
+		YtDlpCookiesConfigured:             ytDlpCookiesConfigured,
 	})
 
 	// Step 6: Start the HTTP Server

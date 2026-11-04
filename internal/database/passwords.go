@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"strings"
 	"time"
 
@@ -14,7 +15,6 @@ import (
 const (
 	passwordFailureWindow = 15 * time.Minute
 	passwordFailureLimit  = 10
-	passwordLockDuration  = 15 * time.Minute
 )
 
 var (
@@ -24,6 +24,7 @@ var (
 )
 
 type PasswordCredential struct {
+	CreatedAt              time.Time  `db:"created_at"`
 	UserID                 string     `db:"user_id"`
 	EmailNormalized        string     `db:"email_normalized"`
 	PasswordHash           string     `db:"password_hash"`
@@ -90,11 +91,6 @@ func (db *DB) RecordPasswordFailure(ctx context.Context, userID, hashSnapshot st
 	if err != nil {
 		return fmt.Errorf("lock password failure: %w", err)
 	}
-	if row.LockedUntil != nil && now.Before(*row.LockedUntil) {
-		// Do not let a caller keep extending an active lock indefinitely. The
-		// handler has already performed uniform-cost password verification.
-		return nil
-	}
 	attempts := row.FailedAttempts + 1
 	window := now
 	if row.FailureWindowStartedAt != nil && now.Sub(*row.FailureWindowStartedAt) < passwordFailureWindow {
@@ -103,9 +99,7 @@ func (db *DB) RecordPasswordFailure(ctx context.Context, userID, hashSnapshot st
 		attempts = 1
 	}
 	var lockedUntil any
-	if attempts >= passwordFailureLimit {
-		lockedUntil = now.Add(passwordLockDuration)
-	}
+	// Retain schema compatibility, but never create an account-wide lock.
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE auth_password_credentials
 		SET failed_attempts = $2, failure_window_started_at = $3,
@@ -169,9 +163,8 @@ func (db *DB) createOrRecoverPasswordSession(ctx context.Context, userID, hashSn
 	if row.PasswordHash != hashSnapshot {
 		return nil, ErrPasswordCredentialChanged
 	}
-	if row.LockedUntil != nil && now.Before(*row.LockedUntil) {
-		return nil, ErrPasswordCredentialLocked
-	}
+	// Failed guesses are telemetry only. A verified password must remain usable
+	// even when an attacker has filled the failure window for this account.
 	if replacementHash != "" {
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE auth_password_credentials SET password_hash = $2, updated_at = $3
@@ -204,10 +197,15 @@ func (db *DB) createOrRecoverPasswordSession(ctx context.Context, userID, hashSn
 	return pair, nil
 }
 
-// SetPasswordCredential trusts the same first-party session boundary already
-// used to add passkeys and rotate recovery codes. Replacing a password revokes
-// every other device so a compromised old session cannot survive the change.
-func (db *DB) SetPasswordCredential(ctx context.Context, userID, currentSessionID, encodedHash string) (*PasswordStatus, error) {
+// SetPasswordCredential serializes credential replacement with login and email
+// proof. HTTP callers supply the reauthenticated snapshot; replacing a password
+// revokes every other device and invalidates pending email proofs.
+type PasswordChange struct {
+	Snapshot string
+	Notice   string
+}
+
+func (db *DB) SetPasswordCredential(ctx context.Context, userID, currentSessionID, encodedHash string, change ...PasswordChange) (*PasswordStatus, error) {
 	if userID == "" || currentSessionID == "" || encodedHash == "" {
 		return nil, ErrPasswordCredentialInvalid
 	}
@@ -235,6 +233,21 @@ func (db *DB) SetPasswordCredential(ctx context.Context, userID, currentSessionI
 	var existed bool
 	if err := tx.GetContext(ctx, &existed, `SELECT EXISTS (SELECT 1 FROM auth_password_credentials WHERE user_id = $1)`, userID); err != nil {
 		return nil, fmt.Errorf("check password credential: %w", err)
+	}
+	if len(change) > 0 {
+		var current string
+		err := tx.GetContext(ctx, &current, `SELECT password_hash FROM auth_password_credentials WHERE user_id=$1`, userID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		if current != change[0].Snapshot {
+			return nil, ErrPasswordCredentialChanged
+		}
+		if change[0].Notice != "" {
+			if err := queueAuthEmailTx(ctx, tx, uuid.NewString(), nil, &userID, change[0].Notice, now.Add(24*time.Hour)); err != nil {
+				return nil, err
+			}
+		}
 	}
 	normalizedEmail := NormalizeLoginEmail(email)
 	if normalizedEmail == "" {
@@ -264,6 +277,15 @@ func (db *DB) SetPasswordCredential(ctx context.Context, userID, currentSessionI
 			WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`, userID, currentSessionID, now); err != nil {
 			return nil, fmt.Errorf("revoke other password sessions: %w", err)
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE auth_email_challenges SET consumed_at=NOW() WHERE user_id=$1 AND consumed_at IS NULL`, userID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET onboarding_required=FALSE WHERE id=$1 AND EXISTS(SELECT 1 FROM auth_verified_emails v WHERE v.user_id=$1 AND v.email=lower(normalize(btrim(users.email),NFC)))`, userID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO auth_events(user_id,event) VALUES($1,'password_changed')`, userID); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit set password: %w", err)

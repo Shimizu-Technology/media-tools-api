@@ -355,6 +355,13 @@ components:
     HealthResponse:
       type: object
       properties:
+        signup_enabled: {type: boolean, description: Whether public signup is enabled}
+        auth_capabilities:
+          type: object
+          properties:
+            email_codes: {type: boolean}
+            password_reset: {type: boolean}
+            optional_passkeys: {type: boolean}
         status:
           type: string
           example: "ok"
@@ -405,6 +412,322 @@ paths:
         "200": {description: Updated preferences}
         "400": {description: Missing or invalid boolean}
         "503": {description: Database unavailable}
+
+  /auth/signup:
+    post:
+      tags: [Authentication]
+      summary: Start signup (also resend); generic accepted response
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                  maxLength: 128
+                  minLength: 12
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Proof accepted; sign in again after signup, reset or email change.
+        '202':
+          description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
+        '400':
+          description: invalid_request, weak_password, password_compromised, or invalid_code (ErrorResponse shape).
+        '401':
+          description: current_password_required or invalid session.
+        '403':
+          description: signup_disabled or csrf_invalid.
+        '429':
+          description: rate_limit_exceeded; honor Retry-After.
+        '503':
+          description: authentication_unavailable; retry.
+
+  /auth/signup/verify:
+    post:
+      tags: [Authentication]
+      summary: Verify signup; completes email/password onboarding
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email:
+                  type: string
+                  format: email
+                code:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+      responses:
+        '200':
+          description: Proof accepted; sign in again after signup, reset or email change.
+        '202':
+          description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
+        '400':
+          description: invalid_request, weak_password, password_compromised, or invalid_code (ErrorResponse shape).
+        '401':
+          description: current_password_required or invalid session.
+        '403':
+          description: signup_disabled or csrf_invalid.
+        '429':
+          description: rate_limit_exceeded; honor Retry-After.
+        '503':
+          description: authentication_unavailable; retry.
+
+  /auth/password/forgot:
+    post:
+      tags: [Authentication]
+      summary: Request a reset, including a passwordless linked account
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Proof accepted; sign in again after signup, reset or email change.
+        '202':
+          description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
+        '400':
+          description: invalid_request, weak_password, password_compromised, or invalid_code (ErrorResponse shape).
+        '401':
+          description: current_password_required or invalid session.
+        '403':
+          description: signup_disabled or csrf_invalid.
+        '429':
+          description: rate_limit_exceeded; honor Retry-After.
+        '503':
+          description: authentication_unavailable; retry.
+
+  /auth/password/reset:
+    post:
+      tags: [Authentication]
+      summary: Prove email, replace password and revoke all sessions
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                code:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+                password:
+                  type: string
+                  format: password
+                  maxLength: 128
+                  minLength: 12
+      responses:
+        '200':
+          description: Proof accepted; sign in again after signup, reset or email change.
+        '202':
+          description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
+        '400':
+          description: invalid_request, weak_password, password_compromised, or invalid_code (ErrorResponse shape).
+        '401':
+          description: current_password_required or invalid session.
+        '403':
+          description: signup_disabled or csrf_invalid.
+        '429':
+          description: rate_limit_exceeded; honor Retry-After.
+        '503':
+          description: authentication_unavailable; retry.
+
+  /auth/email/change:
+    post:
+      tags: [Authentication]
+      summary: Reauthenticate and send proof to the new email
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, current_password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                current_password:
+                  type: string
+                  format: password
+                  maxLength: 128
+      responses:
+        '200':
+          description: Proof accepted; sign in again after signup, reset or email change.
+        '202':
+          description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
+        '400':
+          description: invalid_request, weak_password, password_compromised, or invalid_code (ErrorResponse shape).
+        '401':
+          description: current_password_required or invalid session.
+        '403':
+          description: signup_disabled or csrf_invalid.
+        '429':
+          description: rate_limit_exceeded; honor Retry-After.
+        '503':
+          description: authentication_unavailable; retry.
+
+  /auth/email/change/verify:
+    post:
+      tags: [Authentication]
+      summary: Prove new email and revoke all sessions
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email:
+                  type: string
+                  format: email
+                code:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+      responses:
+        '200':
+          description: Proof accepted; sign in again after signup, reset or email change.
+        '202':
+          description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
+        '400':
+          description: invalid_request, weak_password, password_compromised, or invalid_code (ErrorResponse shape).
+        '401':
+          description: current_password_required or invalid session.
+        '403':
+          description: signup_disabled or csrf_invalid.
+        '429':
+          description: rate_limit_exceeded; honor Retry-After.
+        '503':
+          description: authentication_unavailable; retry.
+
+  /auth/email/verify:
+    post:
+      tags: [Authentication]
+      summary: Request proof for the signed-in account email
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Proof accepted; sign in again after signup, reset or email change.
+        '202':
+          description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
+        '400':
+          description: invalid_request, weak_password, password_compromised, or invalid_code (ErrorResponse shape).
+        '401':
+          description: current_password_required or invalid session.
+        '403':
+          description: signup_disabled or csrf_invalid.
+        '429':
+          description: rate_limit_exceeded; honor Retry-After.
+        '503':
+          description: authentication_unavailable; retry.
+
+  /auth/email/verify/confirm:
+    post:
+      tags: [Authentication]
+      summary: Verify the signed-in account email
+      description: See docs/AUTH_API.md. Codes expire after ten minutes with five attempts. Initiation responses never disclose whether an email exists.
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email:
+                  type: string
+                  format: email
+                code:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+      responses:
+        '200':
+          description: Proof accepted; sign in again after signup, reset or email change.
+        '202':
+          description: If eligible, an email is durably queued. Same response for unknown, existing, and throttled emails.
+        '400':
+          description: invalid_request, weak_password, password_compromised, or invalid_code (ErrorResponse shape).
+        '401':
+          description: current_password_required or invalid session.
+        '403':
+          description: signup_disabled or csrf_invalid.
+        '429':
+          description: rate_limit_exceeded; honor Retry-After.
+        '503':
+          description: authentication_unavailable; retry.
+
+  /auth/usage:
+    get:
+      tags: [Authentication]
+      summary: UTC monthly account usage and limits
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: Account usage includes reserved transcription time, separate summary/chat requests and owner exemption.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  month: {type: string, format: date-time}
+                  transcription_seconds: {type: integer}
+                  transcription_limit_seconds: {type: integer}
+                  ai_requests: {type: integer}
+                  ai_request_limit: {type: integer}
+                  exempt: {type: boolean}
+        '401':
+          description: Sign-in required.
+        '503':
+          description: usage_unavailable (ErrorResponse shape).
 
   /health:
     get:
@@ -1385,7 +1708,7 @@ paths:
       tags: [Authentication]
       summary: Create or replace the signed-in account password
       security: [{BearerAuth: []}]
-      description: Replacing a password revokes every other device session.
+      description: Requires current_password when a password exists. Replacing a password revokes every other device session and queues a notice.
       requestBody:
         required: true
         content:
@@ -1394,10 +1717,13 @@ paths:
               type: object
               required: [password]
               properties:
-                password: {type: string, minLength: 15, maxLength: 128}
+                password: {type: string, minLength: 12, maxLength: 128}
+                current_password: {type: string, format: password, description: Required for replacement, optional for first enrollment}
       responses:
         "200": {description: Password saved}
-        "400": {description: Password does not meet policy}
+        "400": {description: weak_password or password_compromised}
+        "401": {description: current_password_required}
+        "409": {description: credential_changed}
   /auth/web/session/password/prepare:
     post:
       tags: [Authentication]
@@ -1603,7 +1929,7 @@ paths:
       security: []
       parameters:
         - {name: X-CSRF-Token, in: header, required: true, schema: {type: string}}
-      description: Locks the account row, verifies at least one passkey and one active unused recovery code, and clears the server-persisted requirement transactionally. Repeating a completed request is safe.
+      description: Locks the account row, verifies email plus password or the shipped passkey plus recovery-code path, and clears the server-persisted requirement transactionally. Repeating a completed request is safe.
       responses:
         "204": {description: Guided setup completed}
         "401": {description: Browser session is missing or expired}
@@ -1631,6 +1957,7 @@ paths:
                 confirmation:
                   type: string
                   enum: [DELETE]
+                current_password: {type: string, format: password, description: Required if the account has a password}
                 deletion_receipt_token:
                   type: string
                   description: Optional unguessable client receipt used to confirm a committed deletion after a lost response

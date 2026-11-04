@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
 
 	accountservice "github.com/Shimizu-Technology/media-tools-api/internal/services/account"
 	"github.com/google/uuid"
@@ -81,7 +80,7 @@ func TestPasswordCredentialIssuesRecoverableSessionAndReplacementRevokesOtherDev
 	}
 }
 
-func TestPasswordFailuresLockExactCredential(t *testing.T) {
+func TestPasswordFailuresCannotLockCorrectCredential(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
 	ctx := context.Background()
 	userID := createPasswordTestUser(t, db)
@@ -100,23 +99,17 @@ func TestPasswordFailuresLockExactCredential(t *testing.T) {
 		}
 	}
 	successor, _ := RandomFirstPartyRefreshToken()
-	if _, err := db.CreateOrRecoverPasswordSession(ctx, userID, hash, "", "web", "Browser", successor); !errors.Is(err, ErrPasswordCredentialLocked) {
-		t.Fatalf("locked credential login = %v", err)
+	if _, err := db.CreateOrRecoverPasswordSession(ctx, userID, hash, "", "web", "Browser", successor); err != nil {
+		t.Fatalf("verified password blocked by attacker failures: %v", err)
 	}
-	var firstDeadline time.Time
-	if err := db.GetContext(ctx, &firstDeadline, `SELECT locked_until FROM auth_password_credentials WHERE user_id = $1`, userID); err != nil {
+	var failures int
+	if err := db.GetContext(ctx, &failures, `SELECT failed_attempts FROM auth_password_credentials WHERE user_id=$1`, userID); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.RecordPasswordFailure(ctx, userID, hash); err != nil {
-		t.Fatal(err)
+	if failures != 0 {
+		t.Fatal("successful sign-in did not clear failures")
 	}
-	var secondDeadline time.Time
-	if err := db.GetContext(ctx, &secondDeadline, `SELECT locked_until FROM auth_password_credentials WHERE user_id = $1`, userID); err != nil {
-		t.Fatal(err)
-	}
-	if !secondDeadline.Equal(firstDeadline) {
-		t.Fatalf("active lock moved from %s to %s", firstDeadline, secondDeadline)
-	}
+
 }
 
 func TestPasswordLoginAndReplacementUseCompatibleLockOrder(t *testing.T) {
