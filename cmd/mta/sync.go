@@ -278,7 +278,16 @@ func runSync(args []string, stdout, stderr io.Writer) error {
 		content := []byte(renderItemMarkdown(detail, true))
 		path, found := existing[summary.Ref]
 		if !found {
-			path = filepath.Join(*dir, slugify(detail.Title)+"-"+ref.id[:8]+".md")
+			// The full type and id keep two items from sharing a path. A file already
+			// here is someone else's note, because ours would have matched by frontmatter.
+			path = filepath.Join(*dir, slugify(detail.Title)+"-"+ref.kind.name+"-"+ref.id+".md")
+			if _, statErr := os.Stat(path); statErr == nil {
+				entry.Path = path
+				entry.Action, entry.Error = "failed", "a different note already exists at this path"
+				result.Failed++
+				result.Entries = append(result.Entries, entry)
+				continue
+			}
 		}
 		entry.Path = path
 		if previous, readErr := os.ReadFile(path); readErr == nil && string(previous) == string(content) {

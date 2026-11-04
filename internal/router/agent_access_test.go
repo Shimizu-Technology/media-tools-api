@@ -133,7 +133,8 @@ func TestEachScopeUnlocksOnlyItsOwnRoutes(t *testing.T) {
 		}
 	}
 	for route := range reachable(models.ScopeLibraryWrite) {
-		if strings.HasPrefix(route, "GET ") {
+		// Reading a batch refreshes its stored counts, so it is deliberately a write.
+		if strings.HasPrefix(route, "GET ") && route != "GET /api/v1/batches/:id" {
 			t.Errorf("library:write reaches read route %s", route)
 		}
 		if strings.HasPrefix(route, "DELETE ") && !strings.Contains(route, "/items/:itemId") {

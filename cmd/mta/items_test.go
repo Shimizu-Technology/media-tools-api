@@ -411,7 +411,7 @@ func TestSyncWritesIdempotentNotesAndUpdatesInPlace(t *testing.T) {
 			t.Fatalf("note is missing %q:\n%s", want, text)
 		}
 	}
-	if strings.HasSuffix(filepath.Base(path), audioID[:8]+".md") == false {
+	if strings.HasSuffix(filepath.Base(path), "audio-"+audioID+".md") == false {
 		t.Fatalf("note name = %s", filepath.Base(path))
 	}
 
@@ -464,5 +464,27 @@ func TestSlugifyAndFrontmatterParsing(t *testing.T) {
 	notes, err := indexNotes(dir)
 	if err != nil || len(notes) != 1 || notes["audio:"+audioID] == "" {
 		t.Fatalf("index = %v, %v", notes, err)
+	}
+}
+
+func TestSyncRefusesToOverwriteAnUnrelatedNote(t *testing.T) {
+	setupFake(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "voice-memo-12-audio-"+audioID+".md")
+	if err := os.WriteFile(path, []byte("my own note"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, _, _ := runCLI(t, runSync, "--dir", dir, "--collection", "Brain Dump", "--output", "json")
+	var result syncResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Failed != 1 || result.Entries[0].Action != "failed" {
+		t.Fatalf("expected a refusal, got %#v", result)
+	}
+	note, _ := os.ReadFile(path)
+	if string(note) != "my own note" {
+		t.Fatalf("unrelated note was overwritten: %q", note)
 	}
 }

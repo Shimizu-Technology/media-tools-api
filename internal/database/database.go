@@ -365,6 +365,32 @@ func (db *DB) GetSummariesByTranscript(ctx context.Context, transcriptID string)
 
 // --- Chat Operations (MTA-27) ---
 
+// FindChatSession returns the existing session or nil, and never writes. Read-only
+// credentials use this so looking at chat history cannot change the account.
+func (db *DB) FindChatSession(ctx context.Context, itemType, itemID string, userID, apiKeyID *string) (*models.TranscriptChatSession, error) {
+	var session models.TranscriptChatSession
+	var ownerClause string
+	var ownerArg string
+	if apiKeyID != nil {
+		ownerClause = "api_key_id = $3 AND user_id IS NULL"
+		ownerArg = *apiKeyID
+	} else if userID != nil {
+		ownerClause = "user_id = $3 AND api_key_id IS NULL"
+		ownerArg = *userID
+	} else {
+		return nil, fmt.Errorf("chat session owner is required")
+	}
+	query := fmt.Sprintf(`SELECT * FROM transcript_chat_sessions WHERE item_type = $1 AND item_id = $2 AND %s LIMIT 1`, ownerClause)
+	err := db.GetContext(ctx, &session, query, itemType, itemID, ownerArg)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch chat session: %w", err)
+	}
+	return &session, nil
+}
+
 // GetOrCreateChatSession finds or creates a chat session for an item.
 func (db *DB) GetOrCreateChatSession(ctx context.Context, itemType, itemID string, userID, apiKeyID *string) (*models.TranscriptChatSession, error) {
 	var session models.TranscriptChatSession

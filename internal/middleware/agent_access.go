@@ -41,7 +41,6 @@ var scopedKeyRules = []scopeRule{
 	rule("GET", "/api/v1/transcripts/:id/summaries", models.ScopeLibraryRead),
 	rule("GET", "/api/v1/transcripts/:id/chat", models.ScopeLibraryRead),
 	rule("GET", "/api/v1/transcripts/:id/export", models.ScopeLibraryRead),
-	rule("GET", "/api/v1/batches/:id", models.ScopeLibraryRead),
 	rule("GET", "/api/v1/audio/transcriptions", models.ScopeLibraryRead),
 	rule("GET", "/api/v1/audio/transcriptions/search", models.ScopeLibraryRead),
 	rule("GET", "/api/v1/audio/transcriptions/:id", models.ScopeLibraryRead),
@@ -60,6 +59,8 @@ var scopedKeyRules = []scopeRule{
 	rule("GET", "/api/v1/library/items/:type/:id/segments", models.ScopeLibraryRead),
 
 	// library:write: create, change, retry, summarize, and chat.
+	// Reading a batch refreshes its stored counts, so it needs write access.
+	rule("GET", "/api/v1/batches/:id", models.ScopeLibraryWrite),
 	rule("POST", "/api/v1/transcripts", models.ScopeLibraryWrite),
 	rule("POST", "/api/v1/transcripts/batch", models.ScopeLibraryWrite),
 	rule("POST", "/api/v1/transcripts/:id/chat", models.ScopeLibraryWrite),

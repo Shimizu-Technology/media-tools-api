@@ -313,6 +313,7 @@ func (h *Handler) CreateSummary(c *gin.Context) {
 		log.Printf("Summary %s queued durably; payload refresh failed and recovery was signaled: %v", summaryRecord.ID, err)
 	}
 
+	middleware.SetActivityItem(c, "transcript", req.TranscriptID)
 	c.JSON(http.StatusAccepted, gin.H{
 		"message":       "Summary generation started",
 		"summary_id":    summaryRecord.ID,
