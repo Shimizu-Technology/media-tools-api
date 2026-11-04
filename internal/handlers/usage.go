@@ -104,6 +104,7 @@ func (h *Handler) UsageGuard() gin.HandlerFunc {
 				if database.IsUsageCap(err) {
 					authError(c, 402, "monthly_ai_cap", "Monthly summary and chat limit reached; try again next month")
 				} else {
+					log.Printf("AI usage reservation failed: %v", err)
 					authError(c, 503, "usage_unavailable", "Could not check account usage; retry")
 				}
 				c.Abort()
