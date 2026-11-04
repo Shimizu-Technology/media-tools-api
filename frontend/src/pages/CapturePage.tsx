@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { Link, useBlocker, useNavigate, useSearchParams } from 'react-router-dom';
-import { FileUp, Link2, Mic, Play, Trash2, Upload } from 'lucide-react';
+import { Download, FileUp, Link2, Mic, Play, Trash2, Upload } from 'lucide-react';
 import { getErrorMessage } from '../lib/api';
+import { downloadBlob } from '../lib/download';
+import { hasUnsavedRecording, holdRecording, releaseRecording, type HeldRecording } from '../lib/heldRecordings';
 import { itemDetailPath } from '../lib/library';
 import { formatClock, formatItemDate } from '../lib/format';
-import { addPDF, addVideoLink, classifyFile, looksLikeURL, recordingFileName, uploadAudio } from '../lib/mediaUpload';
+import { addPDF, addVideoLink, classifyFile, isAbortError, looksLikeURL, recordingFileName, uploadAudio } from '../lib/mediaUpload';
+import { createOperationSlot } from '../lib/operation';
 import { deleteRecordingDraft, listRecordingDrafts, recoverInterruptedRecordings, type PendingRecording } from '../lib/recordingStore';
-import { recorderSupported, useRecorder, type RecorderResult } from '../hooks/useRecorder';
+import { recorderSupported, useRecorder } from '../hooks/useRecorder';
 import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
 import { RecorderScreen } from '../components/capture/RecorderScreen';
 import { Button } from '../components/ui/Button';
@@ -31,7 +34,7 @@ export function CapturePage() {
   const [upload, setUpload] = useState<Upload | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [review, setReview] = useState<RecorderResult | null>(null);
+  const [held, setHeld] = useState<HeldRecording[]>([]);
   const [link, setLink] = useState('');
   const [dragging, setDragging] = useState(false);
   const [legacyJob, setLegacyJob] = useState<string | null>(() => {
@@ -41,8 +44,23 @@ export function CapturePage() {
   const linkRef = useRef<HTMLInputElement>(null);
   const busyRef = useRef(false);
   const autoStartRef = useRef(false);
+  const [operations] = useState(createOperationSlot);
   const busy = recorder.active || upload !== null;
   useEffect(() => { busyRef.current = busy; }, [busy]);
+  // A recording the browser could not store exists only on this page.
+  const unsaved = hasUnsavedRecording(held);
+  const unsavedRef = useRef(false);
+  useEffect(() => { unsavedRef.current = unsaved; }, [unsaved]);
+
+  // One upload at a time. Leaving the page aborts the request and makes every
+  // callback it queued a no-op, so a finished upload cannot steer navigation
+  // the person has already chosen.
+  const beginOperation = operations.begin;
+  const cancelOperation = operations.cancel;
+  useEffect(() => cancelOperation, [cancelOperation]);
+
+  const hold = (entry: HeldRecording) => setHeld((list) => holdRecording(list, entry));
+  const release = (id: string) => setHeld((list) => releaseRecording(list, id));
 
   const refreshDrafts = useCallback(async () => {
     try { setDrafts(await listRecordingDrafts()); } catch { /* Storage blocked: nothing to show. */ }
@@ -67,15 +85,17 @@ export function CapturePage() {
     if (source === 'link') linkRef.current?.focus();
   }, [params]);
 
-  // Hold navigation while recording or uploading. Leaving after confirming
-  // stops the microphone; the recording stays on this device as a draft.
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => busyRef.current && currentLocation.pathname !== nextLocation.pathname);
+  // Hold navigation while recording, uploading, or keeping a recording that
+  // exists only on this page. Leaving after confirming stops the microphone and
+  // cancels the upload; a recording stored on this device stays there as a draft.
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => (busyRef.current || unsavedRef.current) && currentLocation.pathname !== nextLocation.pathname);
+  const guarded = busy || unsaved;
   useEffect(() => {
-    if (!busy) return;
+    if (!guarded) return;
     const onBeforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [busy]);
+  }, [guarded]);
 
   const finishedOn = (path: string) => {
     busyRef.current = false;
@@ -83,28 +103,43 @@ export function CapturePage() {
     navigate(path, { replace: true });
   };
 
-  const uploadDraft = async (draft: PendingRecording) => {
+  const uploadDraft = async (draft: PendingRecording, context: { savedOnDevice: boolean; warning?: string } = { savedOnDevice: true }) => {
     setError('');
     setNotice('');
-    setReview(null);
+    // In memory first: nothing below may be the only place the audio lives.
+    hold({ recording: draft, warning: context.warning ?? '', savedOnDevice: context.savedOnDevice });
+    const operation = beginOperation();
     if (!(await requestConsent())) {
-      setNotice('Saved on this device. Upload it when you are ready to transcribe it.');
-      await refreshDrafts();
+      if (!operation.live()) return;
+      setNotice(context.savedOnDevice
+        ? 'Saved on this device. Upload it when you are ready to transcribe it.'
+        : 'Not uploaded yet. Download a copy or upload it when you are ready; it is only on this page.');
       return;
     }
+    if (!operation.live()) return;
     busyRef.current = true;
     setUpload({ label: 'Uploading your recording', progress: 0 });
     try {
       const file = new File([draft.blob], recordingFileName(draft.mimeType, draft.createdAt), { type: draft.blob.type || draft.mimeType });
-      const transcription = await uploadAudio(file, (percent) => setUpload((current) => current && { ...current, progress: percent < 0 ? null : percent }));
+      const transcription = await uploadAudio(file, (percent) => { if (operation.live()) setUpload((current) => current && { ...current, progress: percent < 0 ? null : percent }); }, operation.signal);
+      // The server has it: the copy on this device is no longer needed, even if the person already left.
       await deleteRecordingDraft(draft.id).catch(() => undefined);
+      if (!operation.live()) return;
+      release(draft.id);
       finishedOn(itemDetailPath('audio', transcription.id));
     } catch (err) {
+      // Left on purpose: keep the draft exactly as it was and say nothing.
+      if (!operation.live() || isAbortError(err)) return;
+      busyRef.current = false;
       setUpload(null);
-      setError(`The upload did not finish: ${getErrorMessage(err)} The recording is still saved on this device.`);
+      setError(`The upload did not finish: ${getErrorMessage(err)} ${context.savedOnDevice
+        ? 'The recording is still saved on this device.'
+        : 'The recording is kept on this page. Play it, download a copy, or try again.'}`);
       await refreshDrafts();
     }
   };
+
+  const uploadHeld = (entry: HeldRecording) => void uploadDraft(entry.recording, { savedOnDevice: entry.savedOnDevice, warning: entry.warning });
 
   const stopRecording = async () => {
     const result = await recorder.stop();
@@ -112,19 +147,22 @@ export function CapturePage() {
       setError((current) => current || 'Nothing was recorded. Check the microphone and try again.');
       return;
     }
-    if (!result.savedOnDevice) setNotice('This browser would not save a copy on the device, so keep this page open until the upload finishes.');
-    if (result.warning) {
-      setReview(result);
+    const entry = { recording: result.recording, warning: result.warning, savedOnDevice: result.savedOnDevice };
+    hold(entry);
+    if (result.warning || !result.savedOnDevice) {
+      // Let the person hear it, or download it, before anything is uploaded.
       await refreshDrafts();
       return;
     }
-    await uploadDraft(result.recording);
+    await uploadDraft(entry.recording, entry);
   };
 
-  const discardDraft = async (draft: PendingRecording) => {
-    if (!window.confirm('Delete this recording from this device? It has not been uploaded.')) return;
+  const discardDraft = async (draft: PendingRecording, savedOnDevice = true) => {
+    if (!window.confirm(savedOnDevice
+      ? 'Delete this recording from this device? It has not been uploaded.'
+      : 'Delete this recording? It has not been uploaded and is not saved anywhere else.')) return;
     await deleteRecordingDraft(draft.id).catch(() => undefined);
-    if (review?.recording.id === draft.id) setReview(null);
+    release(draft.id);
     await refreshDrafts();
   };
 
@@ -133,20 +171,26 @@ export function CapturePage() {
     setNotice('');
     const kind = classifyFile(file);
     if ('error' in kind) return setError(kind.error);
+    const operation = beginOperation();
     if (kind.kind === 'audio' && !(await requestConsent())) {
+      if (!operation.live()) return;
       setNotice('Nothing was uploaded. Transcription needs permission to use AI processing.');
       return;
     }
+    if (!operation.live()) return;
+    busyRef.current = true;
     setUpload({ label: kind.kind === 'pdf' ? `Reading ${file.name}` : `Uploading ${file.name}`, progress: kind.kind === 'pdf' ? null : 0 });
     try {
       if (kind.kind === 'pdf') {
-        const extraction = await addPDF(file);
-        finishedOn(itemDetailPath('pdf', extraction.id));
+        const extraction = await addPDF(file, operation.signal);
+        if (operation.live()) finishedOn(itemDetailPath('pdf', extraction.id));
       } else {
-        const transcription = await uploadAudio(file, (percent) => setUpload((current) => current && { ...current, progress: percent < 0 ? null : percent }));
-        finishedOn(itemDetailPath('audio', transcription.id));
+        const transcription = await uploadAudio(file, (percent) => { if (operation.live()) setUpload((current) => current && { ...current, progress: percent < 0 ? null : percent }); }, operation.signal);
+        if (operation.live()) finishedOn(itemDetailPath('audio', transcription.id));
       }
     } catch (err) {
+      if (!operation.live() || isAbortError(err)) return;
+      busyRef.current = false;
       setUpload(null);
       setError(getErrorMessage(err));
     }
@@ -156,11 +200,15 @@ export function CapturePage() {
     event.preventDefault();
     setError('');
     if (!looksLikeURL(link)) return setError('Paste the full link, starting with https://');
+    const operation = beginOperation();
+    busyRef.current = true;
     setUpload({ label: 'Adding the video', progress: null });
     try {
-      const transcript = await addVideoLink(link);
-      finishedOn(itemDetailPath('transcript', transcript.id));
+      const transcript = await addVideoLink(link, operation.signal);
+      if (operation.live()) finishedOn(itemDetailPath('transcript', transcript.id));
     } catch (err) {
+      if (!operation.live() || isAbortError(err)) return;
+      busyRef.current = false;
       setUpload(null);
       setError(getErrorMessage(err));
     }
@@ -173,28 +221,34 @@ export function CapturePage() {
     if (file) void addFile(file);
   };
 
+  const leaving = recorder.active ? 'recording' : upload ? 'upload' : 'unsaved';
   const leaveDialog = (
     <Dialog
       open={blocker.state === 'blocked'}
       onClose={() => blocker.reset?.()}
-      title={recorder.active ? 'Still recording' : 'Upload in progress'}
+      title={leaving === 'recording' ? 'Still recording' : leaving === 'upload' ? 'Upload in progress' : 'Recording not saved'}
       footer={(
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <Button onClick={() => blocker.reset?.()}>{recorder.active ? 'Keep recording' : 'Stay'}</Button>
+          <Button onClick={() => blocker.reset?.()}>{leaving === 'recording' ? 'Keep recording' : 'Stay'}</Button>
           <Button variant="danger" onClick={() => void (async () => {
             if (recorder.active) await recorder.stop();
+            // Stop the request and ignore whatever it reports, so it cannot redirect away from where the person chose to go.
+            cancelOperation();
             busyRef.current = false;
+            unsavedRef.current = false;
             blocker.proceed?.();
           })()}>
-            {recorder.active ? 'Stop and leave' : 'Leave'}
+            {leaving === 'recording' ? 'Stop and leave' : leaving === 'upload' ? 'Leave' : 'Leave and lose it'}
           </Button>
         </div>
       )}
     >
       <p className="text-callout text-text-secondary">
-        {recorder.active
+        {leaving === 'recording'
           ? 'Leaving stops the recording. What you have recorded is saved on this device, and you can upload it from Add.'
-          : 'Leaving stops the upload. A recording stays saved on this device; a chosen file needs to be added again.'}
+          : leaving === 'upload'
+            ? 'Leaving stops the upload. A recording stays saved on this device; a chosen file needs to be added again.'
+            : 'This browser could not save your recording on this device, so it exists only on this page. Stay and download it first, or leaving will lose it.'}
       </p>
     </Dialog>
   );
@@ -239,16 +293,10 @@ export function CapturePage() {
       {error && <div className="mt-4"><Notice tone="error">{error}</Notice></div>}
       {(notice || recorder.error) && <div className="mt-4"><Notice>{recorder.error || notice}</Notice></div>}
 
-      {review && (
-        <div className="mt-4 rounded-lg border border-separator bg-surface p-4">
-          <p className="text-subheading">Check this recording</p>
-          <p className="mt-1 text-callout text-text-secondary">{review.warning}</p>
-          <BlobAudio blob={review.recording.blob} />
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button variant="primary" onClick={() => void uploadDraft(review.recording)} icon={<Upload className="h-4 w-4" />}>Upload anyway</Button>
-            <Button variant="danger-plain" onClick={() => void discardDraft(review.recording)}>Delete</Button>
-          </div>
-        </div>
+      {held.length > 0 && (
+        <ul className="mt-4 space-y-3" aria-label="Recordings not uploaded yet">
+          {held.map((entry) => <HeldCard key={entry.recording.id} entry={entry} onUpload={() => uploadHeld(entry)} onDelete={() => void discardDraft(entry.recording, entry.savedOnDevice)} />)}
+        </ul>
       )}
 
       <section className="mt-6" aria-labelledby="record-heading">
@@ -260,12 +308,12 @@ export function CapturePage() {
         )}
       </section>
 
-      {drafts.filter((draft) => draft.id !== review?.recording.id).length > 0 && (
+      {drafts.filter((draft) => !held.some((entry) => entry.recording.id === draft.id)).length > 0 && (
         <section className="mt-8" aria-labelledby="drafts-heading">
           <h2 id="drafts-heading" className="text-heading">Not uploaded yet</h2>
           <p className="mt-1 text-callout text-text-secondary">Saved on this device only.</p>
           <ul className="mt-2 divide-y divide-separator">
-            {drafts.filter((draft) => draft.id !== review?.recording.id).map((draft) => <DraftRow key={draft.id} draft={draft} onUpload={() => void uploadDraft(draft)} onDelete={() => void discardDraft(draft)} />)}
+            {drafts.filter((draft) => !held.some((entry) => entry.recording.id === draft.id)).map((draft) => <DraftRow key={draft.id} draft={draft} onUpload={() => void uploadDraft(draft)} onDelete={() => void discardDraft(draft)} />)}
           </ul>
         </section>
       )}
@@ -298,6 +346,7 @@ export function CapturePage() {
         </button>
         <input ref={fileRef} type="file" hidden accept="audio/*,video/*,.m4a,.mp3,.wav,.caf,.aac,.ogg,.flac,.webm,.mp4,.mov,.qta,.pdf,application/pdf" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void addFile(file); }} />
       </section>
+      {leaveDialog}
     </div>
   );
 }
@@ -313,6 +362,7 @@ function DraftRow({ draft, onUpload, onDelete }: { draft: PendingRecording; onUp
           <p className="text-meta text-text-secondary tabular">{formatItemDate(new Date(draft.createdAt).toISOString())}{draft.durationSeconds ? ` · ${formatClock(draft.durationSeconds)}` : ''}</p>
         </div>
         <Button variant="plain" onClick={() => setUrl((current) => current || URL.createObjectURL(draft.blob))} aria-label="Play this recording" icon={<Play className="h-4 w-4" />}><span className="hidden sm:inline">Play</span></Button>
+        <Button variant="plain" onClick={() => downloadBlob(draft.blob, recordingFileName(draft.mimeType, draft.createdAt))} aria-label="Download this recording" icon={<Download className="h-4 w-4" />} />
         <Button variant="primary" onClick={onUpload} icon={<Upload className="h-4 w-4" />}>Upload</Button>
         <Button variant="danger-plain" onClick={onDelete} aria-label="Delete this recording" icon={<Trash2 className="h-4 w-4" />} />
       </div>
@@ -321,8 +371,36 @@ function DraftRow({ draft, onUpload, onDelete }: { draft: PendingRecording; onUp
   );
 }
 
+function HeldCard({ entry, onUpload, onDelete }: { entry: HeldRecording; onUpload: () => void; onDelete: () => void }) {
+  const { recording, warning, savedOnDevice } = entry;
+  return (
+    <li className="rounded-lg border border-separator bg-surface p-4">
+      <p className="text-subheading">{warning ? 'Check this recording' : 'Not uploaded yet'}</p>
+      <p className="mt-0.5 text-meta text-text-secondary tabular">{formatItemDate(new Date(recording.createdAt).toISOString())}{recording.durationSeconds ? ` · ${formatClock(recording.durationSeconds)}` : ''}</p>
+      {warning && <p className="mt-1 text-callout text-text-secondary">{warning}</p>}
+      <p className="mt-1 text-callout text-text-secondary">
+        {savedOnDevice
+          ? 'Saved on this device.'
+          : 'This browser could not save it on this device, so it exists only on this page. Download a copy, and keep this page open until it is uploaded.'}
+      </p>
+      <BlobAudio blob={recording.blob} />
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button variant="primary" onClick={onUpload} icon={<Upload className="h-4 w-4" />}>{warning ? 'Upload anyway' : 'Upload'}</Button>
+        <Button onClick={() => downloadBlob(recording.blob, recordingFileName(recording.mimeType, recording.createdAt))} icon={<Download className="h-4 w-4" />}>Download</Button>
+        <Button variant="danger-plain" onClick={onDelete}>Delete</Button>
+      </div>
+    </li>
+  );
+}
+
 function BlobAudio({ blob }: { blob: Blob }) {
-  const [url] = useState(() => URL.createObjectURL(blob));
-  useEffect(() => () => URL.revokeObjectURL(url), [url]);
-  return <audio controls src={url} className="mt-3 w-full" />;
+  const [url, setUrl] = useState('');
+  // Created in an effect, not state initialisation: React's development
+  // double-run revokes the first URL, and the second must be a fresh one.
+  useEffect(() => {
+    const next = URL.createObjectURL(blob);
+    queueMicrotask(() => setUrl(next));
+    return () => URL.revokeObjectURL(next);
+  }, [blob]);
+  return url ? <audio controls src={url} aria-label="Play this recording" className="mt-3 w-full" /> : null;
 }

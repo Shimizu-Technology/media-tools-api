@@ -26,12 +26,15 @@ import {
   type AudioContentType,
   type AudioTranscription,
   type Citation,
+  type ExportFormat,
   type LibraryPreferences,
   type MediaSegment,
   type PDFExtraction,
   type Summary,
   type Transcript,
 } from '../lib/api';
+import { deepLinkAction, parseDeepLink } from '../lib/deepLink';
+import { downloadBlob } from '../lib/download';
 import { displayTitle, type ItemDetailType } from '../lib/library';
 import { formatClock, formatDuration, formatItemDate, pluralize } from '../lib/format';
 import { notifyLibraryActivityChanged } from '../lib/libraryActivityEvents';
@@ -108,13 +111,15 @@ export function ItemDetailPage() {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<LibraryPreferences>({ favorite: false, archived: false, tags: [] });
-  const [segments, setSegments] = useState<MediaSegment[]>([]);
+  // Segments and the playback address belong to one item: keyed by it, so a
+  // late answer for the previous item never shows up on the next.
+  const [segmentState, setSegmentState] = useState<{ key: string; list: MediaSegment[] } | null>(null);
   const [videoSummary, setVideoSummary] = useState<Summary | null | undefined>(undefined);
-  const [audioURL, setAudioURL] = useState('');
+  const [audioSource, setAudioSource] = useState<{ id: string; url: string } | null>(null);
   const [automaticSummaries, setAutomaticSummaries] = useState<boolean | undefined>(undefined);
   const [showVideo, setShowVideo] = useState(false);
   const [videoStart, setVideoStart] = useState(0);
-  const [dialog, setDialog] = useState<'collection' | 'rename' | 'tags' | 'summarize' | 'ask' | null>(null);
+  const [dialog, setDialog] = useState<'collection' | 'rename' | 'tags' | 'summarize' | 'ask' | 'export' | null>(null);
   const playerRef = useRef<PlayerHandle | null>(null);
   const videoRef = useRef<HTMLIFrameElement | null>(null);
 
@@ -140,7 +145,7 @@ export function ItemDetailPage() {
   }, [itemId, type]);
 
   useEffect(() => {
-    queueMicrotask(() => { setItem(null); setLoadError(''); setVideoSummary(undefined); setAudioURL(''); setShowVideo(false); });
+    queueMicrotask(() => { setItem(null); setLoadError(''); setVideoSummary(undefined); setShowVideo(false); });
     void load();
     if (!itemId || !validType) return;
     getLibraryPreferences(type, itemId).then(setPreferences).catch(() => undefined);
@@ -158,17 +163,23 @@ export function ItemDetailPage() {
   useEffect(() => {
     if (!itemId || !validType || !complete) return;
     let current = true;
-    getMediaSegments(type, itemId).then((result) => { if (current) setSegments(result); }).catch(() => { if (current) setSegments([]); });
+    const key = `${type}:${itemId}`;
+    getMediaSegments(type, itemId).then((result) => { if (current) setSegmentState({ key, list: result }); }).catch(() => { if (current) setSegmentState({ key, list: [] }); });
     return () => { current = false; };
   }, [complete, itemId, type, validType]);
+  const segmentsLoaded = segmentState?.key === `${type}:${itemId}`;
+  const segments = useMemo(() => (segmentsLoaded && segmentState ? segmentState.list : []), [segmentState, segmentsLoaded]);
 
   // The playback URL is fetched once per recording, not on every refresh of
   // the item, so background polling never resets the player.
   const playable = type === 'audio' && Boolean(item) && status !== 'pending' && audio?.audio_s3_status !== 'pending';
   const fetchAudioURL = useCallback(() => {
     if (!itemId) return;
-    getAudioPlaybackUrl(itemId).then((result) => setAudioURL(result.url)).catch(() => setAudioURL(''));
+    getAudioPlaybackUrl(itemId).then((result) => setAudioSource({ id: itemId, url: result.url })).catch(() => setAudioSource({ id: itemId, url: '' }));
   }, [itemId]);
+  const currentAudio = audioSource && audioSource.id === itemId ? audioSource : null;
+  const audioURL = currentAudio?.url ?? '';
+  const audioUnavailable = currentAudio !== null && currentAudio.url === '';
   useEffect(() => { if (playable) fetchAudioURL(); }, [fetchAudioURL, playable]);
 
   const itemActive = isActive(status) || isActive(audio?.summary_status) || isActive(audio?.formatting_status);
@@ -203,21 +214,32 @@ export function ItemDetailPage() {
     target?.scrollIntoView({ block: 'start' });
   }, [itemId, navigate, showVideo, type]);
 
-  // A deep link (?t= or ?page=) lands once the item is ready.
-  const deepLinkDone = useRef(false);
+  // A deep link (?t= or ?page=) lands once the item is ready and the thing it
+  // points at (player, video, page text) exists. It is used up once per item and
+  // place, so a second citation to another spot is followed too.
+  const consumedLink = useRef('');
+  const isCurrentItem = Boolean(item && item.id === itemId);
+  const hasVideo = type === 'transcript' && Boolean((item as Transcript | null)?.youtube_id);
   useEffect(() => {
-    if (!item || !complete || deepLinkDone.current) return;
-    if (!searchParams.has('t') && !searchParams.has('page')) return;
-    deepLinkDone.current = true;
-    const seconds = Number(searchParams.get('t'));
-    const page = Number(searchParams.get('page'));
-    const timer = window.setTimeout(() => {
-      if (searchParams.has('t') && Number.isFinite(seconds) && seconds >= 0) openCitation({ segment_id: 'link', item_type: type, item_id: item.id, start_ms: seconds * 1000 });
-      else if (Number.isFinite(page) && page > 0) openCitation({ segment_id: 'link', item_type: type, item_id: item.id, page_number: page });
-      setSearchParams({}, { replace: true });
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [complete, item, openCitation, searchParams, setSearchParams, type]);
+    const link = parseDeepLink(searchParams, type, itemId);
+    if (!link) { consumedLink.current = ''; return; }
+    if (consumedLink.current === link.key || !item || !isCurrentItem || !complete) return;
+    const action = deepLinkAction(link, {
+      type,
+      audioPlayerReady: playerRef.current !== null,
+      audioUnavailable,
+      hasVideo,
+      segmentsLoaded,
+    });
+    if (action === 'wait') return;
+    consumedLink.current = link.key;
+    if (action === 'go' && link.target) {
+      openCitation('seconds' in link.target
+        ? { segment_id: 'link', item_type: type, item_id: item.id, start_ms: link.target.seconds * 1000 }
+        : { segment_id: 'link', item_type: type, item_id: item.id, page_number: link.target.page });
+    }
+    setSearchParams({}, { replace: true });
+  }, [audioURL, audioUnavailable, complete, hasVideo, isCurrentItem, item, itemId, openCitation, searchParams, segmentsLoaded, setSearchParams, type]);
 
   if (!validType) return <Navigate to={APP_ROUTES.library} replace />;
 
@@ -322,9 +344,13 @@ export function ItemDetailPage() {
     }
   };
 
-  const exportItem = () => run('export', async () => {
-    const blob = type === 'transcript' ? await downloadExport(item.id, 'md') : type === 'audio' ? await downloadAudioExport(item.id, 'md') : new Blob([view.text], { type: 'text/plain;charset=utf-8' });
-    downloadBlob(blob, `${safeFilename(view.title)}.${type === 'pdf' ? 'txt' : 'md'}`);
+  const exportFormats = exportFormatsFor(type);
+  const exportItem = (format: ExportFormat) => run('export', async () => {
+    const blob = type === 'transcript' ? await downloadExport(item.id, format)
+      : type === 'audio' ? await downloadAudioExport(item.id, format as AudioExportFormat)
+        : new Blob([view.text], { type: 'text/plain;charset=utf-8' });
+    downloadBlob(blob, `${safeFilename(view.title)}.${format}`);
+    setDialog(null);
   });
 
   const stopProcessing = () => void run('cancel', async () => {
@@ -338,7 +364,7 @@ export function ItemDetailPage() {
   }, { ai: true });
 
   const menu: MenuItem[] = [
-    ...(view.text ? [{ label: 'Copy text', icon: <Copy />, onSelect: () => void copyText() }, { label: 'Export', icon: <Download />, onSelect: () => void exportItem() }] : []),
+    ...(view.text ? [{ label: 'Copy text', icon: <Copy />, onSelect: () => void copyText() }, { label: exportFormats.length > 1 ? 'Export…' : 'Export as text', icon: <Download />, onSelect: () => (exportFormats.length > 1 ? setDialog('export') : void exportItem(exportFormats[0].format)) }] : []),
     { label: preferences.favorite ? 'Unstar' : 'Star', icon: <Star />, onSelect: () => void savePreferences({ favorite: !preferences.favorite }) },
     { label: 'Edit tags', icon: <Tag />, onSelect: () => setDialog('tags') },
     ...(type === 'audio' ? [{ label: 'Rename', icon: <Pencil />, onSelect: () => setDialog('rename') }] : []),
@@ -468,6 +494,7 @@ export function ItemDetailPage() {
 
       <AddToCollectionModal open={dialog === 'collection'} onClose={() => setDialog(null)} itemType={type} itemId={item.id} itemTitle={view.title} />
       {audio && <RenameDialog open={dialog === 'rename'} name={audio.original_name} onClose={() => setDialog(null)} onSave={(name) => void run('rename', async () => { setItem(await renameAudioTranscription(audio.id, name)); setDialog(null); })} busy={busy === 'rename'} />}
+      <ExportDialog open={dialog === 'export'} formats={exportFormats} onClose={() => setDialog(null)} onChoose={(format) => void exportItem(format)} busy={busy === 'export'} />
       <TagsDialog open={dialog === 'tags'} tags={preferences.tags} onClose={() => setDialog(null)} onSave={(tags) => void savePreferences({ tags })} busy={busy === 'preferences'} />
       {audio && <SummarizeDialog open={dialog === 'summarize'} initial={audio.content_type || 'general'} onClose={() => setDialog(null)} onSubmit={(contentType) => void summarize(contentType)} busy={busy === 'summary'} />}
     </div>
@@ -510,6 +537,35 @@ function FailedNote({ type, message, busy, onRetry, onDelete }: { type: ItemDeta
         <Button variant="danger-plain" onClick={onDelete} icon={<Trash2 className="h-4 w-4" />}>Delete</Button>
       </div>
     </div>
+  );
+}
+
+type AudioExportFormat = 'txt' | 'md' | 'json';
+
+/** The formats the server offers for each kind of item. A PDF's text is saved as it is shown. */
+function exportFormatsFor(type: ItemDetailType): { format: ExportFormat; label: string; hint: string }[] {
+  const md = { format: 'md' as const, label: 'Markdown', hint: '.md · headings and paragraphs' };
+  const txt = { format: 'txt' as const, label: 'Plain text', hint: '.txt · just the words' };
+  const json = { format: 'json' as const, label: 'JSON', hint: '.json · everything, for other software' };
+  if (type === 'transcript') return [md, txt, { format: 'srt', label: 'Subtitles', hint: '.srt · timed captions' }, json];
+  if (type === 'audio') return [md, txt, json];
+  return [{ ...txt, hint: '.txt · the extracted text' }];
+}
+
+function ExportDialog({ open, formats, onClose, onChoose, busy }: { open: boolean; formats: { format: ExportFormat; label: string; hint: string }[]; onClose: () => void; onChoose: (format: ExportFormat) => void; busy: boolean }) {
+  return (
+    <Dialog open={open} onClose={onClose} title="Export">
+      <ul className="divide-y divide-separator">
+        {formats.map((option) => (
+          <li key={option.format}>
+            <button type="button" disabled={busy} onClick={() => onChoose(option.format)} className="pressable flex min-h-14 w-full items-center gap-3 rounded-sm px-1 py-2 text-left hover:bg-fill disabled:opacity-40">
+              <Download className="h-[18px] w-[18px] shrink-0 text-text-secondary" aria-hidden="true" />
+              <span className="min-w-0 flex-1"><span className="block text-body">{option.label}</span><span className="block text-meta text-text-secondary">{option.hint}</span></span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Dialog>
   );
 }
 
@@ -627,15 +683,4 @@ function audioStage(stage: string | undefined, status: string) {
 
 function safeFilename(value: string) {
   return value.replace(/\.[^.]+$/, '').replace(/[^a-z0-9-_]+/gi, '_').replace(/^_+|_+$/g, '') || 'media-tools-export';
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

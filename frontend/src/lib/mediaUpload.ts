@@ -46,32 +46,39 @@ export function recordingFileName(mimeType: string, createdAt: number): string {
   return `Recording ${stamp}.${ext}`;
 }
 
+/** True when a request was cancelled on purpose (the person left the page). */
+export function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
 /**
  * Straight to storage with a presigned URL when the server offers one, and
- * through the API otherwise. Progress covers the direct path only.
+ * through the API otherwise. Progress covers the direct path only. A cancelled
+ * upload stops outright: it must not fall back to a second upload.
  */
-export async function uploadAudio(file: File, onProgress?: (percent: number) => void): Promise<AudioTranscription> {
+export async function uploadAudio(file: File, onProgress?: (percent: number) => void, signal?: AbortSignal): Promise<AudioTranscription> {
   let transcription: AudioTranscription;
   try {
-    const presign = await presignAudioUpload(file);
-    await uploadAudioToPresignedUrl(presign.upload_url, file, { onProgress });
-    transcription = await completeAudioUpload({ object_key: presign.object_key, original_name: file.name, size_bytes: file.size });
-  } catch {
+    const presign = await presignAudioUpload(file, signal);
+    await uploadAudioToPresignedUrl(presign.upload_url, file, { onProgress, signal });
+    transcription = await completeAudioUpload({ object_key: presign.object_key, original_name: file.name, size_bytes: file.size }, signal);
+  } catch (error) {
+    if (isAbortError(error) || signal?.aborted) throw error;
     onProgress?.(-1);
-    transcription = await transcribeAudio(file);
+    transcription = await transcribeAudio(file, signal);
   }
   notifyLibraryActivityChanged();
   return transcription;
 }
 
-export async function addPDF(file: File) {
-  const extraction = await extractPDF(file);
+export async function addPDF(file: File, signal?: AbortSignal) {
+  const extraction = await extractPDF(file, signal);
   notifyLibraryActivityChanged();
   return extraction;
 }
 
-export async function addVideoLink(url: string) {
-  const transcript = await createTranscript(url.trim());
+export async function addVideoLink(url: string, signal?: AbortSignal) {
+  const transcript = await createTranscript(url.trim(), signal);
   notifyLibraryActivityChanged();
   return transcript;
 }

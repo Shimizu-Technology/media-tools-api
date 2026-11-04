@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { appendRecordingChunk, saveRecordingDraft, type PendingRecording } from '../lib/recordingStore';
+import { createWakeLockKeeper, type WakeLockProvider } from '../lib/wakeLock';
 
 export type RecorderState = 'idle' | 'requesting' | 'recording' | 'paused' | 'stopping';
 
@@ -29,8 +30,6 @@ async function measureDuration(blob: Blob): Promise<number | null> {
   });
 }
 
-type WakeLockSentinelLike = { release: () => Promise<void> };
-
 export function recorderSupported(): boolean {
   return typeof window !== 'undefined' && typeof MediaRecorder !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia);
 }
@@ -55,7 +54,6 @@ export function useRecorder() {
   const sessionRef = useRef<{ id: string; startedAt: number; seq: number; mimeType: string } | null>(null);
   const accumulatedRef = useRef(0);
   const segmentStartRef = useRef<number | null>(null);
-  const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const stopWaitersRef = useRef<Array<(result: RecorderResult | null) => void>>([]);
@@ -68,21 +66,25 @@ export function useRecorder() {
     return (accumulatedRef.current + running) / 1000;
   }, []);
 
-  const requestWakeLock = useCallback(async () => {
-    const wakeLock = (navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<WakeLockSentinelLike> } }).wakeLock;
-    if (!wakeLock || document.visibilityState !== 'visible') return;
-    try { wakeLockRef.current = await wakeLock.request('screen'); } catch { /* Not allowed here; recording continues. */ }
+  // The browser drops the lock whenever the tab is hidden; the keeper notices
+  // and asks again on return. It only holds one while a microphone stream is live.
+  const wakeLockRef = useRef<ReturnType<typeof createWakeLockKeeper> | null>(null);
+  const wakeLock = useCallback(() => {
+    wakeLockRef.current ??= createWakeLockKeeper({
+      provider: () => (navigator as Navigator & { wakeLock?: WakeLockProvider }).wakeLock,
+      wanted: () => document.visibilityState === 'visible' && streamRef.current !== null,
+    });
+    return wakeLockRef.current;
   }, []);
 
   const releaseResources = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
-    void wakeLockRef.current?.release().catch(() => undefined);
-    wakeLockRef.current = null;
+    wakeLock().release();
     analyserRef.current = null;
     void audioContextRef.current?.close().catch(() => undefined);
     audioContextRef.current = null;
-  }, []);
+  }, [wakeLock]);
 
   // Clock: redraw a few times a second while recording.
   useEffect(() => {
@@ -94,10 +96,10 @@ export function useRecorder() {
   // The wake lock drops when the tab is hidden; take it back on return.
   useEffect(() => {
     if (state !== 'recording' && state !== 'paused') return;
-    const onVisible = () => { if (document.visibilityState === 'visible' && !wakeLockRef.current) void requestWakeLock(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') void wakeLock().acquire(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [requestWakeLock, state]);
+  }, [state, wakeLock]);
 
   const finish = useCallback(async (): Promise<RecorderResult | null> => {
     const session = sessionRef.current;
@@ -234,8 +236,8 @@ export function useRecorder() {
     segmentStartRef.current = performance.now();
     setElapsed(0);
     setState('recording');
-    void requestWakeLock();
-  }, [finish, requestWakeLock, settleStop, state, stop]);
+    void wakeLock().acquire();
+  }, [finish, settleStop, state, stop, wakeLock]);
 
   /** Give up waiting for the permission prompt. */
   const cancelRequest = useCallback(() => {
