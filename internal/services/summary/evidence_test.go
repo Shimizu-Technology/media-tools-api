@@ -467,3 +467,20 @@ func jsonCompletionResponse(content, finishReason string, completionTokens int) 
 func validCitedSummaryJSON() string {
 	return `{"summary":{"text":"Recovered summary","citations":["segment-1"]},"key_points":[{"text":"Supported point","citations":["segment-1"]}],"action_items":[],"decisions":[],"topics":[]}`
 }
+
+func TestProviderCallTrackerSurvivesMalformedOutput(t *testing.T) {
+	service := New("synthetic-provider-key", "openai/gpt-4o-mini")
+	service.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"not JSON"}}]}`))}, nil
+	})}
+	ctx, called := TrackProviderCall(context.Background())
+	_, err := service.ChatEvidence(ctx, "recording", []EvidenceSegment{{ID: "fixture", Text: "Synthetic evidence."}}, []ChatMessage{{Role: "user", Content: "What happened?"}}, "")
+	if err == nil || !called.Load() {
+		t.Fatal("post-provider parse failure lost paid-call marker")
+	}
+	ctx, called = TrackProviderCall(context.Background())
+	_, err = New("", "").ChatEvidence(ctx, "recording", nil, nil, "")
+	if err == nil || called.Load() {
+		t.Fatal("pre-provider rejection marked a paid call")
+	}
+}

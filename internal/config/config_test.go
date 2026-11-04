@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -292,5 +293,54 @@ func TestLoadConfiguresSeparateBrowserReadRateLimit(t *testing.T) {
 	}
 	if cfg.DefaultBrowserReadRateLimit != 7500 {
 		t.Fatalf("DefaultBrowserReadRateLimit = %d, want 7500", cfg.DefaultBrowserReadRateLimit)
+	}
+}
+
+func TestEmailSignupAndQuotaDefaults(t *testing.T) {
+	t.Setenv("YT_DLP_PATH", "/usr/bin/true")
+	t.Setenv("GIN_MODE", "debug")
+	t.Setenv("FIRST_PARTY_PASSWORD_AUTH_ENABLED", "false")
+	t.Setenv("EMAIL_DELIVERY", "")
+	// An explicit invalid empty mode should be rejected; an absent setting uses
+	// log. Testing the default needs Unsetenv with a restoring cleanup.
+	previous, had := os.LookupEnv("EMAIL_DELIVERY")
+	_ = os.Unsetenv("EMAIL_DELIVERY")
+	t.Cleanup(func() {
+		if had {
+			_ = os.Setenv("EMAIL_DELIVERY", previous)
+		} else {
+			_ = os.Unsetenv("EMAIL_DELIVERY")
+		}
+	})
+	t.Setenv("PUBLIC_SIGNUP_ENABLED", "false")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.EmailDelivery != "log" || cfg.PublicSignupEnabled || cfg.DefaultMonthlyTranscriptionMinutes != 300 || cfg.DefaultMonthlyAIRequests != 1000 {
+		t.Fatal("unsafe auth defaults")
+	}
+	t.Setenv("EMAIL_DELIVERY", "resend")
+	t.Setenv("RESEND_API_KEY", "")
+	t.Setenv("RESEND_FROM_EMAIL", "")
+	if _, err = Load(); err == nil {
+		t.Fatal("configured Resend accepted missing settings")
+	}
+	t.Setenv("EMAIL_DELIVERY", "log")
+	t.Setenv("PUBLIC_SIGNUP_ENABLED", "true")
+	if _, err = Load(); err == nil {
+		t.Fatal("signup enabled without password auth")
+	}
+}
+
+func TestMalformedMonthlyCaps(t *testing.T) {
+	for _, key := range []string{"DEFAULT_MONTHLY_TRANSCRIPTION_MINUTES", "DEFAULT_MONTHLY_AI_REQUESTS"} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, "100O")
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), key) {
+				t.Fatalf("expected malformed %s error, got %v", key, err)
+			}
+		})
 	}
 }

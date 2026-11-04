@@ -239,6 +239,10 @@ func (h *Handler) TranscribeAudio(c *gin.Context) {
 	}
 
 	if err := h.DB.CreateAudioTranscriptionWithJob(c.Request.Context(), at, tempFilePath); err != nil {
+		os.Remove(tempFilePath)
+		if quotaCreationError(c, err) {
+			return
+		}
 		os.Remove(tempFilePath) // Clean up temp file on error
 		log.Printf("Failed to create audio transcription record: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -512,6 +516,9 @@ func (h *Handler) CompleteAudioUpload(c *gin.Context) {
 		APIKeyID:           session.APIKeyID,
 	}
 	if err := h.DB.CompleteAudioUploadAndCreateTranscription(c.Request.Context(), session.ID, at); err != nil {
+		if quotaCreationError(c, err) {
+			return
+		}
 		if errors.Is(err, database.ErrAudioUploadSessionNotPending) {
 			// A concurrent completion request can read the session while it is
 			// still pending, then lose the conditional update after the winning
@@ -792,6 +799,10 @@ func (h *Handler) FormatAudioTranscript(c *gin.Context) {
 	}
 
 	if err := h.DB.QueueAudioTranscriptFormatting(c.Request.Context(), at.ID); err != nil {
+		if database.IsUsageCap(err) {
+			authError(c, 402, "monthly_ai_cap", "Monthly AI limit reached; try again next month")
+			return
+		}
 		if errors.Is(err, database.ErrAudioFormattingNotQueueable) {
 			c.JSON(http.StatusConflict, models.ErrorResponse{
 				Error: "already_processing", Message: "Readable formatting is already in progress.", Code: http.StatusConflict,
@@ -986,6 +997,10 @@ func (h *Handler) SummarizeAudio(c *gin.Context) {
 	// Parse request body
 	var req models.SummarizeAudioRequest
 	c.ShouldBindJSON(&req) // Optional body — ok if empty
+
+	if !h.allowAIModel(c, req.Model) {
+		return
+	}
 
 	// Validate content type
 	contentType := models.AudioContentType(req.ContentType)

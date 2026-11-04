@@ -445,6 +445,7 @@ func (s *Service) sendProviderCompletion(
 		req.Header.Set("X-Title", "Media Tools API")
 	}
 
+	markProviderCall(ctx)
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return completionResult{}, 0, nil, &ProviderTransportError{Provider: provider, Cause: err}

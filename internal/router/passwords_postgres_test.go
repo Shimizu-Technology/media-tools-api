@@ -52,7 +52,7 @@ func TestPasswordNativeAndWebLoginFlows(t *testing.T) {
 	}
 
 	const origin = "https://media.example.com"
-	engine := Setup(RouterConfig{DB: db, FirstPartyAuthEnabled: true, FirstPartyPasswordAuthEnabled: true, WebCookieAuthEnabled: true, WebCookieSecure: true, AllowedOrigins: []string{origin}})
+	engine := Setup(RouterConfig{Pwned: unbreachedTestChecker(), DB: db, FirstPartyAuthEnabled: true, FirstPartyPasswordAuthEnabled: true, WebCookieAuthEnabled: true, WebCookieSecure: true, AllowedOrigins: []string{origin}})
 	nativeSuccessor, _ := database.RandomFirstPartyRefreshToken()
 	native := postWebRecovery(t, engine, "/api/v1/auth/password/login", map[string]any{
 		"email": email, "password": "a secure password for http tests", "client_type": "ios", "device_name": "Test iPhone", "next_refresh_token": nativeSuccessor,
@@ -119,7 +119,7 @@ func TestPasswordNativeAndWebLoginFlows(t *testing.T) {
 
 	// A password change through the current browser session keeps that browser
 	// alive while revoking the separately signed-in native device.
-	change := postWebRecovery(t, engine, "/api/v1/auth/password", map[string]any{"password": "a replacement password for http tests"}, []*http.Cookie{access, csrf}, origin, csrf.Value)
+	change := postWebRecovery(t, engine, "/api/v1/auth/password", map[string]any{"password": "a replacement password for http tests", "current_password": "a secure password for http tests"}, []*http.Cookie{access, csrf}, origin, csrf.Value)
 	if change.Code != http.StatusOK {
 		t.Fatalf("change password = %d: %s", change.Code, change.Body.String())
 	}

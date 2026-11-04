@@ -1,0 +1,18 @@
+[build]
+  base = "frontend"
+  publish = "dist"
+  command = "npm run build"
+
+# _redirects runs first. It retains domain/SEO rules but no API or SPA catch-all.
+# Runtime-scoped secret is injected by Netlify, never included in the bundle.
+[[redirects]]
+  from = "/api/*"
+  to = "https://media-tools-api.onrender.com/api/:splat"
+  status = 200
+  force = true
+  signed = "NETLIFY_PROXY_SIGNATURE_SECRET"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

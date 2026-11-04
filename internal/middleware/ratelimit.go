@@ -13,7 +13,6 @@ package middleware
 import (
 	"fmt"
 	"math"
-	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -137,14 +136,18 @@ func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 
 // RateLimitUnauthenticated protects public authentication endpoints. Scope
 // keeps credentials with different threat models from sharing a token bucket.
-// RemoteAddr comes from the connected network peer, so an untrusted forwarded
-// header cannot give an attacker unlimited fresh buckets.
+// AuthClientIP uses the explicitly verified proxy chain, or the connected peer
+// when no proxy is trusted. Spoofed headers cannot supply fresh buckets.
 func (rl *RateLimiter) RateLimitUnauthenticated(scope string, limit int) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		peer, _, err := net.SplitHostPort(c.Request.RemoteAddr)
-		if err != nil {
-			peer = c.Request.RemoteAddr
+		// An unconfigured reverse proxy can put every user behind one socket.
+		// Never turn that fallback into a site-wide authentication kill switch.
+		// Password failures and email proofs have durable per-account controls.
+		if verified, _ := c.Get("auth_client_ip_verified"); verified != true {
+			c.Next()
+			return
 		}
+		peer := AuthClientIP(c)
 		result := rl.allow("public-auth:"+scope+":"+peer, limit)
 		if !result.allowed {
 			c.Header("Retry-After", strconv.Itoa(max(1, int(math.Ceil(result.retryAfter.Seconds())))))

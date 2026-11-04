@@ -469,6 +469,7 @@ type AccountDeletionRequest struct {
 }
 
 type DeleteAccountRequest struct {
+	CurrentPassword      string `json:"current_password,omitempty"`
 	Confirmation         string `json:"confirmation" binding:"required"`
 	DeletionReceiptToken string `json:"deletion_receipt_token,omitempty"`
 }
@@ -639,10 +640,12 @@ type ErrorResponse struct {
 }
 
 type HealthResponse struct {
-	Status                 string `json:"status"`
-	Version                string `json:"version"`
-	Database               string `json:"database"`
-	Workers                int    `json:"workers"`
-	YtDlpCookiesConfigured bool   `json:"yt_dlp_cookies_configured"`
-	PasswordAuthEnabled    bool   `json:"password_auth_enabled"`
+	SignupEnabled          bool            `json:"signup_enabled"`
+	AuthCapabilities       map[string]bool `json:"auth_capabilities"`
+	Status                 string          `json:"status"`
+	Version                string          `json:"version"`
+	Database               string          `json:"database"`
+	Workers                int             `json:"workers"`
+	YtDlpCookiesConfigured bool            `json:"yt_dlp_cookies_configured"`
+	PasswordAuthEnabled    bool            `json:"password_auth_enabled"`
 }

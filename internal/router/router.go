@@ -15,6 +15,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	accountservice "github.com/Shimizu-Technology/media-tools-api/internal/services/account"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/audio"
+	emailservice "github.com/Shimizu-Technology/media-tools-api/internal/services/email"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/storage"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	webhookservice "github.com/Shimizu-Technology/media-tools-api/internal/services/webhook"
@@ -24,6 +25,15 @@ import (
 // RouterConfig holds all dependencies for the router setup.
 // Avoids a fragile 13-parameter function signature.
 type RouterConfig struct {
+	Pwned                              *accountservice.PwnedChecker
+	Email                              *emailservice.Service
+	PublicSignupEnabled                bool
+	TrustedProxyCIDRs                  []string
+	RenderClientIPEnabled              bool
+	NetlifyProxySignatureSecret        string
+	DefaultMonthlyTranscriptionMinutes int
+	DefaultMonthlyAIRequests           int
+	OwnerUserID                        string
 	// Version is the build identifier exposed by health endpoints.
 	Version                       string
 	DB                            *database.DB
@@ -57,6 +67,9 @@ type RouterConfig struct {
 // Setup creates and configures the Gin router with all routes.
 func Setup(cfg RouterConfig) *gin.Engine {
 	r := gin.New()
+	// Disable Gin's implicit trust-all forwarding; only our allowlist chooses IPs.
+	_ = r.SetTrustedProxies(nil)
+	r.Use(middleware.ClientIP(cfg.TrustedProxyCIDRs, middleware.ClientIPOptions{RenderPublicEdge: cfg.RenderClientIPEnabled, NetlifySignatureSecret: cfg.NetlifyProxySignatureSecret}))
 
 	// Keep multipart parsing memory bounded; larger uploads are streamed to temp files.
 	r.MaxMultipartMemory = 120 << 20
@@ -73,6 +86,15 @@ func Setup(cfg RouterConfig) *gin.Engine {
 
 	h := handlers.NewHandler(cfg.DB, cfg.WorkerPool, cfg.AudioTranscriber, cfg.AudioStorage, cfg.Webhooks, cfg.Summarizer, cfg.JWTSecret, cfg.AdminAPIKey, cfg.OwnerKeyID, cfg.OwnerKeyPrefix, cfg.YtDlpCookiesConfigured)
 	h.Version = cfg.Version
+	h.MonthlyMinutes = cfg.DefaultMonthlyTranscriptionMinutes
+	h.MonthlyAIRequests = cfg.DefaultMonthlyAIRequests
+	h.OwnerUserID = cfg.OwnerUserID
+	h.Email = cfg.Email
+	h.PublicSignupEnabled = cfg.PublicSignupEnabled && cfg.FirstPartyPasswordAuthEnabled && cfg.Email != nil
+	h.Pwned = cfg.Pwned
+	if h.Pwned == nil {
+		h.Pwned = accountservice.NewPwnedChecker()
+	}
 	h.ClerkAccountDeletionEnabled = cfg.ClerkAccountDeletionEnabled
 	rateLimiter := middleware.NewRateLimiter(
 		cfg.OwnerKeyID,
@@ -80,6 +102,10 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		cfg.DefaultRateLimit,
 		cfg.DefaultBrowserReadRateLimit,
 	)
+
+	if cfg.DB != nil && cfg.Email != nil {
+		r.Use(h.AuthAudit())
+	}
 
 	// Initialize Clerk JWKS cache if configured
 	var jwksCache *middleware.JWKSCache
@@ -115,16 +141,33 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			panic("invalid passkey relying-party configuration: " + err.Error())
 		}
 		h.Passkeys = passkeys
+		// Reauthentication also protects deletion when password login is rolled back.
+		passwords, err := accountservice.NewPasswordHasher(2)
+		if err != nil {
+			panic("initialize password authentication")
+		}
+		h.Passwords = passwords
+		if h.Email != nil {
+			r.Use(h.PurgeAuthTraffic())
+		}
 		if cfg.FirstPartyPasswordAuthEnabled {
-			passwords, err := accountservice.NewPasswordHasher(2)
-			if err != nil {
-				panic("initialize password authentication: " + err.Error())
-			}
-			h.Passwords = passwords
+
 			h.PasswordAuthEnabled = true
 			passwordLogin := r.Group("/api/v1/auth/password")
+			// A verified client IP gets a bucket, and each account separately allows
+			// one check per interval past its failure budget (ClaimPasswordGuess).
 			passwordLogin.Use(rateLimiter.RateLimitUnauthenticated("password", 20))
 			passwordLogin.POST("/login", h.LoginWithPassword)
+			if h.Email != nil {
+				proof := r.Group("/api/v1/auth")
+				// Durable per-address send and guessing budgets survive proxy changes.
+				// The IP bucket keeps one client from mailing many different addresses.
+				proof.Use(rateLimiter.RateLimitUnauthenticated("email-proof", 30))
+				proof.POST("/signup", h.Signup)
+				proof.POST("/signup/verify", h.VerifySignup)
+				proof.POST("/password/forgot", h.ForgotPassword)
+				proof.POST("/password/reset", h.ResetPassword)
+			}
 		}
 		web := handlers.NewWebSessionHandler(cfg.DB, h, cfg.WebCookieSecure, cfg.AllowedOrigins)
 		// A still-valid Clerk identity is the bridge to the same existing user.
@@ -159,7 +202,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			webRecovery.POST("/finish", web.FinishRecoveryCodeLogin)
 			if cfg.FirstPartyPasswordAuthEnabled {
 				webPassword := r.Group("/api/v1/auth/web/session/password")
-				webPassword.Use(rateLimiter.RateLimitUnauthenticated("web-password", 20))
+				// The finish handler shares the native per-account password budget.
+				webPassword.Use(rateLimiter.RateLimitUnauthenticated("web-password", 40))
 				webPassword.POST("/prepare", web.PreparePasswordLogin)
 				webPassword.POST("/finish", web.FinishPasswordLogin)
 			}
@@ -196,6 +240,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		jwtProtected.GET("/auth/me", h.GetMe)
 		jwtProtected.GET("/account/processing-preferences", h.ProcessingPreferences)
 		jwtProtected.PATCH("/account/processing-preferences", h.ProcessingPreferences)
+		jwtProtected.GET("/auth/usage", h.GetUsage)
+		jwtProtected.Use(h.UsageGuard())
 		if cfg.FirstPartyAuthEnabled {
 			jwtProtected.GET("/auth/sessions", h.ListFirstPartySessions)
 			jwtProtected.DELETE("/auth/sessions/:id", h.RevokeFirstPartySession)
@@ -209,10 +255,16 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			jwtProtected.POST("/auth/clerk-detachment", h.DetachClerk)
 			if cfg.FirstPartyPasswordAuthEnabled {
 				jwtProtected.GET("/auth/password", h.PasswordStatus)
-				jwtProtected.POST("/auth/password", h.SetPassword)
+				jwtProtected.POST("/auth/password", rateLimiter.RateLimit(), h.SetPassword)
+				if h.Email != nil {
+					jwtProtected.POST("/auth/email/change", rateLimiter.RateLimit(), h.BeginEmailChange)
+					jwtProtected.POST("/auth/email/change/verify", rateLimiter.RateLimit(), h.FinishEmailChange)
+					jwtProtected.POST("/auth/email/verify", rateLimiter.RateLimit(), h.BeginEmailVerification)
+					jwtProtected.POST("/auth/email/verify/confirm", rateLimiter.RateLimit(), h.FinishEmailVerification)
+				}
 			}
 		}
-		jwtProtected.DELETE("/account", h.DeleteAccount)
+		jwtProtected.DELETE("/account", rateLimiter.RateLimit(), h.DeleteAccount)
 		if cfg.LegacyAuthEnabled {
 			jwtProtected.POST("/auth/refresh", h.RefreshToken)
 		}
@@ -231,6 +283,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	// Scoped agent keys are allow-listed per route and audited; see
 	// middleware/agent_access.go. Everything else passes through unchanged.
 	protected.Use(middleware.ScopedKeyAccess(cfg.DB))
+	protected.Use(h.UsageGuard())
 	{
 		// Transcript endpoints
 		protected.POST("/transcripts", h.CreateTranscript)

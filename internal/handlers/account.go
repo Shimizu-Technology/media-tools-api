@@ -69,14 +69,22 @@ func (h *Handler) DeleteAccount(c *gin.Context) {
 		return
 	}
 
+	snapshot, ok := h.requireCurrentPassword(c, user.ID, body.CurrentPassword)
+	if !ok {
+		return
+	}
 	cleanupAfter := time.Now().UTC()
 	if h.AudioStorage != nil && h.AudioStorage.IsConfigured() {
 		cleanupAfter = cleanupAfter.Add(h.AudioStorage.PresignedURLExpiry() + 5*time.Minute)
 	}
 	request, err := h.DB.RequestAccountDeletionWithReceipt(
-		c.Request.Context(), user.ID, clerkUserID, cleanupAfter, body.DeletionReceiptToken,
+		c.Request.Context(), user.ID, clerkUserID, cleanupAfter, body.DeletionReceiptToken, snapshot,
 	)
 	if err != nil {
+		if errors.Is(err, database.ErrPasswordCredentialChanged) {
+			authError(c, 409, "credential_changed", "Sign in again before deleting your account")
+			return
+		}
 		if errors.Is(err, database.ErrAccountDeletionAlreadyRequested) {
 			c.JSON(http.StatusConflict, models.ErrorResponse{
 				Error:   "account_deletion_already_requested",

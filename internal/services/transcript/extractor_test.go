@@ -9,6 +9,7 @@ package transcript
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -491,5 +492,24 @@ func TestBuildBaseArgs_IncludesCookiesAndProxy(t *testing.T) {
 	}
 	if !strings.Contains(joined, "--proxy http://user:pass@proxy.example.com:8080") {
 		t.Fatalf("expected --proxy arg, got: %v", args)
+	}
+}
+
+func TestDurationGuardRejectsBeforeWhisperFallback(t *testing.T) {
+	expected := errors.New("quota denied")
+	extractor := NewExtractor("/usr/bin/false")
+	calls := 0
+	ctx := WithDurationGuard(context.Background(), func(seconds float64) error {
+		calls++
+		if seconds != 0 {
+			t.Fatal("unexpected metadata")
+		}
+		return expected
+	})
+	if _, err := extractor.ExtractFromURL(ctx, "https://example.invalid/video", "test"); !errors.Is(err, expected) {
+		t.Fatal("duration guard did not stop extraction")
+	}
+	if calls != 1 {
+		t.Fatal("duration guard not called")
 	}
 }

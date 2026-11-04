@@ -522,8 +522,8 @@ func createOrRecoverFirstPartySessionTx(ctx context.Context, tx *sqlx.Tx, userID
 }
 
 // RefreshFirstPartySession consumes a refresh credential exactly once. A very
-// recent duplicate receives a retryable conflict so concurrent client calls do
-// not revoke their own session; an older replay revokes the entire device.
+// duplicate receives a retryable conflict while its successor is unused. Reuse
+// after the successor rotates revokes the entire device.
 func (db *DB) RefreshFirstPartySession(ctx context.Context, credential string) (*AuthTokenPair, error) {
 	return db.RefreshFirstPartySessionWithSuccessor(ctx, credential, "")
 }
@@ -574,43 +574,48 @@ func (db *DB) RefreshFirstPartySessionWithSuccessor(ctx context.Context, credent
 		return nil, ErrSessionInvalid
 	}
 	if row.ConsumedAt.Valid {
-		if successorHash != "" && row.SuccessorHash.Valid && row.SuccessorHash.String == successorHash {
-			var expiresAt time.Time
-			if err := tx.GetContext(ctx, &expiresAt, `
-				SELECT expires_at FROM auth_refresh_tokens
-				WHERE token_hash = $1 AND session_id = $2 AND consumed_at IS NULL`, successorHash, row.SessionID); err == nil && now.Before(expiresAt) {
-				pair, accessHash, _, err := newAuthTokenPairWithRefresh(now, successor)
-				if err != nil {
-					return nil, err
-				}
-				pair.SessionID, pair.UserID, pair.InactiveExpiresAt = row.SessionID, row.UserID, row.InactiveExpiresAt
-				if _, err := tx.ExecContext(ctx, `INSERT INTO auth_access_tokens (token_hash, session_id, expires_at) VALUES ($1, $2, $3)`, accessHash, row.SessionID, pair.AccessExpiresAt); err != nil {
-					return nil, fmt.Errorf("save recovered access credential: %w", err)
-				}
-				if err := tx.Commit(); err != nil {
-					return nil, fmt.Errorf("commit recovered refresh: %w", err)
-				}
-				return &pair, nil
-			} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return nil, fmt.Errorf("load successor credential: %w", err)
-			}
-			// The client knows both credentials, but has already advanced past
-			// this pair. Reject the stale request without revoking the device.
-			return nil, ErrSessionAlreadyRotated
+		var next struct {
+			ConsumedAt sql.NullTime `db:"consumed_at"`
+			ExpiresAt  time.Time    `db:"expires_at"`
 		}
-		if !now.Before(row.TokenExpiresAt) {
+		if !row.SuccessorHash.Valid {
 			return nil, ErrSessionInvalid
 		}
-		if now.Sub(row.ConsumedAt.Time) <= duplicateRefreshGrace {
-			return nil, ErrSessionAlreadyRotated
+		if err := tx.GetContext(ctx, &next, `SELECT consumed_at,expires_at FROM auth_refresh_tokens WHERE token_hash=$1 AND session_id=$2`, row.SuccessorHash.String, row.SessionID); errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrSessionInvalid
+		} else if err != nil {
+			return nil, fmt.Errorf("load successor credential: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE auth_sessions SET revoked_at = $2 WHERE id = $1`, row.SessionID, now); err != nil {
-			return nil, fmt.Errorf("revoke replayed session: %w", err)
+		// An unused successor can mean a lost response or simultaneous refresh.
+		// Once that successor rotated, reuse of its predecessor proves two parties
+		// are using the chain. Revoke even for an exact iOS old/new retry pair.
+		if next.ConsumedAt.Valid {
+			if _, err := tx.ExecContext(ctx, `UPDATE auth_sessions SET revoked_at=COALESCE(revoked_at,NOW()) WHERE id=$1`, row.SessionID); err != nil {
+				return nil, err
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			return nil, ErrSessionInvalid
 		}
-		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("commit replay revocation: %w", err)
+		if !now.Before(next.ExpiresAt) {
+			return nil, ErrSessionInvalid
 		}
-		return nil, ErrSessionReplay
+		if successorHash != "" && row.SuccessorHash.String == successorHash {
+			pair, accessHash, _, err := newAuthTokenPairWithRefresh(now, successor)
+			if err != nil {
+				return nil, err
+			}
+			pair.SessionID, pair.UserID, pair.InactiveExpiresAt = row.SessionID, row.UserID, row.InactiveExpiresAt
+			if _, err := tx.ExecContext(ctx, `INSERT INTO auth_access_tokens(token_hash,session_id,expires_at) VALUES($1,$2,$3)`, accessHash, row.SessionID, pair.AccessExpiresAt); err != nil {
+				return nil, err
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			return &pair, nil
+		}
+		return nil, ErrSessionAlreadyRotated
 	}
 	var pair AuthTokenPair
 	var accessHash, refreshHash string
@@ -624,7 +629,7 @@ func (db *DB) RefreshFirstPartySessionWithSuccessor(ctx context.Context, credent
 	}
 	pair.SessionID = row.SessionID
 	pair.UserID = row.UserID
-	if _, err := tx.ExecContext(ctx, `UPDATE auth_refresh_tokens SET consumed_at = $2, successor_hash = NULLIF($3, '') WHERE token_hash = $1`, hash, now, successorHash); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE auth_refresh_tokens SET consumed_at = $2, successor_hash = NULLIF($3, '') WHERE token_hash = $1`, hash, now, refreshHash); err != nil {
 		return nil, fmt.Errorf("consume refresh credential: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE auth_sessions SET last_used_at = $2, inactive_expires_at = $3 WHERE id = $1`, row.SessionID, now, pair.InactiveExpiresAt); err != nil {

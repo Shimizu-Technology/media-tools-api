@@ -174,6 +174,10 @@ func (h *Handler) postChatResponse(c *gin.Context, target *chatTarget, req model
 		return
 	}
 
+	if !h.allowAIModel(c, req.Model) {
+		return
+	}
+
 	req.Message = strings.TrimSpace(req.Message)
 	if req.Message == "" {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{

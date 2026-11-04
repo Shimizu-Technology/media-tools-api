@@ -18,6 +18,16 @@ import (
 // Go Pattern: We use exported (capitalized) fields so other packages can read them.
 // Tags like `json:"port"` are metadata — useful for serialization but not required here.
 type Config struct {
+	EmailDelivery                      string
+	ResendAPIKey                       string
+	ResendFromEmail                    string
+	PublicSignupEnabled                bool
+	TrustedProxyCIDRs                  []string
+	RenderClientIPEnabled              bool
+	NetlifyProxySignatureSecret        string
+	DefaultMonthlyTranscriptionMinutes int
+	DefaultMonthlyAIRequests           int
+	OwnerUserID                        string
 	// Server settings
 	Port    string
 	GinMode string // "debug", "release", or "test"
@@ -114,6 +124,16 @@ type Config struct {
 func Load() (*Config, error) {
 	ginMode := getEnv("GIN_MODE", "debug")
 	cfg := &Config{
+		EmailDelivery:                      getEnv("EMAIL_DELIVERY", "log"),
+		ResendAPIKey:                       getEnv("RESEND_API_KEY", ""),
+		ResendFromEmail:                    getEnv("RESEND_FROM_EMAIL", ""),
+		PublicSignupEnabled:                getEnvBool("PUBLIC_SIGNUP_ENABLED", false),
+		TrustedProxyCIDRs:                  strings.Split(getEnv("TRUSTED_PROXY_CIDRS", ""), ","),
+		RenderClientIPEnabled:              getEnvBool("RENDER_CLIENT_IP_ENABLED", false),
+		NetlifyProxySignatureSecret:        getEnv("NETLIFY_PROXY_SIGNATURE_SECRET", ""),
+		DefaultMonthlyTranscriptionMinutes: getEnvInt("DEFAULT_MONTHLY_TRANSCRIPTION_MINUTES", 300),
+		DefaultMonthlyAIRequests:           getEnvInt("DEFAULT_MONTHLY_AI_REQUESTS", 1000),
+		OwnerUserID:                        getEnv("OWNER_USER_ID", ""),
 		// Server defaults
 		Port:    getEnv("PORT", "8080"),
 		GinMode: ginMode,
@@ -198,6 +218,25 @@ func Load() (*Config, error) {
 		} else {
 			return nil, fmt.Errorf("CLERK_AUDIENCE, CLERK_AUTHORIZED_PARTY, or single CORS_ORIGIN must be set in production when Clerk auth is enabled")
 		}
+	}
+	if cfg.EmailDelivery != "log" && cfg.EmailDelivery != "resend" {
+		return nil, fmt.Errorf("EMAIL_DELIVERY must be log or resend")
+	}
+	if cfg.EmailDelivery == "resend" && (cfg.ResendAPIKey == "" || cfg.ResendFromEmail == "") {
+		return nil, fmt.Errorf("Resend delivery requires RESEND_API_KEY and RESEND_FROM_EMAIL")
+	}
+	if cfg.PublicSignupEnabled && !cfg.FirstPartyPasswordAuthEnabled {
+		return nil, fmt.Errorf("PUBLIC_SIGNUP_ENABLED requires FIRST_PARTY_PASSWORD_AUTH_ENABLED")
+	}
+	for _, key := range []string{"DEFAULT_MONTHLY_TRANSCRIPTION_MINUTES", "DEFAULT_MONTHLY_AI_REQUESTS"} {
+		if raw := os.Getenv(key); raw != "" {
+			if _, err := strconv.Atoi(raw); err != nil {
+				return nil, fmt.Errorf("%s must be an integer", key)
+			}
+		}
+	}
+	if cfg.DefaultMonthlyTranscriptionMinutes < 1 || cfg.DefaultMonthlyAIRequests < 1 {
+		return nil, fmt.Errorf("monthly usage caps must be positive")
 	}
 	if cfg.WebCookieAuthEnabled && !cfg.FirstPartyAuthEnabled {
 		return nil, fmt.Errorf("WEB_COOKIE_AUTH_ENABLED requires FIRST_PARTY_AUTH_ENABLED")

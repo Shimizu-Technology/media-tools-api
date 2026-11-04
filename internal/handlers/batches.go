@@ -103,16 +103,6 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 		APIKeyID:   owner.APIKeyID,
 	}
 
-	if err := h.DB.CreateBatch(c.Request.Context(), batch); err != nil {
-		log.Printf("Failed to create batch: %v", err)
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
-			Message: "Failed to create batch record",
-			Code:    http.StatusInternalServerError,
-		})
-		return
-	}
-
 	// Step 3: Create a transcript record for each URL, linked to the batch
 	transcripts := make([]models.Transcript, 0, len(parsed))
 
@@ -123,7 +113,6 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 		existing, _ := h.DB.GetTranscriptByYouTubeIDForActor(c.Request.Context(), p.videoID, actor.UserID, actor.APIKeyID)
 
 		var t *models.Transcript
-		var needsExtraction bool
 
 		if existing != nil && existing.Status == models.StatusCompleted {
 			// Reuse existing transcript data — skip re-extraction
@@ -141,7 +130,6 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 				UserID:         owner.UserID,
 				APIKeyID:       owner.APIKeyID,
 			}
-			needsExtraction = false
 			log.Printf("Reusing existing transcript for %s (already extracted)", p.videoID)
 		} else {
 			// Create a pending transcript that needs extraction
@@ -153,29 +141,23 @@ func (h *Handler) CreateBatch(c *gin.Context) {
 				UserID:     owner.UserID,
 				APIKeyID:   owner.APIKeyID,
 			}
-			needsExtraction = true
-		}
-
-		if err := h.DB.CreateTranscriptWithBatch(c.Request.Context(), t); err != nil {
-			log.Printf("Failed to create transcript for %s: %v", p.videoID, err)
-			// Continue with remaining URLs — partial success is better than total failure
-			continue
-		}
-
-		// Only submit extraction job if this is a new transcript
-		if needsExtraction {
-			job := worker.Job{
-				ID:        t.ID,
-				Type:      worker.JobTranscriptExtraction,
-				CreatedAt: time.Now(),
-			}
-
-			if err := h.Worker.Submit(job); err != nil {
-				log.Printf("Batch transcript %s queued durably; payload refresh failed and recovery was signaled: %v", t.ID, err)
-			}
 		}
 
 		transcripts = append(transcripts, *t)
+	}
+	if err := h.DB.CreateBatchWithTranscripts(c.Request.Context(), batch, transcripts); err != nil {
+		if quotaCreationError(c, err) {
+			return
+		}
+		authError(c, 503, "database_error", "Could not queue the batch; retry")
+		return
+	}
+	for _, t := range transcripts {
+		if t.Status == models.StatusPending && h.Worker != nil {
+			if err := h.Worker.Submit(worker.Job{ID: t.ID, Type: worker.JobTranscriptExtraction, CreatedAt: time.Now()}); err != nil {
+				log.Printf("Batch transcript %s queued durably; worker recovery signaled", t.ID)
+			}
+		}
 	}
 
 	if err := h.DB.UpdateBatchCounts(c.Request.Context(), batch.ID); err != nil {

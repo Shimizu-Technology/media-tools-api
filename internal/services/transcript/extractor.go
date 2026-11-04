@@ -143,12 +143,30 @@ type subtitle struct {
 	Ext string `json:"ext"`
 }
 
+type durationGuardKey struct{}
+
+// WithDurationGuard lets the account layer reserve actual video minutes before
+// a subtitle download or paid Whisper fallback. Keeping it in context preserves
+// the small Extractor interface used by existing implementations and tests.
+func WithDurationGuard(ctx context.Context, guard func(float64) error) context.Context {
+	return context.WithValue(ctx, durationGuardKey{}, guard)
+}
+
 // ExtractFromURL downloads the transcript for any yt-dlp-supported video URL (YouTube, Vimeo, etc.).
 // It first tries subtitles, then falls back to Whisper audio transcription.
 func (e *YtDlpExtractor) ExtractFromURL(ctx context.Context, videoURL, videoID string) (*Result, error) {
 	// Step 1: Get video metadata (title, channel, duration, available subtitles)
 	log.Printf("🎬 Extracting metadata for video: %s", videoURL)
 	metadata, metadataErr := e.getMetadata(ctx, videoURL)
+	if guard, ok := ctx.Value(durationGuardKey{}).(func(float64) error); ok {
+		duration := 0.0
+		if metadata != nil {
+			duration = metadata.Duration
+		}
+		if err := guard(duration); err != nil {
+			return nil, err
+		}
+	}
 
 	// Step 2: Try subtitle extraction first
 	if metadataErr == nil {

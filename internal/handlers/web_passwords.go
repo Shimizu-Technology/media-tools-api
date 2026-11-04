@@ -58,6 +58,7 @@ func (h *WebSessionHandler) FinishPasswordLogin(c *gin.Context) {
 	}
 	successor, err := c.Cookie(middleware.WebPasswordPendingCookie)
 	if err != nil || !database.ValidFirstPartyRefreshToken(successor) {
+		h.clearPasswordPending(c)
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "sign_in_not_prepared", Message: "Start password sign-in again", Code: http.StatusBadRequest})
 		return
 	}
@@ -69,7 +70,12 @@ func (h *WebSessionHandler) FinishPasswordLogin(c *gin.Context) {
 	}
 	pair, err := h.auth.createPasswordSession(c.Request.Context(), req.Email, req.Password, "web", "Browser", successor, existing)
 	if errors.Is(err, errPasswordRejected) {
-		passwordCredentialsRejected(c)
+		h.auth.rejectPassword(c, req.Email)
+		return
+	}
+	if errors.Is(err, database.ErrSessionInvalid) || errors.Is(err, database.ErrInvalidSuccessorToken) {
+		h.clearPasswordPending(c)
+		authError(c, 400, "sign_in_not_prepared", "Prepare password sign-in again")
 		return
 	}
 	if err != nil {

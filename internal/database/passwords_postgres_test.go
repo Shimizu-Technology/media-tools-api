@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
+
+	"github.com/google/uuid"
 
 	accountservice "github.com/Shimizu-Technology/media-tools-api/internal/services/account"
-	"github.com/google/uuid"
 )
 
 func createPasswordTestUser(t *testing.T, db *DB) string {
@@ -81,7 +81,7 @@ func TestPasswordCredentialIssuesRecoverableSessionAndReplacementRevokesOtherDev
 	}
 }
 
-func TestPasswordFailuresLockExactCredential(t *testing.T) {
+func TestPasswordFailuresCannotLockCorrectCredential(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
 	ctx := context.Background()
 	userID := createPasswordTestUser(t, db)
@@ -100,23 +100,17 @@ func TestPasswordFailuresLockExactCredential(t *testing.T) {
 		}
 	}
 	successor, _ := RandomFirstPartyRefreshToken()
-	if _, err := db.CreateOrRecoverPasswordSession(ctx, userID, hash, "", "web", "Browser", successor); !errors.Is(err, ErrPasswordCredentialLocked) {
-		t.Fatalf("locked credential login = %v", err)
+	if _, err := db.CreateOrRecoverPasswordSession(ctx, userID, hash, "", "web", "Browser", successor); err != nil {
+		t.Fatalf("verified password blocked by attacker failures: %v", err)
 	}
-	var firstDeadline time.Time
-	if err := db.GetContext(ctx, &firstDeadline, `SELECT locked_until FROM auth_password_credentials WHERE user_id = $1`, userID); err != nil {
+	var failures int
+	if err := db.GetContext(ctx, &failures, `SELECT failed_attempts FROM auth_password_credentials WHERE user_id=$1`, userID); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.RecordPasswordFailure(ctx, userID, hash); err != nil {
-		t.Fatal(err)
+	if failures != 0 {
+		t.Fatal("successful sign-in did not clear failures")
 	}
-	var secondDeadline time.Time
-	if err := db.GetContext(ctx, &secondDeadline, `SELECT locked_until FROM auth_password_credentials WHERE user_id = $1`, userID); err != nil {
-		t.Fatal(err)
-	}
-	if !secondDeadline.Equal(firstDeadline) {
-		t.Fatalf("active lock moved from %s to %s", firstDeadline, secondDeadline)
-	}
+
 }
 
 func TestPasswordLoginAndReplacementUseCompatibleLockOrder(t *testing.T) {
@@ -189,4 +183,55 @@ func credentialEmail(t *testing.T, db *DB, userID string) string {
 		t.Fatal(err)
 	}
 	return email
+}
+
+func TestPasswordGuessesSlowDownPastTheFailureBudget(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := createPasswordTestUser(t, db)
+	hasher, err := accountservice.NewPasswordHasher(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := hasher.Hash(ctx, "a secure password for testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := db.CreateFirstPartySession(ctx, userID, "ios", "iPhone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SetPasswordCredential(ctx, userID, session.SessionID, hash); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < passwordFailureLimit; i++ {
+		if allowed, err := db.ClaimPasswordGuess(ctx, userID); err != nil || !allowed {
+			t.Fatalf("guess %d within budget: allowed=%v err=%v", i, allowed, err)
+		}
+		if err := db.RecordPasswordFailure(ctx, userID, hash); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if allowed, err := db.ClaimPasswordGuess(ctx, userID); err != nil || !allowed {
+		t.Fatalf("first slow guess: allowed=%v err=%v", allowed, err)
+	}
+	if allowed, err := db.ClaimPasswordGuess(ctx, userID); err != nil || allowed {
+		t.Fatalf("second guess inside the gap must not be verified: allowed=%v err=%v", allowed, err)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE auth_password_guess_slots SET claimed_at = NOW() - INTERVAL '31 seconds' WHERE user_id = $1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := db.ClaimPasswordGuess(ctx, userID); err != nil || !allowed {
+		t.Fatalf("a later guess must get through so a correct password still works: allowed=%v err=%v", allowed, err)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE auth_password_credentials SET failure_window_started_at = NOW() - INTERVAL '16 minutes' WHERE user_id = $1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := db.ClaimPasswordGuess(ctx, userID); err != nil || !allowed {
+		t.Fatalf("an expired window restores the budget: allowed=%v err=%v", allowed, err)
+	}
 }

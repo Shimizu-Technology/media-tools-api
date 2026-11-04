@@ -76,6 +76,7 @@ func TestUnauthenticatedRateLimiterSeparatesAuthenticationScopes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	limiter := NewRateLimiter("", "", 100, 100)
 	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("auth_client_ip_verified", true); c.Next() })
 	router.POST("/recovery", limiter.RateLimitUnauthenticated("recovery", 1), func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})

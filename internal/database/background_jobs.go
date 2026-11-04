@@ -151,6 +151,14 @@ func (db *DB) QueueAudioTranscriptFormatting(ctx context.Context, audioID string
 	}
 	defer tx.Rollback()
 
+	var capped bool
+	if err = tx.GetContext(ctx, &capped, `SELECT EXISTS(SELECT 1 FROM audio_transcriptions a LEFT JOIN api_keys k ON k.id=a.api_key_id JOIN account_usage_policies p ON p.user_id=COALESCE(a.user_id,k.user_id) LEFT JOIN account_monthly_usage u ON u.user_id=p.user_id AND u.month=date_trunc('month',NOW() AT TIME ZONE 'UTC')::date WHERE a.id=$1 AND NOT p.exempt AND COALESCE(u.ai_requests,0)>=p.ai_request_limit)`, audioID); err != nil {
+		return err
+	}
+	if capped {
+		return ErrMonthlyUsageCap
+	}
+
 	result, err := tx.ExecContext(ctx, `
 		UPDATE audio_transcriptions
 		SET formatting_status = 'pending',

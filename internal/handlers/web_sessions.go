@@ -70,6 +70,13 @@ func (h *WebSessionHandler) setPair(c *gin.Context, pair *database.AuthTokenPair
 	h.setCookie(c, middleware.WebAccessCookie, pair.AccessToken, int(time.Until(pair.AccessExpiresAt).Seconds()), true, "/api/v1")
 	h.setCookie(c, middleware.WebRefreshCookie, pair.RefreshToken, webRefreshMaxAge, true, "/api/v1/auth/web/session")
 	h.clearPending(c)
+	// Extend the existing double-submit secret without rotating it underneath
+	// another open tab. Refresh has already required a valid CSRF token.
+	if c.Request != nil {
+		if csrf, err := c.Cookie(middleware.WebCSRFCookie); err == nil && csrf != "" {
+			h.setCookie(c, middleware.WebCSRFCookie, csrf, webRefreshMaxAge, false, "/")
+		}
+	}
 	c.Header("Cache-Control", "no-store")
 }
 
