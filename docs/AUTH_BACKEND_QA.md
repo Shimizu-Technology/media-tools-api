@@ -1,6 +1,6 @@
 # Auth backend acceptance
 
-Workstream D, agent-executed backend QA. Initial base: `0fc219e`; rebased onto foundation `d570f70`, then pipeline merge `896102f`, 2026-11-04.
+Workstream D, agent-executed backend QA. Initial base: `0fc219e`; rebased onto foundation `d570f70`, pipeline merge `896102f`, then agent-access merge `ac8ac9d`, 2026-11-04.
 Media Tools saves recordings, video transcripts and PDFs into an account library
 for search, summaries and chat. Sources: repo AGENTS.md, v1 release plan section D,
 PASSKEY_AUTH.md, INVITE_ONBOARDING.md, WEB_SESSION_ROLLOUT.md, and Brain Dump
@@ -56,7 +56,8 @@ signup. These are rollout tasks, not claimed production verification.
 
 ## Final validation
 
-Runtime source: `5951f20`, based on pipeline merge `896102f`. The final commit
+Previous runtime source: `5951f20`, based on pipeline merge `896102f`.
+Final integration adds agent-access merge `ac8ac9d`; combined checks are rerun below. The final commit
 adds this evidence and makes the resend test tolerate a legitimate random-code
 collision; that test was rerun with `-race` and passed. No runtime code changed
 after the full gate.

@@ -25,7 +25,7 @@ is the HTTP status, and `error` is the stable machine-readable identifier.
 - Configure the immutable `OWNER_USER_ID`, or retain the existing configured
   owner API key ID/prefix. Account exemptions are derived from that trusted
   configuration; no owner is inferred from signup order or email.
-- Migrations 056–057 add tables/triggers and widen the background-job type
+- Migrations 057–058 add tables/triggers and widen the background-job type
   constraint. They leave `users` columns unchanged because the overlapping old
   binary uses strict `SELECT *` scans. Old binaries do not know `auth_email` jobs;
   let the backend deployment drain before clients start using the new email
