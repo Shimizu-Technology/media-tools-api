@@ -29,12 +29,15 @@ class AIProcessingConsentStore(private val preferences: ConsentPreferences) {
 
     fun revoke(ownerId: String) = preferences.remove(key(ownerId))
 
-    /** Only call after the server verifies Clerk identity and returns its stable users.id. */
-    fun migrateVerifiedOwner(clerkId: String, userId: String) {
-        require(clerkId.isNotBlank() && userId.isNotBlank())
-        if (clerkId == userId || !hasConsent(clerkId)) return
+    /**
+     * Moves consent recorded under the retired sign-in id to the stable users.id. Only call
+     * with a pair the server returned for a stored session.
+     */
+    fun migrateVerifiedOwner(legacyId: String, userId: String) {
+        require(legacyId.isNotBlank() && userId.isNotBlank())
+        if (legacyId == userId || !hasConsent(legacyId)) return
         preferences.putBoolean(key(userId), true)
-        preferences.remove(key(clerkId))
+        preferences.remove(key(legacyId))
     }
 
     internal fun key(ownerId: String): String {

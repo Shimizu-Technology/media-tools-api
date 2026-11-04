@@ -7,7 +7,9 @@
 - [x] AGP 9.3.1 is newer than the 8.5.1 minimum for 16 KB page alignment.
 - [x] Manifest requests internet only; no broad media, storage, contacts, location, advertising ID, or background permissions.
 - [x] App data is excluded from Android backup and device transfer.
-- [x] Clerk telemetry is disabled.
+- [x] Sign-in is first-party in every build type; no third-party sign-in SDK or key is bundled, and `scripts/android-release-preflight.sh` fails if one returns.
+- [x] API host is `https://media-tools-api.onrender.com/api/v1` and is checked by the preflight.
+- [x] Sign-up appears only when the server reports `signup_enabled`.
 - [x] In-app account deletion and a public web deletion path are available.
 - [x] Explicit account-scoped AI permission can be revoked.
 - [x] Existing AI summaries are labeled and reportable in-app.
@@ -15,17 +17,17 @@
 
 ## External configuration before internal testing
 
-- [ ] Confirm the Clerk development Native API warning and enable it.
-- [ ] Add Android package `com.shimizutechnology.mediatools` to the Clerk development instance.
-- [ ] Test sign-up, sign-in, token refresh, sign-out, and account deletion with a disposable account.
+- [ ] Confirm the server has first-party password auth enabled and real email delivery verified (see `docs/AUTH_API.md`, "Availability and rollout").
+- [ ] Test sign-in, sign-out, token refresh after the access token expires, change password, forgot password, and account deletion (which asks for the password) with a disposable account.
+- [ ] If `signup_enabled` is on: test sign-up with the emailed code, resend, and a wrong code.
+- [ ] Update from an earlier internal build that has a stored session and confirm it stays signed in.
 
 ## External configuration before production
 
 - [ ] Purchase and verify the production domain.
-- [ ] Create/switch to the Clerk production instance and use a `pk_live_` publishable key outside source control.
 - [ ] Create the Play Console app and reserve the package name.
 - [ ] Create and securely escrow the upload key; enroll in Play App Signing.
-- [ ] Complete App access instructions with a working reviewer account if sign-in is required.
+- [ ] Complete App access instructions with a working email-and-password reviewer account if sign-in is required.
 - [ ] Complete Data safety from `DATA_SAFETY.md` after re-auditing production SDKs, providers, and retention.
 - [ ] Enter privacy policy and account-deletion URLs.
 - [ ] Complete Content rating, Target audience, Ads, News, Health apps, Financial features, and Data deletion declarations accurately.

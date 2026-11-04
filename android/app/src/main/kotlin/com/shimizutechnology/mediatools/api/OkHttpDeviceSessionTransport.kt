@@ -20,7 +20,7 @@ class OkHttpDeviceSessionTransport(
                 .method(method, body?.toRequestBody(JSON_MEDIA_TYPE))
                 .build()
             client.newCall(request).execute().use {
-                SessionResponse(it.code, it.body.string())
+                SessionResponse(it.code, it.body.string(), it.header("Retry-After")?.trim()?.toIntOrNull())
             }
         }
 

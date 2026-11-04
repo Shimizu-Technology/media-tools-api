@@ -19,22 +19,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        val isCI = System.getenv("CI")?.toBoolean() == true
-        val clerkKey = providers.gradleProperty("MEDIA_TOOLS_CLERK_PUBLISHABLE_KEY")
-            .orElse(providers.environmentVariable("MEDIA_TOOLS_CLERK_PUBLISHABLE_KEY"))
-            .orNull
-        if (clerkKey.isNullOrBlank() && !isCI) {
-            logger.warn(
-                "MEDIA_TOOLS_CLERK_PUBLISHABLE_KEY is unset. The app will build, but sign-in will show setup guidance."
-            )
-        }
-        val configuredKey = clerkKey ?: "pk_test_placeholder_for_ci"
-        buildConfigField("String", "CLERK_PUBLISHABLE_KEY", "\"$configuredKey\"")
-        buildConfigField("String", "API_BASE_URL", "\"https://media-tools-api-x9r7.onrender.com/api/v1\"")
-        val firstPartySessions = providers.gradleProperty("MEDIA_TOOLS_FIRST_PARTY_ANDROID_AUTH")
-            .orElse(providers.environmentVariable("MEDIA_TOOLS_FIRST_PARTY_ANDROID_AUTH"))
-            .orNull == "true"
-        buildConfigField("boolean", "FIRST_PARTY_ANDROID_AUTH_ENABLED", firstPartySessions.toString())
+        buildConfigField("String", "API_BASE_URL", "\"https://media-tools-api.onrender.com/api/v1\"")
     }
 
     compileOptions {
@@ -48,15 +33,6 @@ android {
         compose = true
         buildConfig = true
     }
-
-    // Native recovery is ready for internal testing. Keep every distributable
-    // build on the migration path until the Play signing certificate can be
-    // published in Digital Asset Links and Android passkeys are verified.
-    buildTypes.getByName("release").buildConfigField(
-        "boolean",
-        "FIRST_PARTY_ANDROID_AUTH_ENABLED",
-        "false",
-    )
 
     val releaseKeystorePath = providers.environmentVariable("MEDIA_TOOLS_ANDROID_KEYSTORE_PATH").orNull
     val releaseKeystorePassword = providers.environmentVariable("MEDIA_TOOLS_ANDROID_KEYSTORE_PASSWORD").orNull
@@ -86,7 +62,6 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.icons)
     implementation(libs.compose.ui.tooling.preview)
-    implementation(libs.clerk.ui)
     implementation(libs.kotlinx.serialization)
     implementation(libs.kotlinx.coroutines)
     implementation(libs.okhttp)

@@ -74,7 +74,11 @@ data class LibraryDetail(
 )
 
 @Serializable
-data class DeleteAccountRequest(val confirmation: String)
+data class DeleteAccountRequest(
+    val confirmation: String,
+    // Required by the server when the account has a password; omitted otherwise.
+    @SerialName("current_password") val currentPassword: String? = null,
+)
 
 @Serializable
 data class DeleteAccountResponse(
@@ -107,4 +111,13 @@ data class APIErrorEnvelope(
     val code: Int = 0,
 )
 
-class MediaToolsAPIException(val statusCode: Int, override val message: String) : Exception(message)
+/**
+ * [errorCode] is the server's stable `error` identifier (see docs/AUTH_API.md), so callers
+ * branch on it instead of on message text. [retryAfterSeconds] mirrors `Retry-After`.
+ */
+class MediaToolsAPIException(
+    val statusCode: Int,
+    override val message: String,
+    val errorCode: String? = null,
+    val retryAfterSeconds: Int? = null,
+) : Exception(message)

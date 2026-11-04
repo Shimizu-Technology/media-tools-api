@@ -67,9 +67,12 @@ class RecoveryAuthController(
         // The store promotes the session and removes the submitted code in one
         // durable commit. A lost response before this point retries the exact
         // code and successor and recovers the same server session.
-        deviceSession.installRecoveredSession(pair, pending.nextRefreshToken)
+        deviceSession.installSession(pair, pending.nextRefreshToken)
         pair
     }
+
+    /** The code of a redeem still in flight (for example after a lost response), or null. */
+    suspend fun pendingRedeemCode(): String? = mutex.withLock { store.loadPendingRecoveryRedeem()?.code }
 
     suspend fun status(): RecoveryCodeStatus = mutex.withLock {
         val owner = requireOwner()
@@ -131,13 +134,7 @@ class RecoveryAuthController(
         path: String,
         body: String?,
         method: String = "POST",
-    ): SessionResponse {
-        val firstToken = deviceSession.token(owner)
-        val first = transport.send(path, body, bearer = firstToken, method = method)
-        if (first.status != 401) return first
-        val replacement = deviceSession.refreshAfterRejectedToken(owner, firstToken)
-        return transport.send(path, body, bearer = replacement, method = method)
-    }
+    ): SessionResponse = transport.sendAuthenticated(deviceSession, owner, path, body, method)
 
     private inline fun <reified T> SessionResponse.requireDecoded(action: String): T {
         if (status !in 200..299) {

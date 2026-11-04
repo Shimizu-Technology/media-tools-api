@@ -8,39 +8,50 @@ Requirements:
 
 - Android Studio with Android 16 / API 36 installed
 - JDK 17
-- a Clerk development publishable key for migration testing
 
-Keep the publishable key outside source control. Add this line to `~/.gradle/gradle.properties`:
-
-```properties
-MEDIA_TOOLS_CLERK_PUBLISHABLE_KEY=pk_test_your_development_key
-```
-
-Then build from this directory:
+No sign-in key or other secret is needed to build. Build from this directory:
 
 ```bash
 ./gradlew lint testDebugUnitTest assembleDebug
 ```
 
-The Clerk dashboard must have Native API enabled and an Android application mapping for package `com.shimizutechnology.mediatools`. That external development setting is intentionally not changed by source code.
+Command-line builds need the SDK location: set `ANDROID_HOME` (for example
+`~/Library/Android/sdk`) or add `sdk.dir=...` to the untracked `local.properties`.
 
-### Staged first-party device session
+The app talks to `https://media-tools-api.onrender.com/api/v1` in every build type.
 
-The new session path is off by default. To exercise it in a development build,
-set `MEDIA_TOOLS_FIRST_PARTY_ANDROID_AUTH=true` in Gradle properties or the
-environment. The Go server must also have `FIRST_PARTY_AUTH_ENABLED=true`.
-Sign in with the existing Clerk flow once; Android exchanges that verified
-session for a Media Tools device session. Subsequent launches use the device
-credential even if Clerk's short session has expired. The sign-in screen also
-accepts a saved one-time recovery code and persists its exact retry credentials
-in encrypted storage before sending the request. A lost response can therefore
-recover the same session without consuming another code.
+## Sign-in
+
+Media Tools owns Android sign-in (contract: [`docs/AUTH_API.md`](../docs/AUTH_API.md)):
+
+- **Email and password.** The device sends its password once, over TLS, and keeps
+  only an opaque device session. A saved successor refresh credential lets a lost
+  sign-in response recover the same session; the password is never stored.
+- **Create an account** with a 6-digit email code and a password of 12 to 128
+  characters. The option appears only when the server's `/health` reports
+  `signup_enabled`.
+- **Forgot password** emails a code, sets a new password, and signs the account out
+  everywhere. Accounts that never had a password use this with their stored email.
+- **Change or set a password** from Settings. Changing it signs other devices out.
+- **Recovery codes** remain a secondary way in, and Settings can replace them.
+
+Requesting a code always shows the same message, whether or not the address has an
+account. Resending is throttled on the device and by the server.
+
+### Device session
 
 The refresh credential and an in-progress replacement are encrypted with a
 device-only Android Keystore key. The app writes the replacement before
 refreshing so it can recover if the server responds but the phone loses the
-response. Sign out requires server revocation and keeps the user signed in if
-revocation cannot be confirmed. Android backup is disabled for this app.
+response. Only a refresh the server rejects (401) ends the session. A dropped
+connection, timeout, 429, 5xx, or `session_refresh_in_progress` keeps the stored
+credentials and retries later. Sign out requires server revocation and keeps the
+user signed in if revocation cannot be confirmed. Android backup is disabled for
+this app.
+
+Sessions saved by earlier internal builds (including ones that came from the old
+third-party sign-in) keep working: the stored format is unchanged, and the
+device-local AI consent they recorded is moved to the stable account id once.
 
 Settings shows the active recovery-code count and a two-step replacement flow.
 The app encrypts the pending rotation ID and plaintext codes, binds them to the
@@ -50,22 +61,18 @@ account deletion, and account switching clear all recovery journals.
 
 ## Privacy and account boundaries
 
-- Clerk session JWTs authenticate API requests by default. With the staged
-  switch enabled, a first-party access credential authenticates after bootstrap.
-  A rejected access credential is refreshed once.
-- The server derives ownership from the JWT. The app never accepts or sends a user ID as an ownership selector.
-- AI permission is explicit, revocable, device-local, and versioned. A verified
-  bootstrap moves existing consent from the Clerk ID to the stable app user ID.
-- Clerk development telemetry is disabled in the Android SDK configuration.
+- A first-party access credential authenticates API calls. A rejected access
+  credential is refreshed once; a wrong *password* is never replayed.
+- The server derives ownership from the credential. The app never accepts or sends a user ID as an ownership selector.
+- AI permission is explicit, revocable, device-local, and versioned.
 - The manifest requests internet access only. Future uploads must use Android's system document picker rather than broad storage permission.
 - In-app and public-web account deletion both use the durable cross-system deletion process documented in the repository.
 
 ## Release status
 
-Source and internal debug builds are ready. Release builds force first-party
-Android auth off. A public first-party release remains blocked until the Play
-production signing certificate is available, its Digital Asset Links entry is
-published for `media.shimizu-technology.com`, and Android passkeys are tested
-end to end. Clerk remains the migration fallback in that release. Run
-`../scripts/android-release-preflight.sh --release` to validate current release
-prerequisites without exposing secret values.
+Source and internal debug builds are ready, and release builds use the same
+first-party sign-in as debug builds. No third-party sign-in SDK is bundled;
+`../scripts/android-release-preflight.sh` fails if one returns or if the API host
+drifts. Run it with `--release` to validate signing prerequisites without exposing
+secret values. Publishing to Google Play is a separate step tracked in
+`play-store/RELEASE_CHECKLIST.md`.

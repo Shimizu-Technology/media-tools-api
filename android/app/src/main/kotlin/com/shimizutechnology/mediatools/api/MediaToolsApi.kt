@@ -1,9 +1,5 @@
 package com.shimizutechnology.mediatools.api
 
-import com.clerk.api.Clerk
-import com.clerk.api.network.serialization.ClerkResult
-import com.clerk.api.session.GetTokenOptions
-import com.clerk.api.session.fetchToken
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -19,28 +15,6 @@ interface SessionTokenProvider {
     suspend fun refreshAfterRejectedToken(expectedOwnerId: String, rejectedToken: String): String =
         token(expectedOwnerId, forceRefresh = true)
     fun currentOwnerId(): String?
-}
-
-class ClerkSessionTokenProvider : SessionTokenProvider {
-    override suspend fun token(expectedOwnerId: String, forceRefresh: Boolean): String {
-        val session = Clerk.session ?: throw MediaToolsAPIException(401, "Sign in to continue.")
-        if (session.user?.id != expectedOwnerId) {
-            throw MediaToolsAPIException(401, "The signed-in account changed. Try again.")
-        }
-        val token = when (val result = session.fetchToken(GetTokenOptions(skipCache = forceRefresh))) {
-            is ClerkResult.Success -> result.value.jwt
-            is ClerkResult.Failure -> throw MediaToolsAPIException(
-                401,
-                if (Clerk.session == null) "Sign in to continue." else "Your sign-in session could not be refreshed.",
-            )
-        }
-        if (Clerk.session?.id != session.id || Clerk.user?.id != expectedOwnerId) {
-            throw MediaToolsAPIException(401, "The signed-in account changed. Try again.")
-        }
-        return token
-    }
-
-    override fun currentOwnerId(): String? = Clerk.user?.id
 }
 
 interface LibraryRepository {
@@ -112,8 +86,9 @@ class MediaToolsApi(
             json.encodeToString(AIReportRequest(target.type, target.id, category, details.trim())),
         )
 
-    suspend fun deleteAccount(): DeleteAccountResponse =
-        delete("/account", json.encodeToString(DeleteAccountRequest("DELETE")))
+    /** [currentPassword] is required by the server when the account has a password. */
+    suspend fun deleteAccount(currentPassword: String? = null): DeleteAccountResponse =
+        delete("/account", json.encodeToString(DeleteAccountRequest("DELETE", currentPassword?.takeIf(String::isNotEmpty))))
 
     private suspend inline fun <reified T> get(path: String): T =
         execute(path = path, method = "GET", body = null)
@@ -129,7 +104,9 @@ class MediaToolsApi(
             ?: throw MediaToolsAPIException(401, "Sign in to continue.")
         val firstToken = tokenProvider.token(expectedOwnerId, forceRefresh = false)
         val first = executeOnce(path, method, body, expectedOwnerId, firstToken)
-        val response = if (first.code == 401) {
+        // A 401 for a wrong current password is not an expired credential; replaying the
+        // request would count a second failed password against the account.
+        val response = if (first.code == 401 && !isPasswordRejection(first)) {
             first.close()
             val replacement = tokenProvider.refreshAfterRejectedToken(expectedOwnerId, firstToken)
             executeOnce(path, method, body, expectedOwnerId, replacement)
@@ -144,7 +121,12 @@ class MediaToolsApi(
             val payload = it.body.string()
             if (!it.isSuccessful) {
                 val serverError = runCatching { json.decodeFromString<APIErrorEnvelope>(payload) }.getOrNull()
-                throw MediaToolsAPIException(it.code, serverError?.message ?: "Request failed (${it.code}).")
+                throw MediaToolsAPIException(
+                    it.code,
+                    serverError?.message ?: "Request failed (${it.code}).",
+                    errorCode = serverError?.error?.takeUnless { code -> code == "unknown" },
+                    retryAfterSeconds = it.header("Retry-After")?.trim()?.toIntOrNull(),
+                )
             }
             return try {
                 json.decodeFromString<T>(payload)
@@ -152,6 +134,12 @@ class MediaToolsApi(
                 throw IOException("Media Tools returned an unreadable response.", error)
             }
         }
+    }
+
+    @PublishedApi
+    internal fun isPasswordRejection(response: okhttp3.Response): Boolean {
+        val code = runCatching { json.decodeFromString<APIErrorEnvelope>(response.peekBody(8192).string()).error }.getOrNull()
+        return code == "current_password_required" || code == "invalid_credentials"
     }
 
     @PublishedApi

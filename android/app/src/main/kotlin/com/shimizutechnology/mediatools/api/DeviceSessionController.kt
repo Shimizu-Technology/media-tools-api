@@ -1,6 +1,7 @@
 package com.shimizutechnology.mediatools.api
 
 import java.time.Instant
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,15 +25,22 @@ data class DeviceSessionPair(
 @Serializable
 data class StoredDeviceSession(
     val pair: DeviceSessionPair,
-    val verifiedClerkId: String? = null,
+    // Id from the retired third-party sign-in, written by earlier internal builds. The
+    // JSON name is the persisted one: keeping it means those stored sessions still decode
+    // after the update, and their device-local AI consent still migrates.
+    @SerialName("verifiedClerkId") val legacyOwnerId: String? = null,
     // Save this before sending refresh. A lost response can retry the same old/new pair.
     val pendingNextRefreshToken: String? = null,
 )
 
-/** Saved before bootstrap so a lost success response can recover the same server session. */
+/**
+ * Saved before password sign-in so a lost success response can recover the same server
+ * session. It holds the successor refresh credential, never the password: a retry after a
+ * relaunch needs the person to type the password again.
+ */
 @Serializable
-data class PendingDeviceSessionBootstrap(
-    val verifiedClerkId: String,
+data class PendingPasswordLogin(
+    val email: String,
     val nextRefreshToken: String,
     val deviceName: String,
 )
@@ -53,21 +61,21 @@ data class PendingRecoveryCodeRotation(
 interface DeviceSessionStore {
     fun load(): StoredDeviceSession?
     fun save(session: StoredDeviceSession)
-    fun loadPendingBootstrap(): PendingDeviceSessionBootstrap?
-    fun savePendingBootstrap(pending: PendingDeviceSessionBootstrap)
-    fun promoteBootstrap(session: StoredDeviceSession)
-    fun clearPendingBootstrap()
+    fun loadPendingPasswordLogin(): PendingPasswordLogin?
+    fun savePendingPasswordLogin(pending: PendingPasswordLogin)
+    fun clearPendingPasswordLogin()
     fun loadPendingRecoveryRedeem(): PendingRecoveryCodeRedeem?
     fun savePendingRecoveryRedeem(pending: PendingRecoveryCodeRedeem)
     fun clearPendingRecoveryRedeem()
     fun loadPendingRecoveryRotation(): PendingRecoveryCodeRotation?
     fun savePendingRecoveryRotation(pending: PendingRecoveryCodeRotation)
     fun clearPendingRecoveryRotation()
-    fun promoteRecovery(session: StoredDeviceSession)
+    /** Installs a new session and removes every pending sign-in journal in one durable commit. */
+    fun promote(session: StoredDeviceSession)
     fun clear()
 }
 
-data class SessionResponse(val status: Int, val body: String)
+data class SessionResponse(val status: Int, val body: String, val retryAfterSeconds: Int? = null)
 
 interface DeviceSessionTransport {
     suspend fun send(path: String, body: String?, bearer: String? = null, method: String = "POST"): SessionResponse
@@ -76,13 +84,16 @@ interface DeviceSessionTransport {
 /**
  * Owns one first-party device session. All rotations and account transitions
  * share a mutex, so parallel API calls cannot consume the same refresh token.
+ *
+ * Only a refresh the server rejects (401) ends the session. Network errors, timeouts,
+ * 429, 5xx, and `session_refresh_in_progress` leave the stored credentials untouched,
+ * so the same old/new pair is retried next time.
  */
 class DeviceSessionController(
     private val store: DeviceSessionStore,
     private val transport: DeviceSessionTransport,
     private val now: () -> Instant = Instant::now,
     private val randomRefreshToken: () -> String = ::newDeviceRefreshToken,
-    private val currentExternalIdentity: () -> String?,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : SessionTokenProvider {
     private val mutex = Mutex()
@@ -91,78 +102,15 @@ class DeviceSessionController(
     private val _revision = MutableStateFlow(0)
     val revision: StateFlow<Int> = _revision
 
+    /** Retired sign-in id and the stable user id, so device-local consent can follow the account. */
     val verifiedMigration: Pair<String, String>?
-        get() = stored?.let { value -> value.verifiedClerkId?.let { it to value.pair.userId } }
+        get() = stored?.let { value -> value.legacyOwnerId?.let { it to value.pair.userId } }
 
-    fun hasConflictingExternalIdentity(currentClerkId: String?): Boolean =
-        currentClerkId != null && stored?.let { it.verifiedClerkId != currentClerkId } == true
-
-    /** A different Clerk identity never inherits this device's account. */
-    fun availableOwnerId(currentClerkId: String?): String? {
+    /** Null when signed out or after the server rejected a refresh. */
+    override fun currentOwnerId(): String? {
         val value = stored ?: return null
-        if (rejected || (currentClerkId != null && currentClerkId != value.verifiedClerkId)) return null
-        return value.pair.userId
+        return if (rejected) null else value.pair.userId
     }
-
-    override fun currentOwnerId(): String? = availableOwnerId(currentExternalIdentity())
-
-    /** This method must receive a token from the same verified Clerk identity. */
-    suspend fun bootstrap(verifiedClerkId: String, clerkToken: String, deviceName: String): DeviceSessionPair =
-        mutex.withLock {
-            require(verifiedClerkId.isNotBlank() && clerkToken.isNotBlank())
-            val existing = stored
-            if (existing != null && !rejected) {
-                if (existing.verifiedClerkId != verifiedClerkId) {
-                    throw MediaToolsAPIException(409, "Sign out of the current device account before switching accounts.")
-                }
-                return@withLock existing.pair
-            }
-            if (currentExternalIdentity() != verifiedClerkId) {
-                throw MediaToolsAPIException(409, "The signed-in account changed. Try again.")
-            }
-            var pending = store.loadPendingBootstrap()
-            if (pending != null && pending.verifiedClerkId != verifiedClerkId) {
-                // A different verified Clerk identity must never reuse the old
-                // identity's successor credential.
-                store.clearPendingBootstrap()
-                pending = null
-            }
-            if (pending == null) {
-                pending = PendingDeviceSessionBootstrap(
-                    verifiedClerkId = verifiedClerkId,
-                    nextRefreshToken = randomRefreshToken(),
-                    deviceName = deviceName.trim().take(80),
-                )
-                store.savePendingBootstrap(pending)
-            }
-            val response = transport.send(
-                "/auth/session/bootstrap",
-                json.encodeToString(
-                    BootstrapRequest(
-                        clientType = "android",
-                        deviceName = pending.deviceName,
-                        nextRefreshToken = pending.nextRefreshToken,
-                    )
-                ),
-                bearer = clerkToken,
-            )
-            if (response.status == 400 || response.status == 401) {
-                store.clearPendingBootstrap()
-            }
-            val pair = response.requirePair()
-            if (currentExternalIdentity() != verifiedClerkId) {
-                throw MediaToolsAPIException(409, "The signed-in account changed. Try again.")
-            }
-            if (pair.refreshToken != pending.nextRefreshToken) {
-                throw MediaToolsAPIException(502, "Media Tools returned an invalid device session.")
-            }
-            val value = StoredDeviceSession(pair, verifiedClerkId)
-            store.promoteBootstrap(value)
-            stored = value
-            rejected = false
-            _revision.value++
-            pair
-        }
 
     override suspend fun token(expectedOwnerId: String, forceRefresh: Boolean): String =
         accessToken(expectedOwnerId, forceRefresh, rejectedToken = null)
@@ -192,14 +140,23 @@ class DeviceSessionController(
             store.save(pending)
             stored = pending
         }
-        val response = transport.send(
-            "/auth/session/refresh",
-            json.encodeToString(RefreshRequest(value.pair.refreshToken, next)),
-        )
+        val request = json.encodeToString(RefreshRequest(value.pair.refreshToken, next))
+        var retries = 0
+        var response = transport.send("/auth/session/refresh", request)
+        // 409 session_refresh_in_progress means another caller just advanced this session
+        // and does not revoke it. Retry the identical request a couple of times; if it keeps
+        // happening, surface it as retryable and keep the stored pair.
+        while (response.status == 409 && retries < REFRESH_IN_PROGRESS_RETRIES &&
+            response.toApiException("Session refresh").errorCode == "session_refresh_in_progress"
+        ) {
+            delay(REFRESH_RETRY_BASE_MILLIS shl retries)
+            retries++
+            response = transport.send("/auth/session/refresh", request)
+        }
         if (response.status == 401) {
             rejected = true
             _revision.value++
-            throw MediaToolsAPIException(401, "Sign in again to continue.")
+            throw MediaToolsAPIException(401, "Sign in again to continue.", "invalid_session")
         }
         val pair = response.requirePair()
         if (pair.userId != value.pair.userId || pair.sessionId != value.pair.sessionId || pair.refreshToken != next) {
@@ -242,27 +199,27 @@ class DeviceSessionController(
         _revision.value++
     }
 
-    /** Installs a public recovery result only when no other local account is active. */
-    suspend fun installRecoveredSession(pair: DeviceSessionPair, expectedRefreshToken: String) = mutex.withLock {
+    /**
+     * Installs the result of password or recovery-code sign-in, but only when no other
+     * account is active on this device. A session the server already rejected may be replaced.
+     */
+    suspend fun installSession(pair: DeviceSessionPair, expectedRefreshToken: String) = mutex.withLock {
         if (stored != null && !rejected) {
-            throw MediaToolsAPIException(409, "Sign out of the current account before using a recovery code.")
+            throw MediaToolsAPIException(409, "Sign out of the current account before signing in again.")
         }
         if (pair.refreshToken != expectedRefreshToken) {
             throw MediaToolsAPIException(502, "Media Tools returned an invalid device session.")
         }
         validatePair(pair)
-        val value = StoredDeviceSession(pair = pair, verifiedClerkId = null)
-        store.promoteRecovery(value)
+        val value = StoredDeviceSession(pair = pair)
+        store.promote(value)
         stored = value
         rejected = false
         _revision.value++
     }
 
     private fun SessionResponse.requirePair(): DeviceSessionPair {
-        if (status !in 200..299) {
-            val error = runCatching { json.decodeFromString<APIErrorEnvelope>(body) }.getOrNull()
-            throw MediaToolsAPIException(status, error?.message ?: "Device session unavailable ($status).")
-        }
+        if (status !in 200..299) throw toApiException("Device session unavailable", json)
         val pair = runCatching { json.decodeFromString<DeviceSessionPair>(body) }.getOrElse {
             throw MediaToolsAPIException(502, "Media Tools returned an unreadable device session.")
         }
@@ -278,15 +235,12 @@ class DeviceSessionController(
     }
 
     private companion object {
-        @Serializable private data class BootstrapRequest(
-            @SerialName("client_type") val clientType: String,
-            @SerialName("device_name") val deviceName: String,
-            @SerialName("next_refresh_token") val nextRefreshToken: String,
-        )
+        const val REFRESH_IN_PROGRESS_RETRIES = 2
+        const val REFRESH_RETRY_BASE_MILLIS = 500L
+
         @Serializable private data class RefreshRequest(
             @SerialName("refresh_token") val refreshToken: String,
             @SerialName("next_refresh_token") val nextRefreshToken: String,
         )
-
     }
 }

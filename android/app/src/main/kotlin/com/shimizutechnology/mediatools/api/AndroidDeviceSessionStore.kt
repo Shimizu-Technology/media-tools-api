@@ -1,6 +1,7 @@
 package com.shimizutechnology.mediatools.api
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -34,37 +35,14 @@ class AndroidDeviceSessionStore(context: Context) : DeviceSessionStore {
         }
     }
 
-    override fun loadPendingBootstrap(): PendingDeviceSessionBootstrap? {
-        val encoded = preferences.getString(PENDING_BOOTSTRAP_KEY, null) ?: return null
-        return runCatching {
-            json.decodeFromString<PendingDeviceSessionBootstrap>(decrypt(encoded))
-        }.getOrNull()
+    override fun loadPendingPasswordLogin(): PendingPasswordLogin? = loadEncrypted(PENDING_PASSWORD_LOGIN_KEY)
+
+    override fun savePendingPasswordLogin(pending: PendingPasswordLogin) {
+        saveEncrypted(PENDING_PASSWORD_LOGIN_KEY, pending, "Could not save this device's pending sign-in credentials.")
     }
 
-    override fun savePendingBootstrap(pending: PendingDeviceSessionBootstrap) {
-        check(
-            preferences.edit()
-                .putString(PENDING_BOOTSTRAP_KEY, encrypt(json.encodeToString(pending)))
-                .commit()
-        ) { "Could not save this device's pending sign-in credentials." }
-    }
-
-    /** One preferences commit makes session installation and journal removal atomic. */
-    override fun promoteBootstrap(session: StoredDeviceSession) {
-        check(
-            preferences.edit()
-                .putString(SESSION_KEY, encrypt(json.encodeToString(session)))
-                .remove(PENDING_BOOTSTRAP_KEY)
-                .remove(PENDING_RECOVERY_REDEEM_KEY)
-                .remove(PENDING_RECOVERY_ROTATION_KEY)
-                .commit()
-        ) { "Could not save this device's sign-in credentials." }
-    }
-
-    override fun clearPendingBootstrap() {
-        check(preferences.edit().remove(PENDING_BOOTSTRAP_KEY).commit()) {
-            "Could not remove this device's pending sign-in credentials."
-        }
+    override fun clearPendingPasswordLogin() {
+        remove(PENDING_PASSWORD_LOGIN_KEY, "Could not remove this device's pending sign-in credentials.")
     }
 
     override fun loadPendingRecoveryRedeem(): PendingRecoveryCodeRedeem? =
@@ -89,30 +67,28 @@ class AndroidDeviceSessionStore(context: Context) : DeviceSessionStore {
         remove(PENDING_RECOVERY_ROTATION_KEY, "Could not remove the pending recovery codes.")
     }
 
-    /** Installs the recovered session and removes its one-time secret in one preferences commit. */
-    override fun promoteRecovery(session: StoredDeviceSession) {
+    /** One preferences commit installs the session and removes every one-time sign-in journal. */
+    override fun promote(session: StoredDeviceSession) {
         check(
             preferences.edit()
                 .putString(SESSION_KEY, encrypt(json.encodeToString(session)))
-                .remove(PENDING_BOOTSTRAP_KEY)
-                .remove(PENDING_RECOVERY_REDEEM_KEY)
-                .remove(PENDING_RECOVERY_ROTATION_KEY)
+                .removePendingJournals()
                 .commit()
-        ) { "Could not save this device's recovered sign-in." }
+        ) { "Could not save this device's sign-in credentials." }
     }
 
     override fun clear() {
-        check(
-            preferences.edit()
-                .remove(SESSION_KEY)
-                .remove(PENDING_BOOTSTRAP_KEY)
-                .remove(PENDING_RECOVERY_REDEEM_KEY)
-                .remove(PENDING_RECOVERY_ROTATION_KEY)
-                .commit()
-        ) {
+        check(preferences.edit().remove(SESSION_KEY).removePendingJournals().commit()) {
             "Could not remove this device's sign-in credentials."
         }
     }
+
+    private fun SharedPreferences.Editor.removePendingJournals(): SharedPreferences.Editor =
+        remove(PENDING_PASSWORD_LOGIN_KEY)
+            .remove(PENDING_RECOVERY_REDEEM_KEY)
+            .remove(PENDING_RECOVERY_ROTATION_KEY)
+            // Journal written by builds that signed in through the old third-party service.
+            .remove(LEGACY_PENDING_BOOTSTRAP_KEY)
 
     private inline fun <reified T> loadEncrypted(key: String): T? {
         val encoded = preferences.getString(key, null) ?: return null
@@ -160,7 +136,8 @@ class AndroidDeviceSessionStore(context: Context) : DeviceSessionStore {
 
     private companion object {
         const val SESSION_KEY = "encrypted_session"
-        const val PENDING_BOOTSTRAP_KEY = "encrypted_pending_bootstrap"
+        const val PENDING_PASSWORD_LOGIN_KEY = "encrypted_pending_password_login"
+        const val LEGACY_PENDING_BOOTSTRAP_KEY = "encrypted_pending_bootstrap"
         const val PENDING_RECOVERY_REDEEM_KEY = "encrypted_pending_recovery_redeem"
         const val PENDING_RECOVERY_ROTATION_KEY = "encrypted_pending_recovery_rotation"
         const val KEY_ALIAS = "com.shimizu-technology.media-tools.device-session.v1"
