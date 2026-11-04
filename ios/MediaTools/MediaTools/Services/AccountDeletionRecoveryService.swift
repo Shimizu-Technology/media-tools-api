@@ -110,8 +110,14 @@ final class AccountDeletionRecoveryService {
 
     /// Local read used before opening a stored workspace. A deletion that might
     /// have committed must be reconciled before showing that account's content.
+    /// A Keychain read that throws is not proof of "no journal": it counts as
+    /// pending, so the workspace stays closed until a later read answers.
     var hasPendingDeletion: Bool {
-        (try? journal.load()) != nil
+        do {
+            return try journal.load() != nil
+        } catch {
+            return true
+        }
     }
 
     /// Persist the receipt before sending DELETE. Retrying for the same owner
@@ -223,7 +229,13 @@ final class AccountDeletionRecoveryService {
         deviceSession: DeviceSessionController,
         shareKeys: ShareUploadKeyManager
     ) async -> PendingDeletionResolution {
-        guard (try? journal.load()) != nil else { return .none }
+        // A journal that cannot be read may hold a committed deletion. Stay
+        // closed without signing out; the next foreground or Try again reads it.
+        do {
+            guard try journal.load() != nil else { return .none }
+        } catch {
+            return .unresolved
+        }
         let confirmed: PendingAccountDeletion?
         do {
             confirmed = try await confirmedPendingDeletion(retryOwnerID: retryOwnerID)
@@ -244,7 +256,11 @@ final class AccountDeletionRecoveryService {
                 return .unresolved
             }
         }
-        if let remaining = try? journal.load(), remaining.ownerID == retryOwnerID {
+        do {
+            if let remaining = try journal.load(), remaining.ownerID == retryOwnerID {
+                return .unresolved
+            }
+        } catch {
             return .unresolved
         }
         return .none

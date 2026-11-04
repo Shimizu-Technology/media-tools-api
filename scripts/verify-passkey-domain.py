@@ -3,8 +3,19 @@
 
 import json
 import plistlib
-import tomllib
+import sys
 from pathlib import Path
+
+# tomllib joined the standard library in Python 3.11. Say so plainly rather than
+# failing on the import below with a ModuleNotFoundError.
+if sys.version_info < (3, 11):
+    sys.exit(
+        "verify-passkey-domain.py needs Python 3.11 or newer (tomllib); "
+        f"this is Python {sys.version_info.major}.{sys.version_info.minor}. "
+        "Run it with python3.11 or later."
+    )
+
+import tomllib  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]

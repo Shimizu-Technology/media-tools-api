@@ -4,8 +4,12 @@ import XCTest
 @MainActor
 private final class MemoryAccountDeletionJournal: AccountDeletionJournaling {
     var value: PendingAccountDeletion?
+    var loadFails = false
 
-    func load() throws -> PendingAccountDeletion? { value }
+    func load() throws -> PendingAccountDeletion? {
+        if loadFails { throw AccountDeletionRecoveryError.couldNotCreateReceipt }
+        return value
+    }
     func save(_ value: PendingAccountDeletion) throws { self.value = value }
     func delete() { value = nil }
 }
@@ -441,6 +445,30 @@ final class AccountDeletionRecoveryServiceTests: XCTestCase {
         XCTAssertEqual(resolution, .unresolved)
         XCTAssertEqual(harness.journal.value, pending)
         XCTAssertEqual(harness.deviceSession.storedUserID, "owner-a")
+    }
+
+    @MainActor
+    func testAJournalReadThatThrowsKeepsTheWorkspaceClosedThenRecovers() async throws {
+        let pending = PendingAccountDeletion(ownerID: "owner-a", receiptToken: "mta_del_" + String(repeating: "i", count: 43))
+        let harness = try launchHarness(
+            pending: pending,
+            api: MockAccountDeletionAPI(requestResult: .failure, receiptResult: .unavailable)
+        )
+        harness.journal.loadFails = true
+
+        XCTAssertTrue(harness.service.hasPendingDeletion, "An unreadable journal is treated as pending")
+        let blocked = await resolve(harness, retryOwnerID: "owner-a")
+        XCTAssertEqual(blocked, .unresolved)
+        XCTAssertEqual(harness.deviceSession.storedUserID, "owner-a", "A failed read never signs the owner out")
+        XCTAssertTrue(harness.cleaner.removedOwners.isEmpty)
+
+        // The next foreground reads again: with the Keychain readable and no
+        // journal, the workspace opens.
+        harness.journal.loadFails = false
+        harness.journal.value = nil
+        XCTAssertFalse(harness.service.hasPendingDeletion)
+        let recovered = await resolve(harness, retryOwnerID: "owner-a")
+        XCTAssertEqual(recovered, .none)
     }
 
     @MainActor

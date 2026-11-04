@@ -360,7 +360,7 @@ struct ShareDirectUploader {
             // no longer speaks for them. The app may also have taken the share over.
             guard policy.load() == startingPolicy,
                   credentials.load() == .found(credential),
-                  inbox.transferClaim(shareID: item.id) == nil
+                  !inbox.hasTransferClaim(shareID: item.id)
             else {
                 return releaseReservation(item)
             }

@@ -8,9 +8,13 @@ import XCTest
 final class KeychainIsolationTests: XCTestCase {
     private let sessionService = "com.shimizu-technology.media-tools.device-session"
     private var account = ""
+    /// Never the production journal account: a test run must not be able to read,
+    /// overwrite, or delete a pending journal on a real device.
+    private var journalAccount = ""
 
     override func setUp() async throws {
         account = "test-\(UUID().uuidString)"
+        journalAccount = "test-journal-\(UUID().uuidString)"
     }
 
     private func requireKeychain() throws {
@@ -38,7 +42,7 @@ final class KeychainIsolationTests: XCTestCase {
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
         XCTAssertEqual(SecItemAdd(attributes as CFDictionary, nil), errSecSuccess)
-        let store = DeviceSessionKeychainStore(account: account)
+        let store = DeviceSessionKeychainStore(account: account, pendingBootstrapAccount: journalAccount)
         addTeardownBlock { [account, sessionService] in
             SecItemDelete([
                 kSecClass as String: kSecClassGenericPassword,
@@ -55,10 +59,15 @@ final class KeychainIsolationTests: XCTestCase {
         XCTAssertEqual(session.pair.userID, "server-a")
     }
 
-    /// The account, service, and format build 13's store actually used.
+    /// Build 13 wrote its journal under this account, so a change would orphan one.
+    func testTheProductionJournalAccountIsBuild13s() {
+        XCTAssertEqual(DeviceSessionKeychainStore.defaultPendingBootstrapAccount, "first-party-ios-bootstrap-v1")
+    }
+
+    /// The service and format build 13's store actually used. The account is
+    /// unique to this run, so a pending journal on a real device is never touched.
     func testAJournalBuild13WroteLoadsThroughTheRealStore() throws {
         try requireKeychain()
-        let journalAccount = "first-party-ios-bootstrap-v1"
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: sessionService,
@@ -71,7 +80,7 @@ final class KeychainIsolationTests: XCTestCase {
         XCTAssertEqual(SecItemAdd(attributes as CFDictionary, nil), errSecSuccess)
         addTeardownBlock { SecItemDelete(query as CFDictionary) }
 
-        let store = DeviceSessionKeychainStore(account: account)
+        let store = DeviceSessionKeychainStore(account: account, pendingBootstrapAccount: journalAccount)
         guard case .found(var journal) = store.loadPendingBootstrap() else {
             return XCTFail("A journal holding a live credential must not read as missing")
         }
@@ -90,7 +99,7 @@ final class KeychainIsolationTests: XCTestCase {
     /// The whole reason not to add a `keychain-access-groups` entitlement.
     func testTheDeviceSessionIsNotReadableFromTheSharedGroup() throws {
         try requireKeychain()
-        let store = DeviceSessionKeychainStore(account: account)
+        let store = DeviceSessionKeychainStore(account: account, pendingBootstrapAccount: journalAccount)
         addTeardownBlock { [store] in await MainActor.run { store.delete() } }
         try store.save(StoredDeviceSession(
             pair: DeviceSessionPair(

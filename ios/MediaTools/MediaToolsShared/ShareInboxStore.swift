@@ -307,6 +307,12 @@ struct ShareInboxStore {
         return try? JSONDecoder().decode(TransferClaim.self, from: data)
     }
 
+    /// True when a claim file exists, readable or not. A claim that cannot be read
+    /// or decoded still means the other side took the share.
+    func hasTransferClaim(shareID: UUID) -> Bool {
+        fileManager.fileExists(atPath: claimURL(for: shareID).path)
+    }
+
     private func claimURL(for id: UUID) -> URL {
         directoryURL(for: id).appendingPathComponent("transfer-claim.json")
     }

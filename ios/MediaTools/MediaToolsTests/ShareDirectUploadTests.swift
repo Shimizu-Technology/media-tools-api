@@ -340,6 +340,22 @@ final class ShareDirectUploaderTests: XCTestCase {
         XCTAssertTrue(starter.calls.isEmpty)
     }
 
+    func testAClaimFileThatCannotBeReadStillStopsTheTransfer() async throws {
+        try allow()
+        let item = try stage(for: "owner-a")
+        http.duringRequest = { [inbox] in
+            let folder = inbox!.fileURL(for: item).deletingLastPathComponent()
+            try Data("not json".utf8).write(to: folder.appendingPathComponent("transfer-claim.json"))
+        }
+
+        let outcome = await uploader.start(item)
+
+        XCTAssertEqual(outcome, .savedForApp)
+        XCTAssertTrue(starter.calls.isEmpty, "An unreadable claim is still a claim")
+        XCTAssertNil(inbox.transferClaim(shareID: item.id))
+        XCTAssertTrue(inbox.hasTransferClaim(shareID: item.id))
+    }
+
     // MARK: Who finishes the upload
 
     func testExactlyOneClaimWinsAcrossRacingProcesses() throws {
@@ -1294,6 +1310,38 @@ final class ShareUploadImportTests: XCTestCase {
         XCTAssertEqual(service.presigns.count, 1)
     }
 
+    func testAnUnsettledClaimIsAskedAgainWithoutAnotherForeground() async throws {
+        uploader = RecordingUploadCoordinator(
+            recorder: recorder,
+            service: service,
+            watchStore: try TranscriptionWatchStore(rootDirectory: directory.appendingPathComponent("watches-retry")),
+            localAccountDefaults: defaults,
+            aiProcessingConsent: consent,
+            isForeground: { true },
+            undeterminedClaimRetryDelay: .milliseconds(100)
+        )
+        await signIn("owner-a")
+        let item = try stage(owner: "owner-a", started: true)
+        uploader.processSharedItems()
+        let folder = inbox.fileURL(for: item).deletingLastPathComponent()
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: folder.path)
+        addTeardownBlock {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        }
+
+        uploader.resumePendingWork()
+        try await waitPastReconciliation()
+        XCTAssertTrue(service.presigns.isEmpty, "Nothing is sent while the claim is unsettled")
+
+        // The claim becomes readable with no scene change and no other trigger.
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        for _ in 0..<60 where service.presigns.isEmpty {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+
+        XCTAssertEqual(service.presigns.count, 1, "The bounded retry settled it and resumed the upload")
+    }
+
     func testARelaunchKeepsTheTakeover() async throws {
         await signIn("owner-a")
         let item = try stage(owner: "owner-a", started: true)
@@ -1318,6 +1366,31 @@ final class ShareUploadImportTests: XCTestCase {
 
         XCTAssertEqual(completions, 0, "A tap would send this again, so its first copy is abandoned")
         XCTAssertEqual(recorder.recording(withID: item.id)?.state, .ready)
+    }
+
+    func testRevokingPermissionAfterTheExtensionFinishedKeepsTheShareOutOfTheManualQueue() async throws {
+        await signIn("owner-a")
+        let item = try stage(owner: "owner-a", started: true)
+        uploader.processSharedItems()
+        XCTAssertEqual(
+            inbox.claimTransfer(.extensionFinished(objectKey: "audio/share.caf"), shareID: item.id),
+            .held(.extensionFinished(objectKey: "audio/share.caf"))
+        )
+
+        consent.revoke()
+
+        XCTAssertEqual(
+            recorder.recording(withID: item.id)?.state, .uploading,
+            "A tap would send these bytes again as a second object"
+        )
+        XCTAssertNotNil(recorder.recording(withID: item.id)?.shareUploadSessionIdentifier)
+
+        consent.allow()
+        uploader.resumePendingWork()
+        try await waitPastReconciliation()
+
+        XCTAssertTrue(service.presigns.isEmpty)
+        XCTAssertEqual(service.completions.map(\.request.objectKey), ["audio/share.caf"])
     }
 
     func testAReservedShareWaitsForTheExtension() async throws {

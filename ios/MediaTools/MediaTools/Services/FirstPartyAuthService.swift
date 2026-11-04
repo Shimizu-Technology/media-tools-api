@@ -1,4 +1,5 @@
 import AuthenticationServices
+import CryptoKit
 import Foundation
 import Observation
 import Security
@@ -403,6 +404,10 @@ final class FirstPartyAuthService {
     /// keyed by endpoint and address: one address's lost response proves nothing
     /// about another's.
     private var unconfirmedProofPaths: Set<String> = []
+    /// Signed-out proofs that lost their reply, each bound to the exact code and
+    /// new password that was sent. Only a digest is kept, in memory, so a later
+    /// attempt with a different code cannot pass for the one that lost its reply.
+    private var unconfirmedSignedOutProofs: [String: SHA256.Digest] = [:]
 #if DEBUG
     private(set) var authorizationRequestStartCountForTesting = 0
 #endif
@@ -598,18 +603,22 @@ final class FirstPartyAuthService {
     /// the code then gets `invalid_code`. The new password is what tells them apart.
     private func finishSignedOutProof(_ path: String, email: String, code: String, password: String) async throws {
         let proofKey = Self.proofKey(path, email: email)
+        let attempt = Self.proofAttemptDigest(code: code, password: password)
         do {
             let _: EmailProofResult = try await api.postPublic(
                 path,
                 body: EmailProofRequest(email: email, code: code, password: password)
             )
-            unconfirmedProofPaths.remove(proofKey)
+            unconfirmedSignedOutProofs[proofKey] = nil
         } catch {
             if Self.isConnectionFailure(error) {
-                unconfirmedProofPaths.insert(proofKey)
+                unconfirmedSignedOutProofs[proofKey] = attempt
                 throw error
             }
-            guard Self.isInvalidCode(error), unconfirmedProofPaths.remove(proofKey) != nil else { throw error }
+            // Only the attempt that lost its reply can have used the code. Any
+            // other code stays an invalid code, and the note stays for the original.
+            guard Self.isInvalidCode(error), unconfirmedSignedOutProofs[proofKey] == attempt else { throw error }
+            unconfirmedSignedOutProofs[proofKey] = nil
             do {
                 try await signInWithPassword(email: email, password: password)
                 return
@@ -618,6 +627,10 @@ final class FirstPartyAuthService {
             }
         }
         try await signInAfterProof(email: email, password: password)
+    }
+
+    private static func proofAttemptDigest(code: String, password: String) -> SHA256.Digest {
+        SHA256.hash(data: Data("\(code)\u{0}\(password)".utf8))
     }
 
     private func signInAfterProof(email: String, password: String) async throws {

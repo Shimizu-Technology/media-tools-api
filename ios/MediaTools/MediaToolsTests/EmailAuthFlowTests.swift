@@ -245,6 +245,35 @@ final class EmailAuthFlowTests: XCTestCase {
         XCTAssertNil(session.activeUserID)
     }
 
+    func testALostResponseOnlyCoversTheExactCodeAndPasswordThatLostIt() async throws {
+        let invalid = APIError.httpError(statusCode: 400, code: "invalid_code", message: "Code invalid")
+        await api.script("/auth/password/reset", .failure(URLError(.networkConnectionLost)))
+        await api.script("/auth/password/reset", .failure(invalid))
+        await api.script("/auth/password/reset", .failure(invalid))
+        try await prepareLogin(email: "person@example.com")
+
+        do {
+            try await service.finishPasswordReset(email: "person@example.com", code: "123456", password: "a long enough password")
+            XCTFail("The first attempt has no answer yet")
+        } catch is URLError {}
+
+        // A different wrong code with the account's current password must not
+        // sign in or report a reset that the server never verified.
+        do {
+            try await service.finishPasswordReset(email: "person@example.com", code: "000000", password: "a long enough password")
+            XCTFail("A different code must stay an invalid code")
+        } catch {
+            XCTAssertTrue(AuthCopy.message(for: error, fallback: "").contains("Send a new code"))
+        }
+        let logins = await api.callCount("/auth/password/login")
+        XCTAssertEqual(logins, 0)
+        XCTAssertNil(session.activeUserID)
+
+        // The exact attempt that lost its reply still recovers.
+        try await service.finishPasswordReset(email: "person@example.com", code: "123456", password: "a long enough password")
+        XCTAssertEqual(session.activeUserID, "server-a")
+    }
+
     func testAnInvalidCodeOnAStillValidSessionNeverSignsInOverIt() async throws {
         store.value = signedInSession()
         session = DeviceSessionController(transport: NoNetwork(), baseURL: URL(string: "https://example.test/api/v1")!, store: store, retiredLegacyIdentities: UpdateRetiredIdentities())

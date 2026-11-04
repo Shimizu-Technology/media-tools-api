@@ -146,12 +146,18 @@ extension DeviceSessionStoring {
 struct DeviceSessionKeychainStore: DeviceSessionStoring {
     private let service = "com.shimizu-technology.media-tools.device-session"
     private let account: String
-    /// Build 13's bootstrap journal, under this same service.
-    private let pendingBootstrapAccount = "first-party-ios-bootstrap-v1"
+    /// Build 13's bootstrap journal, under this same service. A test supplies its
+    /// own account, so a run on a real device can never touch a pending journal.
+    static let defaultPendingBootstrapAccount = "first-party-ios-bootstrap-v1"
+    private let pendingBootstrapAccount: String
     private let ownerMappingsKey = "verifiedLocalOwnerMappings.v1"
 
-    init(account: String = "first-party-ios-v1") {
+    init(
+        account: String = "first-party-ios-v1",
+        pendingBootstrapAccount: String = Self.defaultPendingBootstrapAccount
+    ) {
         self.account = account
+        self.pendingBootstrapAccount = pendingBootstrapAccount
     }
 
     // This metadata grants no API access. Keep it separate from credentials:

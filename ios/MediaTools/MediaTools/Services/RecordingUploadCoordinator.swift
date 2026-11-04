@@ -112,6 +112,10 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     private var sharedDocumentSends: [UUID: SharedDocumentSend] = [:]
     private var rejectedSharedDocuments: Set<UUID> = []
     private var reservationRecheck: Task<Void, Never>?
+    private var undeterminedClaimRetry: Task<Void, Never>?
+    private var undeterminedClaimRetries = 0
+    private let undeterminedClaimRetryDelay: Duration
+    static let maximumUndeterminedClaimRetries = 5
 
     /// `token` lets a cancelled send finish without clearing the send that
     /// replaced it after the same account signed back in.
@@ -130,7 +134,8 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         aiProcessingConsent: AIProcessingConsentManager? = nil,
         isForeground: @escaping @MainActor () -> Bool = {
             UIApplication.shared.applicationState == .active
-        }
+        },
+        undeterminedClaimRetryDelay: Duration = .seconds(5)
     ) {
         self.recorder = recorder ?? .shared
         self.service = service
@@ -148,6 +153,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         simulatesUpload = false
         #endif
         self.isForeground = isForeground
+        self.undeterminedClaimRetryDelay = undeterminedClaimRetryDelay
         watches = (try? self.watchStore?.load()) ?? []
         transport.receiver = self
         self.recorder.onSavedRecordingsChanged = { [weak self] in
@@ -207,14 +213,17 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
     /// neither uploaded nor discarded while marked as in progress.
     private func returnQueuedWorkAfterRevocation() {
         cancelLinkSendsAfterRevocation()
+        // If permission returns, a tap sends this again. The extension must not also
+        // finish its own copy in the meantime. A share the extension has already
+        // claimed, or whose claim cannot be settled, stays where it is: returning it
+        // to the manual queue could upload a second object. It finishes or resumes
+        // through reconciliation once permission is back.
         let queued = recorder.availableRecordings.filter {
             [.waitingForUpload, .uploading, .finalizingUpload].contains($0.state)
+                && recorder.takeOverShareUpload($0) == .takenOver
         }
         guard !queued.isEmpty else { return }
         let queuedIDs = Set(queued.map(\.id))
-        // If permission returns, a tap sends this again. The extension must not also
-        // finish its own copy in the meantime.
-        for recording in queued { _ = recorder.takeOverShareUpload(recording) }
         for recordingID in queuedIDs {
             uploadTasks[recordingID]?.cancel()
             uploadTasks[recordingID] = nil
@@ -675,6 +684,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             where recording.state == .finalizingUpload {
                 self.finalize(recordingID: recording.id)
             }
+            var sawUndetermined = false
             for recording in self.recorder.availableRecordings
             where recording.state == .uploading && !activeIDs.contains(recording.id) {
                 guard self.isActiveOwner(
@@ -686,8 +696,10 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                     self.recorder.markUploadFinalizing(recording.id)
                     self.finalize(recordingID: recording.id)
                 case .undetermined:
-                    // Nothing is sent until this is settled. The next foreground asks again.
+                    // Nothing is sent until this is settled. The next foreground asks
+                    // again, and so does a short, bounded retry in case it stays active.
                     self.hasReconciledTransfers = false
+                    sawUndetermined = true
                 case .takenOver:
                     self.recorder.markWaitingForUpload(
                         recording.id,
@@ -696,6 +708,26 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                     self.process(recordingID: recording.id)
                 }
             }
+            if sawUndetermined {
+                self.scheduleUndeterminedClaimRetry()
+            } else {
+                self.undeterminedClaimRetries = 0
+            }
+        }
+    }
+
+    /// A claim that could not be read may become readable while the app stays
+    /// open, with no scene change to ask again. Each retry waits longer, and a
+    /// handful is all it gets: the next foreground still asks.
+    private func scheduleUndeterminedClaimRetry() {
+        guard undeterminedClaimRetries < Self.maximumUndeterminedClaimRetries else { return }
+        undeterminedClaimRetries += 1
+        undeterminedClaimRetry?.cancel()
+        let delay = undeterminedClaimRetryDelay * undeterminedClaimRetries
+        undeterminedClaimRetry = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self else { return }
+            self.resumePendingWork()
         }
     }
 
