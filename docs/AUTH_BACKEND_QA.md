@@ -35,7 +35,7 @@ full Gin routes over ephemeral loopback HTTP listeners, and synthetic accounts.
 | D06 | Passed: `TestAuthHTTPFailedGuessesDoNotLockCorrectPassword`, `TestClientIPTrustBoundary`; failed guesses reach 429 and correct password succeeds; untrusted forwarded headers ignored |
 | D07 | Passed: `TestAuthHTTPBrowserCSRFAndStalePendingRecovery` and session database regression tests; extended CSRF cookie, cleared stale pending cookie and completed fresh sign-in; stale refresh did not revoke successor |
 | D08 | Passed: email service tests and `TestDurableAuthEmailRequeueAndDelivery`; fake Resend 429 requeued durably with Retry-After, replacement worker completed with stable idempotency key, ciphertext cleared, log delivery contained neither address nor code |
-| D09 | Passed: `TestAuthHTTPUsageAndOwnerExemption`, `TestUsageAtomicConcurrentCapsMonthAndOwner`, `TestUsageAdmissionBatchRollbackAndFailedProvisionalRefund`, `TestAutomaticAIReservationsShareCapAndRecoverWithoutDoubleCharge`, `TestAutomaticEnrichmentChecksCapBeforeProvider`; two HTTP submissions completed through a synthetic extractor and exhausted 120 seconds, next transcription rejected 402, summary/chat rejected at their cap, owner bypassed cap, concurrent reservations respected limits, rejected batch left no items/jobs |
+| D09 | Passed: `TestAuthHTTPUsageAndOwnerExemption`, `TestUsageAtomicConcurrentCapsMonthAndOwner`, `TestUsageAdmissionBatchRollbackAndFailedProvisionalRefund`, `TestAutomaticAIReservationsShareCapAndRecoverWithoutDoubleCharge`, `TestAutomaticEnrichmentChecksCapBeforeProvider`; two HTTP submissions completed through a synthetic extractor and exhausted 120 seconds, next transcription rejected 402, summary/chat rejected at their cap, a scoped agent key received the same 402 and could not change the password, owner bypassed cap, concurrent reservations respected limits, rejected batch left no items/jobs |
 | D10 | Passed: `TestEmailChallengeConcurrentSingleUseAndPurge`; expired access/refresh rows removed, usable exact-successor recovery retained |
 
 The browser API test originally failed because its shared cookie helper filters
@@ -56,16 +56,15 @@ signup. These are rollout tasks, not claimed production verification.
 
 ## Final validation
 
-Previous runtime source: `5951f20`, based on pipeline merge `896102f`.
-Final integration adds agent-access merge `ac8ac9d`; combined checks are rerun below. The final commit
-adds this evidence and makes the resend test tolerate a legitimate random-code
-collision; that test was rerun with `-race` and passed. No runtime code changed
-after the full gate.
+Runtime source: `8a2d96a`, based on pipeline plus agent-access merge `ac8ac9d`.
+The final commit adds evidence and scoped-key assertions to the existing HTTP
+quota scenario; that scenario was rerun with `-race` and passed (6.7 seconds).
+No runtime code changed after the full gate.
 
-- **Passed:** Go 1.25.6 arm64 `go vet ./...` and `go test -p 1 -race -timeout 3m -v ./...`, against local PostgreSQL 16 over TCP, database `mta_test_auth`.
+- **Passed:** Go 1.25.6 arm64 `go vet ./...` and `go test -p 1 -race -timeout 5m -v ./...`, against local PostgreSQL 16 over TCP, database `mta_test_auth`.
 - **Passed:** server build; binary byte inspection confirmed `/__test/email-code` is absent.
-- **Passed:** gofmt (no unformatted files), `git diff --check`, OpenAPI YAML parse (94 paths) and route inventory test.
-- **Passed:** frontend `npm ci`, lint, 31 tests, production build, and production audit (no high/critical production findings). No frontend source changes.
+- **Passed:** gofmt (no unformatted files), `git diff --check`, OpenAPI YAML parse (95 paths) and route inventory test.
+- **Passed:** frontend `npm ci`, lint, 38 tests, production build, and production audit (no high/critical production findings). No frontend source changes.
 - **Passed:** `scripts/scan-secrets.sh`, committed history and working tree; no findings.
 - **Not run locally:** iOS/Android builds and client UI; CI and E/F/G own those checks. No production deployment or real delivery was attempted.
 

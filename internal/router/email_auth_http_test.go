@@ -308,6 +308,35 @@ func TestAuthHTTPUsageAndOwnerExemption(t *testing.T) {
 	f.request("POST", "/api/v1/transcripts", gin.H{"url": "https://youtube.com/watch?v=dQw4w9WgXcQ"}, pair.AccessToken, 402)
 	f.request("POST", "/api/v1/summaries", gin.H{}, pair.AccessToken, 402)
 	f.request("POST", "/api/v1/audio/transcriptions/"+uuid.NewString()+"/chat", gin.H{}, pair.AccessToken, 402)
+	// Agent keys share the account balance, and cannot use auth routes to
+	// change that account's credentials or quota boundary.
+	keyResponse := f.request("POST", "/api/v1/user/keys", gin.H{"name": "Quota fixture agent", "scopes": []string{"library:write"}}, pair.AccessToken, 201)
+	var key struct {
+		Key string `json:"raw_key"`
+	}
+	if err := json.Unmarshal(keyResponse, &key); err != nil || key.Key == "" {
+		t.Fatal("scoped key issuance failed")
+	}
+	for _, tc := range []struct {
+		path string
+		want int
+	}{{"/api/v1/transcripts", 402}, {"/api/v1/summaries", 402}, {"/api/v1/auth/password", 401}} {
+		req, err := http.NewRequest("POST", f.server.URL+tc.path, strings.NewReader(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-API-Key", key.Key)
+		response, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal("scoped key HTTP request failed")
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode != tc.want {
+			t.Fatalf("scoped key %s status=%d want=%d", tc.path, response.StatusCode, tc.want)
+		}
+	}
 	owner := Setup(RouterConfig{DB: f.db, FirstPartyAuthEnabled: true, FirstPartyPasswordAuthEnabled: true, Email: f.email, OwnerUserID: pair.UserID, Pwned: unbreachedTestChecker()})
 	next := httptest.NewServer(owner)
 	defer next.Close()
