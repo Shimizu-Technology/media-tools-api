@@ -44,7 +44,11 @@ func NewWithSimpleProtocol(databaseURL string, useSimpleProtocol bool) (*DB, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse database URL: %w", err)
 	}
-	if useSimpleProtocol {
+	// An explicit default_query_exec_mode in the URL wins. CI uses it to run the
+	// whole integration suite in the prepared-statement mode production uses,
+	// where Postgres infers parameter types and rejects queries that the simple
+	// protocol's inlined literals would hide.
+	if useSimpleProtocol && !strings.Contains(databaseURL, "default_query_exec_mode=") {
 		// Neon pooled connections sit behind PgBouncer. Prepared statements can
 		// intermittently fail there with "bind message supplies N parameters"
 		// when a pooled server connection has stale statement state, so use pgx's

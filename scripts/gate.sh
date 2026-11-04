@@ -19,6 +19,13 @@ go list ./... | grep -v '/frontend/node_modules/' | xargs go vet
 # PostgreSQL integration packages share TEST_DATABASE_URL and include schema
 # migration tests, so run packages serially while keeping test-level concurrency.
 go list ./... | grep -v '/frontend/node_modules/' | xargs go test -p 1 -race
+# Production uses prepared statements; the default test mode inlines parameters
+# and hides Postgres type-inference errors. Run the database packages both ways.
+if [[ -n "${TEST_DATABASE_URL:-}" ]]; then
+  separator='?'
+  [[ "$TEST_DATABASE_URL" == *\?* ]] && separator='&'
+  TEST_DATABASE_URL="${TEST_DATABASE_URL}${separator}default_query_exec_mode=cache_statement" go test -p 1 ./internal/...
+fi
 
 echo "Running frontend checks"
 (
