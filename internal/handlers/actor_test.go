@@ -40,3 +40,32 @@ func TestWriteOwnershipForStandaloneAPIKeyOnlyIncludesKeyScope(t *testing.T) {
 		t.Fatalf("expected API key ownership, got %#v", actor.APIKeyID)
 	}
 }
+
+func TestReadOwnershipForScopedKeyActsAsOwningUser(t *testing.T) {
+	userID := "user-id"
+	actor := readOwnershipForAPIKey(&models.APIKey{ID: "key-id", UserID: &userID, Scopes: []string{models.ScopeLibraryRead}})
+
+	if actor.UserID == nil || *actor.UserID != userID {
+		t.Fatalf("scoped key must read as its owner, got %#v", actor.UserID)
+	}
+	if actor.APIKeyID != nil {
+		t.Fatalf("scoped key read should not be limited to the exact key, got %#v", actor.APIKeyID)
+	}
+}
+
+func TestReadOwnershipForScopedKeyWithoutOwnerStaysExactKey(t *testing.T) {
+	actor := readOwnershipForAPIKey(&models.APIKey{ID: "key-id", Scopes: []string{models.ScopeLibraryRead}})
+
+	if actor.UserID != nil || actor.APIKeyID == nil {
+		t.Fatalf("ownerless scoped key must not gain user scope, got %#v", actor)
+	}
+}
+
+func TestWriteOwnershipForScopedKeyKeepsBothScopes(t *testing.T) {
+	userID := "user-id"
+	actor := writeOwnershipForAPIKey(&models.APIKey{ID: "key-id", UserID: &userID, Scopes: []string{models.ScopeLibraryWrite}})
+
+	if actor.UserID == nil || actor.APIKeyID == nil {
+		t.Fatalf("expected user and key ownership, got %#v", actor)
+	}
+}

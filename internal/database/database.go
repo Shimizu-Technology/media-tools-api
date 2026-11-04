@@ -518,10 +518,11 @@ func (db *DB) CreateAPIKey(ctx context.Context, key *models.APIKey) error {
 func (db *DB) GetAPIKeyByHash(ctx context.Context, hash string) (*models.APIKey, error) {
 	var key models.APIKey
 	err := db.GetContext(ctx, &key,
-		`SELECT * FROM api_keys WHERE key_hash = $1 AND active = true`, hash)
+		apiKeySelect+` WHERE k.key_hash = $1 AND k.active = true`, hash)
 	if err != nil {
 		return nil, fmt.Errorf("invalid API key: %w", err)
 	}
+	hydrateAPIKeyScopes(&key)
 	return &key, nil
 }
 
@@ -537,13 +538,13 @@ func (db *DB) ListAPIKeysForActor(ctx context.Context, userID, apiKeyID *string)
 	switch {
 	case apiKeyID != nil:
 		err := db.SelectContext(ctx, &keys,
-			`SELECT * FROM api_keys WHERE id = $1 ORDER BY created_at DESC`, *apiKeyID)
+			apiKeySelect+` WHERE k.id = $1 ORDER BY k.created_at DESC`, *apiKeyID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list API keys: %w", err)
 		}
 	case userID != nil:
 		err := db.SelectContext(ctx, &keys,
-			`SELECT * FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC`, *userID)
+			apiKeySelect+` WHERE k.user_id = $1 ORDER BY k.created_at DESC`, *userID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list API keys: %w", err)
 		}
@@ -553,6 +554,9 @@ func (db *DB) ListAPIKeysForActor(ctx context.Context, userID, apiKeyID *string)
 
 	if keys == nil {
 		keys = []models.APIKey{}
+	}
+	for i := range keys {
+		hydrateAPIKeyScopes(&keys[i])
 	}
 	return keys, nil
 }

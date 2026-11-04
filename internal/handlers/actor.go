@@ -7,8 +7,11 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 )
 
-// actorOwnership captures the current authentication principal. API-key reads
-// remain scoped to the exact key, even when that key belongs to a user.
+// actorOwnership captures the current authentication principal. Classic
+// API-key reads remain scoped to the exact key, even when that key belongs to a
+// user. Scoped agent keys are the deliberate exception: they act as their
+// owning user, and the route scope check (middleware.ScopedKeyAccess) decides
+// which routes they may reach at all.
 type actorOwnership struct {
 	UserID   *string
 	APIKeyID *string
@@ -27,6 +30,9 @@ func getActorOwnership(c *gin.Context) actorOwnership {
 func readOwnershipForAPIKey(apiKey *models.APIKey) actorOwnership {
 	if apiKey == nil {
 		return actorOwnership{}
+	}
+	if apiKey.IsScoped() && apiKey.UserID != nil {
+		return actorOwnership{UserID: apiKey.UserID}
 	}
 	return actorOwnership{APIKeyID: &apiKey.ID}
 }

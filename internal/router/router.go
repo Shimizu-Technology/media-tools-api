@@ -228,6 +228,9 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	protected.Use(middleware.DualAuth(cfg.DB, cfg.JWTSecret, jwksCache, cfg.ClerkSecretKey, cfg.FirstPartyAuthEnabled, cfg.LegacyAuthEnabled, cfg.ClerkMigrationOnly))
 	protected.Use(middleware.RequireCompletedOnboarding())
 	protected.Use(rateLimiter.RateLimit())
+	// Scoped agent keys are allow-listed per route and audited; see
+	// middleware/agent_access.go. Everything else passes through unchanged.
+	protected.Use(middleware.ScopedKeyAccess(cfg.DB))
 	{
 		// Transcript endpoints
 		protected.POST("/transcripts", h.CreateTranscript)
@@ -250,6 +253,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		protected.GET("/keys", h.ListAPIKeys)
 		protected.POST("/user/keys", h.CreateUserAPIKey)
 		protected.DELETE("/keys/:id", h.RevokeAPIKey)
+		protected.GET("/user/agent-activity", h.ListAgentActivity)
 
 		// Audio transcription endpoints (MTA-16, MTA-22, MTA-25, MTA-26)
 		protected.POST("/audio/transcribe", h.TranscribeAudio)

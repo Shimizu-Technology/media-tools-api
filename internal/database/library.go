@@ -83,6 +83,7 @@ const libraryItemsCTE = `
 		  AND ($6::text = 'all' OR ($6::text = 'only' AND archived) OR ($6::text = '' AND NOT archived))
 		  AND ($7::text = '' OR ($7::text = 'true' AND favorite))
 		  AND ($8::text = '' OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(tags) tag_value WHERE LOWER(tag_value) = LOWER($8)))
+		  AND ($9::timestamptz IS NULL OR created_at >= $9::timestamptz)
 	)`
 
 const libraryItemColumns = `id, item_type, title, subtitle, status, word_count, duration, page_count, summary_status, favorite, archived, tags, created_at`
@@ -114,7 +115,7 @@ func (db *DB) ListLibraryItems(ctx context.Context, params models.LibraryListPar
 	}
 	params.Search = strings.TrimSpace(params.Search)
 
-	args := []interface{}{params.UserID, params.APIKeyID, params.ItemType, params.Status, params.Search, params.Archive, params.Favorite, strings.TrimSpace(params.Tag)}
+	args := []interface{}{params.UserID, params.APIKeyID, params.ItemType, params.Status, params.Search, params.Archive, params.Favorite, strings.TrimSpace(params.Tag), params.SinceAt}
 	var total int
 	if err := db.GetContext(ctx, &total, libraryItemsCTE+` SELECT COUNT(*) FROM filtered`, args...); err != nil {
 		return nil, 0, fmt.Errorf("count library items: %w", err)
@@ -122,7 +123,7 @@ func (db *DB) ListLibraryItems(ctx context.Context, params models.LibraryListPar
 
 	// UUID is a deterministic tie-breaker for rows that share a timestamp. Without
 	// it, offset pagination can repeat or skip items between adjacent pages.
-	query := libraryItemsCTE + ` SELECT ` + libraryItemColumns + ` FROM filtered ORDER BY created_at ` + params.SortDir + `, id ` + params.SortDir + ` LIMIT $9 OFFSET $10`
+	query := libraryItemsCTE + ` SELECT ` + libraryItemColumns + ` FROM filtered ORDER BY created_at ` + params.SortDir + `, id ` + params.SortDir + ` LIMIT $10 OFFSET $11`
 	args = append(args, params.PerPage, (params.Page-1)*params.PerPage)
 	var items []models.LibraryItem
 	if err := db.SelectContext(ctx, &items, query, args...); err != nil {
@@ -149,7 +150,7 @@ func (db *DB) GetLibraryStats(ctx context.Context, userID, apiKeyID *string) (mo
 		FROM filtered`
 	// Stats describe the whole workspace, including items intentionally hidden in
 	// the archive. Normal library browsing still excludes archived items by default.
-	if err := db.GetContext(ctx, &stats, query, userID, apiKeyID, "", "", "", "all", "", ""); err != nil {
+	if err := db.GetContext(ctx, &stats, query, userID, apiKeyID, "", "", "", "all", "", "", nil); err != nil {
 		return stats, fmt.Errorf("get library stats: %w", err)
 	}
 	return stats, nil

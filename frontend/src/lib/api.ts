@@ -134,6 +134,20 @@ export interface APIKey {
   created_at: string;
   last_used_at?: string;
   raw_key?: string;
+  // Empty for a classic key; scoped agent keys list what they may do.
+  scopes?: string[];
+}
+
+export interface AgentActivity {
+  id: string;
+  api_key_id?: string;
+  api_key_name: string;
+  method: string;
+  route: string;
+  item_type?: string;
+  item_id?: string;
+  status_code: number;
+  created_at: string;
 }
 
 export interface PaginatedResponse<T> {
@@ -523,13 +537,18 @@ export async function listAPIKeys(): Promise<APIKey[]> {
   return handleResponse<APIKey[]>(res);
 }
 
-export async function createUserAPIKey(name: string): Promise<APIKey> {
+export async function createUserAPIKey(name: string, scopes?: string[]): Promise<APIKey> {
   const res = await fetchWithAuth(`${API_BASE}/user/keys`, {
     method: 'POST',
     headers: await getHeaders(),
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(scopes && scopes.length > 0 ? { name, scopes } : { name }),
   });
   return handleResponse<APIKey>(res);
+}
+
+export async function listAgentActivity(limit = 50): Promise<AgentActivity[]> {
+  const res = await fetchWithAuth(`${API_BASE}/user/agent-activity?limit=${limit}`, { headers: await getHeaders() });
+  return handleResponse<AgentActivity[]>(res);
 }
 
 export async function revokeAPIKey(id: string): Promise<void> {

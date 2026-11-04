@@ -16,6 +16,8 @@
 //	mta chat <id> <message>           Chat about a transcript
 //	mta chat-collection <id> <msg>    Chat about a collection
 //	mta summary <id>                  Get/create summary for transcript
+//	mta items <command>               Agent-friendly library access (list, search, get, rename, ...)
+//	mta sync --dir <path>             Write one Markdown note per item
 //
 // Configuration:
 //
@@ -90,6 +92,10 @@ func main() {
 		err = cmdChat(args)
 	case "chat-collection":
 		err = cmdChatCollection(args)
+	case "items":
+		err = cmdItems(args)
+	case "sync":
+		err = cmdSync(args)
 	case "health":
 		err = cmdHealth()
 	default:
@@ -127,6 +133,12 @@ Commands:
                                 Generate AI summary for a transcript
   chat <id> <message>           Chat about a transcript/audio/pdf
   chat-collection <id> <msg>    Chat about all items in a collection
+  items list|search|get|rename|tag|favorite|archive|collection|retry|summarize|chat|delete
+                                Read and organize the library with full ids (video:<id>,
+                                audio:<id>, pdf:<id>); every command takes --output json.
+                                Run "mta items help" for details.
+  sync --dir <path> (--collection NAME | --all) [--since DATE]
+                                Write one Markdown note per item, safe to rerun
   health                        Check API health
 
 Environment:

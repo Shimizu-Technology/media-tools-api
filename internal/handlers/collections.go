@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
+	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
 	evidenceservice "github.com/Shimizu-Technology/media-tools-api/internal/services/evidence"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
@@ -76,6 +77,7 @@ func (h *Handler) CreateCollection(c *gin.Context) {
 		return
 	}
 
+	middleware.SetActivityItem(c, "collection", col.ID)
 	c.JSON(http.StatusCreated, col)
 }
 
