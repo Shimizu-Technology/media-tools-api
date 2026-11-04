@@ -19,6 +19,9 @@ func TestPendingRetiredProviderDeletionCompletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	if err := db.RunMigrations("../../../migrations"); err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	var id string
 	err = db.QueryRowContext(ctx, `INSERT INTO users(email,password_hash) VALUES($1,'') RETURNING id`, uuid.NewString()+"@example.invalid").Scan(&id)

@@ -382,6 +382,42 @@ components:
           example: true
 
 paths:
+  /auth/sessions:
+    get:
+      summary: List this account's signed-in devices
+      description: Requires a first-party session. `current` marks the session making this request.
+      tags: [Authentication]
+      responses:
+        "200":
+          description: Active sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        client_type:
+                          type: string
+                        device_name:
+                          type: string
+                        current:
+                          type: boolean
+                          description: True for the session making this request
+                        last_used_at:
+                          type: string
+                          format: date-time
+                        inactive_expires_at:
+                          type: string
+                          format: date-time
+        "401":
+          description: A first-party session is required
   /account/processing-preferences:
     get:
       summary: Get automatic processing preferences (bearer authentication)
