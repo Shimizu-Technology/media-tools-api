@@ -84,9 +84,18 @@ if [[ "$(uname -s)" == "Darwin" ]] && command -v xcodebuild >/dev/null 2>&1; the
   started_simulator=false
   claimed_simulator=false
 
+  simulator_state_of() {
+    xcrun simctl list devices -j | ruby -rjson -e '
+      target = ARGV.fetch(0)
+      device = JSON.parse(STDIN.read).fetch("devices").values.flatten.find { |entry| entry["udid"] == target }
+      puts device ? device.fetch("state") : "missing"
+    ' "$1"
+  }
+
   cleanup_simulator() {
     if [[ "$started_simulator" == "true" ]]; then
-      if xcrun simctl shutdown "$simulator_id" 2>/dev/null; then
+      if xcrun simctl shutdown "$simulator_id" 2>/dev/null ||
+        [[ "$(simulator_state_of "$simulator_id")" == "Shutdown" ]]; then
         started_simulator=false
       else
         printf 'Could not shut down owned simulator %s; keeping its lifecycle claim active.\n' "$simulator_id" >&2
@@ -104,7 +113,8 @@ if [[ "$(uname -s)" == "Darwin" ]] && command -v xcodebuild >/dev/null 2>&1; the
   }
   trap cleanup_simulator EXIT
 
-  if [[ "$simulator_state" != "Booted" ]]; then
+  # A simulator another process is already booting is borrowed, like a booted one.
+  if [[ "$simulator_state" != "Booted" && "$simulator_state" != "Booting" ]]; then
     xcrun simctl boot "$simulator_id"
     started_simulator=true
 
