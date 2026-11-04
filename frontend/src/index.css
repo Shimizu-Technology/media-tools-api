@@ -278,6 +278,53 @@ select {
       }
     }
   }
+
+  /* The quiet audio scrubber: a 3px rule of ink with an 11px knob, 44px to touch. */
+  .scrubber {
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+  }
+  .scrubber::-webkit-slider-runnable-track {
+    height: 3px;
+    border-radius: 2px;
+    background: linear-gradient(to right, var(--color-accent) var(--progress, 0%), var(--color-separator) var(--progress, 0%));
+  }
+  .scrubber::-moz-range-track {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--color-separator);
+  }
+  .scrubber::-moz-range-progress {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--color-accent);
+  }
+  .scrubber::-webkit-slider-thumb {
+    appearance: none;
+    width: 11px;
+    height: 11px;
+    margin-top: -4px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--color-accent);
+  }
+  .scrubber::-moz-range-thumb {
+    width: 11px;
+    height: 11px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--color-accent);
+  }
+}
+
+/* The live dot breathes while recording; under reduced motion it holds still. */
+@keyframes recording-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.recording-dot {
+  animation: recording-dot 1.6s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -358,12 +358,6 @@ export interface User {
   created_at: string;
 }
 
-export interface WorkspaceResponse {
-  transcripts: Transcript[];
-  audio: AudioTranscription[];
-  pdfs: PDFExtraction[];
-}
-
 export interface Webhook {
   id: string;
   url: string;
@@ -454,7 +448,8 @@ async function trackedFetch(input: RequestInfo | URL, init?: RequestInit): Promi
   try {
     response = await fetch(input, init);
   } catch (error) {
-    setConnectionDegraded(true);
+    // Leaving a page cancels its requests on purpose; that is not an outage.
+    if (!(error instanceof DOMException && error.name === 'AbortError')) setConnectionDegraded(true);
     throw error;
   }
   setConnectionDegraded(await isOutageResponse(response));
@@ -588,11 +583,12 @@ export async function createAPIKey(name: string, options?: { rateLimit?: number;
 
 // ── Transcripts ──
 
-export async function createTranscript(url: string): Promise<Transcript> {
+export async function createTranscript(url: string, signal?: AbortSignal): Promise<Transcript> {
   const res = await fetchWithAuth(`${API_BASE}/transcripts`, {
     method: 'POST',
     headers: await getHeaders(),
     body: JSON.stringify({ url }),
+    signal,
   });
   return handleActivityResponse<Transcript>(res);
 }
@@ -728,44 +724,18 @@ export async function downloadExport(transcriptId: string, format: ExportFormat)
   return res.blob();
 }
 
-// ── LocalStorage History ──
-
-const HISTORY_KEY = 'mta_transcript_ids';
-
-export function getStoredTranscriptIds(): string[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw) as string[];
-  } catch { return []; }
-}
-
-export function addTranscriptToHistory(id: string): void {
-  const ids = getStoredTranscriptIds();
-  if (!ids.includes(id)) {
-    ids.unshift(id);
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(ids.slice(0, 100)));
-  }
-}
-
-export function removeTranscriptsFromHistory(idsToRemove: string[]): void {
-  const ids = getStoredTranscriptIds();
-  const filtered = ids.filter((id) => !idsToRemove.includes(id));
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(filtered));
-}
-
 // ── Audio Transcription (MTA-16) ──
 
-export async function transcribeAudio(file: File): Promise<AudioTranscription> {
+export async function transcribeAudio(file: File, signal?: AbortSignal): Promise<AudioTranscription> {
   const formData = new FormData();
   formData.append('file', file);
   const res = await fetchWithAuth(`${API_BASE}/audio/transcribe`, {
-    method: 'POST', headers: await getUploadHeaders(), body: formData,
+    method: 'POST', headers: await getUploadHeaders(), body: formData, signal,
   });
   return handleActivityResponse<AudioTranscription>(res);
 }
 
-export async function presignAudioUpload(file: File): Promise<AudioUploadPresignResponse> {
+export async function presignAudioUpload(file: File, signal?: AbortSignal): Promise<AudioUploadPresignResponse> {
   const res = await fetchWithAuth(`${API_BASE}/audio/uploads/presign`, {
     method: 'POST',
     headers: await getHeaders(),
@@ -774,6 +744,7 @@ export async function presignAudioUpload(file: File): Promise<AudioUploadPresign
       content_type: file.type || 'application/octet-stream',
       size_bytes: file.size,
     }),
+    signal,
   });
   return handleResponse<AudioUploadPresignResponse>(res);
 }
@@ -784,11 +755,16 @@ export function uploadAudioToPresignedUrl(
   options: {
     onProgress?: (percent: number) => void;
     stallTimeoutMs?: number;
+    signal?: AbortSignal;
   } = {}
 ): Promise<void> {
   const stallTimeoutMs = options.stallTimeoutMs ?? 60000;
 
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      reject(new DOMException('The upload was cancelled.', 'AbortError'));
+      return;
+    }
     const xhr = new XMLHttpRequest();
     let settled = false;
     let stallTimer: ReturnType<typeof setTimeout> | null = null;
@@ -797,12 +773,20 @@ export function uploadAudioToPresignedUrl(
       if (settled) return;
       settled = true;
       if (stallTimer) clearTimeout(stallTimer);
+      options.signal?.removeEventListener('abort', onAbort);
       if (err) {
         reject(err);
       } else {
         resolve();
       }
     };
+
+    // A cancelled upload is reported as an abort, not as a storage failure to retry.
+    const onAbort = () => {
+      xhr.abort();
+      finish(new DOMException('The upload was cancelled.', 'AbortError'));
+    };
+    options.signal?.addEventListener('abort', onAbort);
 
     const resetStallTimer = () => {
       if (stallTimer) clearTimeout(stallTimer);
@@ -847,11 +831,12 @@ export async function completeAudioUpload(params: {
   object_key: string;
   original_name: string;
   size_bytes: number;
-}): Promise<AudioTranscription> {
+}, signal?: AbortSignal): Promise<AudioTranscription> {
   const res = await fetchWithAuth(`${API_BASE}/audio/uploads/complete`, {
     method: 'POST',
     headers: await getHeaders(),
     body: JSON.stringify(params),
+    signal,
   });
   return handleActivityResponse<AudioTranscription>(res);
 }
@@ -984,11 +969,11 @@ export async function downloadAudioExport(id: string, format: 'txt' | 'md' | 'js
 
 // ── PDF Extraction (MTA-17) ──
 
-export async function extractPDF(file: File): Promise<PDFExtraction> {
+export async function extractPDF(file: File, signal?: AbortSignal): Promise<PDFExtraction> {
   const formData = new FormData();
   formData.append('file', file);
   const res = await fetchWithAuth(`${API_BASE}/pdf/extract`, {
-    method: 'POST', headers: await getUploadHeaders(), body: formData,
+    method: 'POST', headers: await getUploadHeaders(), body: formData, signal,
   });
   return handleResponse<PDFExtraction>(res);
 }
@@ -1008,39 +993,6 @@ export async function deletePDFExtraction(id: string): Promise<void> {
   if (!res.ok && res.status !== 404) {
     const error: APIError = await res.json().catch(() => ({
       error: 'unknown', message: `HTTP ${res.status}: ${res.statusText}`, code: res.status,
-    }));
-    throw error;
-  }
-}
-
-// ── Workspace (MTA-20) ──
-
-export async function getWorkspace(): Promise<WorkspaceResponse> {
-  const res = await fetchWithAuth(`${API_BASE}/workspace`, { headers: await getHeaders() });
-  return handleResponse<WorkspaceResponse>(res);
-}
-
-export async function saveToWorkspace(itemType: string, itemId: string): Promise<void> {
-  const res = await fetchWithAuth(`${API_BASE}/workspace`, {
-    method: 'POST',
-    headers: await getHeaders(),
-    body: JSON.stringify({ item_type: itemType, item_id: itemId }),
-  });
-  if (!res.ok) {
-    const error: APIError = await res.json().catch(() => ({
-      error: 'unknown', message: `HTTP ${res.status}`, code: res.status,
-    }));
-    throw error;
-  }
-}
-
-export async function removeFromWorkspace(itemType: string, itemId: string): Promise<void> {
-  const res = await fetchWithAuth(`${API_BASE}/workspace/${itemType}/${itemId}`, {
-    method: 'DELETE', headers: await getHeaders(),
-  });
-  if (!res.ok) {
-    const error: APIError = await res.json().catch(() => ({
-      error: 'unknown', message: `HTTP ${res.status}`, code: res.status,
     }));
     throw error;
   }
@@ -1186,4 +1138,25 @@ export async function addCollectionItems(id: string, items: { item_type: string;
 export async function removeCollectionItem(collectionId: string, itemId: string): Promise<void> {
   const res = await fetchWithAuth(`${API_BASE}/collections/${collectionId}/items/${itemId}`, { method: 'DELETE', headers: await getHeaders() });
   if (!res.ok) throw new Error('Failed to remove item from collection');
+}
+
+// ── Processing preferences ──
+
+export interface ProcessingPreferences {
+  /** New transcripts get a title and summary without anyone asking. */
+  automatic_summaries: boolean;
+}
+
+export async function getProcessingPreferences(): Promise<ProcessingPreferences> {
+  const res = await fetchWithAuth(`${API_BASE}/account/processing-preferences`, { headers: await getHeaders() });
+  return handleResponse<ProcessingPreferences>(res);
+}
+
+export async function updateProcessingPreferences(preferences: ProcessingPreferences): Promise<ProcessingPreferences> {
+  const res = await fetchWithAuth(`${API_BASE}/account/processing-preferences`, {
+    method: 'PATCH',
+    headers: await getHeaders(),
+    body: JSON.stringify(preferences),
+  });
+  return handleResponse<ProcessingPreferences>(res);
 }

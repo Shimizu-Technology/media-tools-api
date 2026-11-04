@@ -116,7 +116,7 @@ export function SignInPage() {
         )}
 
         <div className="space-y-2 border-t pt-4" style={{ borderColor: 'var(--color-separator)' }}>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--color-text-secondary)' }}>Other ways in</p>
+          <p className="text-callout font-semibold text-text-secondary">Other ways in</p>
           <PasskeySignInButton variant="secondary" className="w-full" />
           <RecoveryCodeSignIn className="w-full" />
         </div>

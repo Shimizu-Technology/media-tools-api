@@ -1,8 +1,8 @@
 import { useId, useState, type InputHTMLAttributes, type ReactNode } from 'react';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { buttonClass, inputClass as baseInputClass } from '../ui/styles';
 
-const inputClass = 'mt-2 min-h-12 w-full rounded-md border bg-transparent px-4 text-base outline-none focus:ring-2 focus:ring-[var(--color-accent)]';
-const inputStyle = { borderColor: 'var(--color-separator)' };
+const inputClass = `${baseInputClass} mt-1.5 min-h-12`;
 
 type FieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'className' | 'style'> & { label: string; hint?: ReactNode };
 
@@ -12,9 +12,9 @@ export function TextField({ label, hint, id, ...input }: FieldProps) {
   const fieldId = id ?? generated;
   return (
     <div>
-      <label htmlFor={fieldId} className="block text-sm font-semibold">{label}</label>
-      <input id={fieldId} aria-describedby={hint ? `${fieldId}-hint` : undefined} className={inputClass} style={inputStyle} {...input} />
-      {hint && <p id={`${fieldId}-hint`} className="mt-1.5 text-xs leading-5" style={{ color: 'var(--color-text-secondary)' }}>{hint}</p>}
+      <label htmlFor={fieldId} className="block text-callout font-semibold">{label}</label>
+      <input id={fieldId} aria-describedby={hint ? `${fieldId}-hint` : undefined} className={inputClass} {...input} />
+      {hint && <p id={`${fieldId}-hint`} className="mt-1.5 text-meta text-text-secondary">{hint}</p>}
     </div>
   );
 }
@@ -29,14 +29,14 @@ export function PasswordField({ label, hint, id, ...input }: Omit<FieldProps, 't
   const [visible, setVisible] = useState(false);
   return (
     <div>
-      <label htmlFor={fieldId} className="block text-sm font-semibold">{label}</label>
+      <label htmlFor={fieldId} className="block text-callout font-semibold">{label}</label>
       <div className="relative">
-        <input id={fieldId} aria-describedby={hint ? `${fieldId}-hint` : undefined} type={visible ? 'text' : 'password'} autoCapitalize="none" autoCorrect="off" spellCheck={false} className={`${inputClass} pr-12`} style={inputStyle} {...input} />
-        <button type="button" onClick={() => setVisible((value) => !value)} aria-label={visible ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`} aria-pressed={visible} className="absolute right-1 top-2 flex h-12 w-11 items-center justify-center rounded-md" style={{ color: 'var(--color-text-secondary)' }}>
+        <input id={fieldId} aria-describedby={hint ? `${fieldId}-hint` : undefined} type={visible ? 'text' : 'password'} autoCapitalize="none" autoCorrect="off" spellCheck={false} className={`${inputClass} pr-12`} {...input} />
+        <button type="button" onClick={() => setVisible((value) => !value)} aria-label={visible ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`} aria-pressed={visible} className="absolute right-0.5 top-1.5 flex h-12 w-11 items-center justify-center rounded-md text-text-secondary">
           {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
         </button>
       </div>
-      {hint && <p id={`${fieldId}-hint`} className="mt-1.5 text-xs leading-5" style={{ color: 'var(--color-text-secondary)' }}>{hint}</p>}
+      {hint && <p id={`${fieldId}-hint`} className="mt-1.5 text-meta text-text-secondary">{hint}</p>}
     </div>
   );
 }
@@ -60,7 +60,7 @@ export function CodeField({ value, onChange, disabled }: { value: string; onChan
 
 export function PrimaryButton({ busy, busyLabel, children, disabled, ...rest }: { busy?: boolean; busyLabel?: string; children: ReactNode } & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'className' | 'style'>) {
   return (
-    <button disabled={busy || disabled} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md px-5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50" style={{ backgroundColor: 'var(--color-accent-fill)', color: 'var(--color-on-accent)' }} {...rest}>
+    <button disabled={busy || disabled} className={buttonClass({ variant: 'primary', block: true, className: 'min-h-12' })} {...rest}>
       {busy && <Loader2 className="h-4 w-4 animate-spin" />}{busy ? busyLabel ?? 'Working…' : children}
     </button>
   );
@@ -68,7 +68,7 @@ export function PrimaryButton({ busy, busyLabel, children, disabled, ...rest }: 
 
 export function SecondaryButton({ children, ...rest }: { children: ReactNode } & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'className' | 'style'>) {
   return (
-    <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border px-4 text-sm font-semibold transition-colors hover:bg-[var(--color-fill)] disabled:cursor-not-allowed disabled:opacity-50" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text)' }} {...rest}>
+    <button className={buttonClass()} {...rest}>
       {children}
     </button>
   );

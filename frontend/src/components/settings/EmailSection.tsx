@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { BadgeCheck, Mail } from 'lucide-react';
+import { BadgeCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthContext } from '../../contexts/useAuthContext';
 import { AccountAuthError, confirmEmailVerification, finishEmailChange, startEmailChange, startEmailVerification } from '../../lib/accountAuth';
@@ -69,7 +69,6 @@ export function EmailSection({ hasPassword }: { hasPassword: boolean | null }) {
 
   return (
     <SettingsCard
-      icon={<Mail className="h-5 w-5" />}
       title="Email"
       description={
         <>

@@ -4,11 +4,11 @@ import { TermsSection } from '../components/legal/TermsSection';
 /** Publishes the terms that govern use of Media Tools. */
 export function TermsPage() {
   return (
-    <main className="mx-auto max-w-3xl px-6 py-16">
-      <h1 className="text-3xl font-bold" style={{ color: 'var(--color-text)' }}>Terms of Use</h1>
-      <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>Effective August 22, 2026</p>
+    <main className="mx-auto max-w-[60ch] px-4 py-10 sm:px-6 sm:py-16">
+      <h1 className="text-large-title">Terms of Use</h1>
+      <p className="mt-2 text-callout text-text-secondary">Effective August 22, 2026</p>
 
-      <div className="mt-10 space-y-8 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+      <div className="mt-10 space-y-9 text-body leading-7 text-text [&_a]:text-accent">
         <TermsSection title="Agreement and eligibility">
           <p>These terms govern your use of ST Media Tools, provided by Shimizu Technology. You must be at least 13 years old and able to enter a binding agreement where you live. If you use Media Tools for an organization, you confirm that you may accept these terms for it.</p>
         </TermsSection>

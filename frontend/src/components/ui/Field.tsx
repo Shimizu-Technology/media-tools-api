@@ -1,14 +1,14 @@
-import type { InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { AlertCircle, CheckCircle2, Info } from 'lucide-react';
 import { inputClass } from './styles';
 
 
 /** A plain text input at 16px or more, 44px tall. */
-export function Input({ className = '', ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+export function Input({ className = '', ...rest }: ComponentProps<'input'>) {
   return <input className={`${inputClass} ${className}`} {...rest} />;
 }
 
-export function TextArea({ className = '', ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+export function TextArea({ className = '', ...rest }: ComponentProps<'textarea'>) {
   return <textarea className={`${inputClass} py-2.5 leading-6 ${className}`} {...rest} />;
 }
 

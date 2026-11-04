@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Gauge, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { AccountAuthError, getUsage, nextUsageReset, secondsToMinutes, usageFraction, type Usage } from '../../lib/accountAuth';
 import { formatDate } from '../../lib/relativeTime';
 import { SecondaryButton } from '../auth/fields';
@@ -29,7 +29,6 @@ export function UsageSection() {
   const reset = usage ? nextUsageReset(usage.month) : null;
   return (
     <SettingsCard
-      icon={<Gauge className="h-5 w-5" />}
       title="Usage this month"
       description={usage?.exempt ? 'This account has no monthly limits.' : reset ? `Limits reset on ${formatDate(reset)} (UTC).` : undefined}
       action={error ? <SecondaryButton type="button" onClick={() => void load()}>Try again</SecondaryButton> : undefined}

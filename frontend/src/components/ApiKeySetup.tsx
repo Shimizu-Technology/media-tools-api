@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { Key, Check, AlertTriangle, Copy } from 'lucide-react';
 import { createAPIKey } from '../lib/api';
 
@@ -56,10 +55,7 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
   if (hasKey) return null;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay: 0.4, ease: [0.22, 1, 0.36, 1] }}
+    <div
       className="w-full max-w-md mx-auto"
     >
       <div
@@ -102,10 +98,8 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
             </button>
           ))}
         </div>
-
-        <AnimatePresence mode="wait">
           {mode === 'create' ? (
-            <motion.div key="create" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <div key="create">
               {!createdKey ? (
                 <>
                   <input
@@ -173,9 +167,9 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
                   </div>
                 </div>
               )}
-            </motion.div>
+            </div>
           ) : (
-            <motion.div key="existing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <div key="existing">
               <input
                 type="text"
                 value={existingKey}
@@ -197,9 +191,8 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
               >
                 Use This Key
               </button>
-            </motion.div>
+            </div>
           )}
-        </AnimatePresence>
 
         {error && (
           <p className="text-sm text-danger mt-3 flex items-center gap-1.5">
@@ -208,6 +201,6 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
           </p>
         )}
       </div>
-    </motion.div>
+    </div>
   );
 }

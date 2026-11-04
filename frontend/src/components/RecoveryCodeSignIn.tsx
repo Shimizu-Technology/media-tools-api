@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { KeyRound, Loader2, ShieldCheck, X } from 'lucide-react';
+import { KeyRound, Loader2, X } from 'lucide-react';
 import { prepareRecoveryCodeSignIn, RecoveryCodeError, signInWithRecoveryCode } from '../lib/recoveryCodes';
 
 export function RecoveryCodeSignIn({ className = '', onSuccess }: { className?: string; onSuccess?: () => void }) {
@@ -62,10 +62,9 @@ export function RecoveryCodeSignIn({ className = '', onSuccess }: { className?: 
         <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-scrim p-4" role="presentation">
           <section role="dialog" aria-modal="true" aria-labelledby="recovery-sign-in-title" className="my-auto w-full max-w-md rounded-xl border p-6 shadow-overlay sm:p-8" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
             <div className="flex items-start justify-between gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}><ShieldCheck className="h-5 w-5" /></div>
+              <h2 id="recovery-sign-in-title" className="min-w-0 flex-1 pt-1.5 text-title">Use a saved recovery code</h2>
               <button type="button" onClick={close} disabled={preparing || submitting} aria-label="Cancel recovery sign-in" className="flex h-11 w-11 items-center justify-center rounded-md transition-colors hover:bg-[var(--color-fill)] disabled:opacity-50"><X className="h-5 w-5" /></button>
             </div>
-            <h2 id="recovery-sign-in-title" className="mt-5 text-2xl font-semibold tracking-tight">Use a saved recovery code</h2>
             <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>Enter one unused code from the set you saved. The code works once and stays only in this form while you sign in.</p>
             {preparing ? (
               <div className="mt-6 flex min-h-24 items-center justify-center gap-3" role="status" style={{ color: 'var(--color-text-secondary)' }}><Loader2 className="h-5 w-5 animate-spin" />Preparing secure sign-in…</div>

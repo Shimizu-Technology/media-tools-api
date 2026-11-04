@@ -119,7 +119,7 @@ export function Menu({ label, trigger, items, align = 'end', triggerClassName = 
               ? <div key={`separator-${index}`} role="separator" className="my-1 h-px bg-separator" />
               : (
                 <button
-                  key={item.label}
+                  key={`${index}-${item.label}`}
                   type="button"
                   role="menuitem"
                   disabled={item.disabled}

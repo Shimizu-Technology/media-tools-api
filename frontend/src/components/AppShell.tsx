@@ -1,292 +1,74 @@
-import { useEffect, useRef, useState, type ComponentType } from 'react';
+import { Suspense } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
-import {
-  Activity,
-  Boxes,
-  ChevronRight,
-  Code2,
-  FilePlus2,
-
-  FolderOpen,
-  Home,
-  Library,
-  ListTodo,
-  Menu,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Plus,
-  Settings,
-  X,
-} from 'lucide-react';
+import { Loader2, Mic, Plus, Settings } from 'lucide-react';
 import { ConnectionBanner } from './ConnectionBanner';
 import { useAuthContext } from '../contexts/useAuthContext';
 import { LibraryActivityProvider } from '../contexts/LibraryActivityContext';
 import { useLibraryActivity } from '../contexts/useLibraryActivity';
-import { getHealth } from '../lib/api';
 import { AccountMenu } from './AccountMenu';
 import { Mark } from './ui/Mark';
+import { buttonClass, iconLinkClass } from './ui/styles';
+import { APP_ROUTES } from '../lib/appRoutes';
 
-const SIDEBAR_COLLAPSED_KEY = 'mta-app-sidebar-collapsed';
-
-type NavItem = {
-  label: string;
-  shortLabel?: string;
-  to: string;
-  icon: ComponentType<{ className?: string }>;
-  end?: boolean;
-};
-
-const workspaceNav: NavItem[] = [
-  { label: 'Home', to: '/app', icon: Home, end: true },
-  { label: 'Library', to: '/app/library', icon: Library },
-  { label: 'Collections', to: '/app/collections', icon: FolderOpen },
-  { label: 'Activity', to: '/app/processing', icon: ListTodo },
-];
-
-const developerNav: NavItem[] = [
-  { label: 'Developer', to: '/app/developer', icon: Code2, end: true },
-  { label: 'Webhooks', to: '/app/developer/webhooks', icon: Boxes },
-];
-
-const opsNav: NavItem = { label: 'Ops health', to: '/app/admin/ops', icon: Activity };
-
-const mobileNav: NavItem[] = [
-  { label: 'Home', to: '/app', icon: Home, end: true },
-  { label: 'Library', to: '/app/library', icon: Library },
-  { label: 'Add', to: '/app/new', icon: Plus },
-  { label: 'Collections', shortLabel: 'Collections', to: '/app/collections', icon: FolderOpen },
-  { label: 'Activity', to: '/app/processing', icon: ListTodo },
-];
-
-type PageContext = { eyebrow: string; title: string };
-
-function getPageContext(pathname: string): PageContext {
-  if (pathname === '/app') return { eyebrow: 'Workspace', title: 'Home' };
-  if (pathname === '/app/new') return { eyebrow: 'Create', title: 'Add media' };
-  if (pathname.startsWith('/app/items/')) return { eyebrow: 'Library', title: 'Media item' };
-  if (pathname.startsWith('/app/library')) return { eyebrow: 'Workspace', title: 'Library' };
-  if (pathname.startsWith('/app/collections/')) return { eyebrow: 'Workspace', title: 'Collection' };
-  if (pathname.startsWith('/app/collections')) return { eyebrow: 'Workspace', title: 'Collections' };
-  if (pathname.startsWith('/app/processing')) return { eyebrow: 'Workspace', title: 'Activity' };
-  if (pathname.startsWith('/app/video')) return { eyebrow: 'Add media', title: 'Video transcript' };
-  if (pathname.startsWith('/app/audio')) return { eyebrow: 'Add media', title: 'Recording or audio' };
-  if (pathname.startsWith('/app/pdf')) return { eyebrow: 'Add media', title: 'PDF document' };
-  if (pathname.startsWith('/app/developer/webhooks')) return { eyebrow: 'Developer', title: 'Webhooks' };
-  if (pathname.startsWith('/app/developer')) return { eyebrow: 'Developer', title: 'API access' };
-  if (pathname.startsWith('/app/admin/ops')) return { eyebrow: 'Operations', title: 'System health' };
-  if (pathname.startsWith('/app/settings')) return { eyebrow: 'Account', title: 'Settings' };
-  return { eyebrow: 'Media Tools', title: 'Workspace' };
-}
-
+/**
+ * The signed-in frame: one quiet bar with the mark, what is processing, Add,
+ * and Settings. The Library owns the record control; there are no tabs.
+ */
 export function AppShell() {
   return <LibraryActivityProvider><AppShellContent /></LibraryActivityProvider>;
 }
 
 function AppShellContent() {
   const location = useLocation();
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const mobileDialogRef = useRef<HTMLDivElement>(null);
-  const [collapsed, setCollapsed] = useState(() => {
-    try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'; } catch { return false; }
-  });
-  const { user, accountAuthEnabled, isAuthenticated } = useAuthContext();
+  const { accountAuthEnabled, isAuthenticated } = useAuthContext();
   const { activeJobCount } = useLibraryActivity();
-  const page = getPageContext(location.pathname);
-
-  useEffect(() => {
-    void getHealth().catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    if (!mobileOpen) return;
-
-    const dialog = mobileDialogRef.current;
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    const focusableSelector = 'a[href], button:not([disabled]):not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])';
-    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(focusableSelector) || []);
-    focusable()[0]?.focus();
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setMobileOpen(false);
-        return;
-      }
-      if (event.key !== 'Tab') return;
-
-      const items = focusable();
-      if (items.length === 0) {
-        event.preventDefault();
-        return;
-      }
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = previousOverflow;
-      previouslyFocused?.focus();
-    };
-  }, [mobileOpen]);
-
-  const toggleCollapsed = () => {
-    setCollapsed((current) => {
-      const next = !current;
-      try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next)); } catch { /* Best-effort preference. */ }
-      return next;
-    });
-  };
-
-  const userName = user?.name || user?.email || 'Media workspace';
+  const onCapture = location.pathname === APP_ROUTES.add;
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}>
-      <aside className={`fixed inset-y-0 left-0 z-40 hidden border-r backdrop-blur-xl transition-[width] duration-200 lg:flex lg:flex-col ${collapsed ? 'w-20' : 'w-64'}`} style={{ backgroundColor: 'var(--color-bar)', borderColor: 'var(--color-separator)' }}>
-        <SidebarContent collapsed={collapsed} onToggleCollapsed={toggleCollapsed} userName={userName} accountAuthEnabled={accountAuthEnabled} activeJobs={activeJobCount} />
-      </aside>
-
-      {mobileOpen && (
-        <div ref={mobileDialogRef} className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Workspace navigation">
-          <button tabIndex={-1} className="absolute inset-0 backdrop-blur-sm" style={{ backgroundColor: 'var(--color-scrim)' }} aria-label="Close navigation" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[340px] flex-col border-r shadow-overlay" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
-            <SidebarContent collapsed={false} onToggleCollapsed={toggleCollapsed} userName={userName} accountAuthEnabled={accountAuthEnabled} activeJobs={activeJobCount} mobile onNavigate={() => setMobileOpen(false)} />
-          </aside>
-          <button className="absolute left-[calc(min(86vw,340px)+0.75rem)] top-4 flex h-11 w-11 items-center justify-center rounded-full border backdrop-blur" style={{ backgroundColor: 'var(--color-scrim)', borderColor: 'var(--color-separator)', color: 'var(--color-on-accent)' }} onClick={() => setMobileOpen(false)} aria-label="Close navigation">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-      )}
-
-      <div className={`transition-[padding] duration-200 ${collapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
-        <header className="sticky top-0 z-30 border-b backdrop-blur-xl" style={{ backgroundColor: 'var(--color-bar)', borderColor: 'var(--color-separator)' }}>
-          <div className="flex h-16 items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
-            <div className="flex min-w-0 items-center gap-3">
-              <button className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border transition-colors hover:bg-[var(--color-fill)] lg:hidden" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }} onClick={() => setMobileOpen(true)} aria-label="Open navigation">
-                <Menu className="h-5 w-5" />
-              </button>
-              <div className="min-w-0">
-                <p className="truncate text-[0.65rem] font-semibold uppercase tracking-[0.2em]" style={{ color: 'var(--color-text-secondary)' }}>{page.eyebrow}</p>
-                <p className="truncate text-base font-semibold tracking-tight" style={{ color: 'var(--color-text)' }}>{page.title}</p>
+    <div className="min-h-dvh bg-bg text-text">
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[60] focus:rounded-md focus:bg-surface focus:px-4 focus:py-3 focus:shadow-overlay">Skip to content</a>
+      <header className="sticky top-0 z-30 border-b border-separator bg-bar pt-[env(safe-area-inset-top)] backdrop-blur-xl">
+        <div className="mx-auto flex h-14 max-w-5xl items-center gap-1 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))] sm:px-6">
+          <Link to={APP_ROUTES.library} className="-ml-1 flex min-h-11 min-w-11 items-center gap-2.5 rounded-md px-1" aria-label="Media Tools library">
+            <Mark size={28} />
+            <span className="hidden font-serif text-[1.0625rem] font-semibold tracking-[-0.01em] sm:inline">Media Tools</span>
+          </Link>
+          <div className="flex-1" />
+          {activeJobCount > 0 && (
+            <Link to="/app?status=active" className="inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-meta font-semibold text-text-secondary hover:bg-fill">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              <span>{activeJobCount} processing</span>
+            </Link>
+          )}
+          {!onCapture && (
+            <>
+              <div className="hidden items-center gap-1 sm:flex">
+                <Link to={APP_ROUTES.add} className={buttonClass({ variant: 'plain' })}>
+                  <Plus className="h-4 w-4" aria-hidden="true" />Add
+                </Link>
+                <Link to={`${APP_ROUTES.add}?record=1`} className={buttonClass({ variant: 'primary' })}>
+                  <Mic className="h-4 w-4" aria-hidden="true" />Record
+                </Link>
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {activeJobCount > 0 && (
-                <Link to="/app/processing" className="inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-xs font-semibold" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
-                  <span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-fill opacity-50" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent-fill" /></span>
-                  <span className="hidden sm:inline">{activeJobCount} active</span>
-                  <span className="sm:hidden">{activeJobCount}</span>
-                </Link>
-              )}
-              {location.pathname !== '/app/new' && (
-                <Link to="/app/new" className="hidden min-h-11 items-center gap-2 rounded-md px-4 text-sm font-semibold transition-colors sm:inline-flex" style={{ backgroundColor: 'var(--color-accent-fill)', color: 'var(--color-on-accent)' }}>
-                  <Plus className="h-4 w-4" /> Add media
-                </Link>
-              )}
-              {accountAuthEnabled && isAuthenticated && <AccountMenu />}
-            </div>
-          </div>
-        </header>
+              <Link to={APP_ROUTES.add} aria-label="Add a link or file" title="Add a link or file" className={`${iconLinkClass()} sm:hidden`}>
+                <Plus className="h-[22px] w-[22px]" aria-hidden="true" />
+              </Link>
+            </>
+          )}
+          <NavLink to={APP_ROUTES.settings} aria-label="Settings" title="Settings" className={({ isActive }) => `${iconLinkClass()} ${isActive ? 'bg-fill' : ''}`}>
+            <Settings className="h-[22px] w-[22px]" aria-hidden="true" />
+          </NavLink>
+          {accountAuthEnabled && isAuthenticated && <div className="hidden sm:block"><AccountMenu /></div>}
+        </div>
+      </header>
 
-        <ConnectionBanner />
-        <main className="min-h-[calc(100vh-4rem)] px-4 pb-28 pt-5 sm:px-6 sm:pt-7 lg:px-8 lg:pb-8">
+      <ConnectionBanner />
+      <main id="main" className="mx-auto w-full max-w-5xl pb-[calc(env(safe-area-inset-bottom)+2rem)] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pt-2 sm:px-6 sm:pt-6">
+        {/* The bar stays put while the next screen's code loads. */}
+        <Suspense fallback={<div className="flex min-h-[40dvh] items-center justify-center" role="status"><Loader2 className="h-5 w-5 animate-spin text-text-secondary" /><span className="sr-only">Loading</span></div>}>
           <Outlet />
-        </main>
-      </div>
-
-      <MobileBottomNav activeJobs={activeJobCount} />
+        </Suspense>
+      </main>
     </div>
   );
-}
-
-function SidebarContent({ collapsed, onToggleCollapsed, userName, accountAuthEnabled, activeJobs, mobile = false, onNavigate }: {
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
-  userName: string;
-  accountAuthEnabled: boolean;
-  activeJobs: number;
-  mobile?: boolean;
-  onNavigate?: () => void;
-}) {
-  return (
-    <div className="flex h-full flex-col p-3">
-      <div className={`flex items-center gap-3 border-b pb-4 ${collapsed ? 'justify-center' : 'px-2'}`} style={{ borderColor: 'var(--color-separator)' }}>
-        <Link to="/app" onClick={onNavigate} className="flex min-h-11 min-w-0 items-center gap-3 rounded-lg focus-visible:outline-none">
-          <Mark size={40} />
-          {!collapsed && <div className="min-w-0"><p className="truncate text-base font-semibold tracking-tight">Media Tools</p><p className="truncate text-xs" style={{ color: 'var(--color-text-secondary)' }}>Private workspace</p></div>}
-        </Link>
-        {!mobile && !collapsed && (
-          <button className="ml-auto hidden h-11 w-11 items-center justify-center rounded-md border transition-colors hover:bg-[var(--color-fill)] lg:flex" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Collapse sidebar"><PanelLeftClose className="h-4 w-4" /></button>
-        )}
-      </div>
-
-      {!mobile && collapsed && (
-        <button className="mx-auto mt-3 flex h-11 w-11 items-center justify-center rounded-md border" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }} onClick={onToggleCollapsed} aria-label="Expand sidebar"><PanelLeftOpen className="h-4 w-4" /></button>
-      )}
-
-      <Link to="/app/new" onClick={onNavigate} title={collapsed ? 'Add media' : undefined} className={`mt-4 flex min-h-12 items-center rounded-lg font-semibold transition-colors ${collapsed ? 'justify-center' : 'gap-3 px-4'}`} style={{ backgroundColor: 'var(--color-accent-fill)', color: 'var(--color-on-accent)', boxShadow: 'var(--shadow-raised)' }}>
-        <FilePlus2 className="h-5 w-5 shrink-0" />
-        {!collapsed && <><span>Add media</span><ChevronRight className="ml-auto h-4 w-4 opacity-70" /></>}
-      </Link>
-
-      <nav className="mt-4 flex flex-1 flex-col gap-1 overflow-y-auto" aria-label="Workspace">
-        <NavSection items={workspaceNav} collapsed={collapsed} onNavigate={onNavigate} activeJobs={activeJobs} />
-        <Divider collapsed={collapsed} label="Developer" />
-        <NavSection items={accountAuthEnabled ? developerNav : [...developerNav, opsNav]} collapsed={collapsed} onNavigate={onNavigate} />
-      </nav>
-
-      <div className={`mt-4 border-t pt-4 ${collapsed ? 'px-0' : 'px-2'}`} style={{ borderColor: 'var(--color-separator)' }}>
-        <NavLink to="/app/settings" onClick={onNavigate} className={({ isActive }) => navClass(isActive, collapsed)} title="Settings"><Settings className="h-5 w-5 shrink-0" />{!collapsed && <span>Settings</span>}</NavLink>
-        {!collapsed && <div className="mt-3 rounded-lg border p-3" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-fill)' }}><p className="truncate text-sm font-semibold">{userName}</p><p className="mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{accountAuthEnabled ? 'Durable browser session' : 'API key development mode'}</p></div>}
-      </div>
-    </div>
-  );
-}
-
-function MobileBottomNav({ activeJobs }: { activeJobs: number }) {
-  return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl lg:hidden" style={{ backgroundColor: 'var(--color-bar)', borderColor: 'var(--color-separator)' }} aria-label="Primary">
-      <div className="mx-auto grid max-w-xl grid-cols-5">
-        {mobileNav.map((item) => {
-          const Icon = item.icon;
-          const isAdd = item.to === '/app/new';
-          return (
-            <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => `relative flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1 text-[0.65rem] font-semibold transition-colors ${isAdd ? '-mt-5' : ''} ${isActive ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)]'}`}>
-              {isAdd ? (
-                <span className="flex h-13 w-13 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--color-accent-fill)', color: 'var(--color-on-accent)', boxShadow: 'var(--shadow-overlay)' }}><Icon className="h-6 w-6" /></span>
-              ) : (
-                <span className="relative"><Icon className="h-5 w-5" />{item.to === '/app/processing' && activeJobs > 0 && <span className="absolute -right-2 -top-1 h-2.5 w-2.5 rounded-full bg-accent-fill ring-2 ring-[var(--color-bar)]" />}</span>
-              )}
-              <span className={isAdd ? 'text-[var(--color-accent)]' : 'truncate'}>{item.shortLabel || item.label}</span>
-            </NavLink>
-          );
-        })}
-      </div>
-    </nav>
-  );
-}
-
-function NavSection({ items, collapsed, onNavigate, activeJobs = 0 }: { items: NavItem[]; collapsed: boolean; onNavigate?: () => void; activeJobs?: number }) {
-  return <div className="space-y-1">{items.map((item) => { const Icon = item.icon; return <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={({ isActive }) => navClass(isActive, collapsed)} title={collapsed ? item.label : undefined}><Icon className="h-5 w-5 shrink-0" />{!collapsed && <span>{item.label}</span>}{!collapsed && item.to === '/app/processing' && activeJobs > 0 ? <span className="ml-auto rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}>{activeJobs}</span> : !collapsed && <ChevronRight className="ml-auto h-4 w-4 opacity-40" />}{collapsed && item.to === '/app/processing' && activeJobs > 0 && <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-accent-fill ring-2 ring-[var(--color-bar)]" />}</NavLink>; })}</div>;
-}
-
-function Divider({ collapsed, label }: { collapsed: boolean; label: string }) {
-  if (collapsed) return <div className="my-4 h-px" style={{ backgroundColor: 'var(--color-separator)' }} />;
-  return <div className="px-3 pb-1 pt-5 text-[0.65rem] font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--color-text-secondary)' }}>{label}</div>;
-}
-
-function navClass(isActive: boolean, collapsed: boolean) {
-  const base = collapsed ? 'group relative flex min-h-11 items-center justify-center rounded-lg transition-colors' : 'group flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors';
-  return `${base} ${isActive ? 'bg-[var(--color-accent-tint)] text-[var(--color-accent)] dark:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-fill)] hover:text-[var(--color-text)]'}`;
 }
