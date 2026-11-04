@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/summary"
 	"io"
 	"net/http"
 	"os"
@@ -85,5 +87,45 @@ func TestDurableAuthEmailRequeueAndDelivery(t *testing.T) {
 	var stored string
 	if err = db.Get(&stored, `SELECT sealed FROM auth_email_outbox WHERE id=$1`, id); err != nil || stored != "" {
 		t.Fatal("delivered secret payload retained")
+	}
+}
+
+func TestAutomaticEnrichmentChecksCapBeforeProvider(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	db, err := database.New(url)
+	if err != nil {
+		t.Fatal("connect test database")
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err = db.RunMigrations("../../../migrations"); err != nil {
+		t.Fatal(err)
+	}
+	var userID, audioID string
+	if err = db.QueryRow(`INSERT INTO users(email,password_hash,name) VALUES($1,'','Automatic quota') RETURNING id`, uuid.NewString()+"@example.invalid").Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM users WHERE id=$1`, userID) })
+	if err = db.EnsureUsagePolicy(context.Background(), userID, 300, 1, "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.ReserveAIRequest(context.Background(), userID); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.QueryRow(`INSERT INTO audio_transcriptions(filename,original_name,status,transcript_text,summary_status,user_id) VALUES('quota.m4a','New Recording','completed','Synthetic quota fixture.','pending',$1) RETURNING id`, userID).Scan(&audioID); err != nil {
+		t.Fatal(err)
+	}
+	// A nonnil but unconfigured service would reject a provider call. Receiving
+	// the cap error instead proves both automatic paths stop at the quota gate.
+	pool := NewPool(1, 10, db, nil, &summary.Service{})
+	defer pool.cancel()
+	for _, source := range []string{"New Recording", ""} {
+		payload, _ := json.Marshal(AudioSummaryPayload{AudioID: audioID, Automatic: true, TitleSource: source})
+		err = pool.processAudioSummary(Job{ID: audioID, QueueID: uuid.NewString(), Payload: payload})
+		if !database.IsUsageCap(err) {
+			t.Fatal("automatic title/summary bypassed cap", err)
+		}
 	}
 }

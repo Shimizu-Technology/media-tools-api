@@ -63,3 +63,12 @@ END;
 $$ LANGUAGE plpgsql;
 CREATE TRIGGER reserve_audio_admission BEFORE INSERT OR UPDATE OF status ON audio_transcriptions FOR EACH ROW EXECUTE FUNCTION reserve_media_admission();
 CREATE TRIGGER reserve_video_admission BEFORE INSERT OR UPDATE OF status ON transcripts FOR EACH ROW EXECUTE FUNCTION reserve_media_admission();
+
+-- Automatic enrichment has no HTTP admission request. A durable job/operation
+-- key reserves its summary/title budget once, including after worker restart.
+CREATE TABLE account_ai_request_reservations (
+ user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ reservation_key TEXT NOT NULL,
+ month DATE NOT NULL,
+ PRIMARY KEY(user_id,reservation_key,month)
+);

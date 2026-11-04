@@ -1,6 +1,6 @@
 # Auth backend acceptance
 
-Workstream D, agent-executed backend QA. Initial base: `0fc219e`; rebased onto origin/main `d570f70`, 2026-11-04.
+Workstream D, agent-executed backend QA. Initial base: `0fc219e`; rebased onto foundation `d570f70`, then pipeline merge `896102f`, 2026-11-04.
 Media Tools saves recordings, video transcripts and PDFs into an account library
 for search, summaries and chat. Sources: repo AGENTS.md, v1 release plan section D,
 PASSKEY_AUTH.md, INVITE_ONBOARDING.md, WEB_SESSION_ROLLOUT.md, and Brain Dump
@@ -35,7 +35,7 @@ full Gin routes over ephemeral loopback HTTP listeners, and synthetic accounts.
 | D06 | Passed: `TestAuthHTTPFailedGuessesDoNotLockCorrectPassword`, `TestClientIPTrustBoundary`; failed guesses reach 429 and correct password succeeds; untrusted forwarded headers ignored |
 | D07 | Passed: `TestAuthHTTPBrowserCSRFAndStalePendingRecovery` and session database regression tests; extended CSRF cookie, cleared stale pending cookie and completed fresh sign-in; stale refresh did not revoke successor |
 | D08 | Passed: email service tests and `TestDurableAuthEmailRequeueAndDelivery`; fake Resend 429 requeued durably with Retry-After, replacement worker completed with stable idempotency key, ciphertext cleared, log delivery contained neither address nor code |
-| D09 | Passed: `TestAuthHTTPUsageAndOwnerExemption`, `TestUsageAtomicConcurrentCapsMonthAndOwner`, `TestUsageAdmissionBatchRollbackAndFailedProvisionalRefund`; two HTTP submissions completed through a synthetic extractor and exhausted 120 seconds, next transcription rejected 402, summary/chat rejected at their cap, owner bypassed cap, concurrent reservations respected limits, rejected batch left no items/jobs |
+| D09 | Passed: `TestAuthHTTPUsageAndOwnerExemption`, `TestUsageAtomicConcurrentCapsMonthAndOwner`, `TestUsageAdmissionBatchRollbackAndFailedProvisionalRefund`, `TestAutomaticAIReservationsShareCapAndRecoverWithoutDoubleCharge`, `TestAutomaticEnrichmentChecksCapBeforeProvider`; two HTTP submissions completed through a synthetic extractor and exhausted 120 seconds, next transcription rejected 402, summary/chat rejected at their cap, owner bypassed cap, concurrent reservations respected limits, rejected batch left no items/jobs |
 | D10 | Passed: `TestEmailChallengeConcurrentSingleUseAndPurge`; expired access/refresh rows removed, usable exact-successor recovery retained |
 
 The browser API test originally failed because its shared cookie helper filters

@@ -109,3 +109,30 @@ func TestUsageAdmissionBatchRollbackAndFailedProvisionalRefund(t *testing.T) {
 		t.Fatal("provisional failure not refunded")
 	}
 }
+
+func TestAutomaticAIReservationsShareCapAndRecoverWithoutDoubleCharge(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := createPasswordTestUser(t, db)
+	if err := db.EnsureUsagePolicy(ctx, userID, 300, 2, "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := db.ReserveAutomaticAIRequest(ctx, &userID, nil, "durable-job:title"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.ReserveAutomaticAIRequest(ctx, &userID, nil, "durable-job:summary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ReserveAIRequest(ctx, userID); !IsUsageCap(err) {
+		t.Fatal("automatic requests did not share the interactive cap")
+	}
+	if err := db.ReserveAutomaticAIRequest(ctx, &userID, nil, "another-job:summary"); !IsUsageCap(err) {
+		t.Fatal("automatic producer bypassed cap")
+	}
+	usage, err := db.AccountUsage(ctx, userID)
+	if err != nil || usage.AIRequests != 2 {
+		t.Fatal("retry double charged automatic work")
+	}
+}

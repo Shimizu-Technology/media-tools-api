@@ -127,3 +127,56 @@ func (db *DB) CreateBatchWithTranscripts(ctx context.Context, b *models.Batch, t
 	}
 	return tx.Commit()
 }
+
+// ReserveAutomaticAIRequest is the non-HTTP counterpart of ReserveAIRequest.
+// The ledger insert and quota increment share one transaction, so a restarted
+// worker can safely repeat a logical operation without spending a second unit.
+func (db *DB) ReserveAutomaticAIRequest(ctx context.Context, userID, apiKeyID *string, key string) error {
+	account := ""
+	if userID != nil {
+		account = *userID
+	} else if apiKeyID != nil {
+		if err := db.GetContext(ctx, &account, `SELECT COALESCE(user_id::text,'') FROM api_keys WHERE id=$1`, *apiKeyID); err != nil {
+			return err
+		}
+	}
+	if account == "" {
+		return nil
+	}
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var exempt bool
+	var limit int64
+	err = tx.QueryRowContext(ctx, `SELECT exempt,ai_request_limit FROM account_usage_policies WHERE user_id=$1 FOR UPDATE`, account).Scan(&exempt, &limit)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if exempt {
+		return nil
+	}
+	result, err := tx.ExecContext(ctx, `INSERT INTO account_ai_request_reservations(user_id,reservation_key,month) VALUES($1,$2,date_trunc('month',NOW() AT TIME ZONE 'UTC')::date) ON CONFLICT DO NOTHING`, account, key)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+	err = tx.QueryRowContext(ctx, `INSERT INTO account_monthly_usage(user_id,month,ai_requests) VALUES($1,date_trunc('month',NOW() AT TIME ZONE 'UTC')::date,1) ON CONFLICT(user_id,month) DO UPDATE SET ai_requests=account_monthly_usage.ai_requests+1 WHERE account_monthly_usage.ai_requests<$2 RETURNING ai_requests`, account, limit).Scan(&count)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrMonthlyUsageCap
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}

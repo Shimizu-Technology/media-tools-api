@@ -25,7 +25,7 @@ is the HTTP status, and `error` is the stable machine-readable identifier.
 - Configure the immutable `OWNER_USER_ID`, or retain the existing configured
   owner API key ID/prefix. Account exemptions are derived from that trusted
   configuration; no owner is inferred from signup order or email.
-- Migrations 055–056 add tables/triggers and widen the background-job type
+- Migrations 056–057 add tables/triggers and widen the background-job type
   constraint. They leave `users` columns unchanged because the overlapping old
   binary uses strict `SELECT *` scans. Old binaries do not know `auth_email` jobs;
   let the backend deployment drain before clients start using the new email
@@ -181,10 +181,11 @@ processed minutes. Usage includes queued reservations, so it may fall after a
 provisional item fails or its actual duration proves shorter.
 
 Summaries and chat share a separate request cap. HTTP failures refund the
-reserved request; accepted asynchronous work retains its request charge. Future
-automatic title/summary producers must call `ReserveAIRequest` too, or route
-through the same guard. This backend does not add automatic producers (C owns
-them). Audio readability formatting is not a summary/chat request.
+reserved request; accepted asynchronous work retains its request charge. Automatic title and summary jobs each reserve a request before their provider
+call. Durable operation keys prevent retries/restarts from double-charging. Old
+queued accounts without a usage policy retain their pre-deployment behavior;
+new API admissions create the policy before accepting media. Future automatic
+producers must use the same `ReserveAutomaticAIRequest` boundary. Audio readability formatting is not a summary/chat request.
 
 ## Stable errors
 
