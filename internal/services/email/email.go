@@ -160,7 +160,11 @@ func (s *Service) Deliver(ctx context.Context, id, sealed string) error {
 }
 
 func CodeMessage(to, code, purpose string) Message {
-	return Message{To: to, Subject: "Your Media Tools code", Text: "Your Media Tools " + purpose + " code is " + code + ". It expires in 10 minutes. If you did not request this, ignore this email."}
+	label := map[string]string{"signup": "sign-up", "reset": "password reset", "email_change": "email change", "verify": "email verification"}[purpose]
+	if label == "" {
+		label = "verification"
+	}
+	return Message{To: to, Subject: "Your Media Tools code", Text: "Your Media Tools " + label + " code is " + code + ". It expires in 10 minutes. If you did not request this, ignore this email."}
 }
 func Notice(to, action string) Message {
 	return Message{To: to, Subject: "Media Tools account updated", Text: "Your Media Tools " + action + " was changed. If this was not you, reset your password and contact support."}

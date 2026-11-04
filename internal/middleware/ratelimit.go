@@ -136,8 +136,8 @@ func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 
 // RateLimitUnauthenticated protects public authentication endpoints. Scope
 // keeps credentials with different threat models from sharing a token bucket.
-// RemoteAddr comes from the connected network peer, so an untrusted forwarded
-// header cannot give an attacker unlimited fresh buckets.
+// AuthClientIP uses the explicitly verified proxy chain, or the connected peer
+// when no proxy is trusted. Spoofed headers cannot supply fresh buckets.
 func (rl *RateLimiter) RateLimitUnauthenticated(scope string, limit int) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		peer := AuthClientIP(c)

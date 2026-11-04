@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/text/unicode/norm"
 )
 

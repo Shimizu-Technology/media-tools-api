@@ -7,8 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	accountservice "github.com/Shimizu-Technology/media-tools-api/internal/services/account"
 	"github.com/google/uuid"
+
+	accountservice "github.com/Shimizu-Technology/media-tools-api/internal/services/account"
 )
 
 func createPasswordTestUser(t *testing.T, db *DB) string {

@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
-	emailservice "github.com/Shimizu-Technology/media-tools-api/internal/services/email"
 	"github.com/google/uuid"
+
+	emailservice "github.com/Shimizu-Technology/media-tools-api/internal/services/email"
 )
 
 func TestEmailChallengeConcurrentSingleUseAndPurge(t *testing.T) {
