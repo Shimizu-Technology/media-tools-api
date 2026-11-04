@@ -41,7 +41,7 @@ func TestMOVTranscodeAndStreamCopySplit(t *testing.T) {
 		}
 		total += duration
 	}
-	if total < 3 || total > 3.5 {
+	if total < 2.9 || total > 3.5 { // Stream copy cuts on packet boundaries, so allow a little rounding.
 		t.Fatalf("split duration=%f", total)
 	}
 }
