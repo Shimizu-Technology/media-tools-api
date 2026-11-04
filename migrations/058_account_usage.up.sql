@@ -52,7 +52,11 @@ BEGIN
  IF account IS NULL AND NEW.api_key_id IS NOT NULL THEN SELECT user_id INTO account FROM api_keys WHERE id=NEW.api_key_id; END IF;
  IF account IS NULL THEN RETURN NEW; END IF;
  IF (TG_OP='INSERT' AND NEW.status IN ('pending','processing')) OR (TG_OP='UPDATE' AND NEW.status='pending' AND OLD.status='failed') THEN
-  PERFORM reserve_transcription_usage(account,NEW.id,60,TRUE);
+  -- A retry must not swap an already charged duration for a smaller provisional
+  -- one, because the provider was already paid for that attempt.
+  IF NOT EXISTS (SELECT 1 FROM account_transcription_usage u WHERE u.user_id=account AND u.resource_id=NEW.id AND NOT u.provisional) THEN
+   PERFORM reserve_transcription_usage(account,NEW.id,60,TRUE);
+  END IF;
  ELSIF TG_OP='UPDATE' AND NEW.status='failed' AND OLD.status<>NEW.status THEN
   PERFORM 1 FROM account_usage_policies WHERE user_id=account FOR UPDATE;
   WITH released AS (

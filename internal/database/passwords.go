@@ -15,6 +15,7 @@ import (
 const (
 	passwordFailureWindow = 15 * time.Minute
 	passwordFailureLimit  = 10
+	passwordSlowGuessGap  = 30 * time.Second
 )
 
 var (
@@ -73,6 +74,41 @@ func (db *DB) GetPasswordStatus(ctx context.Context, userID string) (*PasswordSt
 // RecordPasswordFailure updates only the exact credential version the handler
 // verified. A concurrent password change therefore cannot inherit failures
 // from an attempt made against its previous hash.
+// ClaimPasswordGuess decides whether this attempt may reach password
+// verification. Past the failure budget an account allows one check per interval.
+// That bounds online guessing while a correct password still gets through on a
+// later try, so a stranger can slow a login but never lock it. The claim is a
+// single UPDATE, so concurrent guesses can't share a slot.
+func (db *DB) ClaimPasswordGuess(ctx context.Context, userID string) (bool, error) {
+	var overBudget bool
+	err := db.GetContext(ctx, &overBudget, `
+		SELECT failed_attempts >= $2 AND failure_window_started_at IS NOT NULL
+		       AND failure_window_started_at > NOW() - make_interval(secs => $3)
+		FROM auth_password_credentials WHERE user_id = $1`,
+		userID, passwordFailureLimit, passwordFailureWindow.Seconds())
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check password guess budget: %w", err)
+	}
+	if !overBudget {
+		return true, nil
+	}
+	result, err := db.ExecContext(ctx, `
+		UPDATE auth_password_credentials SET slow_guess_at = NOW()
+		WHERE user_id = $1 AND (slow_guess_at IS NULL OR slow_guess_at <= NOW() - make_interval(secs => $2))`,
+		userID, passwordSlowGuessGap.Seconds())
+	if err != nil {
+		return false, fmt.Errorf("claim password guess: %w", err)
+	}
+	claimed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read password guess claim: %w", err)
+	}
+	return claimed == 1, nil
+}
+
 func (db *DB) RecordPasswordFailure(ctx context.Context, userID, hashSnapshot string) error {
 	now := time.Now().UTC()
 	tx, err := db.BeginTxx(ctx, nil)

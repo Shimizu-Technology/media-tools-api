@@ -184,3 +184,54 @@ func credentialEmail(t *testing.T, db *DB, userID string) string {
 	}
 	return email
 }
+
+func TestPasswordGuessesSlowDownPastTheFailureBudget(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := createPasswordTestUser(t, db)
+	hasher, err := accountservice.NewPasswordHasher(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := hasher.Hash(ctx, "a secure password for testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := db.CreateFirstPartySession(ctx, userID, "ios", "iPhone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SetPasswordCredential(ctx, userID, session.SessionID, hash); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < passwordFailureLimit; i++ {
+		if allowed, err := db.ClaimPasswordGuess(ctx, userID); err != nil || !allowed {
+			t.Fatalf("guess %d within budget: allowed=%v err=%v", i, allowed, err)
+		}
+		if err := db.RecordPasswordFailure(ctx, userID, hash); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if allowed, err := db.ClaimPasswordGuess(ctx, userID); err != nil || !allowed {
+		t.Fatalf("first slow guess: allowed=%v err=%v", allowed, err)
+	}
+	if allowed, err := db.ClaimPasswordGuess(ctx, userID); err != nil || allowed {
+		t.Fatalf("second guess inside the gap must not be verified: allowed=%v err=%v", allowed, err)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE auth_password_credentials SET slow_guess_at = NOW() - INTERVAL '31 seconds' WHERE user_id = $1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := db.ClaimPasswordGuess(ctx, userID); err != nil || !allowed {
+		t.Fatalf("a later guess must get through so a correct password still works: allowed=%v err=%v", allowed, err)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE auth_password_credentials SET failure_window_started_at = NOW() - INTERVAL '16 minutes', slow_guess_at = NOW() WHERE user_id = $1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := db.ClaimPasswordGuess(ctx, userID); err != nil || !allowed {
+		t.Fatalf("an expired window restores the budget: allowed=%v err=%v", allowed, err)
+	}
+}

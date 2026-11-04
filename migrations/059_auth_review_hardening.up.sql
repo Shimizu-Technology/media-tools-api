@@ -14,3 +14,6 @@ ALTER TABLE audio_transcriptions DROP CONSTRAINT check_audio_summary_status;
 ALTER TABLE audio_transcriptions ADD CONSTRAINT check_audio_summary_status CHECK(summary_status IN ('none','pending','processing','completed','failed','skipped'));
 ALTER TABLE audio_transcriptions DROP CONSTRAINT check_audio_formatting_status;
 ALTER TABLE audio_transcriptions ADD CONSTRAINT check_audio_formatting_status CHECK(formatting_status IN ('none','pending','processing','completed','failed','skipped'));
+
+-- Past the free failure budget, one password check per interval per account.
+ALTER TABLE auth_password_credentials ADD COLUMN slow_guess_at TIMESTAMPTZ;

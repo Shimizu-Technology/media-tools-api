@@ -84,6 +84,18 @@ func (h *Handler) createPasswordSession(ctx context.Context, email, rawPassword,
 	if err != nil {
 		return nil, err
 	}
+	// This runs before verification on purpose. Answering a guess only after
+	// checking it would still tell an attacker when one was right.
+	allowed, err := h.DB.ClaimPasswordGuess(ctx, credential.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		if dummyErr := h.Passwords.VerifyDummy(ctx, password); dummyErr != nil {
+			return nil, dummyErr
+		}
+		return nil, errPasswordRejected
+	}
 	verified, err := h.Passwords.Verify(ctx, credential.PasswordHash, password)
 	if err != nil {
 		return nil, err

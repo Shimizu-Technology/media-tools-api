@@ -178,3 +178,40 @@ func TestRecoveredPolicyAndPreviousMonthRefund(t *testing.T) {
 		t.Fatalf("retry admission must enforce cap: %v", err)
 	}
 }
+
+func TestRetryKeepsTheChargedTranscriptionDuration(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := createPasswordTestUser(t, db)
+	if err := db.EnsureUsagePolicy(ctx, userID, 300, 1000, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	var audioID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO audio_transcriptions (user_id, filename, original_name, status)
+		VALUES ($1, 'a.caf', 'a.caf', 'pending') RETURNING id`, userID).Scan(&audioID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ReserveTranscriptionDuration(ctx, &userID, nil, audioID, 3600); err != nil {
+		t.Fatal(err)
+	}
+	seconds := func() int64 {
+		t.Helper()
+		var total int64
+		if err := db.GetContext(ctx, &total, `SELECT COALESCE(SUM(transcription_seconds),0) FROM account_monthly_usage WHERE user_id = $1`, userID); err != nil {
+			t.Fatal(err)
+		}
+		return total
+	}
+	if got := seconds(); got != 3600 {
+		t.Fatalf("charged = %d", got)
+	}
+	for _, status := range []string{"failed", "pending", "failed"} {
+		if _, err := db.ExecContext(ctx, `UPDATE audio_transcriptions SET status = $2 WHERE id = $1`, audioID, status); err != nil {
+			t.Fatal(err)
+		}
+		if got := seconds(); got != 3600 {
+			t.Fatalf("after %s the charge moved to %d", status, got)
+		}
+	}
+}

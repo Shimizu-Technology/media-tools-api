@@ -154,12 +154,15 @@ func Setup(cfg RouterConfig) *gin.Engine {
 
 			h.PasswordAuthEnabled = true
 			passwordLogin := r.Group("/api/v1/auth/password")
-			// Correct passwords remain usable even during attacks; wrong attempts
-			// are limited durably per account inside rejectPassword.
+			// A verified client IP gets a bucket, and each account separately allows
+			// one check per interval past its failure budget (ClaimPasswordGuess).
+			passwordLogin.Use(rateLimiter.RateLimitUnauthenticated("password", 20))
 			passwordLogin.POST("/login", h.LoginWithPassword)
 			if h.Email != nil {
 				proof := r.Group("/api/v1/auth")
 				// Durable per-address send and guessing budgets survive proxy changes.
+				// The IP bucket keeps one client from mailing many different addresses.
+				proof.Use(rateLimiter.RateLimitUnauthenticated("email-proof", 30))
 				proof.POST("/signup", h.Signup)
 				proof.POST("/signup/verify", h.VerifySignup)
 				proof.POST("/password/forgot", h.ForgotPassword)
@@ -200,6 +203,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 			if cfg.FirstPartyPasswordAuthEnabled {
 				webPassword := r.Group("/api/v1/auth/web/session/password")
 				// The finish handler shares the native per-account password budget.
+				webPassword.Use(rateLimiter.RateLimitUnauthenticated("web-password", 40))
 				webPassword.POST("/prepare", web.PreparePasswordLogin)
 				webPassword.POST("/finish", web.FinishPasswordLogin)
 			}
