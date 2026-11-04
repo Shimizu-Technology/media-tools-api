@@ -1,20 +1,18 @@
 import type { ReactNode } from 'react';
 
-/** The card chrome every Settings section already uses. */
-export function SettingsCard({ icon, title, description, children, action }: { icon: ReactNode; title: string; description?: ReactNode; children?: ReactNode; action?: ReactNode }) {
+/** One Settings section: a heading, a sentence, its controls. Hairlines, not cards. */
+export function SettingsCard({ title, description, children, action, id }: { title: string; description?: ReactNode; children?: ReactNode; action?: ReactNode; id?: string }) {
   return (
-    <section className="rounded-[2rem] border p-5 sm:p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 flex-1 items-start gap-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>{icon}</div>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>{title}</h2>
-            {description && <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{description}</p>}
-          </div>
+    <section id={id} className="border-t border-separator py-6 first:border-t-0 first:pt-2">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-heading">{title}</h2>
+          {description && <div className="mt-1 max-w-[60ch] text-callout text-text-secondary">{description}</div>}
         </div>
-        {action && <div className="shrink-0">{action}</div>}
+        {/* On phones a text-only action lines up with the text above it. */}
+        {action && <div className="shrink-0 max-sm:[&>.text-accent]:-ml-4 max-sm:[&>.text-danger]:-ml-4">{action}</div>}
       </div>
-      {children && <div className="mt-5">{children}</div>}
+      {children && <div className="mt-4">{children}</div>}
     </section>
   );
 }

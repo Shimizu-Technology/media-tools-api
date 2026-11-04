@@ -32,13 +32,13 @@ export function PasskeySignInButton({ onSuccess, className = '', variant = 'prim
         type="button"
         onClick={() => void signIn()}
         disabled={pending || !supported}
-        className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${variant === 'primary' ? 'text-white hover:-translate-y-0.5' : 'border hover:bg-[var(--color-nav-hover)]'} ${className}`}
-        style={variant === 'primary' ? { backgroundColor: 'var(--color-brand-500)' } : { borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+        className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-md px-5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${variant === 'primary' ? 'text-on-accent' : 'border hover:bg-[var(--color-fill)]'} ${className}`}
+        style={variant === 'primary' ? { backgroundColor: 'var(--color-accent-fill)' } : { borderColor: 'var(--color-separator)', color: 'var(--color-text)' }}
       >
         {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
         {pending ? 'Checking passkey…' : 'Sign in with a passkey'}
       </button>
-      {!supported && <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>Passkeys need a current browser on a secure connection.</p>}
+      {!supported && <p className="mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>Passkeys need a current browser on a secure connection.</p>}
       {error && <p className="mt-2 text-sm" role="alert" style={{ color: 'var(--color-danger)' }}>{error}</p>}
     </div>
   );

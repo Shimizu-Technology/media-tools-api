@@ -6,7 +6,9 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { BrainCircuit, ExternalLink, ShieldCheck } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
+import { Dialog } from '../components/ui/Dialog';
+import { Button } from '../components/ui/Button';
 import { AIProcessingConsentContext } from './aiProcessingConsentValue';
 import { readAIConsent, writeAIConsent } from '../lib/aiConsentStorage';
 
@@ -73,52 +75,34 @@ function AIProcessingConsentSession({ ownerID, children }: { ownerID: string | n
 }
 
 function AIProcessingDisclosureDialog({ onAllow, onDecline }: { onAllow: () => void; onDecline: () => void }) {
+  // A native modal dialog, so it stays usable on top of another open sheet.
   return (
-    <div className="fixed inset-0 z-[100] flex items-end justify-center p-4 backdrop-blur-sm sm:items-center" style={{ backgroundColor: 'var(--color-modal-scrim)' }} role="presentation">
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="ai-processing-title"
-        aria-describedby="ai-processing-description"
-        className="w-full max-w-xl rounded-[2rem] border p-6 shadow-2xl sm:p-8"
-        style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}
-      >
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
-          <BrainCircuit className="h-6 w-6" />
+    <Dialog
+      open
+      onClose={onDecline}
+      title="Allow third-party AI processing?"
+      footer={(
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Button onClick={onDecline}>Not now</Button>
+          <Button variant="primary" onClick={onAllow} autoFocus>Allow AI processing</Button>
         </div>
-        <h2 id="ai-processing-title" className="mt-5 text-2xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-          Allow third-party AI processing?
-        </h2>
-        <div id="ai-processing-description" className="mt-3 space-y-4 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
-          <p>
-            With automatic transcription on, new recordings go to OpenAI when they are saved, and their transcripts go to OpenRouter. Everything else is sent only when you use an AI feature. Media Tools sends the content needed to these providers:
-          </p>
-          <ul className="space-y-3">
-            <li className="flex gap-3">
-              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" style={{ color: 'var(--color-brand-500)' }} />
-              <span><strong style={{ color: 'var(--color-text-primary)' }}>OpenAI</strong> receives audio for transcription and may process text if the primary AI route is unavailable.</span>
-            </li>
-            <li className="flex gap-3">
-              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" style={{ color: 'var(--color-brand-500)' }} />
-              <span><strong style={{ color: 'var(--color-text-primary)' }}>OpenRouter and its selected model provider</strong> receive transcript or document text and chat prompts for readable formatting, summaries, and answers. Requests require zero-data-retention providers.</span>
-            </li>
-          </ul>
-          <p>
-            API content is not used to train OpenAI models by default. You can revoke this permission for future requests in Settings. Existing processing may finish.
-          </p>
-          <a href="/privacy#ai-processing" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-2 font-semibold underline" style={{ color: 'var(--color-brand-500)' }}>
-            Read AI and privacy details <ExternalLink className="h-4 w-4" />
-          </a>
-        </div>
-        <div className="mt-6 grid gap-3 sm:grid-cols-2">
-          <button type="button" onClick={onDecline} className="min-h-12 rounded-xl border px-4 text-sm font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
-            Not now
-          </button>
-          <button type="button" onClick={onAllow} autoFocus className="min-h-12 rounded-xl px-4 text-sm font-semibold" style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)' }}>
-            Allow AI processing
-          </button>
-        </div>
-      </section>
-    </div>
+      )}
+    >
+      <div id="ai-processing-description" className="space-y-4 text-callout text-text-secondary">
+        <p>
+          With automatic transcription on, new recordings go to OpenAI when they are saved, and their transcripts go to OpenRouter. Everything else is sent only when you use an AI feature. Media Tools sends the content needed to these providers:
+        </p>
+        <ul className="list-disc space-y-3 pl-5">
+          <li><strong className="text-text">OpenAI</strong> receives audio for transcription and may process text if the primary AI route is unavailable.</li>
+          <li><strong className="text-text">OpenRouter and its selected model provider</strong> receive transcript or document text and chat prompts for readable formatting, summaries, and answers. Requests require zero-data-retention providers.</li>
+        </ul>
+        <p>
+          API content is not used to train OpenAI models by default. You can revoke this permission for future requests in Settings. Existing processing may finish.
+        </p>
+        <a href="/privacy#ai-processing" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-1.5 font-semibold text-accent underline">
+          Read AI and privacy details <ExternalLink className="h-4 w-4" aria-hidden="true" />
+        </a>
+      </div>
+    </Dialog>
   );
 }

@@ -1,192 +1,192 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { AlertCircle, Archive, ArrowLeft, BookOpen, Check, Clock3, Copy, Download, ExternalLink, FileAudio, FileText, FolderPlus, Loader2, Play, RefreshCw, Search, Sparkles, Star, Tag, X } from 'lucide-react';
-import { AddToCollectionModal } from '../components/AddToCollectionModal';
-import { SummaryPanel } from '../components/SummaryPanel';
-import { AIContentReportButton } from '../components/AIContentReportButton';
-import { TranscriptChatPanel } from '../components/TranscriptChatPanel';
-import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
-import { CitationRow } from '../components/CitationChip';
+import { AlertCircle, AlignLeft, Archive, ChevronLeft, Copy, Download, ExternalLink, FolderPlus, Loader2, MessageSquare, MoreHorizontal, Pencil, Play, RefreshCw, RotateCcw, Square, Star, Tag, Trash2, X } from 'lucide-react';
 import {
+  cancelAudioTranscription,
+  createSummary,
+  deleteAudioTranscription,
+  deletePDFExtraction,
+  deleteTranscript,
   downloadAudioExport,
   downloadExport,
   formatAudioTranscript,
   getAudioPlaybackUrl,
   getAudioTranscription,
   getErrorMessage,
-  getSummaryErrorMessage,
   getLibraryPreferences,
   getMediaSegments,
   getPDFExtraction,
+  getProcessingPreferences,
+  getSummaries,
   getTranscript,
+  renameAudioTranscription,
   retryAudioTranscription,
   summarizeAudio,
   updateLibraryPreferences,
+  type AudioContentType,
   type AudioTranscription,
-  type PDFExtraction,
-  type Transcript,
-  type LibraryPreferences,
   type Citation,
+  type ExportFormat,
+  type LibraryPreferences,
   type MediaSegment,
+  type PDFExtraction,
+  type Summary,
+  type Transcript,
 } from '../lib/api';
-import type { ItemDetailType } from '../lib/library';
-import { formatTimestamp } from '../lib/citations';
+import { deepLinkAction, parseDeepLink } from '../lib/deepLink';
+import { downloadBlob } from '../lib/download';
+import { displayTitle, type ItemDetailType } from '../lib/library';
+import { formatClock, formatDuration, formatItemDate, pluralize } from '../lib/format';
+import { notifyLibraryActivityChanged } from '../lib/libraryActivityEvents';
+import { addVideoLink } from '../lib/mediaUpload';
+import { parseKeyPoints } from '../lib/summaries';
+import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
+import { AddToCollectionModal } from '../components/AddToCollectionModal';
+import { ChatPanel } from '../components/ChatPanel';
+import { AudioPlayer, type PlayerHandle } from '../components/item/AudioPlayer';
+import { SummarySection, type SummaryView } from '../components/item/SummarySection';
+import { TranscriptSection } from '../components/item/TranscriptSection';
+import { Menu, type MenuItem } from '../components/ui/Menu';
+import { Dialog } from '../components/ui/Dialog';
+import { Button, ButtonLink } from '../components/ui/Button';
+import { Input, Notice } from '../components/ui/Field';
+import { APP_ROUTES } from '../lib/appRoutes';
 
 type DetailItem = Transcript | AudioTranscription | PDFExtraction;
 
+const CONTENT_TYPES: { value: AudioContentType; label: string }[] = [
+  { value: 'general', label: 'General' },
+  { value: 'meeting', label: 'Meeting' },
+  { value: 'phone_call', label: 'Phone call' },
+  { value: 'voice_memo', label: 'Voice memo' },
+  { value: 'interview', label: 'Interview' },
+  { value: 'lecture', label: 'Lecture' },
+];
+
+function isActive(status?: string) {
+  return status === 'pending' || status === 'processing';
+}
+
+/** Poll while something is moving: soon at first, then less often, never giving up. */
+function useBackoffRefresh(active: boolean, refresh: () => Promise<void>) {
+  const refreshRef = useRef(refresh);
+  useEffect(() => { refreshRef.current = refresh; }, [refresh]);
+  useEffect(() => {
+    if (!active) return;
+    let delay = 3000;
+    let timer = 0;
+    let stopped = false;
+    const tick = async () => {
+      if (document.visibilityState === 'visible') await refreshRef.current().catch(() => undefined);
+      if (stopped) return;
+      delay = Math.min(Math.round(delay * 1.4), 30000);
+      timer = window.setTimeout(() => void tick(), delay);
+    };
+    timer = window.setTimeout(() => void tick(), delay);
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      delay = 3000;
+      window.clearTimeout(timer);
+      void tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [active]);
+}
+
 export function ItemDetailPage() {
-  const { requestConsent: requestAIProcessingConsent } = useAIProcessingConsent();
   const { itemType, itemId } = useParams();
   const type = itemType as ItemDetailType;
-  const [item, setItem] = useState<DetailItem | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isActing, setIsActing] = useState(false);
-  const [error, setError] = useState('');
-  const [copied, setCopied] = useState(false);
-  const [collectionOpen, setCollectionOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [audioURL, setAudioURL] = useState('');
-  const [preferences, setPreferences] = useState<LibraryPreferences>({ favorite: false, archived: false, tags: [] });
-  const [tagInput, setTagInput] = useState('');
-  const [videoSummaryReady, setVideoSummaryReady] = useState(false);
-  const [segments, setSegments] = useState<MediaSegment[]>([]);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const videoRef = useRef<HTMLIFrameElement | null>(null);
-  const playerSectionRef = useRef<HTMLElement | null>(null);
+  const validType = type === 'transcript' || type === 'audio' || type === 'pdf';
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { requestConsent } = useAIProcessingConsent();
+  const [item, setItem] = useState<DetailItem | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [preferences, setPreferences] = useState<LibraryPreferences>({ favorite: false, archived: false, tags: [] });
+  // Segments and the playback address belong to one item: keyed by it, so a
+  // late answer for the previous item never shows up on the next.
+  const [segmentState, setSegmentState] = useState<{ key: string; list: MediaSegment[] } | null>(null);
+  const [videoSummary, setVideoSummary] = useState<Summary | null | undefined>(undefined);
+  const [audioSource, setAudioSource] = useState<{ id: string; url: string } | null>(null);
+  const [automaticSummaries, setAutomaticSummaries] = useState<boolean | undefined>(undefined);
+  const [showVideo, setShowVideo] = useState(false);
+  const [videoStart, setVideoStart] = useState(0);
+  const [dialog, setDialog] = useState<'collection' | 'rename' | 'tags' | 'summarize' | 'ask' | 'export' | null>(null);
+  const playerRef = useRef<PlayerHandle | null>(null);
+  const videoRef = useRef<HTMLIFrameElement | null>(null);
 
-  const validType = type === 'transcript' || type === 'audio' || type === 'pdf';
-  const markVideoSummaryReady = useCallback(() => setVideoSummaryReady(true), []);
-
-  const loadItem = useCallback(async (quiet = false) => {
+  const load = useCallback(async () => {
     if (!itemId || !validType) return;
-    if (!quiet) setIsLoading(true);
-    setError('');
     try {
-      setItem(type === 'transcript' ? await getTranscript(itemId) : type === 'audio' ? await getAudioTranscription(itemId) : await getPDFExtraction(itemId));
+      const next = type === 'transcript' ? await getTranscript(itemId) : type === 'audio' ? await getAudioTranscription(itemId) : await getPDFExtraction(itemId);
+      setItem(next);
+      setLoadError('');
     } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      if (!quiet) setIsLoading(false);
+      setLoadError(getErrorMessage(err));
     }
   }, [itemId, type, validType]);
 
-  useEffect(() => { void loadItem(); }, [loadItem]);
-
-  useEffect(() => {
-    if (!itemId || !validType) return;
-    getLibraryPreferences(type, itemId).then(setPreferences).catch(() => setPreferences({ favorite: false, archived: false, tags: [] }));
-  }, [itemId, type, validType]);
-
-  const status = item?.status || '';
-  const audioSummaryStatus = type === 'audio' ? (item as AudioTranscription | null)?.summary_status : 'none';
-  const formattingStatus = type === 'audio' ? (item as AudioTranscription | null)?.formatting_status : 'none';
-  useEffect(() => {
-    const mediaActive = status === 'pending' || status === 'processing';
-    const summaryActive = audioSummaryStatus === 'pending' || audioSummaryStatus === 'processing';
-    const formattingActive = formattingStatus === 'pending' || formattingStatus === 'processing';
-    if (!mediaActive && !summaryActive && !formattingActive) return;
-    const refresh = () => {
-      if (document.visibilityState === 'visible') void loadItem(true);
-    };
-    const timer = window.setInterval(refresh, 4000);
-    document.addEventListener('visibilitychange', refresh);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', refresh);
-    };
-  }, [audioSummaryStatus, formattingStatus, loadItem, status]);
-
-  useEffect(() => {
-    if (!itemId || !validType || status !== 'completed') {
-      setSegments([]);
-      return;
-    }
-    let current = true;
-    getMediaSegments(type, itemId)
-      .then((result) => { if (current) setSegments(result); })
-      .catch(() => { if (current) setSegments([]); });
-    return () => { current = false; };
-  }, [itemId, status, type, validType]);
-
-  useEffect(() => {
-    if (type !== 'audio' || !itemId || !item || item.status === 'pending') return;
-    let current = true;
-    getAudioPlaybackUrl(itemId).then((result) => { if (current) setAudioURL(result.url); }).catch(() => setAudioURL(''));
-    return () => { current = false; };
-  }, [item, itemId, type]);
-
-  const view = useMemo(() => normalizeItem(type, item), [item, type]);
-  const handleCopy = async () => {
-    if (!view.text) return;
+  const loadVideoSummary = useCallback(async () => {
+    if (type !== 'transcript' || !itemId) return;
     try {
-      await navigator.clipboard.writeText(view.text);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
+      const summaries = await getSummaries(itemId);
+      setVideoSummary(summaries[0] ?? null);
     } catch {
-      setError('The browser could not access your clipboard. Check clipboard permissions and try again.');
+      setVideoSummary((current) => current ?? null);
     }
-  };
+  }, [itemId, type]);
 
-  const handleExport = async () => {
-    if (!item || !itemId) return;
-    setIsActing(true);
-    setError('');
-    try {
-      let blob: Blob;
-      if (type === 'transcript') blob = await downloadExport(itemId, 'md');
-      else if (type === 'audio') blob = await downloadAudioExport(itemId, 'md');
-      else blob = new Blob([view.text], { type: 'text/plain;charset=utf-8' });
-      downloadBlob(blob, `${safeFilename(view.title)}.${type === 'pdf' ? 'txt' : 'md'}`);
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setIsActing(false);
-    }
-  };
+  useEffect(() => {
+    queueMicrotask(() => { setItem(null); setLoadError(''); setVideoSummary(undefined); setShowVideo(false); });
+    void load();
+    if (!itemId || !validType) return;
+    getLibraryPreferences(type, itemId).then(setPreferences).catch(() => undefined);
+    getProcessingPreferences().then((value) => setAutomaticSummaries(value.automatic_summaries)).catch(() => undefined);
+  }, [itemId, load, type, validType]);
 
-  const handleRetry = async () => {
-    if (type !== 'audio' || !itemId) return;
-    if (!(await requestAIProcessingConsent())) return;
-    setIsActing(true);
-    setError('');
-    try {
-      setItem(await retryAudioTranscription(itemId));
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setIsActing(false);
-    }
-  };
+  const status = item?.status ?? '';
+  const audio = type === 'audio' ? (item as AudioTranscription | null) : null;
+  const complete = status === 'completed';
 
-  const handleAudioSummary = async () => {
-    if (type !== 'audio' || !itemId) return;
-    if (!(await requestAIProcessingConsent())) return;
-    setIsActing(true);
-    setError('');
-    try {
-      setItem(await summarizeAudio(itemId, { content_type: (item as AudioTranscription).content_type || 'general', length: 'medium' }));
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setIsActing(false);
-    }
-  };
+  useEffect(() => {
+    if (complete && type === 'transcript') void loadVideoSummary();
+  }, [complete, loadVideoSummary, type]);
 
-  const handleTranscriptFormatting = async () => {
-    if (type !== 'audio' || !itemId) return;
-    if (!(await requestAIProcessingConsent())) return;
-    setIsActing(true);
-    setError('');
-    try {
-      setItem(await formatAudioTranscript(itemId));
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setIsActing(false);
-    }
-  };
+  useEffect(() => {
+    if (!itemId || !validType || !complete) return;
+    let current = true;
+    const key = `${type}:${itemId}`;
+    getMediaSegments(type, itemId).then((result) => { if (current) setSegmentState({ key, list: result }); }).catch(() => { if (current) setSegmentState({ key, list: [] }); });
+    return () => { current = false; };
+  }, [complete, itemId, type, validType]);
+  const segmentsLoaded = segmentState?.key === `${type}:${itemId}`;
+  const segments = useMemo(() => (segmentsLoaded && segmentState ? segmentState.list : []), [segmentState, segmentsLoaded]);
+
+  // The playback URL is fetched once per recording, not on every refresh of
+  // the item, so background polling never resets the player.
+  const playable = type === 'audio' && Boolean(item) && status !== 'pending' && audio?.audio_s3_status !== 'pending';
+  const fetchAudioURL = useCallback(() => {
+    if (!itemId) return;
+    getAudioPlaybackUrl(itemId).then((result) => setAudioSource({ id: itemId, url: result.url })).catch(() => setAudioSource({ id: itemId, url: '' }));
+  }, [itemId]);
+  const currentAudio = audioSource && audioSource.id === itemId ? audioSource : null;
+  const audioURL = currentAudio?.url ?? '';
+  const audioUnavailable = currentAudio !== null && currentAudio.url === '';
+  useEffect(() => { if (playable) fetchAudioURL(); }, [fetchAudioURL, playable]);
+
+  const itemActive = isActive(status) || isActive(audio?.summary_status) || isActive(audio?.formatting_status);
+  useBackoffRefresh(itemActive, load);
+  useBackoffRefresh(type === 'transcript' && isActive(videoSummary?.status), loadVideoSummary);
+
+  const view = useMemo(() => describe(type, item), [item, type]);
 
   const openCitation = useCallback((citation: Citation) => {
     if (!itemId) return;
@@ -194,342 +194,503 @@ export function ItemDetailPage() {
       const params = new URLSearchParams();
       if (typeof citation.start_ms === 'number') params.set('t', String(Math.floor(citation.start_ms / 1000)));
       if (typeof citation.page_number === 'number') params.set('page', String(citation.page_number));
-      const citationSearch = params.toString();
-      navigate(`/app/items/${citation.item_type}/${citation.item_id}${citationSearch ? `?${citationSearch}` : ''}`);
+      navigate(`/app/items/${citation.item_type}/${citation.item_id}${params.toString() ? `?${params}` : ''}`);
       return;
     }
-
     if (typeof citation.start_ms === 'number') {
       const seconds = citation.start_ms / 1000;
-      setSearchParams((current) => {
-        const next = new URLSearchParams(current);
-        next.set('t', String(Math.floor(seconds)));
-        return next;
-      }, { replace: true });
-      if (type === 'audio' && audioRef.current) {
-        audioRef.current.currentTime = seconds;
-        void audioRef.current.play().catch(() => undefined);
+      if (type === 'audio') {
+        playerRef.current?.seek(seconds);
+        document.getElementById('player')?.scrollIntoView({ block: 'nearest' });
       }
-      if (type === 'transcript' && videoRef.current?.contentWindow) {
-        videoRef.current.contentWindow.postMessage(JSON.stringify({
-          event: 'command',
-          func: 'seekTo',
-          args: [seconds, true],
-        }), 'https://www.youtube.com');
-        videoRef.current.contentWindow.postMessage(JSON.stringify({
-          event: 'command',
-          func: 'playVideo',
-          args: [],
-        }), 'https://www.youtube.com');
+      if (type === 'transcript') {
+        if (!showVideo) { setVideoStart(Math.floor(seconds)); setShowVideo(true); }
+        else videoRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [seconds, true] }), 'https://www.youtube-nocookie.com');
+        document.getElementById('player')?.scrollIntoView({ block: 'nearest' });
       }
-      playerSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
+    const target = typeof citation.page_number === 'number' ? document.querySelector(`[data-page="${citation.page_number}"]`) : document.getElementById(`segment-${citation.segment_id}`);
+    target?.scrollIntoView({ block: 'start' });
+  }, [itemId, navigate, showVideo, type]);
 
-    if (typeof citation.page_number === 'number') {
-      setSearchParams((current) => {
-        const next = new URLSearchParams(current);
-        next.set('page', String(citation.page_number));
-        return next;
-      }, { replace: true });
-      const target = document.querySelector(`[data-page="${citation.page_number}"]`);
-      target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return;
+  // A deep link (?t= or ?page=) lands once the item is ready and the thing it
+  // points at (player, video, page text) exists. It is used up once per item and
+  // place, so a second citation to another spot is followed too.
+  const consumedLink = useRef('');
+  const landingRef = useRef<Citation | null>(null);
+  const isCurrentItem = Boolean(item && item.id === itemId);
+  const hasVideo = type === 'transcript' && Boolean((item as Transcript | null)?.youtube_id);
+  useEffect(() => {
+    const link = parseDeepLink(searchParams, type, itemId);
+    if (!link) { consumedLink.current = ''; return; }
+    if (consumedLink.current === link.key || !item || !isCurrentItem || !complete) return;
+    const action = deepLinkAction(link, {
+      type,
+      audioPlayerReady: playerRef.current !== null,
+      audioUnavailable,
+      hasVideo,
+      segmentsLoaded,
+    });
+    if (action === 'wait') return;
+    consumedLink.current = link.key;
+    // Clearing the address changes the location, and the router resets scroll
+    // when it does. Land after that, in the effect below, not before it.
+    if (action === 'go' && link.target) {
+      landingRef.current = 'seconds' in link.target
+        ? { segment_id: 'link', item_type: type, item_id: item.id, start_ms: link.target.seconds * 1000 }
+        : { segment_id: 'link', item_type: type, item_id: item.id, page_number: link.target.page };
     }
-    document.getElementById(`segment-${citation.segment_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [itemId, navigate, setSearchParams, type]);
+    setSearchParams({}, { replace: true });
+  }, [audioURL, audioUnavailable, complete, hasVideo, isCurrentItem, item, itemId, searchParams, segmentsLoaded, setSearchParams, type]);
 
   useEffect(() => {
-    if (!item || status !== 'completed') return;
-    const timeValue = searchParams.get('t');
-    const pageValue = searchParams.get('page');
-    const seconds = timeValue === null ? Number.NaN : Number(timeValue);
-    const page = pageValue === null ? Number.NaN : Number(pageValue);
-    const timer = window.setTimeout(() => {
-      if (Number.isFinite(seconds) && seconds >= 0) {
-        openCitation({
-          segment_id: 'deep-link',
-          item_type: type,
-          item_id: item.id,
-          start_ms: seconds * 1000,
-        });
-      } else if (Number.isFinite(page) && page > 0) {
-        openCitation({
-          segment_id: 'deep-link',
-          item_type: type,
-          item_id: item.id,
-          page_number: page,
-        });
-      }
-    }, 500);
-    return () => window.clearTimeout(timer);
-    // Run once when this item becomes ready; openCitation also normalizes the URL.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item?.id, status]);
+    if (!landingRef.current || searchParams.has('t') || searchParams.has('page')) return;
+    const citation = landingRef.current;
+    landingRef.current = null;
+    openCitation(citation);
+  }, [openCitation, searchParams]);
 
-  if (!validType) return <Navigate to="/app/library" replace />;
+  if (!validType) return <Navigate to={APP_ROUTES.library} replace />;
 
-  const savePreferences = async (updates: Partial<LibraryPreferences>) => {
-    if (!itemId) return;
-    setIsActing(true);
+  const run = async (key: string, action: () => Promise<void>, options: { ai?: boolean } = {}) => {
+    if (options.ai && !(await requestConsent())) return;
+    setBusy(key);
     setError('');
+    setMessage('');
     try {
-      setPreferences(await updateLibraryPreferences(type, itemId, updates));
+      await action();
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
-      setIsActing(false);
+      setBusy(null);
     }
   };
 
-  const addTag = () => {
-    const value = tagInput.trim();
-    if (!value || preferences.tags.some((tag) => tag.toLocaleLowerCase() === value.toLocaleLowerCase())) return;
-    void savePreferences({ tags: [...preferences.tags, value] });
-    setTagInput('');
+  const goBack = () => {
+    // Back keeps the Library's search, filters and scroll position.
+    const index = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (index > 0) navigate(-1);
+    else navigate(APP_ROUTES.library);
   };
 
-  if (isLoading) return <CenteredState icon={<Loader2 className="h-6 w-6 animate-spin" />} title="Loading item…" />;
-  if (!item) return <CenteredState icon={<AlertCircle className="h-7 w-7" />} title="This item could not be opened" body={error || 'It may have been deleted or you may not have access.'} />;
+  if (!item) {
+    return (
+      <div className="mx-auto max-w-2xl">
+        <BackLink onBack={goBack} />
+        {loadError ? (
+          <div className="py-12">
+            <p className="text-title">This item could not be opened</p>
+            <p className="mt-2 text-callout text-text-secondary">{loadError}</p>
+            <div className="mt-4 flex gap-2"><Button onClick={() => void load()} icon={<RefreshCw className="h-4 w-4" />}>Try again</Button><ButtonLink to={APP_ROUTES.library} variant="plain">Library</ButtonLink></div>
+          </div>
+        ) : (
+          <div className="mt-6 space-y-3" role="status" aria-label="Loading">
+            <div className="h-8 w-3/4 rounded-sm bg-fill" />
+            <div className="h-4 w-1/3 rounded-sm bg-fill" />
+            <div className="mt-8 h-4 w-full rounded-sm bg-fill" />
+            <div className="h-4 w-11/12 rounded-sm bg-fill" />
+          </div>
+        )}
+      </div>
+    );
+  }
 
-  const complete = item.status === 'completed';
-  const active = item.status === 'pending' || item.status === 'processing';
+  const summary: SummaryView | null = type === 'audio' && audio
+    ? {
+      status: audio.summary_status,
+      text: audio.summary_text || '',
+      keyPoints: audio.key_points || [],
+      actionItems: audio.action_items || [],
+      decisions: audio.decisions || [],
+      evidence: audio.summary_evidence,
+      errorMessage: audio.summary_error_message,
+      reportTarget: { type: 'audio_summary', id: audio.id },
+    }
+    : type === 'transcript' && videoSummary !== undefined
+      ? {
+        status: videoSummary ? videoSummary.status : 'none',
+        text: videoSummary?.summary_text || '',
+        keyPoints: parseKeyPoints(videoSummary?.key_points),
+        actionItems: [],
+        decisions: [],
+        evidence: videoSummary?.evidence,
+        errorMessage: videoSummary?.error_message,
+        reportTarget: videoSummary ? { type: 'transcript_summary', id: videoSummary.id } : undefined,
+      }
+      : null;
+
+  const summarize = (contentType?: AudioContentType) => run('summary', async () => {
+    if (type === 'audio' && audio) {
+      setItem(await summarizeAudio(audio.id, { content_type: contentType || audio.content_type || 'general', length: 'medium' }));
+    } else if (type === 'transcript') {
+      await createSummary(item.id, { length: 'medium', style: 'bullet' });
+      await loadVideoSummary();
+    }
+    setDialog(null);
+  }, { ai: true });
+
+  const remove = () => {
+    if (!window.confirm(`Delete “${view.title}”? This removes the transcript, summary and conversation.`)) return;
+    void run('delete', async () => {
+      if (type === 'transcript') await deleteTranscript(item.id);
+      else if (type === 'audio') await deleteAudioTranscription(item.id);
+      else await deletePDFExtraction(item.id);
+      notifyLibraryActivityChanged();
+      navigate(APP_ROUTES.library, { replace: true });
+    });
+  };
+
+  const savePreferences = (changes: Partial<LibraryPreferences>) => run('preferences', async () => {
+    setPreferences(await updateLibraryPreferences(type, item.id, changes));
+  });
+
+  const copyText = async () => {
+    try {
+      await navigator.clipboard.writeText(view.text);
+      setMessage('Copied the text.');
+    } catch {
+      setError('The browser blocked the clipboard. Allow clipboard access and try again.');
+    }
+  };
+
+  const exportFormats = exportFormatsFor(type);
+  const exportItem = (format: ExportFormat) => run('export', async () => {
+    const blob = type === 'transcript' ? await downloadExport(item.id, format)
+      : type === 'audio' ? await downloadAudioExport(item.id, format as AudioExportFormat)
+        : new Blob([view.text], { type: 'text/plain;charset=utf-8' });
+    downloadBlob(blob, `${safeFilename(view.title)}.${format}`);
+    setDialog(null);
+  });
+
+  const stopProcessing = () => void run('cancel', async () => {
+    if (!audio) return;
+    setItem(await cancelAudioTranscription(audio.id));
+    notifyLibraryActivityChanged();
+  });
+
+  const formatTranscript = () => void run('format', async () => {
+    if (audio) setItem(await formatAudioTranscript(audio.id));
+  }, { ai: true });
+
+  const menu: MenuItem[] = [
+    ...(view.text ? [{ label: 'Copy text', icon: <Copy />, onSelect: () => void copyText() }, { label: exportFormats.length > 1 ? 'Export…' : 'Export as text', icon: <Download />, onSelect: () => (exportFormats.length > 1 ? setDialog('export') : void exportItem(exportFormats[0].format)) }] : []),
+    { label: preferences.favorite ? 'Unstar' : 'Star', icon: <Star />, onSelect: () => void savePreferences({ favorite: !preferences.favorite }) },
+    { label: 'Edit tags', icon: <Tag />, onSelect: () => setDialog('tags') },
+    ...(type === 'audio' ? [{ label: 'Rename', icon: <Pencil />, onSelect: () => setDialog('rename') }] : []),
+    ...(view.sourceURL ? [{ label: 'Open the source', icon: <ExternalLink />, onSelect: () => window.open(view.sourceURL, '_blank', 'noopener,noreferrer') }] : []),
+    ...(complete && type !== 'pdf' && summary && !isActive(summary.status)
+      ? [{ label: summary.status === 'completed' ? 'Summarize again' : 'Summarize', icon: <RotateCcw />, onSelect: () => (type === 'audio' ? setDialog('summarize') : void summarize()) }]
+      : []),
+    ...(audio && complete && (audio.formatting_status === 'none' || audio.formatting_status === 'failed')
+      ? [{ label: 'Tidy into paragraphs', icon: <AlignLeft />, onSelect: formatTranscript }]
+      : []),
+    ...(audio && isActive(status) ? [{ label: 'Stop processing', icon: <Square />, onSelect: stopProcessing }] : []),
+    { label: preferences.archived ? 'Move out of archive' : 'Archive', icon: <Archive />, onSelect: () => void savePreferences({ archived: !preferences.archived }) },
+    { kind: 'separator' },
+    { label: 'Delete', icon: <Trash2 />, tone: 'danger', onSelect: remove },
+  ];
+
+  const askPlaceholder = type === 'audio' ? 'Ask about this recording' : type === 'transcript' ? 'Ask about this video' : 'Ask about this document';
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 pb-12">
-      <Link to="/app/library" className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}><ArrowLeft className="h-4 w-4" /> Back to library</Link>
+    <div className="mx-auto max-w-5xl pb-28 lg:grid lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-12 lg:pb-10">
+      <article className="min-w-0 lg:max-w-[42rem]">
+        <div className="flex items-center gap-1">
+          <BackLink onBack={goBack} />
+          <div className="flex-1" />
+          <button type="button" onClick={() => setDialog('collection')} aria-label="Add to collection" title="Add to collection" className="pressable inline-flex h-11 w-11 items-center justify-center rounded-full text-accent hover:bg-fill"><FolderPlus className="h-[22px] w-[22px]" /></button>
+          <Menu label="More actions" trigger={<MoreHorizontal className="h-[22px] w-[22px]" />} items={menu} />
+        </div>
 
-      <header className="rounded-[2rem] border p-5 sm:p-7" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-        <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-start">
-          <div className="min-w-0">
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              <TypeBadge type={type} />
-              <StatusBadge status={item.status} />
-              {(view.summaryReady || videoSummaryReady) && <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}><Sparkles className="h-3 w-3" /> Summarized</span>}
+        <h1 className="mt-2 break-words text-title">{view.title}</h1>
+        <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 text-callout text-text-secondary">
+          {[formatItemDate(view.createdAt), view.length, view.byline].filter(Boolean).join(' · ')}
+          {preferences.favorite && <Star className="h-3.5 w-3.5 fill-current" aria-label="Starred" />}
+          {preferences.archived && <span>· Archived</span>}
+        </p>
+        {preferences.tags.length > 0 && <p className="mt-1 text-meta text-text-secondary">{preferences.tags.map((tag) => `#${tag}`).join('  ')}</p>}
+
+        {type === 'audio' && audioURL && (
+          <div id="player"><AudioPlayer src={audioURL} fallbackDuration={audio?.duration} handleRef={playerRef} onExpired={fetchAudioURL} /></div>
+        )}
+        {type === 'transcript' && complete && (item as Transcript).youtube_id && (
+          <div id="player" className="mt-4">
+            {showVideo ? (
+              <div className="overflow-hidden rounded-lg bg-[#000]">
+                <iframe ref={videoRef} className="aspect-video w-full" src={`https://www.youtube-nocookie.com/embed/${(item as Transcript).youtube_id}?enablejsapi=1&playsinline=1&rel=0&autoplay=1&start=${videoStart}`} title={`Video: ${view.title}`} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen />
+              </div>
+            ) : (
+              <Button variant="plain" className="-ml-4" onClick={() => setShowVideo(true)} icon={<Play className="h-4 w-4 fill-current" />}>Play the video</Button>
+            )}
+          </div>
+        )}
+
+        {message && <div className="mt-4"><Notice tone="success">{message}</Notice></div>}
+        {error && <div className="mt-4"><Notice tone="error">{error}</Notice></div>}
+
+        {isActive(status) && <ProgressNote label={view.progressLabel} progress={view.progress} onStop={audio ? stopProcessing : undefined} stopping={busy === 'cancel'} />}
+
+        {status === 'failed' && (
+          <FailedNote
+            type={type}
+            message={view.errorMessage}
+            busy={busy === 'retry'}
+            onRetry={type === 'pdf' ? undefined : () => void run('retry', async () => {
+              if (type === 'audio') {
+                setItem(await retryAudioTranscription(item.id));
+                notifyLibraryActivityChanged();
+              } else {
+                const fresh = await addVideoLink((item as Transcript).youtube_url);
+                navigate(`/app/items/transcript/${fresh.id}`, { replace: true });
+              }
+            }, { ai: type === 'audio' })}
+            onDelete={remove}
+          />
+        )}
+
+        {audio?.quality_warning && (
+          <div className="mt-4"><Notice>
+            <span className="font-semibold">Part of this recording could not be transcribed.</span> {audio.quality_warning}
+            {(audio.omitted_ranges || []).length > 0 && <span className="mt-1 block text-meta text-text-secondary tabular">Missing: {audio.omitted_ranges?.map((range) => `${formatClock(range.start)}–${formatClock(range.end)}`).join(', ')}</span>}
+          </Notice></div>
+        )}
+
+        {complete && summary && type !== 'pdf' && (
+          <SummarySection
+            summary={summary}
+            onSummarize={() => (type === 'audio' && summary.status !== 'none' ? setDialog('summarize') : void summarize())}
+            busy={busy === 'summary'}
+            onCitationClick={openCitation}
+            automaticSummaries={type === 'audio' ? automaticSummaries : undefined}
+          />
+        )}
+
+        {complete && (
+          <TranscriptSection
+            title={type === 'pdf' ? 'Text' : 'Transcript'}
+            text={view.text}
+            originalText={audio?.transcript_text}
+            segments={segments}
+            onCitationClick={openCitation}
+            formatting={audio ? { status: audio.formatting_status, error: audio.formatting_error_message } : undefined}
+            onFormat={audio ? formatTranscript : undefined}
+            formatBusy={busy === 'format'}
+          />
+        )}
+      </article>
+
+      {complete && (
+        <>
+          {/* Desktop: the conversation sits beside the reading column. */}
+          <aside className="hidden lg:block" aria-labelledby="ask-heading">
+            <div className="sticky top-20 flex h-[calc(100dvh-6.5rem)] flex-col pt-14">
+              <h2 id="ask-heading" className="mb-3 text-heading">Ask</h2>
+              <ChatPanel itemId={item.id} itemType={type} placeholder={askPlaceholder} onCitationClick={openCitation} fill />
             </div>
-            <h1 className="break-words text-2xl font-semibold tracking-tight sm:text-4xl">{view.title}</h1>
-            <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>{view.subtitle}</p>
+          </aside>
+          {/* Phones: a quiet bar at the thumb opens the conversation. */}
+          <div className="fixed inset-x-0 bottom-0 z-20 border-t border-separator bg-bar px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5 backdrop-blur-xl lg:hidden">
+            <button type="button" onClick={() => setDialog('ask')} className="pressable flex min-h-11 w-full items-center gap-2 rounded-full border border-separator bg-surface pl-4 pr-1.5 text-left text-body text-text-secondary">
+              <MessageSquare className="h-[18px] w-[18px]" aria-hidden="true" />
+              <span className="flex-1">{askPlaceholder}</span>
+            </button>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <ActionButton label={copied ? 'Copied' : 'Copy text'} icon={copied ? Check : Copy} onClick={() => void handleCopy()} disabled={!view.text} />
-            <ActionButton label="Export" icon={Download} onClick={() => void handleExport()} disabled={!view.text || isActing} />
-            <ActionButton label="Add to collection" icon={FolderPlus} onClick={() => setCollectionOpen(true)} />
-            <ActionButton label={preferences.favorite ? 'Starred' : 'Star'} icon={Star} onClick={() => void savePreferences({ favorite: !preferences.favorite })} active={preferences.favorite} disabled={isActing} />
-            <ActionButton label={preferences.archived ? 'Unarchive' : 'Archive'} icon={Archive} onClick={() => void savePreferences({ archived: !preferences.archived })} disabled={isActing} />
-            {view.sourceURL && <a href={view.sourceURL} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-3 text-sm font-semibold" style={{ borderColor: 'var(--color-border)' }}>Source <ExternalLink className="h-4 w-4" /></a>}
-          </div>
-        </div>
-        <div className="mt-6 grid grid-cols-2 gap-3 border-t pt-5 sm:grid-cols-4" style={{ borderColor: 'var(--color-border)' }}>
-          <Meta label="Created" value={formatDate(view.createdAt)} />
-          <Meta label="Words" value={view.wordCount ? view.wordCount.toLocaleString() : '—'} />
-          <Meta label={type === 'pdf' ? 'Pages' : 'Duration'} value={type === 'pdf' ? String(view.pageCount || '—') : formatDuration(view.duration)} />
-          <Meta label="Language" value={view.language || '—'} />
-        </div>
-      </header>
+          <Dialog open={dialog === 'ask'} onClose={() => setDialog(null)} title="Ask" size="lg">
+            <div className="flex h-[min(70dvh,640px)] flex-col"><ChatPanel itemId={item.id} itemType={type} placeholder={askPlaceholder} onCitationClick={(citation) => { setDialog(null); openCitation(citation); }} autoFocus fill /></div>
+          </Dialog>
+        </>
+      )}
 
-      {error && <div role="alert" className="flex items-start gap-3 rounded-2xl border p-4 text-sm" style={{ borderColor: 'var(--color-error-border)', color: 'var(--color-danger)', backgroundColor: 'var(--color-error-soft)' }}><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
-
-      <section className="flex flex-col gap-4 rounded-2xl border p-4 sm:flex-row sm:items-center" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-        <div className="flex items-center gap-2 text-sm font-semibold"><Tag className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} /> Tags</div>
-        <div className="flex flex-1 flex-wrap gap-2">
-          {preferences.tags.map((tag) => <span key={tag} className="inline-flex min-h-11 items-center gap-1 rounded-full py-1 pl-3 pr-1 text-xs font-semibold" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>{tag}<button onClick={() => void savePreferences({ tags: preferences.tags.filter((value) => value !== tag) })} disabled={isActing} className="flex h-9 w-9 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Remove ${tag} tag`}><X className="h-3 w-3" /></button></span>)}
-          {preferences.tags.length === 0 && <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Add client, project, or topic labels.</span>}
-        </div>
-        <div className="flex gap-2">
-          <input value={tagInput} onChange={(event) => setTagInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addTag(); }} maxLength={40} placeholder="Add tag" aria-label="New tag" className="min-h-11 min-w-0 flex-1 rounded-xl border bg-transparent px-3 text-sm outline-none sm:w-36" style={{ borderColor: 'var(--color-border)' }} />
-          <button onClick={addTag} disabled={!tagInput.trim() || isActing} className="min-h-11 rounded-xl border px-3 text-sm font-semibold disabled:opacity-40" style={{ borderColor: 'var(--color-border)' }}>Add</button>
-        </div>
-      </section>
-
-      {active && <div className="rounded-2xl border p-5" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}><div className="flex items-center gap-3"><Loader2 className="h-5 w-5 animate-spin" style={{ color: 'var(--color-brand-500)' }} /><div><p className="font-semibold">{view.progressLabel}</p><p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>This page updates automatically. You can safely leave and return later.</p></div></div>{view.progress > 0 && <div className="mt-4 h-2 overflow-hidden rounded-full" style={{ backgroundColor: 'var(--color-surface-overlay)' }}><div className="h-full rounded-full transition-all" style={{ width: `${Math.min(view.progress, 100)}%`, backgroundColor: 'var(--color-brand-500)' }} /></div>}</div>}
-
-      {item.status === 'failed' && <div className="flex flex-col items-start justify-between gap-4 rounded-2xl border p-5 sm:flex-row sm:items-center" style={{ borderColor: 'var(--color-error-border)', backgroundColor: 'var(--color-error-soft)' }}><div><p className="font-semibold" style={{ color: 'var(--color-danger)' }}>Processing failed</p><p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>{view.errorMessage || 'The job could not be completed.'}</p></div>{type === 'audio' && <ActionButton label="Retry transcription" icon={RefreshCw} onClick={() => void handleRetry()} disabled={isActing} />}</div>}
-
-      {type === 'transcript' && complete && <section ref={playerSectionRef} className="overflow-hidden rounded-2xl border" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}><div className="flex items-center gap-2 border-b p-4" style={{ borderColor: 'var(--color-border)' }}><Play className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} /><h2 className="font-semibold">Source video</h2><span className="ml-auto text-xs" style={{ color: 'var(--color-text-muted)' }}>Citations jump here</span></div><div className="aspect-video bg-black"><iframe ref={videoRef} className="h-full w-full" src={`https://www.youtube.com/embed/${(item as Transcript).youtube_id}?enablejsapi=1&playsinline=1&rel=0&start=${Math.max(0, Number(searchParams.get('t')) || 0)}`} title={`Source video: ${view.title}`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen /></div></section>}
-
-      {type === 'audio' && audioURL && <section ref={playerSectionRef} className="rounded-2xl border p-5" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}><div className="mb-3 flex items-center gap-2"><Play className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} /><h2 className="font-semibold">Original recording</h2><span className="ml-auto text-xs" style={{ color: 'var(--color-text-muted)' }}>Citations jump here</span></div><audio ref={audioRef} className="w-full" controls preload="metadata" src={audioURL}>Your browser does not support audio playback.</audio></section>}
-
-      {type === 'audio' && (item as AudioTranscription).quality_warning && <section className="rounded-2xl border p-5" style={{ borderColor: 'var(--color-warning-border)', backgroundColor: 'var(--color-warning-subtle)' }}><div className="flex items-start gap-3"><AlertCircle className="mt-0.5 h-5 w-5 shrink-0" style={{ color: 'var(--color-warning)' }} /><div><h2 className="font-semibold">Partial transcript recovered</h2><p className="mt-1 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{(item as AudioTranscription).quality_warning}</p>{((item as AudioTranscription).omitted_ranges || []).length > 0 && <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>Omitted: {(item as AudioTranscription).omitted_ranges?.map((range) => `${formatDuration(range.start)}–${formatDuration(range.end)}`).join(', ')}</p>}</div></div></section>}
-
-      {complete && <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
-        <div className="min-w-0 space-y-6">
-          {type === 'transcript' ? <SummaryPanel transcriptId={item.id} transcriptText={view.text} segments={segments} onCitationClick={openCitation} onSummaryReady={markVideoSummaryReady} /> : <TextViewer title={type === 'pdf' ? 'Document text' : 'Transcript'} text={view.text} originalText={type === 'audio' ? (item as AudioTranscription).transcript_text : undefined} formattingStatus={type === 'audio' ? (item as AudioTranscription).formatting_status : undefined} formattingError={type === 'audio' ? (item as AudioTranscription).formatting_error_message : undefined} onFormat={type === 'audio' ? handleTranscriptFormatting : undefined} isFormattingAction={isActing} segments={segments} query={query} setQuery={setQuery} onCitationClick={openCitation} transcriptModes={type === 'audio'} />}
-          {type === 'audio' && <AudioSummary item={item as AudioTranscription} onGenerate={handleAudioSummary} isActing={isActing} onCitationClick={openCitation} />}
-        </div>
-        <aside className="min-w-0 xl:sticky xl:top-24 xl:self-start"><TranscriptChatPanel itemId={item.id} itemType={type} onCitationClick={openCitation} /></aside>
-      </div>}
-
-      <AddToCollectionModal open={collectionOpen} onClose={() => setCollectionOpen(false)} itemType={type} itemId={item.id} itemTitle={view.title} />
+      <AddToCollectionModal open={dialog === 'collection'} onClose={() => setDialog(null)} itemType={type} itemId={item.id} itemTitle={view.title} />
+      {audio && <RenameDialog open={dialog === 'rename'} name={audio.original_name} onClose={() => setDialog(null)} onSave={(name) => void run('rename', async () => { setItem(await renameAudioTranscription(audio.id, name)); setDialog(null); })} busy={busy === 'rename'} />}
+      <ExportDialog open={dialog === 'export'} formats={exportFormats} onClose={() => setDialog(null)} onChoose={(format) => void exportItem(format)} busy={busy === 'export'} />
+      <TagsDialog open={dialog === 'tags'} tags={preferences.tags} onClose={() => setDialog(null)} onSave={(tags) => void savePreferences({ tags })} busy={busy === 'preferences'} />
+      {audio && <SummarizeDialog open={dialog === 'summarize'} initial={audio.content_type || 'general'} onClose={() => setDialog(null)} onSubmit={(contentType) => void summarize(contentType)} busy={busy === 'summary'} />}
     </div>
   );
 }
 
-function TextViewer({ title, text, originalText, formattingStatus, formattingError, onFormat, isFormattingAction = false, segments, query, setQuery, onCitationClick, transcriptModes = false }: {
-  title: string;
-  text: string;
-  originalText?: string;
-  formattingStatus?: AudioTranscription['formatting_status'];
-  formattingError?: string;
-  onFormat?: () => void;
-  isFormattingAction?: boolean;
-  segments: MediaSegment[];
-  query: string;
-  setQuery: (value: string) => void;
-  onCitationClick: (citation: Citation) => void;
-  transcriptModes?: boolean;
-}) {
-  const [mode, setMode] = useState<'readable' | 'timestamped' | 'original'>('readable');
-  const [viewerCopied, setViewerCopied] = useState(false);
-  const [viewerCopyError, setViewerCopyError] = useState('');
-  const timedSegments = useMemo(() => segments.filter((segment) => typeof segment.start_ms === 'number'), [segments]);
-  const hasTimestampedView = transcriptModes && timedSegments.length > 0;
-  const showSegments = transcriptModes ? mode === 'timestamped' && hasTimestampedView : segments.length > 0;
-  const visibleSegments = transcriptModes ? timedSegments : segments;
-  const readableText = text.trim() || segments.map((segment) => segment.text.trim()).filter(Boolean).join('\n\n');
-  const sourceText = originalText?.trim() || readableText;
-  const plainText = transcriptModes && mode === 'original' ? sourceText : readableText;
-  const copyText = showSegments && transcriptModes
-    ? timedSegments.map((segment) => `[${formatTimestamp(segment.start_ms || 0)}] ${segment.text.trim()}`).join('\n')
-    : plainText;
-  const copyLabel = showSegments && transcriptModes ? 'Copy timestamps' : transcriptModes && mode === 'original' ? 'Copy original' : transcriptModes ? 'Copy readable' : 'Copy text';
-  const matches = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
-    if (!needle || !copyText) return 0;
-    return copyText.toLocaleLowerCase().split(needle).length - 1;
-  }, [copyText, query]);
-  const formattingActive = formattingStatus === 'pending' || formattingStatus === 'processing';
+function BackLink({ onBack }: { onBack: () => void }) {
+  return (
+    <Link to={APP_ROUTES.library} onClick={(event) => { event.preventDefault(); onBack(); }} className="pressable -ml-2 inline-flex min-h-11 items-center gap-0.5 rounded-md pr-3 text-body text-accent hover:bg-fill">
+      <ChevronLeft className="h-6 w-6" aria-hidden="true" />Library
+    </Link>
+  );
+}
 
-  const copyVisibleTranscript = async () => {
-    if (!copyText) return;
-    setViewerCopyError('');
-    try {
-      await navigator.clipboard.writeText(copyText);
-      setViewerCopied(true);
-      window.setTimeout(() => setViewerCopied(false), 1800);
-    } catch {
-      setViewerCopyError('Clipboard access was blocked. Check your browser permissions and try again.');
-    }
+function ProgressNote({ label, progress, onStop, stopping }: { label: string; progress: number; onStop?: () => void; stopping: boolean }) {
+  return (
+    <div className="mt-6" role="status" aria-live="polite">
+      <p className="flex items-center gap-2 text-body font-medium"><Loader2 className="h-4 w-4 animate-spin text-text-secondary" aria-hidden="true" />{label}{progress > 0 && <span className="text-text-secondary tabular">{progress}%</span>}</p>
+      {progress > 0 && <div className="mt-3 h-1 overflow-hidden rounded-full bg-separator"><div className="h-full rounded-full bg-accent-fill transition-[width] duration-500" style={{ width: `${Math.min(progress, 100)}%` }} /></div>}
+      <p className="mt-2 text-callout text-text-secondary">This keeps going if you leave. The transcript and summary appear here by themselves.</p>
+      {onStop && <Button variant="plain" className="-ml-4 mt-1" onClick={onStop} busy={stopping}>Stop processing</Button>}
+    </div>
+  );
+}
+
+function FailedNote({ type, message, busy, onRetry, onDelete }: { type: ItemDetailType; message: string; busy: boolean; onRetry?: () => void; onDelete: () => void }) {
+  const copy = type === 'audio'
+    ? 'The recording is saved, so trying again does not need the file.'
+    : type === 'transcript'
+      ? 'Trying again starts a new attempt for the same link. This one stays until you delete it.'
+      : 'A PDF cannot be retried from here. If it is a scan, it has no text to read; otherwise add the file again.';
+  return (
+    <div className="mt-6 rounded-lg border border-separator bg-surface p-4" role="alert">
+      <p className="flex items-start gap-2 text-body font-semibold"><AlertCircle className="mt-0.5 h-[18px] w-[18px] shrink-0 text-text-secondary" aria-hidden="true" />{type === 'audio' ? 'Transcription failed' : type === 'transcript' ? 'The transcript could not be fetched' : 'This PDF could not be read'}</p>
+      {message && <p className="mt-1 text-callout">{message}</p>}
+      {/* The server's message for recordings already says the audio is kept. */}
+      {(type !== 'audio' || !message) && <p className="mt-1 text-callout text-text-secondary">{copy}</p>}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {onRetry ? <Button variant="primary" onClick={onRetry} busy={busy} icon={<RefreshCw className="h-4 w-4" />}>Try again</Button> : <ButtonLink to={`${APP_ROUTES.add}?source=file`} variant="primary">Add a file</ButtonLink>}
+        <Button variant="danger-plain" onClick={onDelete} icon={<Trash2 className="h-4 w-4" />}>Delete</Button>
+      </div>
+    </div>
+  );
+}
+
+type AudioExportFormat = 'txt' | 'md' | 'json';
+
+/** The formats the server offers for each kind of item. A PDF's text is saved as it is shown. */
+function exportFormatsFor(type: ItemDetailType): { format: ExportFormat; label: string; hint: string }[] {
+  const md = { format: 'md' as const, label: 'Markdown', hint: '.md · headings and paragraphs' };
+  const txt = { format: 'txt' as const, label: 'Plain text', hint: '.txt · just the words' };
+  const json = { format: 'json' as const, label: 'JSON', hint: '.json · everything, for other software' };
+  if (type === 'transcript') return [md, txt, { format: 'srt', label: 'Subtitles', hint: '.srt · timed captions' }, json];
+  if (type === 'audio') return [md, txt, json];
+  return [{ ...txt, hint: '.txt · the extracted text' }];
+}
+
+function ExportDialog({ open, formats, onClose, onChoose, busy }: { open: boolean; formats: { format: ExportFormat; label: string; hint: string }[]; onClose: () => void; onChoose: (format: ExportFormat) => void; busy: boolean }) {
+  return (
+    <Dialog open={open} onClose={onClose} title="Export">
+      <ul className="divide-y divide-separator">
+        {formats.map((option) => (
+          <li key={option.format}>
+            <button type="button" disabled={busy} onClick={() => onChoose(option.format)} className="pressable flex min-h-14 w-full items-center gap-3 rounded-sm px-1 py-2 text-left hover:bg-fill disabled:opacity-40">
+              <Download className="h-[18px] w-[18px] shrink-0 text-text-secondary" aria-hidden="true" />
+              <span className="min-w-0 flex-1"><span className="block text-body">{option.label}</span><span className="block text-meta text-text-secondary">{option.hint}</span></span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Dialog>
+  );
+}
+
+function RenameDialog({ open, name, onClose, onSave, busy }: { open: boolean; name: string; onClose: () => void; onSave: (name: string) => void; busy: boolean }) {
+  const [value, setValue] = useState(name);
+  useEffect(() => { if (open) queueMicrotask(() => setValue(name)); }, [name, open]);
+  const save = () => { if (value.trim() && value.trim() !== name) onSave(value.trim()); else onClose(); };
+  return (
+    <Dialog open={open} onClose={onClose} title="Rename" footer={<div className="flex justify-end gap-2"><Button onClick={onClose}>Cancel</Button><Button variant="primary" busy={busy} disabled={!value.trim()} onClick={save}>Save</Button></div>}>
+      <form onSubmit={(event) => { event.preventDefault(); save(); }}>
+        <Input value={value} onChange={(event) => setValue(event.target.value)} aria-label="Title" maxLength={255} autoFocus />
+      </form>
+      <p className="mt-2 text-meta text-text-secondary">A title you set is never replaced by an automatic one.</p>
+    </Dialog>
+  );
+}
+
+function TagsDialog({ open, tags, onClose, onSave, busy }: { open: boolean; tags: string[]; onClose: () => void; onSave: (tags: string[]) => void; busy: boolean }) {
+  const [input, setInput] = useState('');
+  const add = () => {
+    const value = input.trim();
+    if (!value || tags.some((tag) => tag.toLocaleLowerCase() === value.toLocaleLowerCase())) return;
+    onSave([...tags, value]);
+    setInput('');
   };
-
   return (
-    <section className="min-w-0 overflow-hidden rounded-2xl border" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-      <div className="border-b p-4 sm:p-5" style={{ borderColor: 'var(--color-border)' }}>
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
-            <FileText className="h-4 w-4" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="font-semibold">{title}</h2>
-            {transcriptModes && <p className="mt-0.5 text-xs leading-5" style={{ color: 'var(--color-text-muted)' }}>{mode === 'readable' ? 'Comfortable paragraphs with every spoken word preserved' : mode === 'timestamped' ? 'Select a timestamp to play that moment' : 'Untouched speech-to-text from the transcription service'}</p>}
-          </div>
-        </div>
+    <Dialog open={open} onClose={onClose} title="Tags" footer={<Button variant="primary" block onClick={onClose}>Done</Button>}>
+      {tags.length === 0 ? <p className="text-callout text-text-secondary">Add a client, project or topic to find this later.</p> : (
+        <ul className="flex flex-wrap gap-1.5">
+          {tags.map((tag) => (
+            <li key={tag} className="inline-flex items-center rounded-full bg-fill pl-3 text-callout">
+              {tag}
+              <button type="button" onClick={() => onSave(tags.filter((value) => value !== tag))} disabled={busy} aria-label={`Remove ${tag}`} className="inline-flex h-11 w-10 items-center justify-center text-text-secondary"><X className="h-4 w-4" /></button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form onSubmit={(event) => { event.preventDefault(); add(); }} className="mt-4 flex gap-2">
+        <Input value={input} onChange={(event) => setInput(event.target.value)} placeholder="New tag" aria-label="New tag" maxLength={40} />
+        <Button type="submit" busy={busy} disabled={!input.trim()}>Add</Button>
+      </form>
+    </Dialog>
+  );
+}
 
-        <div className="mt-4 grid min-w-0 gap-2 sm:grid-cols-2 2xl:grid-cols-[minmax(20rem,auto)_auto_minmax(12rem,1fr)]">
-          {transcriptModes && (
-            <div className="grid min-w-0 grid-cols-3 rounded-xl border p-1" role="group" aria-label="Transcript view" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}>
-              <button type="button" aria-pressed={mode === 'readable'} onClick={() => setMode('readable')} className="min-h-11 min-w-0 rounded-lg px-2 text-sm font-semibold transition" style={{ backgroundColor: mode === 'readable' ? 'var(--color-surface-elevated)' : undefined, color: mode === 'readable' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: mode === 'readable' ? 'var(--shadow-tab-active)' : undefined }}>Readable</button>
-              <button type="button" aria-pressed={mode === 'timestamped'} disabled={!hasTimestampedView} onClick={() => setMode('timestamped')} className="min-h-11 min-w-0 rounded-lg px-2 text-sm font-semibold transition disabled:opacity-40" style={{ backgroundColor: mode === 'timestamped' ? 'var(--color-surface-elevated)' : undefined, color: mode === 'timestamped' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: mode === 'timestamped' ? 'var(--shadow-tab-active)' : undefined }}>Timestamps</button>
-              <button type="button" aria-pressed={mode === 'original'} onClick={() => setMode('original')} className="min-h-11 min-w-0 rounded-lg px-2 text-sm font-semibold transition" style={{ backgroundColor: mode === 'original' ? 'var(--color-surface-elevated)' : undefined, color: mode === 'original' ? 'var(--color-text-primary)' : 'var(--color-text-muted)', boxShadow: mode === 'original' ? 'var(--shadow-tab-active)' : undefined }}>Original</button>
-            </div>
-          )}
-          <button type="button" onClick={() => void copyVisibleTranscript()} disabled={!copyText} className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)] disabled:opacity-40" style={{ borderColor: 'var(--color-border)' }}>
-            {viewerCopied ? <Check className="h-4 w-4 shrink-0" /> : <Copy className="h-4 w-4 shrink-0" />}
-            <span className="truncate">{viewerCopied ? 'Copied' : copyLabel}</span>
+function SummarizeDialog({ open, initial, onClose, onSubmit, busy }: { open: boolean; initial: AudioContentType; onClose: () => void; onSubmit: (type: AudioContentType) => void; busy: boolean }) {
+  const [value, setValue] = useState<AudioContentType>(initial);
+  return (
+    <Dialog open={open} onClose={onClose} title="Summarize" footer={<div className="flex justify-end gap-2"><Button onClick={onClose}>Cancel</Button><Button variant="primary" busy={busy} onClick={() => onSubmit(value)}>Summarize</Button></div>}>
+      <p className="text-callout text-text-secondary">What kind of recording is this? The summary looks for what matters in each.</p>
+      <div className="mt-3 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Kind of recording">
+        {CONTENT_TYPES.map((option) => (
+          <button key={option.value} type="button" role="radio" aria-checked={value === option.value} onClick={() => setValue(option.value)} className={`pressable min-h-11 rounded-md border px-3 text-left text-callout ${value === option.value ? 'border-accent bg-accent-tint font-semibold text-accent' : 'border-separator'}`}>
+            {option.label}
           </button>
-          <div className={`relative min-w-0 ${hasTimestampedView ? 'sm:col-span-2 2xl:col-span-1' : ''}`}>
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: 'var(--color-text-muted)' }} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find in text" aria-label="Find in text" className="min-h-11 w-full min-w-0 rounded-xl border bg-transparent pl-9 pr-10 text-sm outline-none" style={{ borderColor: 'var(--color-border)' }} />
-            {query && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: 'var(--color-text-muted)' }}>{matches}</span>}
-          </div>
-        </div>
-        {viewerCopyError && <p role="status" className="mt-3 text-sm" style={{ color: 'var(--color-danger)' }}>{viewerCopyError}</p>}
-        {transcriptModes && mode === 'readable' && formattingActive && <div className="mt-3 flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}><Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-brand-500)' }} />Formatting for readability… The original transcript is available now.</div>}
-        {transcriptModes && mode === 'readable' && formattingStatus === 'none' && <div className="mt-3 flex flex-col items-start justify-between gap-3 rounded-xl border p-3 sm:flex-row sm:items-center" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}><p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>This recording predates readable formatting.</p><button type="button" onClick={onFormat} disabled={isFormattingAction} className="inline-flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-white disabled:opacity-50" style={{ backgroundColor: 'var(--color-brand-500)' }}>{isFormattingAction ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Improve readability</button></div>}
-        {transcriptModes && mode === 'readable' && formattingStatus === 'failed' && <div className="mt-3 flex flex-col items-start justify-between gap-3 rounded-xl border p-3 sm:flex-row sm:items-center" style={{ borderColor: 'color-mix(in srgb, var(--color-warning) 35%, transparent)', backgroundColor: 'var(--color-warning-subtle)' }}><p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{formattingError || 'Readable formatting could not finish. The original transcript is shown.'}</p><button type="button" onClick={onFormat} disabled={isFormattingAction} className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-3 text-sm font-semibold disabled:opacity-50" style={{ borderColor: 'var(--color-border)' }}>{isFormattingAction ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}Try again</button></div>}
+        ))}
       </div>
-
-      <div className="max-h-[62vh] overflow-y-auto overscroll-contain p-3 text-sm leading-7 sm:max-h-[70vh] sm:p-5" style={{ color: 'var(--color-text-secondary)' }}>
-        {showSegments ? (
-          <div className="space-y-1">{visibleSegments.map((segment) => {
-            const location = typeof segment.start_ms === 'number' ? formatTimestamp(segment.start_ms) : typeof segment.page_number === 'number' ? `Page ${segment.page_number}` : 'Source';
-            return <button id={`segment-${segment.id}`} data-page={segment.page_number} type="button" key={segment.id} onClick={() => onCitationClick({ segment_id: segment.id, item_type: segment.item_type, item_id: segment.item_id, start_ms: segment.start_ms, end_ms: segment.end_ms, page_number: segment.page_number })} className="grid min-h-11 w-full grid-cols-[3.75rem_minmax(0,1fr)] gap-2 rounded-xl px-2 py-2 text-left transition hover:bg-[var(--color-surface-overlay)] sm:grid-cols-[4.5rem_minmax(0,1fr)] sm:gap-3 sm:px-3"><span className="font-mono text-xs font-semibold" style={{ color: 'var(--color-brand-500)' }}>{location}</span><span>{renderHighlighted(segment.text, query)}</span></button>;
-          })}</div>
-        ) : <div className="whitespace-pre-wrap px-2 py-1">{renderHighlighted(plainText, query)}</div>}
-      </div>
-    </section>
+    </Dialog>
   );
 }
 
-function AudioSummary({ item, onGenerate, isActing, onCitationClick }: { item: AudioTranscription; onGenerate: () => void; isActing: boolean; onCitationClick: (citation: Citation) => void }) {
-  const hasSummary = Boolean(item.summary_text);
-  const pending = item.summary_status === 'pending' || item.summary_status === 'processing';
-  const buttonLabel = isActing ? 'Starting summary' : pending ? 'Generating in background' : item.summary_status === 'failed' ? 'Try again' : hasSummary ? 'Regenerate' : 'Generate summary';
-
-  return (
-    <section className="rounded-2xl border p-5 sm:p-6" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} />
-          <h2 className="font-semibold">AI summary</h2>
-        </div>
-        <button onClick={onGenerate} disabled={isActing || pending} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white disabled:opacity-50" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-          {isActing || pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-          {buttonLabel}
-        </button>
-      </div>
-      {pending && <p className="mt-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>You can leave this page or start another upload. The summary will keep running.</p>}
-      {item.summary_status === 'failed' && (
-        <div role="alert" className="mt-4 flex items-start gap-3 rounded-xl border p-4" style={{ borderColor: 'var(--color-error-border)', backgroundColor: 'var(--color-error-soft)' }}>
-          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" style={{ color: 'var(--color-danger)' }} />
-          <div>
-            <p className="text-sm font-semibold">Summary couldn't be generated</p>
-            <p className="mt-1 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{getSummaryErrorMessage(item.summary_error_message)}</p>
-          </div>
-        </div>
-      )}
-      {hasSummary ? (
-        <div className="mt-5 space-y-5">
-          <div><p className="whitespace-pre-wrap text-sm leading-7" style={{ color: 'var(--color-text-secondary)' }}>{item.summary_text}</p><CitationRow citations={item.summary_evidence?.summary} onClick={onCitationClick} /></div>
-          <ListBlock title="Key points" items={item.key_points} citations={item.summary_evidence?.key_points} onCitationClick={onCitationClick} />
-          <ListBlock title="Action items" items={item.action_items} citations={item.summary_evidence?.action_items} onCitationClick={onCitationClick} />
-          <ListBlock title="Decisions" items={item.decisions} citations={item.summary_evidence?.decisions} onCitationClick={onCitationClick} />
-          <div className="border-t pt-2" style={{ borderColor: 'var(--color-border)' }}>
-            <AIContentReportButton targetType="audio_summary" targetId={item.id} label="Report summary" />
-          </div>
-        </div>
-      ) : !pending && item.summary_status !== 'failed' && (
-        <p className="mt-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>Create structured notes, key points, decisions, and action items from this recording.</p>
-      )}
-    </section>
-  );
+function describe(type: ItemDetailType, item: DetailItem | null) {
+  const empty = { title: '', byline: '', length: '', text: '', createdAt: '', sourceURL: '', errorMessage: '', progress: 0, progressLabel: '' };
+  if (!item) return empty;
+  if (type === 'transcript') {
+    const value = item as Transcript;
+    return {
+      ...empty,
+      title: value.title || (value.status === 'failed' ? 'Video link' : 'Getting the video…'),
+      byline: value.channel_name || '',
+      length: formatDuration(value.duration),
+      text: value.transcript_text || '',
+      createdAt: value.created_at,
+      sourceURL: value.youtube_url,
+      errorMessage: value.error_message || '',
+      progressLabel: value.status === 'pending' ? 'Waiting to fetch the transcript' : 'Fetching the transcript',
+    };
+  }
+  if (type === 'audio') {
+    const value = item as AudioTranscription;
+    const readable = value.formatting_status === 'completed' && value.formatted_transcript_text?.trim() ? value.formatted_transcript_text : value.transcript_text;
+    return {
+      ...empty,
+      title: displayTitle(value.original_name || '') || 'Untitled recording',
+      length: formatDuration(value.duration),
+      text: readable || '',
+      createdAt: value.created_at,
+      errorMessage: value.error_message || '',
+      progress: value.processing_progress || 0,
+      progressLabel: audioStage(value.processing_stage, value.status),
+    };
+  }
+  const value = item as PDFExtraction;
+  return {
+    ...empty,
+    title: value.original_name || 'Untitled PDF',
+    length: value.page_count ? pluralize(value.page_count, 'page') : '',
+    text: value.text_content || '',
+    createdAt: value.created_at,
+    errorMessage: value.error_message || '',
+    progressLabel: 'Reading the PDF',
+  };
 }
 
-function ListBlock({ title, items, citations, onCitationClick }: { title: string; items: string[]; citations?: Citation[][]; onCitationClick: (citation: Citation) => void }) {
-  if (!items?.length) return null;
-  return <div><h3 className="mb-2 text-sm font-semibold">{title}</h3><ul className="space-y-3">{items.map((value, index) => <li key={`${title}-${index}`} className="flex gap-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}><span style={{ color: 'var(--color-brand-500)' }}>•</span><span className="min-w-0">{value}<CitationRow citations={citations?.[index]} onClick={onCitationClick} /></span></li>)}</ul></div>;
+function audioStage(stage: string | undefined, status: string) {
+  switch (stage) {
+    case 'downloading': return 'Getting the audio ready';
+    case 'transcoding': return 'Preparing the recording';
+    case 'chunking': return 'Splitting a long recording';
+    case 'transcribing': return 'Transcribing';
+    case 'stitching': return 'Putting the transcript together';
+    default: return status === 'pending' ? 'Waiting to transcribe' : 'Transcribing';
+  }
 }
 
-function ActionButton({ label, icon: Icon, onClick, disabled = false, active = false }: { label: string; icon: typeof Copy; onClick: () => void; disabled?: boolean; active?: boolean }) {
-  return <button onClick={onClick} disabled={disabled} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition hover:bg-[var(--color-nav-hover)] disabled:opacity-40" style={{ borderColor: active ? 'var(--color-brand-500)' : 'var(--color-border)', backgroundColor: active ? 'var(--color-brand-50)' : undefined, color: active ? 'var(--color-brand-500)' : undefined }}><Icon className="h-4 w-4" />{label}</button>;
+function safeFilename(value: string) {
+  return value.replace(/\.[^.]+$/, '').replace(/[^a-z0-9-_]+/gi, '_').replace(/^_+|_+$/g, '') || 'media-tools-export';
 }
-
-function Meta({ label, value }: { label: string; value: string }) { return <div><p className="text-xs uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>{label}</p><p className="mt-1 truncate text-sm font-semibold">{value}</p></div>; }
-
-function TypeBadge({ type }: { type: ItemDetailType }) { const content = type === 'transcript' ? ['Video', FileText] as const : type === 'audio' ? ['Recording', FileAudio] as const : ['PDF', BookOpen] as const; const Icon = content[1]; return <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold" style={{ backgroundColor: 'var(--color-surface-subtle)', color: 'var(--color-text-secondary)' }}><Icon className="h-3 w-3" />{content[0]}</span>; }
-function StatusBadge({ status }: { status: string }) { return <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold capitalize" style={{ backgroundColor: 'var(--color-surface-subtle)', color: status === 'completed' ? 'var(--color-success)' : status === 'failed' ? 'var(--color-danger)' : 'var(--color-warning)' }}>{status === 'pending' || status === 'processing' ? <Clock3 className="h-3 w-3" /> : null}{status}</span>; }
-
-function CenteredState({ icon, title, body }: { icon: ReactNode; title: string; body?: string }) { return <div className="mx-auto flex min-h-[50vh] max-w-lg flex-col items-center justify-center text-center"><div className="flex h-14 w-14 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-surface-elevated)', color: 'var(--color-brand-500)' }}>{icon}</div><h1 className="mt-5 text-xl font-semibold">{title}</h1>{body && <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{body}</p>}<Link to="/app/library" className="mt-5 inline-flex min-h-11 items-center gap-2 text-sm font-semibold" style={{ color: 'var(--color-brand-500)' }}><ArrowLeft className="h-4 w-4" /> Back to library</Link></div>; }
-
-function normalizeItem(type: ItemDetailType, item: DetailItem | null) {
-  if (!item) return { title: '', subtitle: '', text: '', wordCount: 0, duration: 0, pageCount: 0, language: '', createdAt: '', sourceURL: '', errorMessage: '', summaryReady: false, progress: 0, progressLabel: '' };
-  if (type === 'transcript') { const value = item as Transcript; return { title: value.title || 'Untitled video', subtitle: value.channel_name || 'Video transcript', text: value.transcript_text || '', wordCount: value.word_count, duration: value.duration, pageCount: 0, language: value.language, createdAt: value.created_at, sourceURL: value.youtube_url, errorMessage: value.error_message || '', summaryReady: false, progress: value.status === 'completed' ? 100 : 0, progressLabel: value.status === 'pending' ? 'Waiting to process video…' : 'Extracting transcript…' }; }
-  if (type === 'audio') { const value = item as AudioTranscription; const readable = value.formatting_status === 'completed' && value.formatted_transcript_text?.trim() ? value.formatted_transcript_text : value.transcript_text; return { title: value.original_name || 'Untitled recording', subtitle: value.content_type?.replaceAll('_', ' ') || 'Audio transcription', text: readable || '', wordCount: value.word_count, duration: value.duration, pageCount: 0, language: value.language, createdAt: value.created_at, sourceURL: '', errorMessage: value.error_message || '', summaryReady: value.summary_status === 'completed', progress: value.processing_progress || 0, progressLabel: audioProgressLabel(value.processing_stage) }; }
-  const value = item as PDFExtraction; return { title: value.original_name || 'Untitled PDF', subtitle: `${value.page_count} ${value.page_count === 1 ? 'page' : 'pages'}`, text: value.text_content || '', wordCount: value.word_count, duration: 0, pageCount: value.page_count, language: '', createdAt: value.created_at, sourceURL: '', errorMessage: value.error_message || '', summaryReady: false, progress: value.status === 'completed' ? 100 : 0, progressLabel: 'Extracting document text…' };
-}
-
-function audioProgressLabel(stage?: string) { switch (stage) { case 'downloading': return 'Preparing source audio…'; case 'transcoding': return 'Optimizing the recording…'; case 'chunking': return 'Splitting long audio safely…'; case 'transcribing': return 'Transcribing audio…'; case 'stitching': return 'Combining transcript chunks…'; default: return 'Waiting to transcribe…'; } }
-function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date); }
-function formatDuration(seconds?: number) { if (!seconds || seconds < 1) return '—'; const h = Math.floor(seconds / 3600); const m = Math.floor((seconds % 3600) / 60); const s = Math.floor(seconds % 60); return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`; }
-function safeFilename(value: string) { return value.replace(/\.[^.]+$/, '').replace(/[^a-z0-9-_]+/gi, '_').replace(/^_+|_+$/g, '') || 'media-tools-export'; }
-function downloadBlob(blob: Blob, filename: string) { const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url); }
-function renderHighlighted(text: string, query: string): ReactNode { const needle = query.trim(); if (!needle) return text; const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); return text.split(new RegExp(`(${escaped})`, 'gi')).map((part, index) => part.toLocaleLowerCase() === needle.toLocaleLowerCase() ? <mark key={index} className="rounded px-0.5" style={{ backgroundColor: 'var(--color-brand-50)', color: 'inherit' }}>{part}</mark> : part); }

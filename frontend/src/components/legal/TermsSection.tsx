@@ -9,10 +9,7 @@ interface TermsSectionProps {
 export function TermsSection({ title, children }: TermsSectionProps) {
   return (
     <section>
-      <h2
-        className="mb-3 text-lg font-semibold"
-        style={{ color: 'var(--color-text-primary)' }}
-      >
+      <h2 className="mb-2 text-heading">
         {title}
       </h2>
       <div>{children}</div>

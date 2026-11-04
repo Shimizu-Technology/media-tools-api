@@ -1,144 +1,109 @@
-import { Link, Navigate, useSearchParams } from 'react-router-dom';
-import { ArrowRight, BookOpen, CheckCircle2, FileText, Library, Lock, Mic, Sparkles } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useAuthContext } from '../contexts/useAuthContext';
 import { useAuthCapabilities } from '../hooks/useAuthCapabilities';
+import { PublicFooter, PublicHeader } from '../components/PublicChrome';
+import { buttonClass } from '../components/ui/styles';
 
-const features = [
-  { icon: FileText, title: 'Video transcripts', body: 'Capture transcripts from YouTube, Vimeo, and other supported video sites.' },
-  { icon: Mic, title: 'Recording transcription', body: 'Upload or record audio, then turn meetings and voice notes into summaries.' },
-  { icon: BookOpen, title: 'PDF extraction', body: 'Extract text from documents and bring it into the same searchable library.' },
-  { icon: Library, title: 'Media library', body: 'Keep transcripts, recordings, PDFs, chats, summaries, and collections in one workspace.' },
-];
-
+/**
+ * The public front page. Every sentence describes something the product does
+ * today; nothing on it is a number, a customer, or a quote we made up.
+ */
 export function LandingPage() {
-  const [searchParams] = useSearchParams();
   const { accountAuthEnabled, isAuthenticated } = useAuthContext();
   const { state: capabilities } = useAuthCapabilities();
-  const canSignUp = capabilities.status === 'ready' && capabilities.signup;
-  const hasSharedTranscript = searchParams.has('id') || searchParams.has('transcript');
-
-  if (hasSharedTranscript) {
-    return <Navigate to={`/app/video?${searchParams.toString()}`} replace />;
-  }
+  const canSignUp = accountAuthEnabled && !isAuthenticated && capabilities.status === 'ready' && capabilities.signup;
+  const primary = isAuthenticated || !accountAuthEnabled ? { to: '/app', label: 'Open your library' } : { to: '/sign-in', label: 'Sign in' };
 
   return (
-    <main className="min-h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}>
-      <div className="pointer-events-none fixed inset-0 opacity-70" aria-hidden="true">
-        <div className="absolute left-1/2 top-[-10rem] h-[28rem] w-[28rem] -translate-x-1/2 rounded-full blur-3xl" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }} />
-        <div className="absolute right-[-8rem] top-1/3 h-[24rem] w-[24rem] rounded-full blur-3xl" style={{ backgroundColor: 'rgba(14, 165, 233, 0.14)' }} />
-      </div>
-
-      <header className="relative mx-auto flex max-w-7xl items-center justify-between px-4 py-5 sm:px-6 lg:px-8">
-        <Link to="/" className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-            <FileText className="h-5 w-5 text-white" />
-          </div>
+    <div className="flex min-h-dvh flex-col bg-bg text-text">
+      <PublicHeader />
+      <main className="flex-1">
+        <section className="mx-auto grid max-w-6xl items-center gap-12 px-4 pb-20 pt-10 sm:px-8 sm:pt-16 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-16 lg:pb-28">
           <div>
-            <p className="font-semibold tracking-tight">Media Tools</p>
-            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Shimizu Technology</p>
-          </div>
-        </Link>
-        <nav className="flex items-center gap-2">
-          <Link to="/docs" className="hidden min-h-11 items-center rounded-xl px-4 text-sm font-medium transition hover:bg-white/[0.06] sm:inline-flex" style={{ color: 'var(--color-text-secondary)' }}>API docs</Link>
-          {isAuthenticated ? (
-            <Link to="/app" className="inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-              Open app
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          ) : accountAuthEnabled ? (
-            <Link to="/sign-in" className="inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-              Sign in
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          ) : (
-            <Link to="/app" className="inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-              Open dev app
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          )}
-        </nav>
-      </header>
-
-      <section className="relative mx-auto grid max-w-7xl gap-10 px-4 pb-14 pt-10 sm:px-6 sm:pt-16 lg:grid-cols-[1.05fr_0.95fr] lg:px-8 lg:pb-24 lg:pt-20">
-        <div className="max-w-3xl">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.2em]" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-elevated)', color: 'var(--color-brand-500)' }}>
-            <Sparkles className="h-3.5 w-3.5" />
-            AI media workspace
-          </div>
-          <h1 className="text-5xl font-semibold tracking-tight sm:text-6xl lg:text-7xl">
-            A private workspace for the media you need to understand.
-          </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-8" style={{ color: 'var(--color-text-secondary)' }}>
-            Extract transcripts, transcribe recordings, parse PDFs, generate summaries, and chat with every item from a clean signed-in workspace.
-          </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            {isAuthenticated ? (
-              <Link to="/app" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white transition hover:-translate-y-0.5" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-                Open workspace
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            ) : accountAuthEnabled ? (
-              <>
-                <Link to="/sign-in" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white transition hover:-translate-y-0.5" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-                  Sign in
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-                {canSignUp && (
-                  <Link to="/sign-up" className="inline-flex min-h-12 items-center justify-center rounded-xl border px-5 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
-                    Create an account
-                  </Link>
-                )}
-              </>
-            ) : (
-              <Link to="/app" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white transition hover:-translate-y-0.5" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-                Open dev workspace
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            )}
-            <Link to="/docs" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border px-5 text-sm font-semibold transition hover:bg-white/[0.06]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>
-              Read API docs
-            </Link>
-          </div>
-          <div className="mt-8 grid gap-3 text-sm sm:grid-cols-3" style={{ color: 'var(--color-text-secondary)' }}>
-            {['Private signed-in workspace', 'API access when you need it', 'Summaries, chat, and collections'].map((item) => (
-              <div key={item} className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-success)' }} />
-                {item}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="relative">
-          <div className="rounded-[2rem] border p-4 shadow-2xl shadow-black/20" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }}>
-            <div className="rounded-[1.5rem] border p-5" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--color-text-muted)' }}>Today</p>
-                  <p className="mt-1 text-xl font-semibold">Workspace overview</p>
-                </div>
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
-                  <Lock className="h-5 w-5" />
-                </div>
-              </div>
-              <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                {features.map((feature) => {
-                  const Icon = feature.icon;
-                  return (
-                    <div key={feature.title} className="rounded-2xl border p-4" style={{ backgroundColor: 'var(--color-surface-subtle)', borderColor: 'var(--color-border)' }}>
-                      <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl" style={{ backgroundColor: 'var(--color-surface-overlay)', color: 'var(--color-brand-500)' }}>
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <p className="font-semibold">{feature.title}</p>
-                      <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{feature.body}</p>
-                    </div>
-                  );
-                })}
-              </div>
+            <h1 className="font-serif text-[clamp(2.5rem,6vw,4.75rem)] font-bold leading-[0.98] tracking-[-0.03em] [text-wrap:balance]">
+              Record it now. Read it later.
+            </h1>
+            <p className="mt-7 max-w-[34rem] text-[1.1875rem] leading-8 text-text">
+              Media Tools turns a voice memo, a video link or a PDF into a transcript and a short summary, kept in a private library you can search and ask questions of.
+            </p>
+            <div className="mt-9 flex flex-wrap gap-3">
+              <Link to={primary.to} className={buttonClass({ variant: 'primary', size: 'lg' })}>{primary.label}</Link>
+              {canSignUp && <Link to="/sign-up" className={buttonClass({ variant: 'secondary', size: 'lg' })}>Create an account</Link>}
             </div>
           </div>
-        </div>
-      </section>
-    </main>
+          <ExamplePage />
+        </section>
+
+        <section aria-labelledby="ways-heading" className="bg-surface">
+          <div className="mx-auto grid max-w-6xl gap-10 px-4 py-20 sm:px-8 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:py-28">
+            <h2 id="ways-heading" className="font-serif text-[clamp(2rem,4.5vw,3.25rem)] font-bold leading-[1.05] tracking-[-0.02em]">Three ways in</h2>
+            <dl className="grid gap-9">
+              <Way term="Record" body="Press Record in the browser and talk. Every second is kept on your device as you go, so a closed tab or a dropped connection does not lose it." />
+              <Way term="Paste a link" body="YouTube, Vimeo and most other video sites. The transcript comes from the video’s captions or its speech." />
+              <Way term="Add a file" body="Audio or video files up to 2 GB, and PDFs up to 50 MB. A PDF’s text is kept page by page." />
+            </dl>
+          </div>
+        </section>
+
+        <section aria-labelledby="read-heading" className="mx-auto max-w-6xl px-4 py-20 sm:px-8 lg:py-28">
+          <h2 id="read-heading" className="max-w-3xl font-serif text-[clamp(2rem,4.5vw,3.25rem)] font-bold leading-[1.05] tracking-[-0.02em]">Then it waits for you, ready to read</h2>
+          <div className="mt-10 grid gap-x-16 gap-y-8 text-[1.0625rem] leading-7 md:grid-cols-2">
+            <p><strong className="font-semibold">The summary comes first:</strong> a few sentences, then key points, decisions and follow-ups. It can be written as soon as a recording is transcribed, or whenever you ask.</p>
+            <p><strong className="font-semibold">Transcripts are set for reading,</strong> in a serif with room between the lines, with timestamps one tap away and the untouched original kept too.</p>
+            <p><strong className="font-semibold">Search covers everything:</strong> titles, transcripts, summaries and tags, across recordings, videos and documents.</p>
+            <p><strong className="font-semibold">Ask a question</strong> about one item or a whole collection. Answers point to the moment or the page they came from.</p>
+          </div>
+        </section>
+
+        <section aria-labelledby="private-heading" className="bg-accent-fill text-on-accent">
+          <div className="mx-auto grid max-w-6xl gap-8 px-4 py-20 sm:px-8 lg:grid-cols-2 lg:py-24">
+            <h2 id="private-heading" className="font-serif text-[clamp(2rem,4.5vw,3.25rem)] font-bold leading-[1.05] tracking-[-0.02em]">Private, and it asks first</h2>
+            <div className="space-y-4 text-[1.0625rem] leading-7">
+              <p>Your library belongs to your account and is not published anywhere. Audio goes to OpenAI for transcription, and text goes to OpenRouter for summaries and answers, only after you allow it. You can take that permission back in Settings.</p>
+              <p>You can delete your account and everything in it yourself, at any time.</p>
+              <p className="flex flex-wrap gap-x-5">
+                <Link to="/privacy" className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">Read the privacy policy</Link>
+                <Link to="/docs" className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">Give an agent its own key</Link>
+              </p>
+            </div>
+          </div>
+        </section>
+      </main>
+      <PublicFooter />
+    </div>
+  );
+}
+
+function Way({ term, body }: { term: string; body: string }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-8">
+      <dt className="font-serif text-2xl font-semibold tracking-[-0.01em]">{term}</dt>
+      <dd className="text-[1.0625rem] leading-7">{body}</dd>
+    </div>
+  );
+}
+
+/**
+ * A real piece of the item page, filled with an example so the reading
+ * layout is visible before signing in. It is labelled as an example.
+ */
+function ExamplePage() {
+  return (
+    <figure className="min-w-0">
+      <div data-ui className="rounded-xl bg-surface px-6 py-7 shadow-overlay sm:px-9 sm:py-9" aria-hidden="true">
+        <p className="text-title">Planning call about the launch</p>
+        <p className="mt-1.5 text-callout text-text-secondary">Recording · Meetings</p>
+        <p className="mt-6 text-heading">Summary</p>
+        <p className="mt-2 text-reading">The launch moves back a week so the retry path can be tested properly. Testing is split by platform, and pricing waits until after launch.</p>
+        <p className="mt-5 text-subheading">Follow-ups</p>
+        <ul className="mt-1.5 list-disc space-y-1 pl-5 text-reading marker:text-text-secondary">
+          <li>Send the revised timeline.</li>
+          <li>Book the test build.</li>
+        </ul>
+        <p className="mt-6 text-heading">Transcript</p>
+        <p className="mt-2 text-reading text-text-secondary">Okay, so the main thing I wanted to talk through is the date. I don’t think it gives us enough room for the retry work…</p>
+      </div>
+      <figcaption className="mt-3 text-meta text-text-secondary">An example item page. Your library shows your own recordings.</figcaption>
+    </figure>
   );
 }

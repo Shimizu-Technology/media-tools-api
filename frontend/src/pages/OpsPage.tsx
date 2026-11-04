@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Activity, AlertCircle, Flag, RefreshCw } from 'lucide-react';
+import { BackToSettings } from '../components/settings/BackToSettings';
+import { AlertCircle, Flag, RefreshCw } from 'lucide-react';
 import {
   getAIContentReports,
   getAudioOpsHealth,
@@ -60,23 +61,17 @@ export function OpsPage() {
 
   return (
     <main className="pb-12 sm:pb-16">
-      <div className="max-w-4xl mx-auto">
+      <div className="mx-auto max-w-2xl">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-3"
-              style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>
-              <Activity className="w-3.5 h-3.5" />
-              Operations
-            </div>
-            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>
-              Operations
-            </h1>
+            <BackToSettings />
+            <h1 className="mt-1 text-large-title">System health</h1>
           </div>
           <button
             onClick={load}
             disabled={loading}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border"
-            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', minHeight: '44px' }}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-sm text-sm font-medium border"
+            style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)', minHeight: '44px' }}
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
@@ -84,8 +79,8 @@ export function OpsPage() {
         </div>
 
         {error && (
-          <div className="mb-4 p-3 rounded-xl border text-sm flex items-center gap-2"
-            style={{ borderColor: 'var(--color-error-border)', color: 'var(--color-danger)', backgroundColor: 'var(--color-error-soft)' }}>
+          <div className="mb-4 p-3 rounded-md border text-sm flex items-center gap-2"
+            style={{ borderColor: 'var(--color-separator)', color: 'var(--color-danger)', backgroundColor: 'var(--color-fill)' }}>
             <AlertCircle className="w-4 h-4" />
             {error}
           </div>
@@ -106,11 +101,11 @@ export function OpsPage() {
               ].map((card) => (
                 <div
                   key={card.label}
-                  className="p-4 rounded-xl border"
-                  style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-elevated)' }}
+                  className="p-4 rounded-md border"
+                  style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-surface)' }}
                 >
-                  <p className="text-xs mb-1" style={{ color: 'var(--color-text-muted)' }}>{card.label}</p>
-                  <p className="text-2xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>{card.value}</p>
+                  <p className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>{card.label}</p>
+                  <p className="text-2xl font-semibold" style={{ color: 'var(--color-text)' }}>{card.value}</p>
                 </div>
               ))}
             </div>
@@ -119,9 +114,9 @@ export function OpsPage() {
 
         <section className="mt-10">
           <div className="mb-3 flex items-center gap-2">
-            <Flag className="h-4 w-4" style={{ color: 'var(--color-brand-500)' }} />
+            <Flag className="h-4 w-4" style={{ color: 'var(--color-accent)' }} />
             <h2 className="text-lg font-semibold">AI output reports</h2>
-            <span className="rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-surface-subtle)', color: 'var(--color-text-muted)' }}>
+            <span className="rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-fill)', color: 'var(--color-text-secondary)' }}>
               {reports.filter((report) => report.status === 'open' || report.status === 'reviewing').length} active
             </span>
           </div>
@@ -130,30 +125,30 @@ export function OpsPage() {
           </p>
           <div className="space-y-3">
             {reports.length === 0 && !loading && (
-              <div className="rounded-xl border p-5 text-sm" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>
+              <div className="rounded-md border p-5 text-sm" style={{ borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }}>
                 No AI output reports have been submitted.
               </div>
             )}
             {reports.map((report) => (
-              <article key={report.id} className="rounded-xl border p-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-elevated)' }}>
+              <article key={report.id} className="rounded-md border p-4" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-surface)' }}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="rounded-full px-2 py-1 font-semibold capitalize" style={{ backgroundColor: 'var(--color-brand-50)', color: 'var(--color-brand-500)' }}>{report.category.replaceAll('_', ' ')}</span>
-                    <span className="capitalize" style={{ color: 'var(--color-text-muted)' }}>{report.target_type.replaceAll('_', ' ')}</span>
-                    <span style={{ color: 'var(--color-text-muted)' }}>{new Date(report.created_at).toLocaleString()}</span>
+                    <span className="rounded-full px-2 py-1 font-semibold capitalize" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}>{report.category.replaceAll('_', ' ')}</span>
+                    <span className="capitalize" style={{ color: 'var(--color-text-secondary)' }}>{report.target_type.replaceAll('_', ' ')}</span>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>{new Date(report.created_at).toLocaleString()}</span>
                   </div>
-                  <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: report.status === 'open' ? 'var(--color-warning)' : report.status === 'resolved' ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
+                  <span className="text-meta font-semibold capitalize" style={{ color: report.status === 'open' ? 'var(--color-text)' : report.status === 'resolved' ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}>
                     {report.status}
                   </span>
                 </div>
                 {report.details && <p className="mt-3 text-sm" style={{ color: 'var(--color-text-secondary)' }}>{report.details}</p>}
-                <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap rounded-xl p-3 text-xs leading-5" style={{ backgroundColor: 'var(--color-surface-subtle)', color: 'var(--color-text-secondary)' }}>
+                <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap rounded-md p-3 text-xs leading-5" style={{ backgroundColor: 'var(--color-fill)', color: 'var(--color-text-secondary)' }}>
                   {JSON.stringify(report.content_snapshot, null, 2)}
                 </pre>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {report.status === 'open' && <button type="button" onClick={() => void updateReport(report.id, 'reviewing')} disabled={updatingReportId === report.id} className="min-h-11 rounded-lg border px-3 text-xs font-semibold disabled:opacity-50" style={{ borderColor: 'var(--color-border)' }}>Start review</button>}
-                  {(report.status === 'open' || report.status === 'reviewing') && <button type="button" onClick={() => void updateReport(report.id, 'resolved')} disabled={updatingReportId === report.id} className="min-h-11 rounded-lg px-3 text-xs font-semibold disabled:opacity-50" style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)' }}>Resolve</button>}
-                  {(report.status === 'open' || report.status === 'reviewing') && <button type="button" onClick={() => void updateReport(report.id, 'dismissed')} disabled={updatingReportId === report.id} className="min-h-11 rounded-lg border px-3 text-xs font-semibold disabled:opacity-50" style={{ borderColor: 'var(--color-border)' }}>Dismiss</button>}
+                  {report.status === 'open' && <button type="button" onClick={() => void updateReport(report.id, 'reviewing')} disabled={updatingReportId === report.id} className="min-h-11 rounded-sm border px-3 text-xs font-semibold disabled:opacity-50" style={{ borderColor: 'var(--color-separator)' }}>Start review</button>}
+                  {(report.status === 'open' || report.status === 'reviewing') && <button type="button" onClick={() => void updateReport(report.id, 'resolved')} disabled={updatingReportId === report.id} className="min-h-11 rounded-sm px-3 text-xs font-semibold disabled:opacity-50" style={{ backgroundColor: 'var(--color-accent-fill)', color: 'var(--color-on-accent)' }}>Resolve</button>}
+                  {(report.status === 'open' || report.status === 'reviewing') && <button type="button" onClick={() => void updateReport(report.id, 'dismissed')} disabled={updatingReportId === report.id} className="min-h-11 rounded-sm border px-3 text-xs font-semibold disabled:opacity-50" style={{ borderColor: 'var(--color-separator)' }}>Dismiss</button>}
                 </div>
               </article>
             ))}

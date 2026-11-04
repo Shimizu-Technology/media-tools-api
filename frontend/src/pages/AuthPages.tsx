@@ -106,17 +106,17 @@ export function SignInPage() {
         )}
 
         {state.passwordReset && (
-          <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-subtle)' }}>
+          <div className="rounded-lg border p-4" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-fill)' }}>
             <p className="text-sm font-semibold">Already use Media Tools? Set your password first.</p>
             <p className="mt-1 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
               If you signed in before with a different method, your account has no password yet. We email a code to the address on your account and you choose one.
             </p>
-            <div className="mt-3"><Link to="/forgot-password" state={resetState} className="inline-flex min-h-11 items-center justify-center rounded-xl border px-4 text-sm font-semibold" style={{ borderColor: 'var(--color-border)' }}>Set or reset my password</Link></div>
+            <div className="mt-3"><Link to="/forgot-password" state={resetState} className="inline-flex min-h-11 items-center justify-center rounded-md border px-4 text-sm font-semibold" style={{ borderColor: 'var(--color-separator)' }}>Set or reset my password</Link></div>
           </div>
         )}
 
-        <div className="space-y-2 border-t pt-4" style={{ borderColor: 'var(--color-border)' }}>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--color-text-muted)' }}>Other ways in</p>
+        <div className="space-y-2 border-t pt-4" style={{ borderColor: 'var(--color-separator)' }}>
+          <p className="text-callout font-semibold text-text-secondary">Other ways in</p>
           <PasskeySignInButton variant="secondary" className="w-full" />
           <RecoveryCodeSignIn className="w-full" />
         </div>
@@ -258,7 +258,7 @@ function EmailCodeFlow({ mode }: { mode: 'signup' | 'reset' }) {
           <EmailField value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
           {error && <Notice tone="error">{error}</Notice>}
           <PrimaryButton type="submit" busy={busy} busyLabel="Sending…" disabled={!email.trim()}>Email me a code</PrimaryButton>
-          {signup && <p className="text-xs leading-5" style={{ color: 'var(--color-text-muted)' }}>By continuing you agree to the <Link to="/terms" className="underline">Terms</Link> and <Link to="/privacy" className="underline">Privacy Policy</Link>.</p>}
+          {signup && <p className="text-xs leading-5" style={{ color: 'var(--color-text-secondary)' }}>By continuing you agree to the <Link to="/terms" className="underline">Terms</Link> and <Link to="/privacy" className="underline">Privacy Policy</Link>.</p>}
         </form>
       </AuthShell>
     );
@@ -267,7 +267,7 @@ function EmailCodeFlow({ mode }: { mode: 'signup' | 'reset' }) {
   return (
     <AuthShell
       title="Check your email"
-      intro={<>If this request is eligible, an email will arrive shortly at <strong className="break-all" style={{ color: 'var(--color-text-primary)' }}>{email.trim()}</strong>. Enter the code and choose a password.</>}
+      intro={<>If this request is eligible, an email will arrive shortly at <strong className="break-all" style={{ color: 'var(--color-text)' }}>{email.trim()}</strong>. Enter the code and choose a password.</>}
       footer={footer}
     >
       <form onSubmit={(event) => void confirm(event)} className="space-y-4" noValidate>
@@ -290,11 +290,11 @@ function EmailCodeFlow({ mode }: { mode: 'signup' | 'reset' }) {
           <SecondaryButton type="button" onClick={() => void resend()} disabled={busy || resendIn > 0}>
             <RefreshCw className="h-4 w-4" />{resendIn > 0 ? `Send another in ${resendIn}s` : 'Send another code'}
           </SecondaryButton>
-          <button type="button" onClick={() => { setStep('request'); setCode(''); setPassword(''); setError(''); setResent(false); }} className="min-h-11 px-2 text-sm font-semibold underline-offset-4 hover:underline" style={{ color: 'var(--color-brand-500)' }}>
+          <button type="button" onClick={() => { setStep('request'); setCode(''); setPassword(''); setError(''); setResent(false); }} className="min-h-11 px-2 text-sm font-semibold underline-offset-4 hover:underline" style={{ color: 'var(--color-accent)' }}>
             Use a different email
           </button>
         </div>
-        <p className="flex items-start gap-2 text-xs leading-5" style={{ color: 'var(--color-text-muted)' }}>
+        <p className="flex items-start gap-2 text-xs leading-5" style={{ color: 'var(--color-text-secondary)' }}>
           <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0" />Check spam if nothing arrives within a minute. Never share this code with anyone.
         </p>
       </form>

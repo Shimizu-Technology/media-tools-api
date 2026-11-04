@@ -2,6 +2,7 @@ import { BookOpen, Clock3, FileText } from 'lucide-react';
 import type { Citation } from '../lib/api';
 import { formatTimestamp } from '../lib/citations';
 
+/** A source reference: small in the text, 44px to touch. */
 export function CitationChip({ citation, onClick }: {
   citation: Citation;
   onClick: (citation: Citation) => void;
@@ -20,11 +21,12 @@ export function CitationChip({ citation, onClick }: {
       type="button"
       onClick={() => onClick(citation)}
       title={citation.item_title ? `Open source: ${citation.item_title}` : 'Open source evidence'}
-      className="inline-flex min-h-11 items-center gap-1.5 rounded-full border px-2.5 text-xs font-semibold transition hover:-translate-y-0.5 hover:bg-[var(--color-brand-50)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-500)]"
-      style={{ borderColor: 'var(--color-border)', color: 'var(--color-brand-500)', backgroundColor: 'var(--color-surface-subtle)' }}
+      className="pressable group -my-2.5 inline-flex min-h-11 items-center"
     >
-      <Icon className="h-3.5 w-3.5" />
-      {label}
+      <span className="inline-flex items-center gap-1 rounded-full bg-accent-tint px-2 py-0.5 font-sans text-meta font-semibold text-accent tabular group-hover:bg-fill">
+        <Icon className="h-3 w-3" aria-hidden="true" />
+        {label}
+      </span>
     </button>
   );
 }
@@ -35,10 +37,10 @@ export function CitationRow({ citations, onClick }: {
 }) {
   if (!citations?.length) return null;
   return (
-    <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Source citations">
+    <span className="mt-1 flex flex-wrap gap-x-1.5" aria-label="Sources">
       {citations.map((citation) => (
         <CitationChip key={citation.segment_id} citation={citation} onClick={onClick} />
       ))}
-    </div>
+    </span>
   );
 }

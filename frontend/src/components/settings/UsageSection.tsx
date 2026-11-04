@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Gauge, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { AccountAuthError, getUsage, nextUsageReset, secondsToMinutes, usageFraction, type Usage } from '../../lib/accountAuth';
 import { formatDate } from '../../lib/relativeTime';
 import { SecondaryButton } from '../auth/fields';
@@ -29,13 +29,12 @@ export function UsageSection() {
   const reset = usage ? nextUsageReset(usage.month) : null;
   return (
     <SettingsCard
-      icon={<Gauge className="h-5 w-5" />}
       title="Usage this month"
       description={usage?.exempt ? 'This account has no monthly limits.' : reset ? `Limits reset on ${formatDate(reset)} (UTC).` : undefined}
       action={error ? <SecondaryButton type="button" onClick={() => void load()}>Try again</SecondaryButton> : undefined}
     >
       {loading && !usage && <p className="flex items-center gap-2 text-sm" role="status" style={{ color: 'var(--color-text-secondary)' }}><Loader2 className="h-4 w-4 animate-spin" />Loading usage…</p>}
-      {error && <p role="alert" className="text-sm" style={{ color: 'var(--color-error)' }}>{error}</p>}
+      {error && <p role="alert" className="text-sm" style={{ color: 'var(--color-danger)' }}>{error}</p>}
       {usage && (
         <div className="grid gap-5 sm:grid-cols-2">
           <Meter label="Transcription" used={secondsToMinutes(usage.transcription_seconds)} limit={usage.exempt ? 0 : secondsToMinutes(usage.transcription_limit_seconds)} unit="min" />
@@ -56,8 +55,8 @@ function Meter({ label, used, limit, unit }: { label: string; used: number; limi
         <span style={{ color: 'var(--color-text-secondary)' }}>{limit > 0 ? `${used} of ${limit} ${unit}` : `${used} ${unit} used`}</span>
       </div>
       {limit > 0 && (
-        <div role="progressbar" aria-label={`${label} used`} aria-valuemin={0} aria-valuemax={limit} aria-valuenow={Math.min(used, limit)} className="mt-2 h-2 overflow-hidden rounded-full" style={{ backgroundColor: 'var(--color-surface-overlay)' }}>
-          <div className="h-full rounded-full" style={{ width: `${Math.round(fraction * 100)}%`, backgroundColor: near ? 'var(--color-warning)' : 'var(--color-brand-500)' }} />
+        <div role="progressbar" aria-label={`${label} used`} aria-valuemin={0} aria-valuemax={limit} aria-valuenow={Math.min(used, limit)} className="mt-2 h-2 overflow-hidden rounded-full" style={{ backgroundColor: 'var(--color-fill)' }}>
+          <div className="h-full rounded-full" style={{ width: `${Math.round(fraction * 100)}%`, backgroundColor: near ? 'var(--color-text)' : 'var(--color-accent)' }} />
         </div>
       )}
       {near && <p className="mt-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{fraction >= 1 ? 'Limit reached. New work waits until the reset.' : 'Close to this month’s limit.'}</p>}

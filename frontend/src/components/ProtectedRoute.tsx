@@ -25,8 +25,8 @@ export function ProtectedRoute({ children, requireOwner = false }: ProtectedRout
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--color-surface)' }}>
-        <div className="flex items-center gap-3 rounded-2xl border px-5 py-4" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--color-bg)' }}>
+        <div className="flex items-center gap-3 rounded-lg border px-5 py-4" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }}>
           <Loader2 className="w-5 h-5 animate-spin" />
           <span className="text-sm font-medium">Checking your workspace...</span>
         </div>
@@ -55,7 +55,7 @@ export function ProtectedRoute({ children, requireOwner = false }: ProtectedRout
   // ops gated by API-key auth in the API client itself instead of pretending
   // every account is an owner.
   if (requireOwner && accountAuthEnabled) {
-    return <Navigate to="/app/developer" replace />;
+    return <Navigate to="/app/settings/developer" replace />;
   }
 
   return <>{children}</>;
@@ -69,13 +69,13 @@ function SessionUnavailable({ onRetry }: { onRetry: () => void }) {
     window.setTimeout(() => setBusy(false), 1200);
   };
   return (
-    <main className="min-h-screen px-4 py-10 flex items-center justify-center" style={{ backgroundColor: 'var(--color-surface)' }}>
-      <section className="w-full max-w-md rounded-[2rem] border p-6 text-center sm:p-8" style={{ backgroundColor: 'var(--color-surface-elevated)', borderColor: 'var(--color-border)' }} role="alert">
-        <h1 className="text-2xl font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>Can’t reach Media Tools</h1>
+    <main className="min-h-screen px-4 py-10 flex items-center justify-center" style={{ backgroundColor: 'var(--color-bg)' }}>
+      <section className="w-full max-w-md rounded-xl border p-6 text-center sm:p-8" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }} role="alert">
+        <h1 className="text-2xl font-semibold tracking-tight" style={{ color: 'var(--color-text)' }}>Can’t reach Media Tools</h1>
         <p className="mt-3 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
           We could not check your session right now. Nothing has been signed out or changed. We keep trying, or you can try now.
         </p>
-        <button type="button" onClick={retry} disabled={busy} className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold disabled:opacity-60" style={{ backgroundColor: 'var(--color-brand-500)', color: 'var(--color-on-brand)' }}>
+        <button type="button" onClick={retry} disabled={busy} className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md px-5 text-sm font-semibold disabled:opacity-60" style={{ backgroundColor: 'var(--color-accent-fill)', color: 'var(--color-on-accent)' }}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}{busy ? 'Trying…' : 'Try again'}
         </button>
       </section>

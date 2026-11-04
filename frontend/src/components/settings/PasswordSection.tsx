@@ -1,5 +1,4 @@
 import { useState, type FormEvent } from 'react';
-import { KeyRound } from 'lucide-react';
 import { useAuthContext } from '../../contexts/useAuthContext';
 import { AccountAuthError, changePassword } from '../../lib/accountAuth';
 import { Notice } from '../auth/AuthShell';
@@ -44,13 +43,13 @@ export function PasswordSection({ configured, onChanged }: { configured: boolean
         : 'Verify your email above first. Then you can create a password.';
 
   return (
-    <SettingsCard icon={<KeyRound className="h-5 w-5" />} title="Password" description={description}>
+    <SettingsCard title="Password" description={description}>
       {configured !== null && (configured || verified) && (
         <form onSubmit={(event) => void save(event)} className="max-w-sm space-y-4" noValidate>
           {configured && <PasswordField label="Current password" value={current} onChange={(event) => setCurrent(event.target.value)} autoComplete="current-password" required />}
           <PasswordField label="New password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" hint="12 to 128 characters." required />
           <PasswordField label="Confirm new password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" aria-invalid={mismatch} required />
-          {mismatch && <p className="text-xs" style={{ color: 'var(--color-error)' }}>The passwords do not match.</p>}
+          {mismatch && <p className="text-xs" style={{ color: 'var(--color-danger)' }}>The passwords do not match.</p>}
           {error && <Notice tone="error">{error}</Notice>}
           {message && <Notice tone="success">{message}</Notice>}
           <PrimaryButton type="submit" busy={busy} busyLabel="Saving…" disabled={password.length < 12 || !confirmation || (configured === true && !current)}>
