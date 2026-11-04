@@ -662,6 +662,9 @@ func (db *DB) CreateAudioTranscription(ctx context.Context, at *models.AudioTran
 // INSERT trigger; the second statement fills in the process-local temporary
 // path before any worker can observe or claim the committed job.
 func (db *DB) CreateAudioTranscriptionWithJob(ctx context.Context, at *models.AudioTranscription, tempFilePath string) error {
+	if at.AudioS3Key != "" {
+		tempFilePath = ""
+	}
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin audio transcription transaction: %w", err)

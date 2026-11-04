@@ -371,6 +371,35 @@ components:
           example: true
 
 paths:
+  /account/processing-preferences:
+    get:
+      summary: Get automatic processing preferences (bearer authentication)
+      responses:
+        "200":
+          description: Account preferences; automatic_summaries defaults to true
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  automatic_summaries: {type: boolean, default: true}
+        "503": {description: Database unavailable}
+    patch:
+      summary: Enable or disable automatic summaries; titles remain automatic
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [automatic_summaries]
+              properties:
+                automatic_summaries: {type: boolean}
+      responses:
+        "200": {description: Updated preferences}
+        "400": {description: Missing or invalid boolean}
+        "503": {description: Database unavailable}
+
   /health:
     get:
       tags: [Health]

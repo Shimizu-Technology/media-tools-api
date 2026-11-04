@@ -455,14 +455,14 @@ func (s *Service) sendProviderCompletion(
 		return completionResult{}, resp.StatusCode, nil, &ProviderTransportError{Provider: provider, Cause: err}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return completionResult{}, resp.StatusCode, body, newProviderError(provider, resp.StatusCode, body)
+		return completionResult{}, resp.StatusCode, body, newProviderError(provider, resp.StatusCode, body, resp.Header.Get("Retry-After"))
 	}
 	var parsed chatResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return completionResult{}, resp.StatusCode, body, fmt.Errorf("parse %s response: %w", provider, err)
 	}
 	if parsed.Error != nil {
-		return completionResult{}, resp.StatusCode, body, newProviderError(provider, providerErrorStatus(resp.StatusCode, parsed.Error.Code), body)
+		return completionResult{}, resp.StatusCode, body, newProviderError(provider, providerErrorStatus(resp.StatusCode, parsed.Error.Code), body, resp.Header.Get("Retry-After"))
 	}
 	if len(parsed.Choices) == 0 {
 		return completionResult{}, resp.StatusCode, body, fmt.Errorf("no response from model")
@@ -473,7 +473,7 @@ func (s *Service) sendProviderCompletion(
 		if choice.Error != nil {
 			code = providerErrorStatus(resp.StatusCode, choice.Error.Code)
 		}
-		return completionResult{}, resp.StatusCode, body, newProviderError(provider, code, body)
+		return completionResult{}, resp.StatusCode, body, newProviderError(provider, code, body, resp.Header.Get("Retry-After"))
 	}
 	actualModel := reqBody.Model
 	if strings.TrimSpace(parsed.Model) != "" {

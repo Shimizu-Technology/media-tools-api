@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
@@ -240,6 +241,30 @@ func (db *DB) CompleteAudioTranscriptionWithSegments(ctx context.Context, audio 
 			return false, fmt.Errorf("queue transcript formatting: %w", err)
 		}
 	}
+	// A replacement transcript invalidates old chat only after successful save.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM transcript_chat_sessions WHERE item_type='audio' AND item_id=$1`, audio.ID); err != nil {
+		return false, err
+	}
+	if os.Getenv("AUTOMATIC_AUDIO_ENRICHMENT_ENABLED") == "true" {
+
+		// Preserve the old summary through failures, then mark its replacement pending.
+		if _, err := tx.ExecContext(ctx, `UPDATE audio_transcriptions a SET summary_status='pending' WHERE a.id=$1 AND COALESCE((SELECT automatic_summaries FROM processing_preferences p WHERE p.user_id=a.user_id),true)`, audio.ID); err != nil {
+			return false, err
+		}
+
+		// The existing job type keeps rolling deployments compatible. Older workers
+		// still produce summaries; upgraded workers additionally generate a title.
+		_, err = tx.ExecContext(ctx, `INSERT INTO background_jobs(job_type,resource_id,payload)
+ SELECT 'audio_summary', a.id, jsonb_build_object('audio_id',a.id,'length','medium','content_type',a.content_type,'automatic',true,'title_source',CASE WHEN a.title_manually_set THEN '' ELSE a.original_name END,'title_only',NOT COALESCE(p.automatic_summaries,true))
+ FROM audio_transcriptions a LEFT JOIN processing_preferences p ON p.user_id=a.user_id
+ WHERE a.id=$1
+ ON CONFLICT (job_type,resource_id) WHERE status IN ('queued','running') DO UPDATE SET payload=EXCLUDED.payload WHERE background_jobs.status='queued'`, audio.ID)
+		if err != nil {
+			return false, err
+		}
+
+	}
+
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("commit audio completion: %w", err)
 	}

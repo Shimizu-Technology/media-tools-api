@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
+	"github.com/jmoiron/sqlx"
 )
 
 const backgroundJobColumns = `
@@ -263,6 +264,16 @@ func (db *DB) ClaimBackgroundJob(ctx context.Context, workerID string, lease tim
 	}
 	defer tx.Rollback()
 
+	var exhausted []models.BackgroundJob
+	if err := tx.SelectContext(ctx, &exhausted, `UPDATE background_jobs SET status='failed', completed_at=NOW(), last_error='Worker lease expired too many times', locked_by=NULL, locked_at=NULL, lease_expires_at=NULL WHERE status='running' AND lease_expires_at < NOW() AND attempts >= max_attempts AND job_type <> 'account_deletion' RETURNING `+backgroundJobColumns); err != nil {
+		return nil, err
+	}
+	for _, job := range exhausted {
+		if err := failJobResource(ctx, tx, job.JobType, job.ResourceID, job.LastError); err != nil {
+			return nil, err
+		}
+	}
+
 	var job models.BackgroundJob
 	err = tx.GetContext(ctx, &job, `
 		SELECT `+backgroundJobColumns+`
@@ -274,6 +285,7 @@ func (db *DB) ClaimBackgroundJob(ctx context.Context, workerID string, lease tim
 		) OR (
 			status = 'running'
 			AND lease_expires_at < NOW()
+ AND (attempts < max_attempts OR job_type = 'account_deletion')
 		)
 		ORDER BY
 			CASE WHEN status = 'queued' THEN 0 ELSE 1 END,
@@ -282,7 +294,7 @@ func (db *DB) ClaimBackgroundJob(ctx context.Context, workerID string, lease tim
 		FOR UPDATE SKIP LOCKED
 		LIMIT 1`)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, tx.Commit()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("select background job: %w", err)
@@ -396,33 +408,30 @@ func (db *DB) CompleteBackgroundJob(ctx context.Context, jobID, workerID string)
 	return nil
 }
 
+// FailBackgroundJob changes both durable work and its visible resource in one
+// transaction. This is also the catch-all for panics and early read failures.
 func (db *DB) FailBackgroundJob(ctx context.Context, jobID, workerID, message string) error {
-	result, err := db.ExecContext(ctx, `
-		UPDATE background_jobs
-		SET status = 'failed',
-			completed_at = NOW(),
-			locked_by = NULL,
-			locked_at = NULL,
-			lease_expires_at = NULL,
-			last_error = $3
-		WHERE id = $1 AND status = 'running' AND locked_by = $2`,
-		jobID, workerID, message,
-	)
+	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("fail background job: %w", err)
+		return err
 	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		// A specialized worker path may already have atomically failed its
-		// resource and durable job. Treat that terminal acknowledgement as
-		// idempotent while still reporting a lease actually owned elsewhere.
+	defer tx.Rollback()
+	var job models.BackgroundJob
+	err = tx.GetContext(ctx, &job, `UPDATE background_jobs SET status='failed', completed_at=NOW(), locked_by=NULL, locked_at=NULL, lease_expires_at=NULL, last_error=$3 WHERE id=$1 AND status='running' AND locked_by=$2 RETURNING `+backgroundJobColumns, jobID, workerID, message)
+	if errors.Is(err, sql.ErrNoRows) {
 		var status string
-		if err := db.GetContext(ctx, &status, `SELECT status FROM background_jobs WHERE id = $1`, jobID); err == nil && status == "failed" {
+		if e := tx.GetContext(ctx, &status, `SELECT status FROM background_jobs WHERE id=$1`, jobID); e == nil && status == "failed" {
 			return nil
 		}
 		return fmt.Errorf("background job failure lost its lease")
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	if err := failJobResource(ctx, tx, job.JobType, job.ResourceID, message); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // RequeueBackgroundJob releases a retryable job while preserving its attempt
@@ -472,4 +481,24 @@ func (db *DB) CountQueuedBackgroundJobs(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("count queued background jobs: %w", err)
 	}
 	return count, nil
+}
+
+func failJobResource(ctx context.Context, tx *sqlx.Tx, kind, id, message string) error {
+	var query string
+	switch kind {
+	case "audio_transcription":
+		query = `UPDATE audio_transcriptions SET status='failed', processing_stage='failed', processing_progress=100, error_message=$2 WHERE id=$1 AND status IN ('pending','processing','failed')`
+	case "transcript_extraction":
+		query = `UPDATE transcripts SET status='failed', error_message=$2 WHERE id=$1 AND status IN ('pending','processing')`
+	case "summary_generation":
+		query = `UPDATE summaries SET status='failed', error_message=$2 WHERE id=$1 AND status IN ('pending','processing')`
+	case "audio_summary":
+		query = `UPDATE audio_transcriptions SET summary_status='failed', summary_error_message=$2 WHERE id=$1 AND summary_status IN ('pending','processing')`
+	case "audio_transcript_formatting":
+		query = `UPDATE audio_transcriptions SET formatting_status='failed', formatting_error_message=$2 WHERE id=$1 AND formatting_status IN ('pending','processing')`
+	default:
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, query, id, message)
+	return err
 }
