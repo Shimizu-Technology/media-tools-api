@@ -95,13 +95,13 @@ func TestPipelineHTTPUploadToTitleAndCitedSummary(t *testing.T) {
 	router.GET("/api/v1/audio/transcriptions/:id", h.GetAudioTranscription)
 	server := httptest.NewServer(router)
 	defer server.Close()
-	path := filepath.Join(t.TempDir(), "capture.mov")
+	path := filepath.Join(t.TempDir(), "New Recording.mov")
 	if output, err := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-c:a", "aac", path).CombinedOutput(); err != nil {
 		t.Fatalf("fixture %v %s", err, output)
 	}
 	var request bytes.Buffer
 	form := multipart.NewWriter(&request)
-	part, _ := form.CreateFormFile("file", "capture.mov")
+	part, _ := form.CreateFormFile("file", "New Recording.mov")
 	file, _ := os.Open(path)
 	io.Copy(part, file)
 	file.Close()

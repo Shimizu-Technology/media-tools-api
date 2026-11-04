@@ -245,6 +245,11 @@ func (db *DB) CompleteAudioTranscriptionWithSegments(ctx context.Context, audio 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM transcript_chat_sessions WHERE item_type='audio' AND item_id=$1`, audio.ID); err != nil {
 		return false, err
 	}
+	// Checkpoints only exist to resume this run. Dropping them here means a later
+	// deliberate re-transcribe gets a fresh result and no extra transcript copy lingers.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM audio_chunk_checkpoints WHERE audio_id=$1`, audio.ID); err != nil {
+		return false, err
+	}
 	if os.Getenv("AUTOMATIC_AUDIO_ENRICHMENT_ENABLED") == "true" {
 
 		// Preserve the old summary through failures, then mark its replacement pending.
