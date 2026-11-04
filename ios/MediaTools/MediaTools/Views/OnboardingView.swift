@@ -1,179 +1,94 @@
 import AVFoundation
 import SwiftUI
 
+/// Only what iOS will ask about, and what happens to the audio. Each permission gets
+/// its own screen and a single neutral Continue, with no way out before the system
+/// prompt: App Review treats a skip or "not now" there as steering the decision.
 struct OnboardingView: View {
     @Binding var isComplete: Bool
     @Environment(\.openURL) private var openURL
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var currentPage = 0
     @State private var microphoneState: MicrophonePermissionState = .notRequested
     @State private var notificationState: NotificationPermissionState = .notRequested
-    @State private var appeared = false
+    @State private var isAdvancing = false
 
-    private let pageCount = 4
+    private let pageCount = 3
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                LinearGradient(
-                    colors: [Theme.surface, Theme.surfaceElevated, Theme.surface],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
-
-                Circle()
-                    .fill(Theme.brand500.opacity(0.08))
-                    .frame(width: 400, height: 400)
-                    .blur(radius: 80)
-                    .offset(y: -280)
-                    .ignoresSafeArea()
-                    .accessibilityHidden(true)
-
-                VStack(spacing: 0) {
-                    HStack {
-                        Text("Media Tools")
-                            .font(Theme.heading(17))
-                            .foregroundStyle(Theme.textPrimary)
-                        Spacer()
-                        Button("Skip setup") { finish() }
-                            .font(Theme.body(14, weight: .semibold))
-                            .foregroundStyle(Theme.textSecondary)
-                            .frame(minHeight: 44)
-                    }
-                    .frame(width: max(0, geometry.size.width - 48))
-                    .padding(.top, 8)
-
-                    TabView(selection: $currentPage) {
-                        onboardingPage(
-                            availableWidth: geometry.size.width,
-                            icon: "button.programmable",
-                            color: Theme.brand400,
-                            title: "Capture a thought anywhere",
-                            subtitle:
-                                "Press the Action Button, a widget, Control Center, or Back Tap to open Media Tools and begin recording automatically. Once capture starts, it keeps recording when the screen locks or you use another app.",
-                            note: "You always get a visible recording indicator and one-tap stop control."
-                        )
-                        .tag(0)
-
-                        onboardingPage(
-                            availableWidth: geometry.size.width,
-                            icon: microphoneIcon,
-                            color: microphoneState == .denied ? Theme.warning : Theme.audioColor,
-                            title: "Prepare your microphone",
-                            subtitle:
-                                "Media Tools only listens after you deliberately start a recording. Only record people when you have their permission and recording is lawful where you are. Audio is saved on this iPhone first, then transcribed automatically once you allow AI processing.",
-                            note: microphoneDetail
-                        ) {
-                            permissionButton(
-                                title: microphoneActionTitle,
-                                icon: microphoneIcon,
-                                isComplete: microphoneState == .enabled,
-                                action: handleMicrophoneAction
-                            )
-                            .accessibilityIdentifier("onboarding.microphone.permission")
-                        }
-                        .tag(1)
-
-                        onboardingPage(
-                            availableWidth: geometry.size.width,
-                            icon: notificationIcon,
-                            color: notificationState == .denied ? Theme.warning : Color.blue,
-                            title: "Know when it’s ready",
-                            subtitle:
-                                "Uploads and transcription continue without keeping Media Tools open. Optional completion alerts tell you when the transcript is ready or needs attention.",
-                            note: notificationDetail
-                        ) {
-                            permissionButton(
-                                title: notificationActionTitle,
-                                icon: notificationIcon,
-                                isComplete: notificationState == .enabled,
-                                action: handleNotificationAction
-                            )
-                            .accessibilityIdentifier("onboarding.notifications.permission")
-                        }
-                        .tag(2)
-
-                        onboardingPage(
-                            availableWidth: geometry.size.width,
-                            icon: "lock.shield.fill",
-                            color: Theme.brand400,
-                            title: "Private, durable, and ready",
-                            subtitle:
-                                "Recordings stay recoverable on this iPhone until the server accepts them. Before the first transcription, summary, formatting, or chat request, Media Tools explains which third-party AI providers receive your content and asks your permission.",
-                            note:
-                                "Your AI permission is account-scoped and can be revoked in Settings. Next, add Media Tools → Quick Record to your Action Button."
-                        ) {
-                            VStack(spacing: 10) {
-                                Button {
-                                    guard let url = URL(string: "shortcuts://") else { return }
-                                    openURL(url)
-                                } label: {
-                                    Label("Open Shortcuts", systemImage: "arrow.up.forward.app")
-                                        .font(Theme.body(15, weight: .semibold))
-                                        .frame(maxWidth: .infinity, minHeight: 48)
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(Theme.brand400)
-                                .accessibilityHint("Opens Shortcuts so you can configure Quick Record")
-
-                                legalLinks
-                            }
-                        }
-                        .tag(3)
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-                    .frame(width: geometry.size.width)
-
-                    pageIndicator
-
-                    Button {
-                        if currentPage < pageCount - 1 {
-                            if reduceMotion {
-                                currentPage += 1
-                            } else {
-                                withAnimation(Theme.springSnappy) { currentPage += 1 }
-                            }
-                        } else {
-                            finish()
-                        }
-                    } label: {
-                        Text(currentPage < pageCount - 1 ? "Next" : "Continue to sign in")
-                            .font(Theme.heading(16))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity, minHeight: 52)
-                            .background(
-                                RoundedRectangle(cornerRadius: Theme.radiusMedium)
-                                    .fill(Theme.brandGradient)
-                            )
-                    }
-                    .frame(width: max(0, geometry.size.width - 48))
-                    .accessibilityIdentifier("onboarding.next")
-                    .padding(.top, 18)
-                    .padding(.bottom, 20)
-                    .opacity(appeared ? 1 : 0)
-                    .offset(y: appeared ? 0 : (reduceMotion ? 0 : 12))
-                    .accessibilityHint(
-                        currentPage < pageCount - 1
-                            ? "Shows the next setup step" : "Finishes setup and opens sign in"
-                    )
-                }
-                .frame(width: geometry.size.width)
-            }
+        ScrollView {
+            pageContent
+                .readingMeasure()
+                .padding(.horizontal, 24)
+                .padding(.top, 32)
+                .padding(.bottom, 16)
+                .id(currentPage)
+                .transition(.opacity)
         }
-        .preferredColorScheme(.dark)
+        .scrollBounceBehavior(.basedOnSize)
+        .background(Theme.bg)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 12) {
+                pageIndicator
+                Button(action: advance) {
+                    Text(currentPage < pageCount - 1 ? "Continue" : "Continue to sign in")
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .accessibilityIdentifier("onboarding.next")
+                .accessibilityHint(
+                    currentPage < pageCount - 1 ? "Shows the next setup step" : "Finishes setup and opens sign in"
+                )
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 12)
+            .padding(.bottom, 12)
+            .background(Theme.bg)
+        }
         .task { await refreshPermissionStates() }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await refreshPermissionStates() }
         }
-        .onAppear {
-            if reduceMotion {
-                appeared = true
-            } else {
-                withAnimation(Theme.springGentle.delay(0.15)) { appeared = true }
+    }
+
+    @ViewBuilder
+    private var pageContent: some View {
+        switch currentPage {
+        case 0:
+            page(
+                title: "Prepare your microphone",
+                message: "Media Tools only listens after you deliberately start a recording. Only record people when you have their permission and recording is lawful where you are. Audio is saved on this iPhone first, then transcribed automatically once you allow AI processing.",
+                note: microphoneDetail
+            ) {
+                if microphoneState == .denied {
+                    settingsButton
+                }
+            }
+        case 1:
+            page(
+                title: "Know when it’s ready",
+                message: "Uploads and transcription continue without keeping Media Tools open. Completion alerts tell you when a transcript is ready or needs attention.",
+                note: notificationDetail
+            ) {
+                if notificationState == .denied {
+                    settingsButton
+                }
+            }
+        default:
+            page(
+                title: "Private and durable",
+                message: "Recordings stay recoverable on this iPhone until the server accepts them. Before the first transcription, summary, formatting, or chat request, Media Tools explains which third-party AI providers receive your content and asks your permission. You can revoke that in Settings.",
+                note: "To record with one press, add Media Tools, then Quick Record, to your Action Button."
+            ) {
+                Button("Open Shortcuts") {
+                    guard let url = URL(string: "shortcuts://") else { return }
+                    openURL(url)
+                }
+                .buttonStyle(QuietButtonStyle())
+                .accessibilityHint("Opens Shortcuts so you can configure Quick Record")
+
+                legalLinks
             }
         }
     }
@@ -182,36 +97,39 @@ struct OnboardingView: View {
     /// when Dynamic Type needs a vertical layout.
     private var legalLinks: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
+            HStack(spacing: 20) {
                 legalLink("Terms", destination: Configuration.termsURL)
                 legalLink("Privacy", destination: Configuration.privacyURL)
                 legalLink("Support", destination: Configuration.supportURL)
             }
 
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 legalLink("Terms", destination: Configuration.termsURL)
                 legalLink("Privacy", destination: Configuration.privacyURL)
                 legalLink("Support", destination: Configuration.supportURL)
             }
         }
-        .frame(maxWidth: .infinity)
     }
 
     private func legalLink(_ title: String, destination: URL) -> some View {
         Link(title, destination: destination)
-            .font(Theme.caption(12, weight: .semibold))
-            .foregroundStyle(Theme.brand400)
-            .frame(minWidth: 72, minHeight: 44)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(Theme.accent)
+            .frame(minWidth: 44, minHeight: 44)
             .contentShape(Rectangle())
     }
 
+    private var settingsButton: some View {
+        Button("Open device Settings", action: openDeviceSettings)
+            .buttonStyle(QuietButtonStyle())
+    }
+
     private var pageIndicator: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             ForEach(0..<pageCount, id: \.self) { index in
-                Capsule()
-                    .fill(index == currentPage ? Theme.brand400 : Theme.borderSubtle)
-                    .frame(width: index == currentPage ? 24 : 8, height: 8)
-                    .animation(reduceMotion ? nil : Theme.springSnappy, value: currentPage)
+                Circle()
+                    .fill(index == currentPage ? Theme.accent : Theme.separator)
+                    .frame(width: 7, height: 7)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -219,125 +137,62 @@ struct OnboardingView: View {
         .accessibilityValue("Step \(currentPage + 1) of \(pageCount)")
     }
 
-    private func onboardingPage<Actions: View>(
-        availableWidth: CGFloat,
-        icon: String,
-        color: Color,
+    private func page<Actions: View>(
         title: String,
-        subtitle: String,
+        message: String,
         note: String,
         @ViewBuilder actions: () -> Actions
     ) -> some View {
-        ScrollView {
-            VStack(spacing: 22) {
-                ZStack {
-                    Circle()
-                        .fill(color.opacity(0.08))
-                        .frame(width: 150, height: 150)
-                    Circle()
-                        .fill(color.opacity(0.12))
-                        .frame(width: 126, height: 126)
-                    Image(systemName: icon)
-                        .font(.system(size: 54, weight: .medium))
-                        .foregroundStyle(color)
-                }
-                .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title)
+                .font(.ledgerLargeTitle)
+                .foregroundStyle(Theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
 
-                VStack(spacing: 12) {
-                    Text(title)
-                        .font(Theme.heading(26))
-                        .foregroundStyle(Theme.textPrimary)
-                        .multilineTextAlignment(.center)
+            Text(message)
+                .readingText()
+                .fixedSize(horizontal: false, vertical: true)
 
-                    Text(subtitle)
-                        .font(Theme.body(16))
-                        .foregroundStyle(Theme.textSecondary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .accessibilityElement(children: .combine)
+            Text(note)
+                .font(.subheadline)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-                Label(note, systemImage: "info.circle.fill")
-                    .font(Theme.caption(13))
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-                    .background(Theme.surfaceCard)
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
+            actions()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-                actions()
+    private func advance() {
+        // A second tap must not skip the next permission page.
+        guard !isAdvancing else { return }
+        isAdvancing = true
+        Task {
+            defer { isAdvancing = false }
+            // Continue on a permission page asks iOS first, whatever the answer.
+            switch currentPage {
+            case 0 where microphoneState == .notRequested:
+                microphoneState = await MicrophonePermissionService.requestPermission()
+            case 1 where notificationState == .notRequested:
+                _ = await NotificationService.requestPermission()
+                notificationState = await NotificationService.permissionState()
+            default:
+                break
             }
-            .frame(width: max(0, min(availableWidth - 48, 560)))
-            .padding(.top, 30)
-            .padding(.bottom, 20)
-        }
-        .frame(width: availableWidth)
-        .scrollBounceBehavior(.basedOnSize)
-    }
-
-    private func onboardingPage(
-        availableWidth: CGFloat,
-        icon: String,
-        color: Color,
-        title: String,
-        subtitle: String,
-        note: String
-    ) -> some View {
-        onboardingPage(
-            availableWidth: availableWidth,
-            icon: icon,
-            color: color,
-            title: title,
-            subtitle: subtitle,
-            note: note
-        ) { EmptyView() }
-    }
-
-    private func permissionButton(
-        title: String,
-        icon: String,
-        isComplete: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: isComplete ? "checkmark.circle.fill" : icon)
-                .font(Theme.body(15, weight: .semibold))
-                .frame(maxWidth: .infinity, minHeight: 48)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(isComplete ? Theme.success : Theme.brand500)
-    }
-
-    private var microphoneIcon: String {
-        switch microphoneState {
-        case .enabled: "checkmark.circle.fill"
-        case .denied: "mic.slash.fill"
-        case .notRequested: "mic.fill"
+            if currentPage < pageCount - 1 {
+                withMotion(Theme.quick) { currentPage += 1 }
+            } else {
+                isComplete = true
+            }
         }
     }
 
     private var microphoneDetail: String {
         switch microphoneState {
-        case .enabled: "Microphone access is ready."
-        case .denied: "Microphone access is off. You can enable it in device Settings."
+        case .enabled: "Microphone access is on."
+        case .denied: "Microphone access is off. You can turn it on in device Settings."
         case .notRequested: "When you tap Continue, iOS will ask for microphone access."
-        }
-    }
-
-    private var microphoneActionTitle: String {
-        switch microphoneState {
-        case .enabled: "Microphone ready"
-        case .denied: "Open device Settings"
-        case .notRequested: "Continue"
-        }
-    }
-
-    private var notificationIcon: String {
-        switch notificationState {
-        case .enabled: "checkmark.circle.fill"
-        case .denied: "bell.slash.fill"
-        case .notRequested: "bell.badge.fill"
         }
     }
 
@@ -346,42 +201,7 @@ struct OnboardingView: View {
         case .enabled: "Completion alerts are on."
         case .denied: "Completion alerts are off. You can change this in device Settings."
         case .notRequested:
-            "Completion alerts are optional. When you tap Continue, iOS will ask whether to allow them."
-        }
-    }
-
-    private var notificationActionTitle: String {
-        switch notificationState {
-        case .enabled: "Completion alerts ready"
-        case .denied: "Open device Settings"
-        case .notRequested: "Continue"
-        }
-    }
-
-    private func handleMicrophoneAction() {
-        switch microphoneState {
-        case .enabled:
-            return
-        case .denied:
-            openDeviceSettings()
-        case .notRequested:
-            Task {
-                microphoneState = await MicrophonePermissionService.requestPermission()
-            }
-        }
-    }
-
-    private func handleNotificationAction() {
-        switch notificationState {
-        case .enabled:
-            return
-        case .denied:
-            openDeviceSettings()
-        case .notRequested:
-            Task {
-                _ = await NotificationService.requestPermission()
-                notificationState = await NotificationService.permissionState()
-            }
+            "When you tap Continue, iOS will ask whether to allow alerts. They are optional."
         }
     }
 
@@ -393,14 +213,6 @@ struct OnboardingView: View {
     private func openDeviceSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         openURL(url)
-    }
-
-    private func finish() {
-        if reduceMotion {
-            isComplete = true
-        } else {
-            withAnimation(Theme.springGentle) { isComplete = true }
-        }
     }
 }
 

@@ -1,243 +1,326 @@
 import SwiftUI
 
-/// Media Tools design system — matches the web frontend.
-/// Font: Satoshi (Fontshare) — falls back to system rounded on iOS.
-/// Colors: Dark-first with teal brand accent.
-enum Theme {
-    // MARK: - Brand Colors
-    static let brand50 = Color(red: 47/255, green: 158/255, blue: 143/255).opacity(0.12)
-    static let brand400 = Color(red: 103/255, green: 215/255, blue: 199/255)
-    static let brand500 = Color(red: 47/255, green: 158/255, blue: 143/255)
-    static let brand600 = Color(red: 31/255, green: 123/255, blue: 112/255)
+// The tokens and type scale are in MediaToolsShared/LedgerTheme.swift, because the
+// extensions need them too. This file holds the app's reusable controls.
 
-    // MARK: - Surfaces (dark mode)
-    static let surface = Color(red: 11/255, green: 13/255, blue: 16/255)         // #0b0d10
-    static let surfaceElevated = Color(red: 21/255, green: 24/255, blue: 28/255)  // #15181c
-    static let surfaceCard = Color(red: 27/255, green: 31/255, blue: 36/255)      // #1b1f24
-    static let surfaceOverlay = Color(red: 32/255, green: 37/255, blue: 43/255)   // #20252b
+// MARK: - Motion
 
-    // MARK: - Text
-    static let textPrimary = Color(red: 231/255, green: 233/255, blue: 238/255)   // #e7e9ee
-    static let textSecondary = Color(red: 166/255, green: 173/255, blue: 184/255) // #a6adb8
-    static let textMuted = Color(red: 122/255, green: 131/255, blue: 145/255)     // #7a8391
-
-    // MARK: - Borders
-    static let border = Color(red: 42/255, green: 48/255, blue: 56/255)           // #2a3038
-    static let borderSubtle = Color(red: 31/255, green: 35/255, blue: 42/255)     // #1f232a
-
-    // MARK: - Status
-    static let success = Color(red: 24/255, green: 185/255, blue: 133/255)        // #18b985
-    static let error = Color(red: 239/255, green: 68/255, blue: 68/255)           // #ef4444
-    static let warning = Color(red: 245/255, green: 158/255, blue: 11/255)        // #f59e0b
-
-    // MARK: - Type icons
-    static let videoColor = brand500
-    static let audioColor = Color(red: 249/255, green: 115/255, blue: 22/255)     // orange-500
-    static let pdfColor = Color(red: 239/255, green: 68/255, blue: 68/255)        // red-500
-    static let collectionColor = brand500
-
-    // MARK: - Corner Radii (intentional, not uniform)
-    static let radiusSmall: CGFloat = 6
-    static let radiusMedium: CGFloat = 10
-    static let radiusLarge: CGFloat = 16
-    static let radiusXL: CGFloat = 20
-
-    // MARK: - Fonts
-    static func heading(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
-        .system(size: size, weight: weight, design: .rounded)
+/// Runs a change animated, or plainly when Reduce Motion is on.
+@MainActor
+func withMotion<Result>(_ animation: Animation = Theme.settle, _ body: () throws -> Result) rethrows -> Result {
+    if UIAccessibility.isReduceMotionEnabled {
+        return try body()
     }
-
-    static func body(_ size: CGFloat = 16, weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .rounded)
-    }
-
-    static func caption(_ size: CGFloat = 12, weight: Font.Weight = .medium) -> Font {
-        .system(size: size, weight: weight, design: .rounded)
-    }
-
-    static func mono(_ size: CGFloat = 14) -> Font {
-        .system(size: size, design: .monospaced)
-    }
-
-    // MARK: - Gradients
-
-    static let brandGradient = LinearGradient(
-        colors: [brand600, brand500],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
-
-    static let subtleGlow = LinearGradient(
-        colors: [brand500.opacity(0.08), Color.clear],
-        startPoint: .top,
-        endPoint: .bottom
-    )
-
-    // MARK: - Animation Presets
-
-    static let springSnappy = Animation.spring(response: 0.35, dampingFraction: 0.8)
-    static let springGentle = Animation.spring(response: 0.5, dampingFraction: 0.75)
+    return try withAnimation(animation, body)
 }
 
-// MARK: - Themed Text Field Style
+// MARK: - Buttons
 
-struct ThemedTextFieldStyle: TextFieldStyle {
-    func _body(configuration: TextField<Self._Label>) -> some View {
-        configuration
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Theme.surfaceCard)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.radiusMedium)
-                    .stroke(Theme.border, lineWidth: 1)
-            )
+/// The filled action on a screen. Pills sit at the thumb, as the Record control does;
+/// rounded rectangles sit in forms.
+struct PrimaryButtonStyle: ButtonStyle {
+    enum Shape {
+        case pill
+        case rounded
     }
-}
 
-extension TextFieldStyle where Self == ThemedTextFieldStyle {
-    static var themed: ThemedTextFieldStyle { ThemedTextFieldStyle() }
-}
+    var shape: Shape = .rounded
+    var fill: Color = Theme.accentFill
+    var foreground: Color = Theme.onAccent
 
-// MARK: - Section Header
-
-struct SectionHeader: View {
-    let text: String
-    var icon: String?
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if let icon {
-                Image(systemName: icon)
-                    .font(Theme.caption(11, weight: .semibold))
-                    .foregroundStyle(Theme.textMuted)
-            }
-            Text(text.uppercased())
-                .font(Theme.caption(11, weight: .semibold))
-                .foregroundStyle(Theme.textMuted)
-                .tracking(0.6)
-        }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 4)
+    func makeBody(configuration: ButtonStyleConfiguration) -> some View {
+        PrimaryButtonBody(configuration: configuration, shape: shape, fill: fill, foreground: foreground)
     }
-}
 
-// MARK: - Tab Chip
+    private struct PrimaryButtonBody: View {
+        let configuration: ButtonStyleConfiguration
+        let shape: Shape
+        let fill: Color
+        let foreground: Color
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-struct TabChip: View {
-    let title: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(Theme.caption(13, weight: .semibold))
+        var body: some View {
+            configuration.label
+                .font(shape == .pill ? .title3.weight(.semibold) : .headline)
+                .foregroundStyle(foreground)
+                .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(
-                    Capsule()
-                        .fill(isSelected ? Theme.brand500 : Theme.surfaceCard)
-                )
-                .foregroundStyle(isSelected ? .white : Theme.textSecondary)
-                .overlay(
-                    Capsule()
-                        .stroke(isSelected ? Color.clear : Theme.borderSubtle, lineWidth: 1)
-                )
+                .frame(maxWidth: .infinity, minHeight: shape == .pill ? 56 : 52)
+                .background {
+                    switch shape {
+                    case .pill: Capsule().fill(fill)
+                    case .rounded: RoundedRectangle(cornerRadius: 14, style: .continuous).fill(fill)
+                    }
+                }
+                .contentShape(Rectangle())
+                .opacity(isEnabled ? (configuration.isPressed ? 0.88 : 1) : 0.45)
+                .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+                .animation(reduceMotion ? nil : Theme.quick, value: configuration.isPressed)
         }
-        .buttonStyle(.plain)
     }
 }
 
-// MARK: - View Extensions
+/// A text action in the accent color, with a full-size target around it.
+struct QuietButtonStyle: ButtonStyle {
+    var color: Color = Theme.accent
 
-extension View {
-    /// Apply the dark surface background.
-    func surfaceBackground() -> some View {
-        self.background(Theme.surface)
+    func makeBody(configuration: ButtonStyleConfiguration) -> some View {
+        QuietButtonBody(configuration: configuration, color: color)
     }
 
-    /// Card style with elevated surface.
-    func cardStyle(padding: CGFloat = 16) -> some View {
-        self
-            .padding(padding)
-            .background(Theme.surfaceCard)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.radiusMedium)
-                    .stroke(Theme.borderSubtle, lineWidth: 1)
-            )
-    }
+    private struct QuietButtonBody: View {
+        let configuration: ButtonStyleConfiguration
+        let color: Color
+        @Environment(\.isEnabled) private var isEnabled
 
-    /// Elevated card (modals, popovers).
-    func elevatedCard(padding: CGFloat = 16) -> some View {
-        self
-            .padding(padding)
-            .background(Theme.surfaceElevated)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusLarge))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.radiusLarge)
-                    .stroke(Theme.border, lineWidth: 1)
-            )
-    }
-
-    /// Card with brand accent border.
-    func accentCardStyle(padding: CGFloat = 16) -> some View {
-        self
-            .padding(padding)
-            .background(Theme.surfaceCard)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.radiusMedium)
-                    .stroke(Theme.brand500.opacity(0.4), lineWidth: 1)
-            )
+        var body: some View {
+            configuration.label
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(isEnabled ? color : Theme.textSecondary)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+                .opacity(configuration.isPressed ? 0.55 : 1)
+        }
     }
 }
 
-// MARK: - Themed Button Modifiers
+/// Darkens a list row under the finger instead of moving it, so scrolling a long
+/// list never shimmers.
+struct RowButtonStyle: ButtonStyle {
+    func makeBody(configuration: ButtonStyleConfiguration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .background(configuration.isPressed ? Theme.fill : .clear)
+    }
+}
+
+/// Press feedback for a custom round control.
+struct PressFeedbackButtonStyle: ButtonStyle {
+    var pressedScale: CGFloat = 0.94
+
+    func makeBody(configuration: ButtonStyleConfiguration) -> some View {
+        PressBody(configuration: configuration, pressedScale: pressedScale)
+    }
+
+    private struct PressBody: View {
+        let configuration: ButtonStyleConfiguration
+        let pressedScale: CGFloat
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            configuration.label
+                .opacity(configuration.isPressed ? 0.85 : 1)
+                .scaleEffect(configuration.isPressed && !reduceMotion ? pressedScale : 1)
+                .animation(reduceMotion ? nil : Theme.quick, value: configuration.isPressed)
+        }
+    }
+}
+
+// MARK: - Text
+
+/// New York at a comfortable measure and line height, for summaries and transcripts.
+struct ReadingTextModifier: ViewModifier {
+    /// About half an extra line, for the mockup's 1.5 line height at Body.
+    @ScaledMetric(relativeTo: .body) private var lineSpacing: CGFloat = 6
+
+    func body(content: Content) -> some View {
+        content
+            .font(.ledgerReading)
+            .lineSpacing(lineSpacing)
+            .foregroundStyle(Theme.text)
+    }
+}
 
 extension View {
-    func brandButtonStyle(isDestructive: Bool = false) -> some View {
-        self
-            .font(Theme.body(16, weight: .semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.radiusMedium)
-                    .fill(isDestructive ? Theme.error : Theme.brand500)
-            )
+    func readingText() -> some View {
+        modifier(ReadingTextModifier())
     }
 
-    func secondaryButtonStyle() -> some View {
-        self
-            .font(Theme.body(14, weight: .medium))
-            .foregroundStyle(Theme.textPrimary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.radiusMedium)
-                    .fill(Theme.surfaceCard)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.radiusMedium)
-                    .stroke(Theme.border, lineWidth: 1)
-            )
+    /// Keeps long reading to roughly 70 characters a line on wide screens.
+    func readingMeasure() -> some View {
+        modifier(ReadingMeasureModifier())
+    }
+}
+
+private struct ReadingMeasureModifier: ViewModifier {
+    @ScaledMetric(relativeTo: .body) private var measure: CGFloat = 600
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: measure, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+/// An error stays in ink with an icon. Red means a recording is running.
+struct InlineError: View {
+    let message: String
+    var identifier: String?
+
+    init(_ message: String, identifier: String? = nil) {
+        self.message = message
+        self.identifier = identifier
     }
 
-    func chipStyle(isSelected: Bool = false) -> some View {
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "exclamationmark.circle")
+                .accessibilityHidden(true)
+            messageText
+        }
+        .font(.footnote)
+        .foregroundStyle(Theme.text)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var messageText: some View {
+        let text = Text(message).fixedSize(horizontal: false, vertical: true)
+        if let identifier {
+            text.accessibilityIdentifier(identifier)
+        } else {
+            text
+        }
+    }
+}
+
+/// Something that needs attention, inline with the content rather than in a card.
+struct NoticeRow<Actions: View>: View {
+    let systemImage: String
+    let title: String
+    var message: String?
+    @ViewBuilder var actions: Actions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+            } icon: {
+                Image(systemName: systemImage)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            if let message {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            actions
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension NoticeRow where Actions == EmptyView {
+    init(systemImage: String, title: String, message: String? = nil) {
+        self.init(systemImage: systemImage, title: title, message: message) { EmptyView() }
+    }
+}
+
+/// A plain progress line for work in the background.
+struct ProgressNote: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .tint(Theme.textSecondary)
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Fields
+
+extension View {
+    /// A form field on the paper background.
+    func ledgerField() -> some View {
         self
-            .font(Theme.caption(12, weight: .medium))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(isSelected ? Theme.brand500 : Theme.surfaceCard)
-            )
-            .foregroundStyle(isSelected ? .white : Theme.textSecondary)
-            .overlay(
-                Capsule()
-                    .stroke(isSelected ? Color.clear : Theme.borderSubtle, lineWidth: 1)
-            )
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .frame(minHeight: 50)
+            .background(Theme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Theme.radiusMedium, style: .continuous)
+                    .stroke(Theme.separator, lineWidth: 0.5)
+            }
+    }
+
+    /// The standard page margin: 20 points on the largest iPhones, 16 elsewhere, the
+    /// same as the system's large titles and search field.
+    func ledgerPageMargin() -> some View {
+        modifier(PageMarginModifier())
+    }
+
+    /// A bar over scrolling content: the system material, warmed to match the paper.
+    func ledgerBarBackground() -> some View {
+        self
+            .background(Theme.bg.opacity(0.82))
+            .background(.ultraThinMaterial)
+    }
+
+    /// A grouped native list on the paper background.
+    func ledgerListBackground() -> some View {
+        self
+            .scrollContentBackground(.hidden)
+            .background(Theme.bg)
+    }
+}
+
+private struct PageMarginModifier: ViewModifier {
+    @State private var width: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, Theme.pageMargin(forWidth: width))
+            .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
+    }
+}
+
+/// A hairline, as used between rows and above bottom bars.
+struct Hairline: View {
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        Rectangle()
+            .fill(Theme.separator)
+            .frame(height: 1 / max(displayScale, 1))
+            .accessibilityHidden(true)
+    }
+}
+
+extension Theme {
+    static func pageMargin(forWidth width: CGFloat) -> CGFloat {
+        width >= 414 ? 20 : 16
+    }
+}
+
+// MARK: - Durations
+
+enum LedgerFormat {
+    /// "0:31" for short recordings and "42 min" once seconds stop mattering.
+    static func duration(_ seconds: Double) -> String? {
+        guard seconds.isFinite, seconds > 0 else { return nil }
+        let total = Int(seconds.rounded(.down))
+        if total < 600 {
+            return "\(total / 60):\(String(format: "%02d", total % 60))"
+        }
+        let minutes = total / 60
+        if minutes < 60 {
+            return "\(minutes) min"
+        }
+        let hours = minutes / 60
+        let remainder = minutes % 60
+        return remainder == 0 ? "\(hours) hr" : "\(hours) hr \(remainder) min"
     }
 }

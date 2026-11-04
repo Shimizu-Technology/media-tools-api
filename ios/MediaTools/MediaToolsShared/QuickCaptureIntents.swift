@@ -99,7 +99,7 @@ extension Notification.Name {
 }
 
 /// The notification handles warm launches. The persisted one-shot flag covers
-/// cold launches where the intent can finish before MainTabView subscribes.
+/// cold launches where the intent can finish before MainView subscribes.
 enum QuickCaptureNavigation {
     private static let recordTabRequestKey = "MediaToolsQuickCaptureRequestedRecordTab"
 

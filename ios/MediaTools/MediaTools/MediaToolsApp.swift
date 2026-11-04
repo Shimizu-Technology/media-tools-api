@@ -15,7 +15,7 @@ struct MediaToolsApp: App {
         MediaToolsAppShortcuts.updateAppShortcutParameters()
         #if DEBUG
         // Exercise the real cold-launch handoff in UI tests: publish the route
-        // before MainTabView exists, just as an Action Button intent can.
+        // before MainView exists, just as an Action Button intent can.
         if ProcessInfo.processInfo.arguments.contains("-ui-test-cold-quick-capture") {
             QuickCaptureNavigation.requestRecordTab()
         }
@@ -60,6 +60,7 @@ struct MediaToolsApp: App {
     var body: some Scene {
         WindowGroup {
             rootView
+                .tint(Theme.accent)
                 .environment(recordingCoordinator)
                 .environment(uploadCoordinator)
                 .environment(aiProcessingConsent)
@@ -91,47 +92,34 @@ struct MediaToolsApp: App {
         if ProcessInfo.processInfo.arguments.contains("-ui-test-signed-in") {
             // The real signed-in path through ContentView, with a fixture session.
             ContentView()
-                .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-onboarding") {
             OnboardingView(isComplete: .constant(false))
-                .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-welcome") {
             // Force this one test route signed out so an earlier simulator login
             // cannot bypass the welcome screen that App Review needs to discover.
             ContentView(forceSignedOutForUITesting: true)
-                .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-main") {
-            MainTabView()
-                .preferredColorScheme(.dark)
+            MainView()
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-library") {
-            NavigationStack {
-                LibraryView(previewItems: LibraryListItem.uiTestSamples)
-            }
-            .preferredColorScheme(.dark)
+            MainView(previewItems: LibraryListItem.uiTestSamples)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-library-pagination") {
-            NavigationStack {
-                LibraryView(previewItems: LibraryListItem.uiTestPaginationSamples)
-            }
-            .preferredColorScheme(.dark)
+            MainView(previewItems: LibraryListItem.uiTestPaginationSamples)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-record") {
             NavigationStack {
                 RecordView()
+                    .navigationDestination(for: AppRoute.self) { AppRouteDestination(route: $0) }
             }
-            .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-recovery-codes-sheet") {
             RecoveryCodesOneTimePreviewHost()
-                .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-recovery-sign-in-sheet") {
             RecoveryCodeSignInPreviewHost()
-                .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-security-status-error") {
             SignInSecurityStatusFailurePreviewHost()
-                .preferredColorScheme(.dark)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-quick-capture") {
             NavigationStack {
                 RecordView()
+                    .navigationDestination(for: AppRoute.self) { AppRouteDestination(route: $0) }
             }
-            .preferredColorScheme(.dark)
             .task {
                 _ = await recordingCoordinator.toggleFromSystem()
             }
@@ -147,42 +135,35 @@ struct MediaToolsApp: App {
     private var standardRoot: some View {
         if hasCompletedOnboarding {
             ContentView()
-                .preferredColorScheme(.dark)
         } else {
             OnboardingView(isComplete: $hasCompletedOnboarding)
-                .preferredColorScheme(.dark)
         }
     }
 
-    /// Force dark mode and tint the navigation/tab bars to match the theme.
+    /// Bars follow the system appearance. Large titles are New York; the proxies only
+    /// take a font, so the title metrics are what keep them following Dynamic Type.
     private func configureAppearance() {
-        // Navigation bar
         let navAppearance = UINavigationBarAppearance()
         if #available(iOS 26.0, *) {
             // iOS 26 draws titles behind an opaque bar background, which leaves
             // them in the accessibility tree but blank on screen. Every screen
-            // already paints Theme.surface behind a transparent bar.
+            // already paints the paper background behind a transparent bar.
             navAppearance.configureWithTransparentBackground()
         } else {
             navAppearance.configureWithOpaqueBackground()
-            navAppearance.backgroundColor = UIColor(Theme.surface)
+            navAppearance.backgroundColor = UIColor.ledger("bg")
+            navAppearance.shadowColor = .clear
         }
-        navAppearance.titleTextAttributes = [.foregroundColor: UIColor(Theme.textPrimary)]
-        navAppearance.largeTitleTextAttributes = [.foregroundColor: UIColor(Theme.textPrimary)]
+        navAppearance.titleTextAttributes = [
+            .foregroundColor: UIColor.ledger("text"),
+            .font: UIFont.ledgerSerif(.headline, weight: .semibold),
+        ]
+        navAppearance.largeTitleTextAttributes = [
+            .foregroundColor: UIColor.ledger("text"),
+            .font: UIFont.ledgerSerif(.largeTitle, weight: .bold),
+        ]
         UINavigationBar.appearance().standardAppearance = navAppearance
         UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
-        UINavigationBar.appearance().tintColor = UIColor(Theme.brand500)
-
-        // Tab bar
-        let tabAppearance = UITabBarAppearance()
-        tabAppearance.configureWithOpaqueBackground()
-        tabAppearance.backgroundColor = UIColor(Theme.surfaceElevated)
-        UITabBar.appearance().standardAppearance = tabAppearance
-        UITabBar.appearance().scrollEdgeAppearance = tabAppearance
-        UITabBar.appearance().tintColor = UIColor(Theme.brand500)
-        UITabBar.appearance().unselectedItemTintColor = UIColor(Theme.textMuted)
-
-        // Table/List background
-        UITableView.appearance().backgroundColor = UIColor(Theme.surface)
+        UINavigationBar.appearance().compactAppearance = navAppearance
     }
 }

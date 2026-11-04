@@ -13,8 +13,10 @@ private enum TranscriptViewMode: String, CaseIterable, Identifiable {
 }
 
 struct ItemDetailView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let item: LibraryItem
     @Environment(\.openURL) private var openURL
+    @Environment(\.dismiss) private var dismiss
     @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @State private var transcript: Transcript?
     @State private var audio: AudioTranscription?
@@ -44,6 +46,13 @@ struct ItemDetailView: View {
     @State private var pollingWarning: String?
     @State private var detailPollingTask: Task<Void, Never>?
     @State private var reportTarget: AIContentReportTarget?
+    @State private var showTagsSheet = false
+    @State private var showDeleteConfirmation = false
+    @State private var isDeleting = false
+    /// The same player drives the inline control and the bar that takes over when
+    /// a timestamp starts playback with the inline control off screen.
+    @State private var player = AudioPlayerService()
+    @State private var isPlayerVisible = true
 
     private let service = MediaToolsService.shared
 
@@ -75,42 +84,34 @@ struct ItemDetailView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 0) {
                     headerSection
-                    if let detailError {
-                        detailErrorBanner(detailError)
-                    }
-                    if let pollingWarning {
-                        pollingWarningBanner(pollingWarning)
-                    }
-                    processingSection
-                    actionButtons
-                    preferencesSection
-                    if canSummarize {
-                        summaryTypeSection
-                    }
                     audioPlayerSection
-                    summaryStatusSection
+                    noticesSection
                     summarySection
                     transcriptSection
                 }
-                .padding()
+                .readingMeasure()
+                .ledgerPageMargin()
+                .padding(.top, 4)
+                .padding(.bottom, 24)
             }
             .onChange(of: scrollTarget) {
                 guard let scrollTarget else { return }
-                withAnimation(Theme.springGentle) {
+                withMotion {
                     proxy.scrollTo(scrollTarget, anchor: .center)
                 }
                 self.scrollTarget = nil
             }
         }
-        .background(Theme.surface)
+        .background(Theme.bg)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
         .sheet(isPresented: $showChat) {
             NavigationStack {
                 ChatView(itemType: chatItemType, itemId: itemId, onCitationTap: handleCitation)
-                    .navigationTitle("Chat")
+                    .navigationTitle("Ask")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
@@ -118,7 +119,6 @@ struct ItemDetailView: View {
                         }
                     }
             }
-            .preferredColorScheme(.dark)
         }
         .sheet(isPresented: $showAddToCollection) {
             AddToCollectionSheet(
@@ -133,67 +133,25 @@ struct ItemDetailView: View {
         .sheet(isPresented: $showRenameSheet) {
             renameSheet
         }
+        .sheet(isPresented: $showTagsSheet) {
+            tagsSheet
+        }
         .sheet(item: $reportTarget) { target in
             AIContentReportSheet(target: target)
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    if isAudioItem {
-                        Button {
-                            beginRename()
-                        } label: {
-                            Label("Rename Recording", systemImage: "pencil")
-                        }
-                    }
-                    Button {
-                        Task {
-                            await savePreferences(
-                                UpdateLibraryPreferencesRequest(favorite: !preferences.favorite)
-                            )
-                        }
-                    } label: {
-                        Label(
-                            preferences.favorite ? "Remove Star" : "Star",
-                            systemImage: preferences.favorite ? "star.slash" : "star"
-                        )
-                    }
-                    Button {
-                        Task {
-                            await savePreferences(
-                                UpdateLibraryPreferencesRequest(archived: !preferences.archived)
-                            )
-                        }
-                    } label: {
-                        Label(
-                            preferences.archived ? "Unarchive" : "Archive",
-                            systemImage: preferences.archived ? "tray.and.arrow.up" : "archivebox"
-                        )
-                    }
-                    Button {
-                        showAddToCollection = true
-                    } label: {
-                        Label("Add to Collection", systemImage: "folder.badge.plus")
-                    }
-                    if let text = visibleTranscriptText {
-                        Button {
-                            UIPasteboard.general.string = text
-                            Haptics.success()
-                        } label: {
-                            Label("Copy Text", systemImage: "doc.on.doc")
-                        }
-                        Button {
-                            exportText = text
-                            showExportSheet = true
-                        } label: {
-                            Label("Export", systemImage: "square.and.arrow.up")
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
+        .confirmationDialog(
+            "Delete This Item?",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                Task { await deleteItem() }
             }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently removes the selected content and cannot be undone.")
         }
+        .toolbar { detailToolbar }
         .task { await loadDetail() }
         .onChange(of: audio?.hasDistinctReadableTranscript) { _, hasDistinctOriginal in
             if hasDistinctOriginal != true, transcriptViewMode == .original {
@@ -203,88 +161,247 @@ struct ItemDetailView: View {
         .onDisappear { detailPollingTask?.cancel() }
     }
 
+    // MARK: - Toolbar
+
+    /// The three things people reach for, with everything rarer in the menu.
+    @ToolbarContentBuilder
+    private var detailToolbar: some ToolbarContent {
+        // The title sits in the page, where a long name can wrap. It stays set on the
+        // bar for Back and VoiceOver, but three actions leave too little room to show it.
+        ToolbarItem(placement: .principal) {
+            Text(verbatim: "")
+                .accessibilityHidden(true)
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                showAddToCollection = true
+            } label: {
+                Image(systemName: "folder.badge.plus")
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel("Add to Collection")
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                exportText = visibleTranscriptText ?? ""
+                showExportSheet = true
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .disabled(visibleTranscriptText == nil)
+            .accessibilityLabel("Export")
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            moreMenu
+        }
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Section {
+                if isAudioItem {
+                    Button(action: beginRename) {
+                        Label("Rename Recording", systemImage: "pencil")
+                    }
+                }
+                Button {
+                    Task {
+                        await savePreferences(
+                            UpdateLibraryPreferencesRequest(favorite: !preferences.favorite)
+                        )
+                    }
+                } label: {
+                    Label(
+                        preferences.favorite ? "Remove Star" : "Star",
+                        systemImage: preferences.favorite ? "star.slash" : "star"
+                    )
+                }
+                Button {
+                    showTagsSheet = true
+                } label: {
+                    Label("Tags", systemImage: "tag")
+                }
+                if let text = visibleTranscriptText {
+                    Button {
+                        UIPasteboard.general.string = text
+                        Haptics.success()
+                    } label: {
+                        Label("Copy Text", systemImage: "doc.on.doc")
+                    }
+                }
+            }
+
+            if canSummarize {
+                Section {
+                    Picker(selection: $summaryContentType) {
+                        ForEach(summaryTypes, id: \.0) { type in
+                            Text(type.1).tag(type.0)
+                        }
+                    } label: {
+                        Label("Summary Style", systemImage: "text.alignleft")
+                    }
+                    .pickerStyle(.menu)
+
+                    Button {
+                        Task { await generateSummary() }
+                    } label: {
+                        Label(
+                            summary?.summary == nil ? "Summarize" : "Summarize Again",
+                            systemImage: "text.badge.star"
+                        )
+                    }
+                    .disabled(isLoadingSummary || isSummaryRunning)
+                }
+            }
+
+            Section {
+                // App Review expects AI reporting to be findable, not prominent.
+                if let summaryID = summary?.id, summary?.summary != nil {
+                    Button {
+                        reportTarget = AIContentReportTarget(
+                            targetType: isAudioItem ? .audioSummary : .transcriptSummary,
+                            targetId: summaryID
+                        )
+                    } label: {
+                        Label("Report Summary", systemImage: "flag")
+                    }
+                }
+                Button {
+                    Task {
+                        await savePreferences(
+                            UpdateLibraryPreferencesRequest(archived: !preferences.archived)
+                        )
+                    }
+                } label: {
+                    Label(
+                        preferences.archived ? "Unarchive" : "Archive",
+                        systemImage: preferences.archived ? "tray.and.arrow.up" : "archivebox"
+                    )
+                }
+                Button(role: .destructive) {
+                    showDeleteConfirmation = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .disabled(isDeleting)
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityLabel("More actions")
+        .accessibilityIdentifier("detail.more")
+    }
+
+    // MARK: - Bottom bar
+
+    @ViewBuilder
+    private var bottomBar: some View {
+        let showsMiniPlayer = !isPlayerVisible && player.isPlaying
+        if canUseContentActions || showsMiniPlayer {
+            VStack(spacing: 0) {
+                Hairline()
+                if showsMiniPlayer {
+                    AudioMiniBar(player: player)
+                        .ledgerPageMargin()
+                        .transition(.opacity)
+                }
+                if canUseContentActions {
+                    askBox
+                        .ledgerPageMargin()
+                        .padding(.vertical, 8)
+                }
+            }
+            .ledgerBarBackground()
+            .animation(reduceMotion ? nil : Theme.quick, value: showsMiniPlayer)
+        }
+    }
+
+    /// Opens the conversation, keyboard up, with any earlier answers above it.
+    private var askBox: some View {
+        Button {
+            Task {
+                guard await aiProcessingConsent.requestPermission() else { return }
+                showChat = true
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Text("Ask about this")
+                    .font(.body)
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "arrow.up")
+                    .font(.subheadline.weight(.semibold))
+                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    .foregroundStyle(Theme.onAccent)
+                    .frame(width: 34, height: 34)
+                    .background(Theme.accentFill, in: Circle())
+                    .accessibilityHidden(true)
+            }
+            .padding(.leading, 16)
+            .padding(.trailing, 5)
+            .frame(minHeight: 44)
+            .background(Theme.surface, in: Capsule())
+            .overlay { Capsule().stroke(Theme.separator, lineWidth: 0.5) }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressFeedbackButtonStyle(pressedScale: 0.98))
+        .accessibilityLabel("Ask about this")
+        .accessibilityIdentifier("detail.ask")
+    }
+
     // MARK: - Header
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top) {
-                Image(systemName: iconName)
-                    .font(.title)
-                    .foregroundStyle(iconColor)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.ledgerTitle)
+                .foregroundStyle(Theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
 
-                VStack(alignment: .leading) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(title)
-                            .font(Theme.heading(18))
-                            .foregroundStyle(Theme.textPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if isAudioItem {
-                            Button(action: beginRename) {
-                                Image(systemName: "pencil")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(Theme.brand400)
-                                    .frame(width: 44, height: 44)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Rename recording")
-                        }
-                    }
-                    HStack(spacing: 8) {
-                        StatusBadge(status: statusText)
-                        if let wc = wordCount, wc > 0 {
-                            Text("\(wc) words")
-                                .font(Theme.caption())
-                                .foregroundStyle(Theme.textSecondary)
-                        }
-                        if let dur = audioDuration {
-                            Text(formatDuration(dur))
-                                .font(Theme.caption())
-                                .foregroundStyle(Theme.textSecondary)
-                        }
-                        if preferences.favorite {
-                            Image(systemName: "star.fill")
-                                .font(.caption)
-                                .foregroundStyle(Theme.warning)
-                                .accessibilityLabel("Starred")
-                        }
-                    }
-                }
+            if let metadataText {
+                Text(metadataText)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if !preferences.tags.isEmpty {
+                Text(preferences.tags.joined(separator: " · "))
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
+                    .accessibilityLabel("Tags: \(preferences.tags.joined(separator: ", "))")
             }
         }
     }
 
-    // MARK: - Actions
+    private var metadataText: String? {
+        var parts: [String] = []
+        if let date = createdAt {
+            let day = LibraryDaySection.dayTitle(for: date, now: Date(), calendar: .current)
+            parts.append("\(day), \(date.formatted(date: .omitted, time: .shortened))")
+        }
+        if let duration = audioDuration.flatMap(LedgerFormat.duration) {
+            parts.append(duration)
+        } else if let words = wordCount, words > 0 {
+            parts.append("\(words) words")
+        }
+        if let type = RecordingContentType.all.first(where: { $0.value == audio?.contentType }),
+           type.value != "general" {
+            parts.append(type.title)
+        }
+        if preferences.archived { parts.append("Archived") }
+        if preferences.favorite { parts.append("Starred") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 
-    private var actionButtons: some View {
-        HStack(spacing: 12) {
-            Button {
-                Task {
-                    guard await aiProcessingConsent.requestPermission() else { return }
-                    showChat = true
-                }
-            } label: {
-                Label("Chat", systemImage: "bubble.left.and.bubble.right")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(Theme.brand500)
-            .disabled(!canUseContentActions)
-
-            Button {
-                Task { await generateSummary() }
-            } label: {
-                if isLoadingSummary {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                } else {
-                    Label("Summarize", systemImage: "sparkles")
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .buttonStyle(.bordered)
-            .tint(Theme.brand400)
-            .disabled(isLoadingSummary || !canSummarize || isSummaryRunning)
+    private var createdAt: Date? {
+        switch item {
+        case .transcript(let t): (transcript ?? t).createdAt
+        case .audio(let a): (audio ?? a).createdAt
+        case .pdf(let p): (pdf ?? p).createdAt
         }
     }
 
@@ -305,156 +422,142 @@ struct ItemDetailView: View {
         !["pending", "processing", "failed"].contains(statusText)
     }
 
-    // MARK: - Processing state
+    // MARK: - Status
+
+    /// Shows only what needs attention. A finished item has nothing here.
+    @ViewBuilder
+    private var noticesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let detailError {
+                detailErrorBanner(detailError)
+            }
+            if let pollingWarning {
+                NoticeRow(
+                    systemImage: "wifi.exclamationmark",
+                    title: "Connection interrupted",
+                    message: pollingWarning
+                )
+            }
+            processingSection
+            if isSavingPreferences {
+                ProgressNote(text: "Saving…")
+            }
+        }
+        .padding(.top, hasNotices ? 16 : 0)
+    }
+
+    private var hasNotices: Bool {
+        detailError != nil || pollingWarning != nil || isSavingPreferences
+            || audio.map { ["pending", "processing", "failed"].contains($0.status) } == true
+            || nonAudioFailureMessage != nil || isNonAudioItemProcessing
+    }
 
     @ViewBuilder
     private var processingSection: some View {
         if let audio, ["pending", "processing"].contains(audio.status) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    ProgressView()
-                        .tint(Theme.brand400)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(audio.processingDescription)
-                            .font(Theme.body(15, weight: .semibold))
-                            .foregroundStyle(Theme.textPrimary)
-                        Text("You can leave this screen. Media Tools will keep working in the background.")
-                            .font(Theme.caption())
-                            .foregroundStyle(Theme.textSecondary)
-                    }
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                ProgressNote(text: "\(audio.processingDescription). You can leave this screen. Media Tools keeps working in the background.")
                 if let progress = audio.processingProgress, progress > 0 {
                     ProgressView(value: Double(progress), total: 100)
-                        .tint(Theme.brand400)
                         .accessibilityLabel("Transcription progress")
                         .accessibilityValue("\(progress) percent")
                 }
             }
-            .accentCardStyle()
         } else if let message = nonAudioFailureMessage {
-            VStack(alignment: .leading, spacing: 8) {
-                Label("This item needs attention", systemImage: "exclamationmark.triangle.fill")
-                    .font(Theme.body(15, weight: .semibold))
-                    .foregroundStyle(Theme.error)
-                Text(message)
-                    .font(Theme.caption())
-                    .foregroundStyle(Theme.textSecondary)
-            }
-            .cardStyle()
+            NoticeRow(
+                systemImage: "exclamationmark.circle",
+                title: "This item needs attention",
+                message: message
+            )
         } else if isNonAudioItemProcessing {
-            HStack(spacing: 12) {
-                ProgressView()
-                    .tint(Theme.brand400)
-                Text("You can leave this screen. Media Tools will keep working in the background.")
-                    .font(Theme.caption())
-                    .foregroundStyle(Theme.textSecondary)
-            }
-            .accentCardStyle()
+            ProgressNote(text: "You can leave this screen. Media Tools keeps working in the background.")
         } else if let audio, audio.status == "failed" {
-            VStack(alignment: .leading, spacing: 12) {
-                Label("Transcription needs attention", systemImage: "exclamationmark.triangle.fill")
-                    .font(Theme.body(15, weight: .semibold))
-                    .foregroundStyle(Theme.error)
-                Text(audio.errorMessage ?? "The recording could not be transcribed.")
-                    .font(Theme.caption())
-                    .foregroundStyle(Theme.textSecondary)
+            NoticeRow(
+                systemImage: "exclamationmark.circle",
+                title: "Transcription needs attention",
+                message: audio.errorMessage ?? "The recording could not be transcribed."
+            ) {
                 if audio.isRetryable {
                     Button {
                         Task { await retryAudioTranscription() }
                     } label: {
                         if isRetrying {
-                            ProgressView().frame(maxWidth: .infinity)
+                            ProgressView()
                         } else {
-                            Label("Retry Transcription", systemImage: "arrow.clockwise")
-                                .frame(maxWidth: .infinity)
+                            Text("Retry Transcription")
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.brand500)
+                    .buttonStyle(QuietButtonStyle())
                     .disabled(isRetrying)
                 }
             }
-            .cardStyle()
         }
     }
 
-    // MARK: - Library preferences
+    // MARK: - Tags
 
-    private var preferencesSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                SectionHeader(text: "Organize", icon: "tag")
-                Spacer()
-                if isSavingPreferences {
-                    ProgressView().tint(Theme.brand400)
+    private var tagsSheet: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack(spacing: 8) {
+                        TextField("Add a tag", text: $tagInput)
+                            .submitLabel(.done)
+                            .onSubmit { Task { await addTag() } }
+                            .onChange(of: tagInput) { _, value in
+                                if value.count > 40 { tagInput = String(value.prefix(40)) }
+                            }
+                        Button("Add") { Task { await addTag() } }
+                            .buttonStyle(QuietButtonStyle())
+                            .disabled(
+                                tagInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    || isSavingPreferences
+                            )
+                    }
+                    .frame(minHeight: 44)
+                    .listRowBackground(Theme.surface)
                 }
-            }
-
-            if !preferences.tags.isEmpty {
-                FlowLayout(spacing: 6) {
-                    ForEach(preferences.tags, id: \.self) { tag in
-                        Button {
-                            Task { await removeTag(tag) }
-                        } label: {
-                            HStack(spacing: 5) {
+                if !preferences.tags.isEmpty {
+                    Section {
+                        ForEach(preferences.tags, id: \.self) { tag in
+                            HStack {
                                 Text(tag)
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(Theme.text)
+                                Spacer()
+                                Button {
+                                    Task { await removeTag(tag) }
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.footnote)
+                                        .foregroundStyle(Theme.textSecondary)
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(isSavingPreferences)
+                                .accessibilityLabel("Remove \(tag) tag")
                             }
-                            .font(Theme.caption(12, weight: .semibold))
-                            .foregroundStyle(Theme.brand400)
-                            .padding(.leading, 11)
-                            .padding(.trailing, 9)
-                            .frame(minHeight: 44)
-                            .background(Theme.brand500.opacity(0.12), in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isSavingPreferences)
-                        .accessibilityLabel("Remove \(tag) tag")
-                    }
-                }
-            }
-
-            HStack(spacing: 8) {
-                TextField("Add a tag", text: $tagInput)
-                    .textFieldStyle(.themed)
-                    .submitLabel(.done)
-                    .onSubmit { Task { await addTag() } }
-                    .onChange(of: tagInput) { _, value in
-                        if value.count > 40 { tagInput = String(value.prefix(40)) }
-                    }
-                Button("Add") { Task { await addTag() } }
-                    .font(Theme.body(14, weight: .semibold))
-                    .frame(minWidth: 56, minHeight: 44)
-                    .foregroundStyle(Theme.brand400)
-                    .disabled(tagInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSavingPreferences)
-            }
-        }
-        .cardStyle()
-    }
-
-    // MARK: - Summary Content Type
-
-    @ViewBuilder
-    private var summaryTypeSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SectionHeader(text: "Summary Style", icon: "sparkles")
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(summaryTypes, id: \.0) { type in
-                        Button {
-                            withAnimation(Theme.springSnappy) {
-                                summaryContentType = type.0
-                            }
-                        } label: {
-                            Text(type.1)
-                                .chipStyle(isSelected: summaryContentType == type.0)
+                            .listRowBackground(Theme.surface)
                         }
                     }
                 }
+                if let detailError {
+                    Section {
+                        InlineError(detailError)
+                            .listRowBackground(Color.clear)
+                    }
+                }
+            }
+            .ledgerListBackground()
+            .navigationTitle("Tags")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showTagsSheet = false }
+                }
             }
         }
+        .presentationDetents([.medium, .large])
     }
 
     // MARK: - Audio Player
@@ -463,11 +566,13 @@ struct ItemDetailView: View {
     private var audioPlayerSection: some View {
         if let audio, audio.isComplete {
             AudioPlayerView(
+                player: player,
                 audioId: audio.id,
                 knownDuration: audio.duration,
                 seekTime: $audioSeekTime
             )
-                .id("audio-player")
+            .padding(.top, 12)
+            .onScrollVisibilityChange(threshold: 0.2) { isPlayerVisible = $0 }
         }
     }
 
@@ -482,142 +587,108 @@ struct ItemDetailView: View {
         return nil
     }
 
+    /// Summary first: the reason most people opened this item.
     @ViewBuilder
-    private var summaryStatusSection: some View {
-        if isSummaryRunning || isLoadingSummary {
-            HStack(spacing: 10) {
-                ProgressView()
-                    .tint(Theme.brand400)
-                Text("Summarizing…")
-                    .font(Theme.body(14, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .cardStyle(padding: 12)
-        } else if let summaryFailureMessage {
+    private var summarySection: some View {
+        let summaryText = summary?.summary
+        let isWorking = isSummaryRunning || isLoadingSummary
+        if summaryText != nil || isWorking || summaryFailureMessage != nil || canSummarize {
             VStack(alignment: .leading, spacing: 6) {
-                Label("Summary needs attention", systemImage: "exclamationmark.triangle.fill")
-                    .font(Theme.body(14, weight: .semibold))
-                    .foregroundStyle(Theme.error)
-                Text(summaryFailureMessage)
-                    .font(Theme.caption())
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text("Summary")
+                    .font(.ledgerTitle2)
+                    .foregroundStyle(Theme.text)
+                    .accessibilityAddTraits(.isHeader)
+
+                if isWorking {
+                    ProgressNote(text: "Summarizing…")
+                } else if let summaryFailureMessage {
+                    NoticeRow(
+                        systemImage: "exclamationmark.circle",
+                        title: "Summary needs attention",
+                        message: summaryFailureMessage
+                    ) {
+                        if canSummarize { summarizeButton(title: "Try Again") }
+                    }
+                }
+
+                if let summary, let summaryText {
+                    summaryBody(summary, text: summaryText)
+                } else if !isWorking, summaryFailureMessage == nil {
+                    summarizeButton(title: "Summarize")
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .cardStyle(padding: 12)
+            .padding(.top, 22)
         }
     }
 
-    @ViewBuilder
-    private var summarySection: some View {
-        if let summary, let summaryText = summary.summary {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(Theme.brand400)
-                    Text("Summary")
-                        .font(Theme.heading(16))
-                        .foregroundStyle(Theme.textPrimary)
-                }
+    private func summarizeButton(title: String) -> some View {
+        Button(title) {
+            Task { await generateSummary() }
+        }
+        .buttonStyle(QuietButtonStyle())
+        .accessibilityIdentifier("detail.summarize")
+    }
 
-                Text(summaryText)
-                    .font(Theme.body())
-                    .foregroundStyle(Theme.textSecondary)
-                    .textSelection(.enabled)
+    private func summaryBody(_ summary: Summary, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(text)
+                .readingText()
+                .textSelection(.enabled)
 
-                CitationChips(
-                    citations: summary.evidence?.summary ?? [],
-                    onTap: handleCitation
-                )
+            CitationChips(
+                citations: summary.evidence?.summary ?? [],
+                onTap: handleCitation
+            )
 
-                if let points = summary.keyPoints, !points.isEmpty {
-                    Text("Key Points")
-                        .font(Theme.body(14, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .padding(.top, 4)
-
-                    ForEach(Array(points.enumerated()), id: \.offset) { index, point in
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: "circle.fill")
-                                    .font(.system(size: 5))
-                                    .padding(.top, 7)
-                                    .foregroundStyle(Theme.brand500)
-                                Text(point)
-                                    .font(Theme.body(14))
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                            CitationChips(
-                                citations: summary.evidence?.keyPoints?[safe: index] ?? [],
-                                onTap: handleCitation
-                            )
-                        }
-                    }
-                }
-
-                if let actions = summary.actionItems, !actions.isEmpty {
-                    Text("Action Items")
-                        .font(Theme.body(14, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .padding(.top, 4)
-
-                    ForEach(Array(actions.enumerated()), id: \.offset) { index, action in
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: "checkmark.square")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.brand500)
-                                    .padding(.top, 2)
-                                Text(action)
-                                    .font(Theme.body(14))
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                            CitationChips(
-                                citations: summary.evidence?.actionItems?[safe: index] ?? [],
-                                onTap: handleCitation
-                            )
-                        }
-                    }
-                }
-
-                if let topics = summary.topics, !topics.isEmpty {
-                    Text("Topics")
-                        .font(Theme.body(14, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .padding(.top, 4)
-
-                    FlowLayout(spacing: 6) {
-                        ForEach(topics, id: \.self) { topic in
-                            Text(topic)
-                                .font(Theme.caption())
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Theme.brand500.opacity(0.1))
-                                .foregroundStyle(Theme.brand400)
-                                .clipShape(Capsule())
-                        }
-                    }
-                }
-
-                if let summaryID = summary.id {
-                    Button {
-                        reportTarget = AIContentReportTarget(
-                            targetType: isAudioItem ? .audioSummary : .transcriptSummary,
-                            targetId: summaryID
-                        )
-                    } label: {
-                        Label("Report summary", systemImage: "flag")
-                            .font(Theme.caption(12, weight: .semibold))
-                            .frame(minHeight: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Theme.textMuted)
-                    .accessibilityHint("Opens an in-app safety report for this AI summary")
+            if let points = summary.keyPoints, !points.isEmpty {
+                summaryListHeading("Key Points")
+                ForEach(Array(points.enumerated()), id: \.offset) { index, point in
+                    summaryListItem(
+                        point,
+                        citations: summary.evidence?.keyPoints?[safe: index] ?? []
+                    )
                 }
             }
-            .accentCardStyle()
-            .transition(.opacity.combined(with: .move(edge: .bottom)))
+
+            if let actions = summary.actionItems, !actions.isEmpty {
+                summaryListHeading("Action Items")
+                ForEach(Array(actions.enumerated()), id: \.offset) { index, action in
+                    summaryListItem(
+                        action,
+                        citations: summary.evidence?.actionItems?[safe: index] ?? []
+                    )
+                }
+            }
+
+            if let topics = summary.topics, !topics.isEmpty {
+                summaryListHeading("Topics")
+                Text(topics.joined(separator: " · "))
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+        }
+    }
+
+    private func summaryListHeading(_ title: String) -> some View {
+        Text(title)
+            .font(.ledgerHeadline)
+            .foregroundStyle(Theme.text)
+            .padding(.top, 10)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func summaryListItem(_ text: String, citations: [Citation]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(verbatim: "•")
+                    .font(.ledgerReading)
+                    .foregroundStyle(Theme.textSecondary)
+                    .accessibilityHidden(true)
+                Text(text)
+                    .readingText()
+                    .textSelection(.enabled)
+            }
+            CitationChips(citations: citations, onTap: handleCitation)
         }
     }
 
@@ -626,23 +697,26 @@ struct ItemDetailView: View {
     @ViewBuilder
     private var transcriptSection: some View {
         if let text = contentText, !text.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(text: "Transcript", icon: "doc.text")
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(pdf == nil ? "Transcript" : "Text")
+                        .font(.ledgerTitle2)
+                        .foregroundStyle(Theme.text)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength: 8)
+                    if isAudioItem, availableTranscriptViewModes.count > 1 {
+                        transcriptModeMenu
+                    }
+                }
 
                 if isAudioItem {
-                    Picker("Transcript view", selection: $transcriptViewMode) {
-                        ForEach(availableTranscriptViewModes) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    Text(transcriptViewDescription)
-                        .font(Theme.caption())
-                        .foregroundStyle(Theme.textMuted)
-
                     if transcriptViewMode == .readable {
                         transcriptFormattingState
+                    }
+                    if transcriptViewMode != .readable || audio?.hasDistinctReadableTranscript == true {
+                        Text(transcriptViewDescription)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                 }
 
@@ -651,45 +725,59 @@ struct ItemDetailView: View {
                 } else if !isAudioItem && !segments.isEmpty {
                     timestampedTranscript
                 } else {
-                    Text(visibleTranscriptText ?? text)
-                        .font(Theme.body())
-                        .foregroundStyle(Theme.textSecondary)
-                        .textSelection(.enabled)
+                    ReadingBody(text: visibleTranscriptText ?? text)
                 }
             }
-            .cardStyle()
+            .padding(.top, 26)
         }
     }
 
+    private var transcriptModeMenu: some View {
+        Menu {
+            Picker("Transcript view", selection: $transcriptViewMode) {
+                ForEach(availableTranscriptViewModes) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(transcriptViewMode.rawValue)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2)
+                    .accessibilityHidden(true)
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(Theme.accent)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Transcript view")
+        .accessibilityValue(transcriptViewMode.rawValue)
+        .accessibilityIdentifier("detail.transcript-mode")
+    }
+
+    /// Tapping a timestamp plays that moment and leaves the page where it is.
     private var timestampedTranscript: some View {
         LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(segments) { segment in
                 Button {
                     handleSegment(segment)
                 } label: {
-                    HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(segment.locatorLabel)
-                            .font(.caption.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(iconColor)
-                            .frame(minWidth: 52, alignment: .leading)
-
+                            .font(.footnote.monospacedDigit())
+                            .foregroundStyle(segment.startMs == nil ? Theme.textSecondary : Theme.accent)
                         Text(segment.text)
-                            .font(Theme.body())
-                            .foregroundStyle(Theme.textSecondary)
+                            .readingText()
                             .multilineTextAlignment(.leading)
-
-                        Spacer(minLength: 0)
                     }
-                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.vertical, 8)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RowButtonStyle())
+                .accessibilityHint(segment.startMs == nil ? "" : "Plays from this moment")
                 .id(segment.id)
-
-                if segment.id != segments.last?.id {
-                    Divider()
-                        .overlay(Theme.borderSubtle)
-                }
             }
         }
     }
@@ -699,57 +787,36 @@ struct ItemDetailView: View {
         if let audio {
             switch audio.formattingStatus ?? "none" {
             case "pending", "processing":
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .tint(Theme.brand500)
-                    Text("Formatting for readability… Your transcript is available now.")
-                        .font(Theme.caption())
-                        .foregroundStyle(Theme.textSecondary)
-                }
+                ProgressNote(text: "Formatting for readability… Your transcript is available now.")
             case "failed":
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(audio.formattingErrorMessage ?? "Readable formatting could not finish. Your transcript is shown unchanged.")
-                        .font(Theme.caption())
-                        .foregroundStyle(Theme.textSecondary)
+                NoticeRow(
+                    systemImage: "exclamationmark.circle",
+                    title: "Readable formatting could not finish",
+                    message: audio.formattingErrorMessage ?? "Your transcript is shown unchanged."
+                ) {
                     Button {
                         Task { await formatTranscriptForReadability() }
                     } label: {
-                        if isFormattingTranscript {
-                            ProgressView().frame(maxWidth: .infinity)
-                        } else {
-                            Label("Try Again", systemImage: "arrow.clockwise")
-                                .frame(maxWidth: .infinity)
-                        }
+                        if isFormattingTranscript { ProgressView() } else { Text("Try Again") }
                     }
-                    .buttonStyle(.bordered)
-                    .tint(Theme.brand500)
+                    .buttonStyle(QuietButtonStyle())
                     .disabled(isFormattingTranscript)
                 }
-                .padding(12)
-                .background(Theme.warning.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
             case "none":
-                VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text("This recording predates readable formatting.")
-                        .font(Theme.caption())
+                        .font(.footnote)
                         .foregroundStyle(Theme.textSecondary)
+                    Spacer(minLength: 0)
                     Button {
                         Task { await formatTranscriptForReadability() }
                     } label: {
-                        if isFormattingTranscript {
-                            ProgressView().frame(maxWidth: .infinity)
-                        } else {
-                            Label("Improve Readability", systemImage: "sparkles")
-                                .frame(maxWidth: .infinity)
-                        }
+                        if isFormattingTranscript { ProgressView() } else { Text("Improve") }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.brand500)
+                    .buttonStyle(QuietButtonStyle())
                     .disabled(isFormattingTranscript)
+                    .accessibilityLabel("Improve readability")
                 }
-                .padding(12)
-                .background(Theme.surfaceElevated)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
             default:
                 EmptyView()
             }
@@ -803,22 +870,6 @@ struct ItemDetailView: View {
         case .transcript: "transcript"
         case .audio: "audio"
         case .pdf: "pdf"
-        }
-    }
-
-    private var iconName: String {
-        switch item {
-        case .transcript: "play.rectangle.fill"
-        case .audio: "mic.fill"
-        case .pdf: "doc.fill"
-        }
-    }
-
-    private var iconColor: Color {
-        switch item {
-        case .transcript: Theme.brand500
-        case .audio: Theme.audioColor
-        case .pdf: Theme.error
         }
     }
 
@@ -971,70 +1022,46 @@ struct ItemDetailView: View {
         }
     }
 
-    @ViewBuilder
     private func detailErrorBanner(_ message: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(Theme.error)
-            Text(message)
-                .font(Theme.caption())
-                .foregroundStyle(Theme.textSecondary)
-            Spacer(minLength: 0)
+            InlineError(message)
             Button {
                 detailError = nil
             } label: {
                 Image(systemName: "xmark")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
                     .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(Theme.textMuted)
             .accessibilityLabel("Dismiss error")
         }
-        .cardStyle(padding: 12)
     }
 
-    @ViewBuilder
-    private func pollingWarningBanner(_ message: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "wifi.exclamationmark")
-                .foregroundStyle(Theme.warning)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Connection interrupted")
-                    .font(Theme.body(14, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Text(message)
-                    .font(Theme.caption())
-                    .foregroundStyle(Theme.textSecondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .cardStyle(padding: 12)
-    }
-
-    @ViewBuilder
     private var renameSheet: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Use a name you will recognize in search, exports, and collections.")
-                    .font(Theme.body(14))
-                    .foregroundStyle(Theme.textSecondary)
-
-                TextField("Recording title", text: $renameValue)
-                    .textFieldStyle(.themed)
-                    .textInputAutocapitalization(.sentences)
-                    .submitLabel(.done)
-                    .onSubmit { Task { await renameAudio() } }
-                    .accessibilityIdentifier("recording.rename.field")
+            Form {
+                Section {
+                    TextField("Recording title", text: $renameValue)
+                        .textInputAutocapitalization(.sentences)
+                        .submitLabel(.done)
+                        .onSubmit { Task { await renameAudio() } }
+                        .accessibilityIdentifier("recording.rename.field")
+                        .listRowBackground(Theme.surface)
+                } footer: {
+                    Text("Use a name you will recognize in search, exports, and collections.")
+                        .foregroundStyle(Theme.textSecondary)
+                }
 
                 if let detailError {
-                    Text(detailError)
-                        .font(Theme.caption())
-                        .foregroundStyle(Theme.error)
+                    Section {
+                        InlineError(detailError)
+                            .listRowBackground(Color.clear)
+                    }
                 }
-                Spacer(minLength: 0)
             }
-            .padding()
-            .background(Theme.surface)
+            .ledgerListBackground()
             .navigationTitle("Rename Recording")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1053,8 +1080,7 @@ struct ItemDetailView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
-        .presentationDetents([.height(250)])
+        .presentationDetents([.medium, .large])
     }
 
     private func beginRename() {
@@ -1213,14 +1239,30 @@ struct ItemDetailView: View {
         }
 
         if citation.itemType == "audio", let startMS = citation.startMs {
+            // Plays from here without moving the page, so reading carries on where
+            // it was. The bottom bar offers pause if the player is out of view.
             audioSeekTime = TimeInterval(startMS) / 1_000
-            scrollTarget = "audio-player"
             showChat = false
             return
         }
 
         scrollTarget = citation.segmentId
         showChat = false
+    }
+
+    private func deleteItem() async {
+        isDeleting = true
+        detailError = nil
+        defer { isDeleting = false }
+        do {
+            try await service.deleteLibraryItem(itemReference)
+            SpotlightService.removeLibraryItems([itemReference])
+            Haptics.success()
+            dismiss()
+        } catch {
+            detailError = error.localizedDescription
+            Haptics.error()
+        }
     }
 
     private func generateSummary() async {
@@ -1242,7 +1284,7 @@ struct ItemDetailView: View {
             case .pdf:
                 throw APIError.httpError(statusCode: 400, message: "PDF summaries are not available yet")
             }
-            withAnimation(Theme.springGentle) {
+            withMotion {
                 summary = result
             }
             Haptics.success()
@@ -1261,26 +1303,44 @@ struct CitationChips: View {
 
     var body: some View {
         if !citations.isEmpty {
-            FlowLayout(spacing: 6) {
+            FlowLayout(spacing: 12) {
                 ForEach(citations, id: \.self) { citation in
                     Button {
                         onTap(citation)
                     } label: {
                         Label(citation.locatorLabel, systemImage: citation.pageNumber == nil ? "play.fill" : "doc.text")
-                            .font(Theme.caption(11, weight: .semibold))
-                            .padding(.horizontal, 10)
+                            .font(.footnote.monospacedDigit())
+                            .labelStyle(.titleAndIcon)
+                            .foregroundStyle(Theme.accent)
                             .frame(minHeight: 44)
-                            .background(Theme.brand500.opacity(0.12))
-                            .foregroundStyle(Theme.brand400)
-                            .clipShape(Capsule())
-                            .overlay(
-                                Capsule()
-                                    .stroke(Theme.brand500.opacity(0.25), lineWidth: 1)
-                            )
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Open source at \(citation.locatorLabel)")
                 }
+            }
+        }
+    }
+}
+
+/// Long transcripts render a paragraph at a time, so scrolling stays smooth and a
+/// very tall block of text never has to be laid out in one piece.
+struct ReadingBody: View {
+    let text: String
+
+    private var paragraphs: [String] {
+        text.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    var body: some View {
+        LazyVStack(alignment: .leading, spacing: 14) {
+            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                Text(paragraph)
+                    .readingText()
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -1310,30 +1370,29 @@ struct ExportSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                // ShareLink presents from this sheet. Presenting from the root
-                // view controller failed silently, because that controller was
-                // already busy presenting this sheet.
-                ForEach(files) { file in
-                    ShareLink(item: file.url) {
-                        Label(file.label, systemImage: file.icon)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .frame(minHeight: 44)
+            List {
+                Section {
+                    // ShareLink presents from this sheet. Presenting from the root
+                    // view controller failed silently, because that controller was
+                    // already busy presenting this sheet.
+                    ForEach(files) { file in
+                        ShareLink(item: file.url) {
+                            Label(file.label, systemImage: file.icon)
+                                .foregroundStyle(Theme.text)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        }
+                        .listRowBackground(Theme.surface)
                     }
-                    .cardStyle(padding: 14)
                 }
 
                 if let exportError {
-                    Text(exportError)
-                        .font(Theme.caption())
-                        .foregroundStyle(Theme.error)
+                    Section {
+                        InlineError(exportError)
+                            .listRowBackground(Color.clear)
+                    }
                 }
-
-                Spacer()
             }
-            .padding()
-            .background(Theme.surface)
-            .foregroundStyle(Theme.textPrimary)
+            .ledgerListBackground()
             .navigationTitle("Export As")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1342,8 +1401,7 @@ struct ExportSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
-        .preferredColorScheme(.dark)
+        .presentationDetents([.medium, .large])
         .task { prepareFiles() }
     }
 

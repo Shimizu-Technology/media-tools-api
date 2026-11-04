@@ -195,7 +195,12 @@ final class UITestAPIProtocol: URLProtocol {
         } else if path.hasSuffix("/preferences") {
             respond(["favorite": false, "archived": false, "tags": []])
         } else if path.hasSuffix("/segments") {
-            respond([])
+            respond(Self.isRichContent ? Self.richSegments : [])
+        } else if Self.isRichContent, path.hasSuffix("/audio/transcriptions/\(Self.audioID)") {
+            respond(Self.richAudio)
+        } else if Self.isRichContent, path.hasSuffix("/audio/transcriptions/\(Self.audioID)/audio") {
+            // Nothing plays, but the player reaches its loaded state for layout review.
+            respond(["url": "https://example.invalid/fixture.m4a"])
         } else if path.hasSuffix("/audio/transcriptions/\(Self.audioID)") {
             respond([
                 "id": Self.audioID,
@@ -232,6 +237,113 @@ final class UITestAPIProtocol: URLProtocol {
         }
     }
 
+    // MARK: - Realistic content
+
+    /// `-ui-test-rich-content` fills the Library and one item with believable lengths,
+    /// for design review and the tests that need a summary and timestamps to act on.
+    private static var isRichContent: Bool {
+        ProcessInfo.processInfo.arguments.contains("-ui-test-rich-content")
+    }
+
+    private static func richLibraryItem(
+        id: String,
+        title: String,
+        subtitle: String = "",
+        status: String = "completed",
+        duration: Double,
+        hoursAgo: Double,
+        favorite: Bool = false
+    ) -> [String: Any] {
+        let created = Date().addingTimeInterval(-hoursAgo * 3_600)
+        return [
+            "id": id,
+            "item_type": "audio",
+            "title": title,
+            "subtitle": subtitle,
+            "status": status,
+            "word_count": Int(duration * 2),
+            "duration": duration,
+            "page_count": 0,
+            "summary_status": "",
+            "favorite": favorite,
+            "archived": false,
+            "tags": [],
+            "created_at": ISO8601DateFormatter().string(from: created),
+        ]
+    }
+
+    private static var richLibraryItems: [[String: Any]] {
+        [
+            richLibraryItem(id: audioID, title: "Monday planning call", duration: 2_530, hoursAgo: 0.2, favorite: true),
+            richLibraryItem(id: "rich-2", title: "Parking lot idea", status: "processing", duration: 108, hoursAgo: 0.5),
+            richLibraryItem(
+                id: "rich-3",
+                title: "Call with the bank about the account and the second signer they need before Friday",
+                status: "failed",
+                duration: 720,
+                hoursAgo: 26
+            ),
+            richLibraryItem(id: "rich-4", title: "Grocery and pharmacy run", duration: 31, hoursAgo: 28),
+            richLibraryItem(id: "rich-5", title: "Sunday sermon notes", subtitle: "Weekly teaching series", duration: 1_388, hoursAgo: 72),
+            richLibraryItem(id: "rich-6", title: "Dentist follow-up", duration: 252, hoursAgo: 96),
+            richLibraryItem(id: "rich-7", title: "Budget review with Sam", duration: 3_900, hoursAgo: 120),
+        ]
+    }
+
+    private static let richTranscript = """
+        Okay so the main thing I wanted to talk through is the date. I don’t think the eleventh gives us enough room for the retry work.
+
+        Agreed. If we push a week we can actually test the failure path properly instead of hoping it works on the day.
+
+        Eighteenth then. Let’s write that down. And for QA I’ll take the phone side and the share extension since that’s where I’m living anyway.
+
+        That works. I’ll take the web upload and the agent endpoints. We should also decide whether the pricing page ships with this or after.
+
+        After. It’s not worth holding anything for, and I’d rather not rush the copy. Send me the timeline when you have it and I’ll book the build for Friday.
+        """
+
+    private static var richAudio: [String: Any] {
+        [
+            "id": audioID,
+            "title": "Monday planning call",
+            "status": "completed",
+            "transcript_text": richTranscript,
+            "formatted_transcript_text": richTranscript,
+            "formatting_status": "completed",
+            "content_type": "meeting",
+            "duration": 2_530,
+            "word_count": 6_120,
+            "created_at": ISO8601DateFormatter().string(from: Date().addingTimeInterval(-720)),
+            "summary_status": "completed",
+            "summary_text": "Planning call about the launch. The date moves from the 11th to the 18th so QA can run a full week on the audio retry path. We split QA: I take iOS and the share extension, the other side takes the web upload and the agent endpoints.",
+            "key_points": [
+                "Launch moves to the 18th.",
+                "QA split by platform, not by feature.",
+                "Pricing page waits until after launch.",
+            ],
+            "action_items": [
+                "Send the revised timeline by Wednesday.",
+                "Book the TestFlight build for Friday.",
+            ],
+        ]
+    }
+
+    private static var richSegments: [[String: Any]] {
+        let lines = richTranscript.components(separatedBy: "\n\n")
+        // Enough to scroll the player well out of view.
+        return (0..<24).map { index in
+            [
+                "id": "segment-\(index)",
+                "item_type": "audio",
+                "item_id": audioID,
+                "ordinal": index,
+                "start_ms": index * 42_000,
+                "end_ms": (index + 1) * 42_000,
+                "text": lines[index % lines.count],
+            ]
+        }
+    }
+
     private func transcript(status: String) -> [String: Any] {
         [
             "id": "ui-test-transcript",
@@ -242,7 +354,7 @@ final class UITestAPIProtocol: URLProtocol {
     }
 
     private func libraryList() -> [String: Any] {
-        var items: [[String: Any]] = []
+        var items: [[String: Any]] = Self.isRichContent ? Self.richLibraryItems : []
         if let title = Self.currentAudioTitle {
             items.append([
                 "id": Self.audioID,

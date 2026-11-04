@@ -1,170 +1,66 @@
 import SwiftUI
 import AVFoundation
 
-/// In-app audio playback for recorded/uploaded audio.
+/// In-app audio playback for recorded/uploaded audio. Quiet until it is used: one
+/// line under the title, with skip and speed appearing once playback has started.
 struct AudioPlayerView: View {
+    let player: AudioPlayerService
     let audioId: String
     let knownDuration: TimeInterval?
     @Binding private var seekTime: TimeInterval?
-    @State private var player = AudioPlayerService()
     @State private var isLoading = true
     @State private var error: String?
     @State private var playbackNotice: String?
+    @State private var hasStarted = false
     @Environment(RecordingCoordinator.self) private var recorder
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
+        player: AudioPlayerService,
         audioId: String,
         knownDuration: TimeInterval? = nil,
         seekTime: Binding<TimeInterval?> = .constant(nil)
     ) {
+        self.player = player
         self.audioId = audioId
         self.knownDuration = knownDuration
         self._seekTime = seekTime
     }
 
     var body: some View {
-        VStack(spacing: 14) {
-            HStack {
-                Image(systemName: "speaker.wave.2.fill")
-                    .foregroundStyle(Theme.audioColor)
-                Text("Playback")
-                    .font(Theme.body(15, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer()
-            }
-
+        VStack(alignment: .leading, spacing: 2) {
             if isLoading {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .tint(Theme.audioColor)
-                    Text("Loading audio...")
-                        .font(Theme.caption())
-                        .foregroundStyle(Theme.textSecondary)
-                }
-                .padding(.vertical, 8)
+                ProgressNote(text: "Loading audio…")
+                    .frame(minHeight: 44)
             } else if let error {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(Theme.audioColor)
-                    Text(error)
-                        .font(Theme.caption())
-                        .foregroundStyle(Theme.textSecondary)
-                }
+                NoticeRow(systemImage: "exclamationmark.circle", title: error)
+                    .frame(minHeight: 44)
             } else {
-                // Playback controls
-                VStack(spacing: 10) {
-                    // Progress bar
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Theme.surfaceOverlay)
-                                .frame(height: 6)
-
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Theme.audioColor)
-                                .frame(width: geo.size.width * player.progress, height: 6)
-
-                            // Scrubber dot
-                            Circle()
-                                .fill(Theme.audioColor)
-                                .frame(width: 14, height: 14)
-                                .shadow(color: Theme.audioColor.opacity(0.4), radius: 4)
-                                .offset(x: geo.size.width * player.progress - 7)
-                        }
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { value in
-                                    let pct = value.location.x / geo.size.width
-                                    player.seek(to: max(0, min(1, pct)))
-                                }
-                        )
+                HStack(spacing: 10) {
+                    playButton
+                    PlaybackTrack(player: player)
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        timeLabel
                     }
-                    .frame(height: 14)
-                    .allowsHitTesting(player.duration > 0)
+                }
+                if dynamicTypeSize.isAccessibilitySize {
+                    timeLabel
+                }
 
-                    // Time + controls
-                    HStack {
-                        Text(player.formattedCurrentTime)
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(Theme.textSecondary)
+                if hasStarted {
+                    secondaryControls
+                        .transition(.opacity)
+                }
 
-                        Spacer()
-
-                        // Rewind 15s
-                        Button {
-                            player.skip(seconds: -15)
-                        } label: {
-                            Image(systemName: "gobackward.15")
-                                .font(.title3)
-                        }
-                        .disabled(player.duration <= 0)
-
-                        // Play/Pause
-                        Button {
-                            if player.isPlaying {
-                                player.pause()
-                            } else {
-                                startPlayback()
-                            }
-                        } label: {
-                            Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                .font(.largeTitle)
-                                .foregroundStyle(Theme.audioColor)
-                        }
-
-                        // Forward 15s
-                        Button {
-                            player.skip(seconds: 15)
-                        } label: {
-                            Image(systemName: "goforward.15")
-                                .font(.title3)
-                        }
-                        .disabled(player.duration <= 0)
-
-                        Spacer()
-
-                        Text(player.formattedDuration)
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(Theme.textSecondary)
-                    }
-
-                    if let playbackNotice {
-                        Text(playbackNotice)
-                            .font(Theme.caption())
-                            .foregroundStyle(Theme.textSecondary)
-                            .multilineTextAlignment(.center)
-                    }
-
-                    // Speed control
-                    HStack(spacing: 6) {
-                        ForEach(Array(zip([0.5, 1.0, 1.25, 1.5, 2.0], ["0.5x", "1x", "1.25x", "1.5x", "2x"])), id: \.0) { speed, label in
-                            Button {
-                                player.setSpeed(Float(speed))
-                            } label: {
-                                Text(label)
-                                    .font(Theme.caption(11, weight: .semibold))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
-                                    .background(player.speed == Float(speed) ? Theme.audioColor.opacity(0.2) : Theme.surfaceCard)
-                                    .foregroundStyle(player.speed == Float(speed) ? Theme.audioColor : Theme.textSecondary)
-                                    .clipShape(Capsule())
-                                    .overlay(
-                                        Capsule()
-                                            .stroke(player.speed == Float(speed) ? Theme.audioColor.opacity(0.4) : Theme.borderSubtle, lineWidth: 1)
-                                    )
-                            }
-                        }
-                    }
+                if let playbackNotice {
+                    Text(playbackNotice)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.textSecondary)
                 }
             }
         }
-        .padding(16)
-        .background(Theme.surfaceCard)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radiusMedium)
-                .stroke(Theme.audioColor.opacity(0.2), lineWidth: 1)
-        )
+        .animation(reduceMotion ? nil : Theme.quick, value: hasStarted)
         .task {
             await loadAudio()
         }
@@ -184,6 +80,97 @@ struct AudioPlayerView: View {
         }
     }
 
+    private var timeText: String {
+        "\(player.formattedCurrentTime) of \(player.formattedDuration)"
+    }
+
+    private var timeLabel: some View {
+        Text(timeText)
+            .font(.footnote.monospacedDigit())
+            .foregroundStyle(Theme.textSecondary)
+            .lineLimit(1)
+            .fixedSize()
+            .accessibilityHidden(true)
+    }
+
+    private var playButton: some View {
+        Button {
+            if player.isPlaying {
+                player.pause()
+            } else {
+                startPlayback()
+            }
+        } label: {
+            // The glyph has a fixed circle to stay inside. Its label is what scales.
+            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                .font(.subheadline)
+                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                .foregroundStyle(Theme.onAccent)
+                .frame(width: 36, height: 36)
+                .background(Theme.accentFill, in: Circle())
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressFeedbackButtonStyle())
+        .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+        .accessibilityValue(timeText)
+    }
+
+    private var secondaryControls: some View {
+        HStack(spacing: 4) {
+            Button {
+                player.skip(seconds: -15)
+            } label: {
+                Image(systemName: "gobackward.15")
+                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .disabled(player.duration <= 0)
+            .accessibilityLabel("Back 15 seconds")
+
+            Button {
+                player.skip(seconds: 15)
+            } label: {
+                Image(systemName: "goforward.15")
+                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .disabled(player.duration <= 0)
+            .accessibilityLabel("Forward 15 seconds")
+
+            Spacer(minLength: 0)
+
+            Menu {
+                ForEach(Array(zip([0.5, 1.0, 1.25, 1.5, 2.0], ["0.5x", "1x", "1.25x", "1.5x", "2x"])), id: \.0) { speed, label in
+                    Button {
+                        player.setSpeed(Float(speed))
+                    } label: {
+                        if player.speed == Float(speed) {
+                            Label(label, systemImage: "checkmark")
+                        } else {
+                            Text(label)
+                        }
+                    }
+                }
+            } label: {
+                Text(speedLabel)
+                    .font(.footnote.weight(.semibold).monospacedDigit())
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Playback speed")
+            .accessibilityValue(speedLabel)
+        }
+        .foregroundStyle(Theme.accent)
+    }
+
+    private var speedLabel: String {
+        let value = player.speed
+        return value == value.rounded() ? "\(Int(value))x" : "\(value)x"
+    }
+
     private var captureIsActive: Bool {
         recorder.isRecording || recorder.isStarting
     }
@@ -196,6 +183,7 @@ struct AudioPlayerView: View {
             return
         }
         playbackNotice = nil
+        hasStarted = true
         player.play()
     }
 
@@ -217,6 +205,79 @@ struct AudioPlayerView: View {
             self.error = "Audio not available for playback"
         }
         isLoading = false
+    }
+}
+
+/// A thin line with a thumb. The strip around it is a full 44 points tall.
+private struct PlaybackTrack: View {
+    let player: AudioPlayerService
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Theme.separator)
+                    .frame(height: 3)
+                Capsule()
+                    .fill(Theme.accent)
+                    .frame(width: geometry.size.width * player.progress, height: 3)
+                Circle()
+                    .fill(Theme.accent)
+                    .frame(width: 11, height: 11)
+                    .offset(x: geometry.size.width * player.progress - 5.5)
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        guard geometry.size.width > 0 else { return }
+                        let fraction = value.location.x / geometry.size.width
+                        player.seek(to: max(0, min(1, fraction)))
+                    }
+            )
+        }
+        .frame(height: 44)
+        .allowsHitTesting(player.duration > 0)
+        .accessibilityElement()
+        .accessibilityLabel("Playback position")
+        .accessibilityValue("\(player.formattedCurrentTime) of \(player.formattedDuration)")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: player.skip(seconds: 15)
+            case .decrement: player.skip(seconds: -15)
+            @unknown default: break
+            }
+        }
+    }
+}
+
+/// Takes over from the inline control when it has scrolled away, so a timestamp
+/// tapped deep in the transcript can still be paused from where you are reading.
+struct AudioMiniBar: View {
+    let player: AudioPlayerService
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button {
+                player.pause()
+            } label: {
+                Image(systemName: "pause.fill")
+                    .font(.subheadline)
+                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Pause")
+            PlaybackTrack(player: player)
+            Text(player.formattedCurrentTime)
+                .font(.footnote.monospacedDigit())
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize()
+                .accessibilityHidden(true)
+        }
     }
 }
 

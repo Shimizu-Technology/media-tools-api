@@ -4,7 +4,7 @@ import UserNotifications
 
 /// Holds the item a tapped notification should open. iOS can deliver the tap
 /// before any view exists on a cold launch, so the route waits here until
-/// `MainTabView` is on screen and consumes it.
+/// `MainView` is on screen and consumes it.
 @MainActor
 @Observable
 final class NotificationRouter {

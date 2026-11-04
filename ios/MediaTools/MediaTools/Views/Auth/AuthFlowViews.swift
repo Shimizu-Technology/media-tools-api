@@ -3,12 +3,7 @@ import UIKit
 
 extension View {
     func authFieldStyle() -> some View {
-        self
-            .padding(.horizontal, 14)
-            .frame(minHeight: 50)
-            .background(Theme.surfaceCard)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-            .overlay { RoundedRectangle(cornerRadius: Theme.radiusMedium).stroke(Theme.borderSubtle, lineWidth: 1) }
+        ledgerField()
     }
 }
 
@@ -29,17 +24,11 @@ struct AuthPrimaryButton: View {
             action()
         } label: {
             HStack(spacing: 8) {
-                if isBusy { ProgressView().tint(.white) }
+                if isBusy { ProgressView().tint(Theme.onAccent) }
                 Text(isBusy ? busyTitle : title)
             }
-            .font(Theme.body(15, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity, minHeight: 50)
-            .background(
-                isEnabled ? Theme.brand500 : Theme.textMuted,
-                in: RoundedRectangle(cornerRadius: Theme.radiusMedium)
-            )
         }
+        .buttonStyle(PrimaryButtonStyle())
         .disabled(!isEnabled || isBusy)
         .accessibilityIdentifier(identifier)
     }
@@ -85,8 +74,8 @@ struct NewPasswordFields: View {
                 .authFieldStyle()
                 .accessibilityIdentifier("\(idPrefix).confirm-password")
             Text(NewPasswordRule.hint)
-                .font(Theme.caption(12))
-                .foregroundStyle(Theme.textMuted)
+                .font(.footnote)
+                .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -100,7 +89,7 @@ struct EmailCodeField: View {
         TextField("6-digit code", text: $code)
             .keyboardType(.numberPad)
             .textContentType(.oneTimeCode)
-            .font(Theme.mono(16))
+            .font(.system(.body, design: .monospaced))
             .authFieldStyle()
             .accessibilityIdentifier("\(idPrefix).code")
     }
@@ -130,9 +119,11 @@ struct ResendCodeButton: View {
             }
         } label: {
             Text(secondsLeft > 0 ? "Send a new code in \(secondsLeft)s" : "Send a new code")
-                .font(Theme.body(14, weight: .semibold))
-                .foregroundStyle(secondsLeft > 0 ? Theme.textMuted : Theme.brand400)
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(secondsLeft > 0 ? Theme.textSecondary : Theme.accent)
                 .frame(maxWidth: .infinity, minHeight: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(secondsLeft > 0 || isBusy)
@@ -200,8 +191,8 @@ struct EmailPasswordFlowView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(purpose.title)
-                        .font(Theme.heading(24))
-                        .foregroundStyle(Theme.textPrimary)
+                        .font(.ledgerTitle2)
+                        .foregroundStyle(Theme.text)
                     if isAwaitingCode {
                         codeStep
                     } else {
@@ -211,7 +202,7 @@ struct EmailPasswordFlowView: View {
                 .padding(20)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.surface)
+            .background(Theme.bg)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { onCancel() }.disabled(isBusy)
@@ -223,7 +214,7 @@ struct EmailPasswordFlowView: View {
     private var emailStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(purpose.emailDetail)
-                .font(Theme.body(14))
+                .font(.subheadline)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             TextField("Email", text: $email)
@@ -255,7 +246,7 @@ struct EmailPasswordFlowView: View {
     private var codeStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(AuthCopy.emailReceipt + ". Enter the code it contains.")
-                .font(Theme.body(14))
+                .font(.subheadline)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("\(purpose.idPrefix).receipt")
@@ -291,9 +282,8 @@ struct EmailPasswordFlowView: View {
                 code = ""
                 errorMessage = nil
             }
-            .font(Theme.body(14, weight: .semibold))
-            .foregroundStyle(Theme.brand400)
-            .frame(maxWidth: .infinity, minHeight: 44)
+            .buttonStyle(QuietButtonStyle())
+            .frame(maxWidth: .infinity)
             .disabled(isBusy)
         }
     }
@@ -301,11 +291,7 @@ struct EmailPasswordFlowView: View {
     @ViewBuilder
     private var errorText: some View {
         if let errorMessage {
-            Text(errorMessage)
-                .font(Theme.caption(13))
-                .foregroundStyle(Theme.error)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("\(purpose.idPrefix).error")
+            InlineError(errorMessage, identifier: "\(purpose.idPrefix).error")
         }
     }
 

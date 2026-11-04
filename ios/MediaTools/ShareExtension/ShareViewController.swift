@@ -6,10 +6,18 @@ import UniformTypeIdentifiers
 /// and iOS wakes the app to finish. Without those, or if anything goes wrong, the
 /// saved share waits for the app, which handles everything as it always has.
 final class ShareViewController: UIViewController {
-    private let symbol = UIImageView(image: UIImage(systemName: "waveform.circle.fill"))
-    private let statusLabel = UILabel()
+    private let appMark = UIImageView(image: UIImage(named: "AppMark"))
+    private let appName = UILabel()
+    private let closeButton = UIButton(type: .system)
+    private let statusMark = UIImageView()
+    private let statusBackground = UIView()
     private let activity = UIActivityIndicatorView(style: .medium)
-    private let doneButton = UIButton(type: .system)
+    private let titleLabel = UILabel()
+    private let noteLabel = UILabel()
+    private let countdownTrack = UIView()
+    private let countdownFill = UIView()
+    private var countdownWidth: NSLayoutConstraint?
+    private var didFinish = false
 
     /// Long enough to read the confirmation without making a share feel slow.
     private static let successDismissDelay: TimeInterval = 1
@@ -28,55 +36,179 @@ final class ShareViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIColor.black.withAlphaComponent(0.25)
+        // Clear, because iOS 26 can host this inside a sheet of the host app's own, out
+        // of reach from here. Any color would paint that whole sheet, not just a dim.
+        view.backgroundColor = .clear
 
         let card = UIView()
-        card.backgroundColor = .systemBackground
-        card.layer.cornerRadius = 28
+        card.backgroundColor = UIColor.ledger("surface")
+        card.layer.cornerRadius = 24
         card.layer.cornerCurve = .continuous
+        card.layer.shadowColor = UIColor.black.cgColor
+        card.layer.shadowOpacity = 0.22
+        card.layer.shadowRadius = 24
+        card.layer.shadowOffset = CGSize(width: 0, height: 8)
         card.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(card)
 
-        symbol.tintColor = .systemTeal
-        symbol.contentMode = .scaleAspectFit
-        symbol.translatesAutoresizingMaskIntoConstraints = false
+        let scrollView = UIScrollView()
+        scrollView.alwaysBounceVertical = false
+        scrollView.layer.cornerRadius = 24
+        scrollView.layer.cornerCurve = .continuous
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(scrollView)
 
-        statusLabel.text = "Saving to Media Tools…"
-        statusLabel.textAlignment = .center
-        statusLabel.numberOfLines = 0
-        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        let content = UIStackView()
+        content.axis = .vertical
+        content.alignment = .fill
+        content.spacing = 16
+        content.isLayoutMarginsRelativeArrangement = true
+        content.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 8, leading: 20, bottom: 24, trailing: 12)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(content)
 
-        activity.startAnimating()
-        activity.translatesAutoresizingMaskIntoConstraints = false
+        content.addArrangedSubview(makeHeader())
+        content.addArrangedSubview(makeStatusRow())
+        content.addArrangedSubview(makeCountdown())
 
-        doneButton.setTitle("Done", for: .normal)
-        doneButton.addTarget(self, action: #selector(done), for: .touchUpInside)
-        doneButton.isHidden = true
-        doneButton.translatesAutoresizingMaskIntoConstraints = false
-
-        [symbol, statusLabel, activity, doneButton].forEach(card.addSubview)
+        // The card hugs its content until accessibility text outgrows the screen,
+        // and only then scrolls.
+        let hug = scrollView.heightAnchor.constraint(equalTo: content.heightAnchor)
+        hug.priority = .defaultHigh
         NSLayoutConstraint.activate([
             card.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
             card.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
             card.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
-            symbol.centerXAnchor.constraint(equalTo: card.centerXAnchor),
-            symbol.topAnchor.constraint(equalTo: card.topAnchor, constant: 24),
-            symbol.widthAnchor.constraint(equalToConstant: 44),
-            symbol.heightAnchor.constraint(equalToConstant: 44),
-            statusLabel.topAnchor.constraint(equalTo: symbol.bottomAnchor, constant: 12),
-            statusLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 24),
-            statusLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -24),
-            activity.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 12),
-            activity.centerXAnchor.constraint(equalTo: card.centerXAnchor),
-            activity.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -24),
-            doneButton.topAnchor.constraint(equalTo: card.topAnchor, constant: 8),
-            doneButton.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
-            doneButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
+            card.topAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            scrollView.topAnchor.constraint(equalTo: card.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            hug,
+            content.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            content.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.trailingAnchor),
         ])
+
         saveOfferedItems()
     }
 
+    private func makeHeader() -> UIView {
+        appMark.contentMode = .scaleAspectFill
+        appMark.layer.cornerRadius = 8
+        appMark.layer.cornerCurve = .continuous
+        appMark.clipsToBounds = true
+        appMark.isAccessibilityElement = false
+
+        appName.text = "Media Tools"
+        appName.font = UIFontMetrics(forTextStyle: .headline)
+            .scaledFont(for: .systemFont(ofSize: 17, weight: .semibold))
+        appName.adjustsFontForContentSizeCategory = true
+        appName.textColor = UIColor.ledger("text")
+        appName.numberOfLines = 0
+
+        closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
+        closeButton.tintColor = UIColor.ledger("text-secondary")
+        closeButton.addTarget(self, action: #selector(done), for: .touchUpInside)
+        closeButton.accessibilityLabel = "Done"
+        closeButton.isHidden = true
+
+        let header = UIStackView(arrangedSubviews: [appMark, appName, closeButton])
+        header.axis = .horizontal
+        header.alignment = .center
+        header.spacing = 10
+        NSLayoutConstraint.activate([
+            appMark.widthAnchor.constraint(equalToConstant: 36),
+            appMark.heightAnchor.constraint(equalToConstant: 36),
+            closeButton.widthAnchor.constraint(equalToConstant: 44),
+            closeButton.heightAnchor.constraint(equalToConstant: 44),
+            header.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
+        ])
+        return header
+    }
+
+    private func makeStatusRow() -> UIView {
+        statusBackground.backgroundColor = .clear
+        statusBackground.layer.cornerRadius = 22
+        statusBackground.translatesAutoresizingMaskIntoConstraints = false
+
+        statusMark.contentMode = .scaleAspectFit
+        statusMark.translatesAutoresizingMaskIntoConstraints = false
+        statusMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .headline)
+        statusMark.isAccessibilityElement = false
+        statusBackground.addSubview(statusMark)
+
+        activity.startAnimating()
+        activity.color = UIColor.ledger("text-secondary")
+        activity.translatesAutoresizingMaskIntoConstraints = false
+        statusBackground.addSubview(activity)
+
+        titleLabel.text = "Saving to Media Tools…"
+        titleLabel.font = UIFont.ledgerSerif(.title3, weight: .semibold)
+        titleLabel.adjustsFontForContentSizeCategory = true
+        titleLabel.textColor = UIColor.ledger("text")
+        titleLabel.numberOfLines = 0
+
+        noteLabel.font = .preferredFont(forTextStyle: .subheadline)
+        noteLabel.adjustsFontForContentSizeCategory = true
+        noteLabel.textColor = UIColor.ledger("text-secondary")
+        noteLabel.numberOfLines = 0
+        noteLabel.isHidden = true
+
+        let text = UIStackView(arrangedSubviews: [titleLabel, noteLabel])
+        text.axis = .vertical
+        text.spacing = 2
+
+        let row = UIStackView(arrangedSubviews: [statusBackground, text])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 12
+        row.isLayoutMarginsRelativeArrangement = true
+        row.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8)
+        NSLayoutConstraint.activate([
+            statusBackground.widthAnchor.constraint(equalToConstant: 44),
+            statusBackground.heightAnchor.constraint(equalToConstant: 44),
+            statusMark.centerXAnchor.constraint(equalTo: statusBackground.centerXAnchor),
+            statusMark.centerYAnchor.constraint(equalTo: statusBackground.centerYAnchor),
+            activity.centerXAnchor.constraint(equalTo: statusBackground.centerXAnchor),
+            activity.centerYAnchor.constraint(equalTo: statusBackground.centerYAnchor),
+        ])
+        return row
+    }
+
+    /// A thin line that empties as the card closes itself.
+    private func makeCountdown() -> UIView {
+        countdownTrack.backgroundColor = UIColor.ledger("separator")
+        countdownTrack.layer.cornerRadius = 1.5
+        countdownTrack.clipsToBounds = true
+        countdownTrack.isHidden = true
+        countdownTrack.isAccessibilityElement = false
+
+        countdownFill.backgroundColor = UIColor.ledger("accent")
+        countdownFill.translatesAutoresizingMaskIntoConstraints = false
+        countdownTrack.addSubview(countdownFill)
+
+        let width = countdownFill.widthAnchor.constraint(equalTo: countdownTrack.widthAnchor)
+        countdownWidth = width
+        NSLayoutConstraint.activate([
+            countdownTrack.heightAnchor.constraint(equalToConstant: 3),
+            countdownFill.leadingAnchor.constraint(equalTo: countdownTrack.leadingAnchor),
+            countdownFill.topAnchor.constraint(equalTo: countdownTrack.topAnchor),
+            countdownFill.bottomAnchor.constraint(equalTo: countdownTrack.bottomAnchor),
+            width,
+        ])
+
+        let wrapper = UIStackView(arrangedSubviews: [countdownTrack])
+        wrapper.axis = .vertical
+        wrapper.isLayoutMarginsRelativeArrangement = true
+        wrapper.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8)
+        return wrapper
+    }
+
     @objc private func done() {
+        guard !didFinish else { return }
+        didFinish = true
         extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
     }
 
@@ -130,7 +262,7 @@ final class ShareViewController: UIViewController {
             if let failure, saved == 0 {
                 self?.finish(failure: failure)
             } else if let failure {
-                self?.finish(failure: "Saved \(saved). One item could not be saved: \(failure)")
+                self?.finish(failure: "Saved \(saved). One item could not be saved: \(failure)", title: "Not everything saved")
             } else {
                 self?.finishSuccessfully(uploadStarted: uploading > 0)
             }
@@ -225,25 +357,49 @@ final class ShareViewController: UIViewController {
     }
 
     private func finishSuccessfully(uploadStarted: Bool) {
-        activity.stopAnimating()
-        symbol.image = UIImage(systemName: "checkmark.circle.fill")
-        symbol.tintColor = .systemGreen
-        statusLabel.text = uploadStarted ? "Saved. Uploading to Media Tools." : "Saved to Media Tools"
-        UIAccessibility.post(notification: .announcement, argument: statusLabel.text)
+        showStatus(systemImage: "checkmark", tint: UIColor.ledger("on-accent"), background: UIColor.ledger("accent-fill"))
+        titleLabel.text = "Saved to your library"
+        noteLabel.text = uploadStarted
+            ? "Uploading in the background."
+            : "Saved on this iPhone for Media Tools to finish."
+        noteLabel.isHidden = false
+        closeButton.isHidden = false
+        UIAccessibility.post(notification: .announcement, argument: "\(titleLabel.text ?? "") \(noteLabel.text ?? "")")
+        runCountdown()
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.successDismissDelay) { [weak self] in
             self?.done()
         }
     }
 
     /// A failure stays on screen until dismissed because nothing was saved and
-    /// the person needs to know that.
-    private func finish(failure message: String) {
+    /// the person needs to know that. It stays in ink: red means recording here too.
+    private func finish(failure message: String, title: String = "Not saved") {
+        showStatus(systemImage: "exclamationmark", tint: UIColor.ledger("text"), background: UIColor.ledger("fill"))
+        titleLabel.text = title
+        noteLabel.text = message
+        noteLabel.textColor = UIColor.ledger("text")
+        noteLabel.isHidden = false
+        closeButton.isHidden = false
+        UIAccessibility.post(notification: .announcement, argument: "\(title) \(message)")
+    }
+
+    private func showStatus(systemImage: String, tint: UIColor, background: UIColor) {
         activity.stopAnimating()
-        symbol.image = UIImage(systemName: "exclamationmark.circle.fill")
-        symbol.tintColor = .systemRed
-        statusLabel.text = message
-        statusLabel.textColor = .systemRed
-        doneButton.isHidden = false
+        statusMark.image = UIImage(systemName: systemImage)
+        statusMark.tintColor = tint
+        statusBackground.backgroundColor = background
+    }
+
+    private func runCountdown() {
+        guard !UIAccessibility.isReduceMotionEnabled, let countdownWidth else { return }
+        countdownTrack.isHidden = false
+        view.layoutIfNeeded()
+        countdownWidth.isActive = false
+        let empty = countdownFill.widthAnchor.constraint(equalToConstant: 0)
+        empty.isActive = true
+        UIView.animate(withDuration: Self.successDismissDelay, delay: 0, options: .curveLinear) {
+            self.countdownTrack.layoutIfNeeded()
+        }
     }
 }
 

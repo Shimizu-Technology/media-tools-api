@@ -24,7 +24,6 @@ struct AIContentReportSheet: View {
                     } actions: {
                         Button("Done") { dismiss() }
                             .buttonStyle(.borderedProminent)
-                            .tint(Theme.brand500)
                     }
                 } else {
                     Form {
@@ -32,8 +31,9 @@ struct AIContentReportSheet: View {
                             Text(
                                 "The selected AI output, category, and optional note will be available to Shimizu Technology for review. Media Tools does not attach a separate copy of your source recording, transcript, or document."
                             )
-                            .font(Theme.body(14))
+                            .font(.subheadline)
                             .foregroundStyle(Theme.textSecondary)
+                            .listRowBackground(Theme.surface)
                         }
 
                         Section("What is wrong with it?") {
@@ -44,6 +44,7 @@ struct AIContentReportSheet: View {
                             }
                             .pickerStyle(.inline)
                             .labelsHidden()
+                            .listRowBackground(Theme.surface)
                         }
 
                         Section("Note (optional)") {
@@ -53,25 +54,27 @@ struct AIContentReportSheet: View {
                                 axis: .vertical
                             )
                             .lineLimit(3...6)
+                            .listRowBackground(Theme.surface)
                             .onChange(of: details) { _, value in
                                 if value.count > 1_000 {
                                     details = String(value.prefix(1_000))
                                 }
                             }
                             Text("Do not add passwords, API keys, or source content. \(details.count)/1000")
-                                .font(Theme.caption())
-                                .foregroundStyle(Theme.textMuted)
+                                .listRowBackground(Theme.surface)
+                                .font(.footnote)
+                                .foregroundStyle(Theme.textSecondary)
                         }
 
                         if let error {
                             Section {
-                                Label(error, systemImage: "exclamationmark.triangle.fill")
-                                    .font(Theme.body(14))
-                                    .foregroundStyle(Theme.error)
+                                InlineError(error)
+                                    .listRowBackground(Color.clear)
                             }
                         }
                     }
                     .scrollDismissesKeyboard(.interactively)
+                    .ledgerListBackground()
                 }
             }
             .navigationTitle("Report AI output")

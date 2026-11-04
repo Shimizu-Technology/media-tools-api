@@ -44,6 +44,11 @@ enum LibrarySortOrder: String, CaseIterable, Hashable {
     var direction: String { self == .newest ? "desc" : "asc" }
 }
 
+struct LibraryCollectionFilter: Hashable {
+    let id: String
+    let name: String
+}
+
 struct LibraryQuery: Hashable {
     let type: LibraryMediaFilter
     let status: LibraryStatusFilter
@@ -55,7 +60,7 @@ struct LibraryQuery: Hashable {
 /// Owns the Library snapshot independently from its navigation destination.
 ///
 /// A detail push temporarily removes `LibraryView` from the active hierarchy,
-/// but this model remains owned by the Library tab. Returning therefore reuses
+/// but this model remains owned by `MainView`. Returning therefore reuses
 /// the loaded pages, filters, and visible anchor instead of clearing page one.
 @MainActor
 @Observable
@@ -67,9 +72,12 @@ final class LibraryViewModel {
     var searchText = ""
     var showsArchived = false
     var visibleReference: LibraryReference?
-    /// Lives here rather than in the view so a notification tap can open an item
-    /// before the Library tab has ever been shown.
-    var presentedReference: LibraryReference?
+    /// Collections are a filter over the Library. The server's list endpoint has no
+    /// collection parameter, so a chosen collection shows its own item list.
+    var selectedCollection: LibraryCollectionFilter?
+    private(set) var collectionItems: [CollectionItem] = []
+    private(set) var isLoadingCollection = false
+    private(set) var collectionError: String?
     private(set) var currentPage = 0
     private(set) var totalPages = 0
     private(set) var totalItems = 0
@@ -159,6 +167,28 @@ final class LibraryViewModel {
 
     func retryNextPage() async {
         await loadNextPage(for: query)
+    }
+
+    /// A collection that has gone away falls back to its error, with the rest of the
+    /// Library one filter change away.
+    func loadSelectedCollection() async {
+        guard let filter = selectedCollection else {
+            collectionItems = []
+            collectionError = nil
+            return
+        }
+        isLoadingCollection = true
+        collectionError = nil
+        defer { isLoadingCollection = false }
+        do {
+            let collection = try await service.getCollection(filter.id)
+            guard selectedCollection == filter, !Task.isCancelled else { return }
+            collectionItems = collection.items ?? []
+        } catch {
+            guard selectedCollection == filter, !Task.isCancelled else { return }
+            collectionItems = []
+            collectionError = error.localizedDescription
+        }
     }
 
     func remove(_ references: Set<LibraryReference>) {

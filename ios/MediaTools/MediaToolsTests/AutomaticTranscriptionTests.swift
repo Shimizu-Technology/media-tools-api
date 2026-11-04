@@ -1236,11 +1236,4 @@ final class LibraryFreshnessTests: XCTestCase {
             ).contains("archive")
         )
     }
-
-    func testPresentedReferenceSurvivesWithoutTheLibraryViewOnScreen() {
-        let model = LibraryViewModel(previewItems: [])
-        let reference = LibraryReference(itemType: "audio", itemId: "abc")
-        model.presentedReference = reference
-        XCTAssertEqual(model.presentedReference, reference)
-    }
 }

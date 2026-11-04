@@ -13,78 +13,78 @@ struct AddToCollectionSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    if service.collections.isEmpty {
-                        ContentUnavailableView(
-                            "No Collections",
-                            systemImage: "folder.badge.plus",
-                            description: Text("Create your first collection below.")
-                        )
-                        .padding(.top, 40)
-                    }
+            List {
+                if service.collections.isEmpty {
+                    ContentUnavailableView(
+                        "No Collections",
+                        systemImage: "folder",
+                        description: Text("Create your first collection below.")
+                    )
+                    .listRowBackground(Color.clear)
+                }
 
+                Section {
                     ForEach(service.collections) { collection in
                         Button {
                             Task { await addTo(collection) }
                         } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: "folder.fill")
-                                    .foregroundStyle(Theme.brand500)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(collection.name)
-                                        .font(Theme.body(15, weight: .medium))
-                                        .foregroundStyle(Theme.textPrimary)
+                                        .font(.body)
+                                        .foregroundStyle(Theme.text)
                                     if let count = collection.itemCount {
-                                        Text("\(count) items")
-                                            .font(Theme.caption())
+                                        Text("\(count) item\(count == 1 ? "" : "s")")
+                                            .font(.footnote)
                                             .foregroundStyle(Theme.textSecondary)
                                     }
                                 }
                                 Spacer()
                                 if addedTo == collection.id {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(Theme.success)
-                                        .transition(.scale.combined(with: .opacity))
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Theme.accent)
+                                        .accessibilityLabel("Added")
                                 }
                             }
-                            .cardStyle(padding: 12)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .disabled(isAdding)
+                        .listRowBackground(Theme.surface)
                     }
+                }
 
-                    // Create new
-                    VStack(spacing: 10) {
-                        if showCreateNew {
-                            HStack(spacing: 8) {
-                                TextField("Collection name", text: $newName)
-                                    .textFieldStyle(.themed)
-                                Button("Create") {
+                Section {
+                    if showCreateNew {
+                        HStack(spacing: 8) {
+                            TextField("Collection name", text: $newName)
+                                .submitLabel(.done)
+                                .onSubmit {
+                                    guard !newName.isEmpty else { return }
                                     Task { await createAndAdd() }
                                 }
-                                .brandButtonStyle()
-                                .disabled(newName.isEmpty)
+                            Button("Create") {
+                                Task { await createAndAdd() }
                             }
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                        } else {
-                            Button {
-                                withAnimation(Theme.springSnappy) {
-                                    showCreateNew = true
-                                }
-                            } label: {
-                                Label("New Collection", systemImage: "plus")
-                                    .font(Theme.body(14, weight: .medium))
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .secondaryButtonStyle()
+                            .buttonStyle(QuietButtonStyle())
+                            .disabled(newName.isEmpty)
                         }
+                        .frame(minHeight: 44)
+                        .listRowBackground(Theme.surface)
+                    } else {
+                        Button {
+                            showCreateNew = true
+                        } label: {
+                            Label("New Collection", systemImage: "plus")
+                                .foregroundStyle(Theme.accent)
+                                .frame(minHeight: 44)
+                        }
+                        .listRowBackground(Theme.surface)
                     }
-                    .padding(.top, 8)
                 }
-                .padding()
             }
-            .background(Theme.surface)
+            .ledgerListBackground()
             .navigationTitle("Add to Collection")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -96,7 +96,6 @@ struct AddToCollectionSheet: View {
                 await service.loadCollections()
             }
         }
-        .preferredColorScheme(.dark)
     }
 
     private func addTo(_ collection: Collection) async {
@@ -104,9 +103,7 @@ struct AddToCollectionSheet: View {
         defer { isAdding = false }
         do {
             try await service.addToCollection(collection.id, itemType: itemType, itemId: itemId)
-            withAnimation(Theme.springSnappy) {
-                addedTo = collection.id
-            }
+            addedTo = collection.id
             Haptics.success()
 
             try? await Task.sleep(for: .seconds(0.8))
@@ -123,9 +120,7 @@ struct AddToCollectionSheet: View {
         do {
             let collection = try await service.createCollection(name: newName)
             try await service.addToCollection(collection.id, itemType: itemType, itemId: itemId)
-            withAnimation(Theme.springSnappy) {
-                addedTo = collection.id
-            }
+            addedTo = collection.id
             newName = ""
             showCreateNew = false
             await service.loadCollections()
