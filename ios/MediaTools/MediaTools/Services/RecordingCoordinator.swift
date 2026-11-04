@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import Observation
 import SwiftUI
+import UIKit
 
 enum RecordingCaptureState: Equatable {
     case idle
@@ -19,6 +20,7 @@ enum RecordingCaptureState: Equatable {
 final class RecordingCoordinator {
     static let shared = RecordingCoordinator()
     static let pendingLegacyRecordingOwnerIDKey = "pendingLegacyRecordingOwnerID"
+    static let pendingShareClaimOwnerIDKey = "pendingShareClaimOwnerID"
 
     private(set) var captureState: RecordingCaptureState = .idle
     private(set) var isStarting = false
@@ -41,7 +43,13 @@ final class RecordingCoordinator {
     private var lastStorageCheckDuration: TimeInterval = 0
     private var stateBeforeInterruption: RecordingCaptureState?
     private let notificationObservers = NotificationObserverBag()
-    private let store: RecordingStore?
+    private var store: RecordingStore?
+    /// False until the saved manifest has been read. Until then this launch only
+    /// knows part of the list, so it must not replace the manifest. See
+    /// `persistPendingRecordings`.
+    private var hasRestoredManifest = false
+    private var hasAttemptedRestoration = false
+    private var unmergedRecordingIDs: Set<UUID> = []
     private var shareInbox: ShareInboxStore?
     private let simulatesCapture: Bool
     private let activityManager: RecordingActivityManaging
@@ -51,6 +59,9 @@ final class RecordingCoordinator {
     /// has one entry point for every capture path: Action Button, Live Activity,
     /// the in-app button, and imported shares.
     var onSavedRecordingsChanged: (() -> Void)?
+    /// Called when recordings appear after a restore that first failed, because
+    /// the upload coordinator has not seen any of their queued work.
+    var onRecordingsRestored: (() -> Void)?
 
     static let minimumStartCapacityBytes: Int64 = 100 * 1_024 * 1_024
     static let criticalRecordingCapacityBytes: Int64 = 50 * 1_024 * 1_024
@@ -88,7 +99,7 @@ final class RecordingCoordinator {
                 self.store = try RecordingStore()
             } catch {
                 self.store = nil
-                errorMessage = "Media Tools could not prepare secure recording storage."
+                errorMessage = Self.storageUnavailableMessage
             }
         }
         #if DEBUG
@@ -98,6 +109,7 @@ final class RecordingCoordinator {
         #endif
         restorePendingRecordings()
         observeAudioSession()
+        observeProtectedData()
     }
 
     var formattedDuration: String {
@@ -131,16 +143,26 @@ final class RecordingCoordinator {
 
     /// Switches the visible device workspace. Unowned recordings are legacy or
     /// signed-out Quick Captures, so the first signed-in account claims them.
-    /// The intended owner is saved separately before rewriting the manifest;
-    /// if that rewrite fails, a later account can never claim the same files.
     func setActiveOwnerID(_ ownerID: String?) {
         activeOwnerID = ownerID
-        guard let ownerID else { return }
+        guard ownerID != nil else { return }
+        retryRestorationIfNeeded()
+        claimUnownedRecordings()
+    }
+
+    /// The intended owner is saved separately before rewriting the manifest; if
+    /// that rewrite fails, a later account can never claim the same files. An
+    /// unread manifest may hold unowned recordings, so this account's place in
+    /// line is saved until it has been read.
+    private func claimUnownedRecordings() {
+        guard let ownerID = activeOwnerID else { return }
         let pendingClaimOwnerID = localAccountDefaults.string(
             forKey: Self.pendingLegacyRecordingOwnerIDKey
         )
         let hasUnownedRecordings = pendingRecordings.contains { $0.ownerID == nil }
-        guard pendingClaimOwnerID != nil || hasUnownedRecordings else { return }
+        guard pendingClaimOwnerID != nil || hasUnownedRecordings || !hasRestoredManifest else {
+            return
+        }
         let claimOwnerID = pendingClaimOwnerID ?? ownerID
         localAccountDefaults.set(
             claimOwnerID,
@@ -151,7 +173,9 @@ final class RecordingCoordinator {
         }
         do {
             try persistPendingRecordings()
-            localAccountDefaults.removeObject(forKey: Self.pendingLegacyRecordingOwnerIDKey)
+            if hasRestoredManifest {
+                localAccountDefaults.removeObject(forKey: Self.pendingLegacyRecordingOwnerIDKey)
+            }
         } catch {
             errorMessage = "Device recordings are protected, but their account assignment will retry."
         }
@@ -161,6 +185,11 @@ final class RecordingCoordinator {
     /// Rewrite only that exact subject; another account's recordings stay put.
     func migrateOwnerID(from clerkID: String, to userID: String) throws {
         guard clerkID != userID else { return }
+        // The manifest may hold this account's recordings. Migrating only what is
+        // in memory would strand those under an owner ID that never signs in again.
+        retryRestorationIfNeeded()
+        guard hasRestoredManifest else { throw RecordingCoordinatorError.manifestUnavailable }
+        try migrateSharedDocuments(from: clerkID, to: userID)
         let previous = pendingRecordings
         for index in pendingRecordings.indices where pendingRecordings[index].ownerID == clerkID {
             pendingRecordings[index].ownerID = userID
@@ -188,6 +217,13 @@ final class RecordingCoordinator {
         }
         pendingRecordings.removeAll { $0.ownerID == ownerID }
         try persistPendingRecordings()
+        try deleteSharedDocuments(ownedBy: ownerID)
+        // Recordings still in the unread manifest belong to this account too. The
+        // caller keeps its deletion intent and retries after this throws.
+        guard hasRestoredManifest else { throw RecordingCoordinatorError.manifestUnavailable }
+        if pendingRecordings.contains(where: { $0.ownerID == ownerID }) {
+            try deleteRecordingsOwned(by: ownerID)
+        }
     }
 
     func fileURL(for recording: LocalRecording) -> URL? {
@@ -203,14 +239,9 @@ final class RecordingCoordinator {
     /// coordinator checks account ownership and AI processing consent. PDFs and
     /// links have no recording, so they stay in the inbox until it sends them.
     func importSharedItems() {
+        retryRestorationIfNeeded()
         do {
-            let inbox: ShareInboxStore
-            if let existing = shareInbox {
-                inbox = existing
-            } else {
-                inbox = try ShareInboxStore()
-                shareInbox = inbox
-            }
+            let inbox = try resolvedShareInbox()
             var errors = pendingSharedErrors
             for item in try inbox.pendingItems() where item.resolvedKind == .audio {
                 do {
@@ -235,6 +266,13 @@ final class RecordingCoordinator {
         }
     }
 
+    private func resolvedShareInbox() throws -> ShareInboxStore {
+        if let shareInbox { return shareInbox }
+        let inbox = try ShareInboxStore()
+        shareInbox = inbox
+        return inbox
+    }
+
     func sharedFileURL(for item: ShareInboxStore.Item) -> URL? {
         guard item.resolvedKind != .link,
               pendingSharedItems.contains(where: { $0.id == item.id })
@@ -242,10 +280,15 @@ final class RecordingCoordinator {
         return shareInbox?.fileURL(for: item)
     }
 
+    /// A share claimed by another account is hidden, like that account's recordings.
+    var availableSharedItems: [ShareInboxStore.Item] {
+        pendingSharedItems.filter { $0.ownerID == nil || $0.ownerID == activeOwnerID }
+    }
+
     /// Audio still in the inbox failed to import. A PDF or link only needs
     /// attention after sending it failed; until then it is simply on its way.
     var sharesNeedingAttention: [ShareInboxStore.Item] {
-        pendingSharedItems.filter {
+        availableSharedItems.filter {
             $0.resolvedKind == .audio || pendingSharedErrors[$0.id] != nil
         }
     }
@@ -255,8 +298,81 @@ final class RecordingCoordinator {
         completeSharedDocument(item)
     }
 
-    var pendingSharedDocuments: [ShareInboxStore.Item] {
-        pendingSharedItems.filter { $0.resolvedKind != .audio }
+    func sharedDocuments(ownedBy ownerID: String) -> [ShareInboxStore.Item] {
+        pendingSharedItems.filter { $0.resolvedKind != .audio && $0.ownerID == ownerID }
+    }
+
+    /// Saves who owns each unowned PDF and link before anything is sent. As with
+    /// recordings, the intended owner is saved first: if a write fails, the claim
+    /// retries for this account and never passes to a later one.
+    func claimSharedDocuments() {
+        guard let ownerID = activeOwnerID, let shareInbox else { return }
+        let intendedOwnerID = localAccountDefaults.string(forKey: Self.pendingShareClaimOwnerIDKey)
+        let unclaimed = pendingSharedItems.indices.filter {
+            pendingSharedItems[$0].resolvedKind != .audio && pendingSharedItems[$0].ownerID == nil
+        }
+        guard intendedOwnerID != nil || !unclaimed.isEmpty else { return }
+        let claimOwnerID = intendedOwnerID ?? ownerID
+        localAccountDefaults.set(claimOwnerID, forKey: Self.pendingShareClaimOwnerIDKey)
+        let autoTranscribe = AutoTranscribePreference(defaults: localAccountDefaults)
+            .isEnabled(ownerID: claimOwnerID)
+        var claimedAll = true
+        for index in unclaimed {
+            var claimed = pendingSharedItems[index]
+            claimed.ownerID = claimOwnerID
+            claimed.autoTranscribeRequested = autoTranscribe
+            do {
+                try shareInbox.update(claimed)
+                pendingSharedItems[index] = claimed
+            } catch {
+                claimedAll = false
+            }
+        }
+        if claimedAll {
+            localAccountDefaults.removeObject(forKey: Self.pendingShareClaimOwnerIDKey)
+        }
+    }
+
+    /// Permission was revoked while this link was being sent, so it stays manual.
+    func markSharedDocumentManual(_ itemID: UUID) {
+        guard let index = pendingSharedItems.firstIndex(where: { $0.id == itemID }) else { return }
+        var updated = pendingSharedItems[index]
+        updated.autoTranscribeRequested = false
+        pendingSharedItems[index] = updated
+        try? shareInbox?.update(updated)
+    }
+
+    /// With no App Group container, the extension cannot have staged anything. A
+    /// container that exists but cannot be read still throws, so the caller retries.
+    private func shareInboxIfAvailable() throws -> ShareInboxStore? {
+        do {
+            return try resolvedShareInbox()
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+            return nil
+        }
+    }
+
+    private func migrateSharedDocuments(from clerkID: String, to userID: String) throws {
+        guard let inbox = try shareInboxIfAvailable() else { return }
+        for var item in try inbox.pendingItems() where item.ownerID == clerkID {
+            item.ownerID = userID
+            try inbox.update(item)
+            if let index = pendingSharedItems.firstIndex(where: { $0.id == item.id }) {
+                pendingSharedItems[index] = item
+            }
+        }
+        if localAccountDefaults.string(forKey: Self.pendingShareClaimOwnerIDKey) == clerkID {
+            localAccountDefaults.set(userID, forKey: Self.pendingShareClaimOwnerIDKey)
+        }
+    }
+
+    private func deleteSharedDocuments(ownedBy ownerID: String) throws {
+        guard let inbox = try shareInboxIfAvailable() else { return }
+        for item in try inbox.pendingItems() where item.ownerID == ownerID {
+            try inbox.remove(item)
+            pendingSharedItems.removeAll { $0.id == item.id }
+            pendingSharedErrors[item.id] = nil
+        }
     }
 
     /// The server has the item, so the inbox copy is no longer the only one.
@@ -328,8 +444,9 @@ final class RecordingCoordinator {
 
     private func prepareToStart() -> Bool {
         guard !isRecording, !isStarting else { return false }
+        retryRestorationIfNeeded()
         guard store != nil else {
-            errorMessage = "Secure recording storage is unavailable. Restart Media Tools and try again."
+            errorMessage = "Secure recording storage is unavailable. Unlock this iPhone and try again."
             return false
         }
         if let directoryURL = store?.directoryURL,
@@ -942,30 +1059,53 @@ final class RecordingCoordinator {
         return finalDuration
     }
 
+    /// Files protected until first unlock cannot be read after a restart until
+    /// the person unlocks, and a background launch can arrive before that. Any
+    /// later point can finish the restore, so the app tries again at unlock and
+    /// whenever it next needs the list.
+    func retryRestorationIfNeeded() {
+        guard !hasRestoredManifest else { return }
+        if store == nil, let recovered = try? RecordingStore() {
+            store = recovered
+        }
+        restorePendingRecordings()
+    }
+
     private func restorePendingRecordings() {
-        guard let store else { return }
+        let restoredLate = hasAttemptedRestoration
+        hasAttemptedRestoration = true
+        guard let store, !hasRestoredManifest else { return }
         do {
-            pendingRecordings = try store.loadRecordings()
-            var recoveredAny = false
-            for index in pendingRecordings.indices {
-                let recording = pendingRecordings[index]
-                guard recording.state == .recording || recording.canUpload else { continue }
-                switch RecordingIntegrityValidator.validate(url: store.fileURL(for: recording)) {
-                case .success where recording.state == .recording:
-                    pendingRecordings[index].state = .interrupted
-                    pendingRecordings[index].lastError =
-                        "Recovered and verified after Media Tools stopped unexpectedly."
-                    recoveredAny = true
-                case .failure:
-                    pendingRecordings[index].state = .invalid
-                    pendingRecordings[index].lastError = Self.invalidRecordingMessage
-                    recoveredAny = true
-                default:
-                    break
-                }
+            // This launch's own recordings are the newest copy of themselves, and
+            // one of them may be capturing right now. Recovery must leave them alone.
+            let journaled = try store.loadUnmergedRecordings()
+            var known = Set(pendingRecordings.map(\.id))
+            var adopted = journaled.filter { !known.contains($0.id) }
+            var recoveredAny = recoverInterruptedRecordings(&adopted, store: store)
+            pendingRecordings = Self.newestFirst(pendingRecordings + adopted)
+            unmergedRecordingIDs.formUnion(journaled.map(\.id))
+            known.formUnion(adopted.map(\.id))
+
+            var saved = try store.loadRecordings().filter { !known.contains($0.id) }
+            recoveredAny = recoverInterruptedRecordings(&saved, store: store) || recoveredAny
+            let merged = Self.newestFirst(pendingRecordings + saved)
+            if recoveredAny || !known.isEmpty {
+                // The manifest is written before the unmerged files go, so a
+                // termination between the two only repeats this same merge.
+                try store.saveRecordings(merged)
             }
-            if recoveredAny {
-                try persistPendingRecordings()
+            try store.removeAllUnmergedRecordings()
+            pendingRecordings = merged
+            unmergedRecordingIDs = []
+            hasRestoredManifest = true
+            if errorMessage == Self.restorationPendingMessage
+                || errorMessage == Self.storageUnavailableMessage {
+                errorMessage = nil
+            }
+            if activeOwnerID != nil {
+                claimUnownedRecordings()
+            }
+            if recoveredAny, activeRecordingID == nil {
                 statusMessage = pendingRecordings.contains { $0.state == .invalid }
                     ? "A recording needs recovery and was not uploaded"
                     : "Recovered and verified an interrupted recording"
@@ -973,10 +1113,51 @@ final class RecordingCoordinator {
                     await activityManager.end(recordingID: nil, finalDuration: 0)
                 }
             }
+            if restoredLate {
+                // Not inline: this can run in the middle of saving another recording.
+                Task { @MainActor [weak self] in
+                    self?.onRecordingsRestored?()
+                }
+            }
         } catch {
-            errorMessage = "Saved recordings could not be restored: \(error.localizedDescription)"
+            errorMessage = Self.restorationPendingMessage
         }
     }
+
+    @discardableResult
+    private func recoverInterruptedRecordings(
+        _ recordings: inout [LocalRecording],
+        store: RecordingStore
+    ) -> Bool {
+        var recoveredAny = false
+        for index in recordings.indices {
+            let recording = recordings[index]
+            guard recording.state == .recording || recording.canUpload else { continue }
+            switch RecordingIntegrityValidator.validate(url: store.fileURL(for: recording)) {
+            case .success where recording.state == .recording:
+                recordings[index].state = .interrupted
+                recordings[index].lastError =
+                    "Recovered and verified after Media Tools stopped unexpectedly."
+                recoveredAny = true
+            case .failure:
+                recordings[index].state = .invalid
+                recordings[index].lastError = Self.invalidRecordingMessage
+                recoveredAny = true
+            default:
+                break
+            }
+        }
+        return recoveredAny
+    }
+
+    private static func newestFirst(_ recordings: [LocalRecording]) -> [LocalRecording] {
+        recordings.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private static let restorationPendingMessage =
+        "Earlier recordings are safe but not available yet. They will come back after this iPhone unlocks."
+    private static let storageUnavailableMessage =
+        "Media Tools could not prepare secure recording storage."
 
     private static let invalidRecordingMessage =
         "This older recording ended before its audio index was saved. Export and keep the original file for a best-effort recovery attempt on a computer."
@@ -999,7 +1180,36 @@ final class RecordingCoordinator {
     }()
 
     private func persistPendingRecordings() throws {
-        try store?.saveRecordings(pendingRecordings)
+        guard let store else { return }
+        retryRestorationIfNeeded()
+        if hasRestoredManifest {
+            try store.saveRecordings(pendingRecordings)
+            return
+        }
+        // The manifest stays untouched until it has been read. A recording made
+        // in this window lives in its own file, so it survives a termination too.
+        let currentIDs = Set(pendingRecordings.map(\.id))
+        for id in unmergedRecordingIDs.subtracting(currentIDs) {
+            try store.removeUnmergedRecording(id: id)
+        }
+        for recording in pendingRecordings {
+            try store.saveUnmergedRecording(recording)
+        }
+        unmergedRecordingIDs = currentIDs
+    }
+
+    private func observeProtectedData() {
+        notificationObservers.append(
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.retryRestorationIfNeeded()
+                }
+            }
+        )
     }
 
     private func observeAudioSession() {
@@ -1144,6 +1354,7 @@ private enum RecordingCoordinatorError: LocalizedError {
     case couldNotStart
     case couldNotResume
     case storageUnavailable
+    case manifestUnavailable
     case invalidRecording(String)
 
     var errorDescription: String? {
@@ -1154,6 +1365,8 @@ private enum RecordingCoordinatorError: LocalizedError {
             return "The recorder could not resume."
         case .storageUnavailable:
             return "Secure recording storage is unavailable."
+        case .manifestUnavailable:
+            return "Earlier recordings are not available until this iPhone unlocks."
         case .invalidRecording(let message):
             return message
         }

@@ -681,7 +681,7 @@ struct SettingsView: View {
             return "New recordings stay on this iPhone until you tap Transcribe."
         }
         return aiProcessingConsent.hasAutomaticConsent
-            ? "New recordings and shared audio go to OpenAI when they are saved."
+            ? "New recordings, shared audio, and shared video links with no subtitles go to OpenAI when they are saved."
             : "New recordings stay on this iPhone until you allow AI processing."
     }
 
@@ -1332,6 +1332,8 @@ private struct ClerkMigrationCard: View {
                     .frame(minHeight: 44)
             }
         }
+        // Without this the card's identifier replaces the Disconnect button's.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clerk-migration.card")
     }
 

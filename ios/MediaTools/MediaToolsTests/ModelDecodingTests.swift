@@ -591,13 +591,20 @@ final class ModelDecodingTests: XCTestCase {
             recording.id, objectKey: "audio/clerk-a/meeting.m4a", sizeBytes: 42,
             mimeType: "audio/mp4", taskIdentifier: 19
         )
+        let consentSuite = "MediaToolsTests.\(UUID().uuidString)"
+        let consentDefaults = try XCTUnwrap(UserDefaults(suiteName: consentSuite))
+        defer { consentDefaults.removePersistentDomain(forName: consentSuite) }
+        let consent = AIProcessingConsentManager(defaults: consentDefaults)
+        consent.grantForUITesting(ownerID: "clerk-a")
         let uploader = RecordingUploadCoordinator(
             recorder: recorder,
             service: SuspendedRecordingUploadService(),
-            watchStore: try TranscriptionWatchStore(rootDirectory: directory)
+            watchStore: try TranscriptionWatchStore(rootDirectory: directory),
+            aiProcessingConsent: consent
         )
 
         try await uploader.migrateOwnerID(from: "clerk-a", to: "server-a")
+        consent.migrateConsent(from: "clerk-a", to: "server-a")
         await uploader.setActiveOwnerID("server-a")
         uploader.receiveBackgroundUploadEvent(
             .completed(metadata: BackgroundUploadMetadata(
@@ -779,7 +786,7 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     @MainActor
-    func testPendingFinalizationWaitsForExplicitAIConsent() async throws {
+    func testPendingFinalizationReturnsToSavedWithoutAIConsent() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let consentSuite = "AIProcessingConsentTests.\(UUID().uuidString)"
@@ -819,21 +826,16 @@ final class ModelDecodingTests: XCTestCase {
         await uploader.setActiveOwnerID("user_current")
         for _ in 0..<20 { await Task.yield() }
         XCTAssertFalse(service.completeStarted)
-        XCTAssertEqual(recorder.recording(withID: recording.id)?.state, .finalizingUpload)
+        let returned = try XCTUnwrap(recorder.recording(withID: recording.id))
+        XCTAssertEqual(returned.state, .ready)
+        XCTAssertTrue(returned.canUpload)
 
+        // Consent granted later still needs a deliberate Transcribe.
         consent.allow()
         uploader.resumePendingWork()
-        for _ in 0..<20 where !service.completeStarted { await Task.yield() }
-        XCTAssertTrue(service.completeStarted)
-        XCTAssertEqual(service.completionOwnerIDs, ["user_current"])
-
-        service.resumeCompletion(
-            try APIClient.makeDecoder().decode(
-                AudioTranscription.self,
-                from: Data(#"{"id":"audio-after-consent","status":"pending"}"#.utf8)
-            )
-        )
-        await Task.yield()
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertFalse(service.completeStarted)
+        XCTAssertEqual(recorder.recording(withID: recording.id)?.state, .ready)
     }
 
     @MainActor

@@ -39,6 +39,7 @@ struct MediaToolsApp: App {
         if arguments.contains("-ui-test-reset-recordings") {
             AIProcessingConsentManager.shared.resetForUITesting()
         }
+        UITestShareFixture.prepare(arguments: arguments)
         #endif
         // A stored session owns anything captured from here on, including a
         // cold Action Button press and work finishing in a background launch

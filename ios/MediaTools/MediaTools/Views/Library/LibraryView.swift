@@ -137,9 +137,9 @@ struct LibraryView: View {
         }
     }
 
-    /// Shares that failed to import stay visible until they are dealt with.
+    /// Shares that failed, or that wait for a tap, stay visible until dealt with.
     private var sharesNeedingAttention: [ShareInboxStore.Item] {
-        recorder.sharesNeedingAttention
+        uploader.sharesNeedingAttention
     }
 
     private var hasDeviceRows: Bool {
@@ -176,7 +176,7 @@ struct LibraryView: View {
                             .font(Theme.body(15, weight: .semibold))
                             .foregroundStyle(Theme.textPrimary)
                             .lineLimit(2)
-                        Text(recorder.pendingSharedErrors[item.id] ?? "")
+                        Text(uploader.shareStatusMessage(for: item))
                             .font(Theme.caption())
                             .foregroundStyle(Theme.textSecondary)
                             .lineLimit(2)

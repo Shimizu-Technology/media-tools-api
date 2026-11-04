@@ -78,19 +78,21 @@ struct RecordView: View {
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
 
-                    if !recorder.sharesNeedingAttention.isEmpty {
+                    if !uploader.sharesNeedingAttention.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             SectionHeader(text: "Shares needing attention", icon: "square.and.arrow.down")
-                            Text("These are still saved on this iPhone. Retry, or remove them if you no longer need them.")
+                            Text("These are still saved on this iPhone. Send them, or remove them if you no longer need them.")
                                 .font(Theme.caption(12))
                                 .foregroundStyle(Theme.textSecondary)
-                            ForEach(recorder.sharesNeedingAttention) { item in
+                            ForEach(uploader.sharesNeedingAttention) { item in
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
                                         Text(item.originalName)
                                             .lineLimit(1)
                                         Spacer()
-                                        Button("Retry") { uploader.processSharedItems(retryRejected: true) }
+                                        Button(uploader.shareActionTitle(for: item)) {
+                                            Task { await uploader.retrySharedItem(item) }
+                                        }
                                             .frame(minHeight: 44)
                                         Button("Remove", role: .destructive) { sharedItemToRemove = item }
                                             .frame(minHeight: 44)
@@ -101,11 +103,13 @@ struct RecordView: View {
                                             .accessibilityLabel("Export \(item.originalName)")
                                         }
                                     }
-                                    if let reason = recorder.pendingSharedErrors[item.id] {
-                                        Text(reason)
-                                            .foregroundStyle(Theme.error)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
+                                    Text(uploader.shareStatusMessage(for: item))
+                                        .foregroundStyle(
+                                            recorder.pendingSharedErrors[item.id] == nil
+                                                ? Theme.textSecondary
+                                                : Theme.error
+                                        )
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
                                 .font(Theme.caption(13))
                             }
@@ -337,7 +341,7 @@ struct RecordView: View {
             presenting: sharedItemToRemove
         ) { item in
             Button("Remove", role: .destructive) {
-                recorder.discardSharedItem(item)
+                uploader.discardSharedItem(item)
                 sharedItemToRemove = nil
             }
             Button("Keep", role: .cancel) {

@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import MediaTools
 
 /// Stops every upload at the first network request, which is enough to prove a
@@ -8,7 +9,21 @@ private final class RecordingServiceSpy: RecordingUploadServicing {
     private(set) var presignedFilenames: [String] = []
     private(set) var importedLinks: [String] = []
     private(set) var importedPDFs: [String] = []
+    private(set) var documentOwnerIDs: [String?] = []
+    private(set) var cancelledDocumentImports = 0
     var documentImportError: Error?
+    /// Keeps a document send open until the coordinator cancels it.
+    var holdsDocumentImports = false
+
+    private func hold() async throws {
+        guard holdsDocumentImports else { return }
+        do {
+            try await Task.sleep(for: .seconds(60))
+        } catch {
+            cancelledDocumentImports += 1
+            throw error
+        }
+    }
 
     func getAudioItem(_ id: String, expectedOwnerID: String?) async throws -> AudioTranscription {
         throw URLError(.notConnectedToInternet)
@@ -42,11 +57,15 @@ private final class RecordingServiceSpy: RecordingUploadServicing {
     }
 
     func importSharedLink(_ link: String, expectedOwnerID: String?) async throws {
+        documentOwnerIDs.append(expectedOwnerID)
+        try await hold()
         if let documentImportError { throw documentImportError }
         importedLinks.append(link)
     }
 
     func importSharedPDF(fileURL: URL, filename: String, expectedOwnerID: String?) async throws {
+        documentOwnerIDs.append(expectedOwnerID)
+        try await hold()
         if let documentImportError { throw documentImportError }
         importedPDFs.append(filename)
     }
@@ -483,6 +502,7 @@ final class AutomaticTranscriptionTests: XCTestCase {
 
     func testSharedLinkAndPDFReachTheServerAndLeaveTheInbox() async throws {
         await signIn()
+        grantConsent()
         let pdf = directory.appendingPathComponent("notes.pdf")
         try Data("%PDF-1.4".utf8).write(to: pdf)
         _ = try inbox.stageFile(from: pdf, originalName: "Notes.pdf")
@@ -499,6 +519,7 @@ final class AutomaticTranscriptionTests: XCTestCase {
 
     func testFailedSharedLinkStaysStagedWithAMessageAndRetries() async throws {
         await signIn()
+        grantConsent()
         service.documentImportError = URLError(.notConnectedToInternet)
         let item = try inbox.stageLink(try XCTUnwrap(URL(string: "https://youtu.be/abc")))
 
@@ -518,6 +539,7 @@ final class AutomaticTranscriptionTests: XCTestCase {
 
     func testRejectedLinkWaitsForAManualRetryInsteadOfRepeatingOnForeground() async throws {
         await signIn()
+        grantConsent()
         service.documentImportError = APIError.httpError(
             statusCode: 400,
             message: "This page has no video."
@@ -533,13 +555,14 @@ final class AutomaticTranscriptionTests: XCTestCase {
         XCTAssertTrue(service.importedLinks.isEmpty, "A foreground must not resend a rejected share")
         XCTAssertEqual(try inbox.pendingItems().map(\.id), [item.id])
 
-        uploader.processSharedItems(retryRejected: true)
+        await uploader.retrySharedItem(item)
         await settle { !service.importedLinks.isEmpty }
         XCTAssertEqual(service.importedLinks, ["https://example.com/article"])
     }
 
     func testRemovingAShareIsTheOnlyWayItLeavesTheInboxUnprocessed() async throws {
         await signIn()
+        grantConsent()
         service.documentImportError = APIError.httpError(statusCode: 400, message: "No video")
         let item = try inbox.stageLink(try XCTUnwrap(URL(string: "https://example.com/article")))
         uploader.processSharedItems()
@@ -578,6 +601,520 @@ final class AutomaticTranscriptionTests: XCTestCase {
 
         XCTAssertEqual(recorder.pendingSharedItems.map(\.id), [item.id])
         XCTAssertTrue(service.importedLinks.isEmpty)
+    }
+
+    // MARK: - Shared link consent
+
+    private func stageLink(_ link: String = "https://youtu.be/abc") throws -> ShareInboxStore.Item {
+        try inbox.stageLink(try XCTUnwrap(URL(string: link)))
+    }
+
+    private func stagePDF() throws -> ShareInboxStore.Item {
+        let pdf = directory.appendingPathComponent("\(UUID().uuidString).pdf")
+        try Data("%PDF-1.4".utf8).write(to: pdf)
+        return try inbox.stageFile(from: pdf, originalName: "Notes.pdf")
+    }
+
+    func testSharedLinkIsNotSentWithoutConsentAndSendsOnceAllowed() async throws {
+        await signIn()
+        let item = try stageLink()
+
+        uploader.processSharedItems()
+        await settle { !service.importedLinks.isEmpty }
+
+        XCTAssertTrue(service.importedLinks.isEmpty, "A link can reach Whisper, so it needs consent")
+        XCTAssertEqual(try inbox.pendingItems().map(\.id), [item.id])
+        XCTAssertTrue(consent.isPresentingDisclosure)
+
+        consent.allow()
+        await settle { !service.importedLinks.isEmpty }
+        XCTAssertEqual(service.importedLinks, ["https://youtu.be/abc"])
+    }
+
+    func testDeclinedLinkStaysHereWithAManualActionAndDoesNotAskAgain() async throws {
+        await signIn()
+        let item = try stageLink()
+        uploader.processSharedItems()
+        consent.decline()
+
+        uploader.processSharedItems()
+
+        XCTAssertFalse(consent.isPresentingDisclosure)
+        let waiting = try XCTUnwrap(uploader.sharesNeedingAttention.first)
+        XCTAssertEqual(waiting.id, item.id)
+        XCTAssertEqual(uploader.shareActionTitle(for: waiting), "Transcribe")
+        XCTAssertFalse(uploader.shareStatusMessage(for: waiting).isEmpty)
+        XCTAssertEqual(try inbox.pendingItems().map(\.id), [item.id])
+
+        // Tapping asks; declining again still keeps the share.
+        let declined = Task { await uploader.retrySharedItem(item) }
+        await settle { consent.isPresentingDisclosure }
+        consent.decline()
+        await declined.value
+        XCTAssertTrue(service.importedLinks.isEmpty)
+        XCTAssertEqual(try inbox.pendingItems().map(\.id), [item.id])
+
+        let allowed = Task { await uploader.retrySharedItem(item) }
+        await settle { consent.isPresentingDisclosure }
+        consent.allow()
+        await allowed.value
+        await settle { (try? inbox.pendingItems().isEmpty) == true }
+        XCTAssertEqual(service.importedLinks, ["https://youtu.be/abc"])
+        XCTAssertTrue(uploader.sharesNeedingAttention.isEmpty)
+    }
+
+    func testAGrantUnderTheOldCopyOnlyCoversATappedLink() async throws {
+        defaults.set(["owner-a"], forKey: "aiProcessingConsentedOwnerIDs.v1")
+        await signIn()
+        let item = try stageLink()
+
+        uploader.processSharedItems()
+        await settle { !service.importedLinks.isEmpty }
+        XCTAssertTrue(service.importedLinks.isEmpty)
+        consent.decline()
+
+        await uploader.retrySharedItem(item)
+        await settle { !service.importedLinks.isEmpty }
+        XCTAssertEqual(service.importedLinks, ["https://youtu.be/abc"])
+    }
+
+    func testLinkClaimedWithTheSettingOffStaysManualAfterItTurnsOn() async throws {
+        await signIn()
+        grantConsent()
+        consent.setAutoTranscribeEnabled(false)
+        let item = try stageLink()
+        uploader.processSharedItems()
+        XCTAssertEqual(uploader.sharesNeedingAttention.map(\.id), [item.id])
+
+        consent.setAutoTranscribeEnabled(true)
+        await settle { !service.importedLinks.isEmpty }
+        XCTAssertTrue(service.importedLinks.isEmpty)
+
+        await uploader.retrySharedItem(item)
+        await settle { !service.importedLinks.isEmpty }
+        XCTAssertEqual(service.importedLinks, ["https://youtu.be/abc"])
+    }
+
+    func testRevokingStopsALinkBeingSentAndKeepsItHere() async throws {
+        await signIn()
+        grantConsent()
+        service.holdsDocumentImports = true
+        let item = try stageLink()
+        uploader.processSharedItems()
+        await settle { !service.documentOwnerIDs.isEmpty }
+
+        consent.revoke()
+        await settle { service.cancelledDocumentImports == 1 }
+
+        XCTAssertEqual(service.cancelledDocumentImports, 1)
+        XCTAssertEqual(try inbox.pendingItems().map(\.id), [item.id])
+        XCTAssertEqual(uploader.sharesNeedingAttention.map(\.id), [item.id])
+    }
+
+    func testPDFIsSentWithoutConsentBecauseExtractionUsesNoAI() async throws {
+        await signIn()
+        _ = try stagePDF()
+
+        uploader.processSharedItems()
+        await settle { !service.importedPDFs.isEmpty }
+
+        XCTAssertEqual(service.importedPDFs, ["Notes.pdf"])
+        XCTAssertEqual(service.documentOwnerIDs, ["owner-a"])
+        XCTAssertFalse(consent.isPresentingDisclosure)
+    }
+
+    // MARK: - Shared document ownership
+
+    func testFailedShareNeverUploadsIntoAnotherAccount() async throws {
+        await signIn("owner-a")
+        service.documentImportError = URLError(.notConnectedToInternet)
+        let item = try stagePDF()
+        uploader.processSharedItems()
+        await settle { recorder.pendingSharedErrors[item.id] != nil }
+        XCTAssertEqual(service.documentOwnerIDs, ["owner-a"])
+
+        service.documentImportError = nil
+        consent.setActiveOwnerID("owner-b")
+        await uploader.setActiveOwnerID("owner-b")
+        uploader.processSharedItems()
+        await settle { service.documentOwnerIDs.count > 1 }
+
+        XCTAssertEqual(service.documentOwnerIDs, ["owner-a"])
+        XCTAssertTrue(uploader.sharesNeedingAttention.isEmpty)
+        XCTAssertTrue(recorder.availableSharedItems.isEmpty)
+
+        await signIn("owner-a")
+        await settle { (try? inbox.pendingItems().isEmpty) == true }
+        XCTAssertEqual(service.documentOwnerIDs, ["owner-a", "owner-a"])
+    }
+
+    func testFirstSignedInAccountClaimsAShareDurablyAcrossRelaunch() async throws {
+        service.documentImportError = URLError(.notConnectedToInternet)
+        let item = try stagePDF()
+        uploader.processSharedItems()
+        XCTAssertNil(try inbox.pendingItems().first?.ownerID)
+
+        await signIn("owner-a")
+        await settle { recorder.pendingSharedErrors[item.id] != nil }
+        XCTAssertEqual(try inbox.pendingItems().first?.ownerID, "owner-a")
+
+        makeCoordinators()
+        service.documentImportError = nil
+        await signIn("owner-b")
+        await settle { service.documentOwnerIDs.count > 1 }
+        XCTAssertEqual(service.documentOwnerIDs, ["owner-a"])
+        XCTAssertEqual(try inbox.pendingItems().map(\.id), [item.id])
+    }
+
+    func testAClaimThatCouldNotBeSavedBlocksSendingAndStaysWithThatAccount() async throws {
+        await signIn("owner-a")
+        let item = try stagePDF()
+        let itemDirectory = inbox.rootURL.appendingPathComponent(item.id.uuidString.lowercased())
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: itemDirectory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: itemDirectory.path) }
+
+        uploader.processSharedItems()
+        await settle { !service.documentOwnerIDs.isEmpty }
+        XCTAssertTrue(service.documentOwnerIDs.isEmpty, "Nothing is sent before the claim is saved")
+
+        consent.setActiveOwnerID("owner-b")
+        await uploader.setActiveOwnerID("owner-b")
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: itemDirectory.path)
+        uploader.processSharedItems()
+
+        XCTAssertEqual(try inbox.pendingItems().first?.ownerID, "owner-a")
+        await settle { !service.documentOwnerIDs.isEmpty }
+        XCTAssertTrue(service.documentOwnerIDs.isEmpty)
+    }
+
+    func testSigningOutCancelsASendAndTheShareWaitsForItsOwner() async throws {
+        await signIn("owner-a")
+        service.holdsDocumentImports = true
+        let item = try stagePDF()
+        uploader.processSharedItems()
+        await settle { !service.documentOwnerIDs.isEmpty }
+
+        await uploader.setActiveOwnerID(nil)
+        await settle { service.cancelledDocumentImports == 1 }
+
+        XCTAssertEqual(service.cancelledDocumentImports, 1)
+        XCTAssertEqual(try inbox.pendingItems().map(\.id), [item.id])
+        XCTAssertTrue(recorder.availableSharedItems.isEmpty)
+    }
+
+    func testSwitchingAccountsCancelsASendForThePreviousOwner() async throws {
+        await signIn("owner-a")
+        service.holdsDocumentImports = true
+        _ = try stagePDF()
+        uploader.processSharedItems()
+        await settle { !service.documentOwnerIDs.isEmpty }
+
+        await signIn("owner-b")
+        await settle { service.cancelledDocumentImports == 1 }
+
+        XCTAssertEqual(service.cancelledDocumentImports, 1)
+        XCTAssertEqual(service.documentOwnerIDs, ["owner-a"])
+    }
+
+    func testVerifiedMigrationMovesAShareToTheNewOwnerID() async throws {
+        service.documentImportError = URLError(.notConnectedToInternet)
+        await signIn("clerk-a")
+        let item = try stagePDF()
+        uploader.processSharedItems()
+        await settle { recorder.pendingSharedErrors[item.id] != nil }
+
+        try await uploader.migrateOwnerID(from: "clerk-a", to: "server-a")
+
+        XCTAssertEqual(try inbox.pendingItems().first?.ownerID, "server-a")
+    }
+
+    func testDeletingAnAccountRemovesItsSharesButNotAnotherAccounts() async throws {
+        service.documentImportError = URLError(.notConnectedToInternet)
+        await signIn("owner-a")
+        let owned = try stagePDF()
+        uploader.processSharedItems()
+        await settle { recorder.pendingSharedErrors[owned.id] != nil }
+        await signIn("owner-b")
+        let other = try stagePDF()
+        uploader.processSharedItems()
+        await settle { recorder.pendingSharedErrors[other.id] != nil }
+
+        await uploader.removeLocalAccountData(ownerID: "owner-a")
+
+        XCTAssertEqual(try inbox.pendingItems().map(\.id), [other.id])
+    }
+
+    // MARK: - Signed-out shares
+
+    func testSignedOutDocumentsSendThemselvesAfterSignIn() async throws {
+        await signIn("owner-a")
+        grantConsent()
+        await uploader.setActiveOwnerID(nil)
+        consent.setActiveOwnerID(nil)
+        _ = try stagePDF()
+        _ = try stageLink()
+        uploader.processSharedItems()
+        XCTAssertEqual(recorder.availableSharedItems.count, 2)
+        XCTAssertTrue(service.documentOwnerIDs.isEmpty)
+
+        // Nothing but signing in: no foreground and no Retry.
+        await signIn("owner-a")
+
+        await settle { (try? inbox.pendingItems().isEmpty) == true }
+        XCTAssertTrue(try inbox.pendingItems().isEmpty)
+        XCTAssertEqual(service.importedPDFs, ["Notes.pdf"])
+        XCTAssertEqual(service.importedLinks, ["https://youtu.be/abc"])
+    }
+
+    // MARK: - Revocation
+
+    func testRevocationInterruptedByTerminationLeavesRecordingsActionable() async throws {
+        await signIn()
+        grantConsent()
+        consent.revoke()
+        var recordings: [LocalRecording] = []
+        for state in [LocalRecordingState.waitingForUpload, .uploading, .finalizingUpload] {
+            var recording = store.makeRecording(contentType: "general", ownerID: "owner-a")
+            recording.state = state
+            recording.autoTranscribeRequested = true
+            recording.uploadObjectKey = "audio/key"
+            recording.uploadSizeBytes = 42
+            try simulatedCAF(at: store.fileURL(for: recording))
+            recordings.append(recording)
+        }
+        try store.saveRecordings(recordings)
+
+        makeCoordinators()
+        await signIn()
+
+        for recording in recordings {
+            let current = try XCTUnwrap(recorder.recording(withID: recording.id))
+            XCTAssertEqual(current.state, .ready)
+            XCTAssertTrue(current.canUpload)
+            XCTAssertNotEqual(current.autoTranscribeRequested, true)
+        }
+        XCTAssertEqual(try store.loadRecordings().map(\.state), [.ready, .ready, .ready])
+
+        // Discard works again, and so does a deliberate Transcribe.
+        uploader.discard(try XCTUnwrap(recorder.recording(withID: recordings[0].id)))
+        XCTAssertNil(recorder.recording(withID: recordings[0].id))
+
+        grantConsent()
+        await settle { true }
+        XCTAssertEqual(recorder.recording(withID: recordings[1].id)?.state, .ready)
+        uploader.queue(try XCTUnwrap(recorder.recording(withID: recordings[1].id)))
+        await settle { !service.presignedFilenames.isEmpty }
+        XCTAssertEqual(service.presignedFilenames.count, 1)
+    }
+
+    func testConsentMigrationGapIsNotTreatedAsARevocation() async throws {
+        await signIn("clerk-a")
+        grantConsent()
+        let id = try recordAndStop()
+        XCTAssertTrue(recorder.recording(withID: id)?.isUploadInProgress == true)
+
+        try await uploader.migrateOwnerID(from: "clerk-a", to: "server-a")
+        recorder.setActiveOwnerID("server-a")
+        uploader.resumePendingWork()
+
+        XCTAssertTrue(recorder.recording(withID: id)?.isUploadInProgress == true)
+    }
+
+    func testResumingWithConsentLeavesQueuedWorkAlone() async throws {
+        await signIn()
+        grantConsent()
+        var recording = store.makeRecording(contentType: "general", ownerID: "owner-a")
+        recording.state = .waitingForUpload
+        try simulatedCAF(at: store.fileURL(for: recording))
+        try store.saveRecordings([recording])
+
+        makeCoordinators()
+        await signIn()
+
+        XCTAssertTrue(recorder.recording(withID: recording.id)?.isUploadInProgress == true)
+    }
+
+    // MARK: - Restoring after unlock
+
+    private var manifestURL: URL {
+        store.directoryURL.appendingPathComponent("recordings.json")
+    }
+
+    /// A manifest that exists but cannot be read, as before first unlock.
+    private func lockManifest() throws {
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: manifestURL.path)
+    }
+
+    private func unlockManifest() throws {
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: manifestURL.path)
+    }
+
+    private func savedRecording(
+        ownerID: String? = "owner-a",
+        state: LocalRecordingState = .ready,
+        autoTranscribe: Bool = false
+    ) throws -> LocalRecording {
+        var recording = store.makeRecording(contentType: "general", ownerID: ownerID)
+        recording.state = state
+        recording.autoTranscribeRequested = autoTranscribe
+        try simulatedCAF(at: store.fileURL(for: recording))
+        try store.saveRecordings([recording])
+        return recording
+    }
+
+    func testLockedManifestIsNeverOverwrittenAndRestoresAtUnlock() async throws {
+        let earlier = try savedRecording()
+        let original = try Data(contentsOf: manifestURL)
+        try lockManifest()
+        defer { try? unlockManifest() }
+
+        makeCoordinators()
+        await signIn()
+        XCTAssertNil(recorder.recording(withID: earlier.id))
+        XCTAssertNotNil(recorder.errorMessage)
+
+        // Every write path a person can reach while the manifest is closed.
+        let newID = try recordAndStop()
+        XCTAssertEqual(recorder.recording(withID: newID)?.state, .ready)
+
+        try unlockManifest()
+        XCTAssertEqual(try Data(contentsOf: manifestURL), original, "The manifest must not be replaced")
+
+        NotificationCenter.default.post(
+            name: UIApplication.protectedDataDidBecomeAvailableNotification,
+            object: nil
+        )
+        await settle { recorder.recording(withID: earlier.id) != nil }
+
+        XCTAssertNotNil(recorder.recording(withID: earlier.id))
+        XCTAssertNotNil(recorder.recording(withID: newID))
+        XCTAssertNil(recorder.errorMessage)
+        XCTAssertEqual(
+            Set(try store.loadRecordings().map(\.id)),
+            [earlier.id, newID]
+        )
+        XCTAssertTrue(try store.loadUnmergedRecordings().isEmpty)
+        try assertAudioIsSafe(earlier.id)
+        try assertAudioIsSafe(newID)
+    }
+
+    func testCaptureWhileLockedSurvivesTerminationAndStillMerges() async throws {
+        let earlier = try savedRecording()
+        try lockManifest()
+        defer { try? unlockManifest() }
+
+        makeCoordinators()
+        await signIn()
+        recorder.start(contentType: "voice_memo")
+        let capturing = try XCTUnwrap(recorder.pendingRecordings.first?.id)
+
+        // The app ends mid-capture, and relaunches still locked.
+        makeCoordinators()
+        await signIn()
+        XCTAssertEqual(recorder.recording(withID: capturing)?.state, .interrupted)
+        XCTAssertNil(recorder.recording(withID: earlier.id))
+
+        try unlockManifest()
+        recorder.retryRestorationIfNeeded()
+
+        XCTAssertNotNil(recorder.recording(withID: earlier.id))
+        XCTAssertEqual(recorder.recording(withID: capturing)?.state, .interrupted)
+        XCTAssertEqual(Set(try store.loadRecordings().map(\.id)), [earlier.id, capturing])
+        try assertAudioIsSafe(capturing)
+    }
+
+    func testRestoringDuringACaptureLeavesItRecording() async throws {
+        let earlier = try savedRecording()
+        try lockManifest()
+        defer { try? unlockManifest() }
+
+        makeCoordinators()
+        await signIn()
+        recorder.start(contentType: "voice_memo")
+        let capturing = try XCTUnwrap(recorder.pendingRecordings.first?.id)
+
+        try unlockManifest()
+        recorder.retryRestorationIfNeeded()
+
+        XCTAssertNotNil(recorder.recording(withID: earlier.id))
+        XCTAssertEqual(recorder.recording(withID: capturing)?.state, .recording)
+        XCTAssertTrue(recorder.isRecording)
+
+        recorder.stop()
+        XCTAssertEqual(recorder.recording(withID: capturing)?.state, .ready)
+        XCTAssertEqual(Set(try store.loadRecordings().map(\.id)), [earlier.id, capturing])
+    }
+
+    func testDiscardingWhileLockedDoesNotComeBackAfterUnlock() async throws {
+        let earlier = try savedRecording()
+        try lockManifest()
+        defer { try? unlockManifest() }
+
+        makeCoordinators()
+        await signIn()
+        let newID = try recordAndStop()
+        uploader.discard(try XCTUnwrap(recorder.recording(withID: newID)))
+        XCTAssertTrue(try store.loadUnmergedRecordings().isEmpty)
+
+        try unlockManifest()
+        recorder.retryRestorationIfNeeded()
+
+        XCTAssertEqual(try store.loadRecordings().map(\.id), [earlier.id])
+    }
+
+    func testRestoredWorkIsClaimedAndResumesWithoutARelaunch() async throws {
+        await signIn()
+        grantConsent()
+        let unowned = try savedRecording(ownerID: nil, autoTranscribe: true)
+        try lockManifest()
+        defer { try? unlockManifest() }
+
+        makeCoordinators()
+        await signIn()
+        XCTAssertTrue(service.presignedFilenames.isEmpty)
+
+        try unlockManifest()
+        recorder.retryRestorationIfNeeded()
+        await settle { !service.presignedFilenames.isEmpty }
+
+        XCTAssertEqual(recorder.recording(withID: unowned.id)?.ownerID, "owner-a")
+        XCTAssertEqual(service.presignedFilenames.count, 1)
+        XCTAssertEqual(try store.loadRecordings().first?.ownerID, "owner-a")
+    }
+
+    func testMigrationWaitsForTheManifestSoNoRecordingKeepsAnOldOwner() async throws {
+        let earlier = try savedRecording(ownerID: "clerk-a")
+        try lockManifest()
+        defer { try? unlockManifest() }
+
+        makeCoordinators()
+        do {
+            try await uploader.migrateOwnerID(from: "clerk-a", to: "server-a")
+            XCTFail("Migration must wait until the manifest can be read")
+        } catch {}
+
+        try unlockManifest()
+        try await uploader.migrateOwnerID(from: "clerk-a", to: "server-a")
+
+        XCTAssertEqual(recorder.recording(withID: earlier.id)?.ownerID, "server-a")
+        XCTAssertEqual(try store.loadRecordings().first?.ownerID, "server-a")
+    }
+
+    func testAccountDeletionWaitsForTheManifestAndThenFinishes() async throws {
+        _ = try savedRecording()
+        try lockManifest()
+        defer { try? unlockManifest() }
+
+        makeCoordinators()
+        await signIn()
+        await uploader.removeLocalAccountData(ownerID: "owner-a")
+        XCTAssertTrue(uploader.hasPendingLocalAccountDeletion(ownerID: "owner-a"))
+
+        try unlockManifest()
+        await uploader.setActiveOwnerID("owner-b")
+
+        XCTAssertFalse(uploader.hasPendingLocalAccountDeletion(ownerID: "owner-a"))
+        XCTAssertTrue(try store.loadRecordings().isEmpty)
     }
 
     private func simulatedCAF(at url: URL) throws {

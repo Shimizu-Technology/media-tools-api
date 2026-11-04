@@ -73,6 +73,24 @@ private struct UITestDeviceSessionTransport: DeviceSessionTransport {
     }
 }
 
+/// Puts a share in the real inbox before launch finishes, as the extension would.
+enum UITestShareFixture {
+    static let linkTitle = "Fixture shared video"
+
+    static func prepare(arguments: [String]) {
+        guard let inbox = try? ShareInboxStore() else { return }
+        if arguments.contains("-ui-test-reset-recordings") {
+            for item in (try? inbox.pendingItems()) ?? [] {
+                try? inbox.remove(item)
+            }
+        }
+        if arguments.contains("-ui-test-staged-link"),
+           let url = URL(string: "https://youtu.be/ui-test") {
+            _ = try? inbox.stageLink(url, title: linkTitle)
+        }
+    }
+}
+
 /// Stands in for the API while `-ui-test-signed-in` is active. It reflects what
 /// the simulated upload accepted, so a test can watch the Library update itself.
 final class UITestAPIProtocol: URLProtocol {

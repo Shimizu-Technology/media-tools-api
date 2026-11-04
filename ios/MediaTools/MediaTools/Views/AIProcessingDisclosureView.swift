@@ -16,7 +16,7 @@ struct AIProcessingDisclosureView: View {
                         Text("Allow third-party AI processing?")
                             .font(Theme.heading(25))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("With automatic transcription on, new recordings and shared audio go to OpenAI when they are saved, and their transcripts go to OpenRouter. Everything else is sent only when you use an AI feature. You can turn automatic transcription off in Settings. This permission applies to this account on this iPhone.")
+                        Text("With automatic transcription on, new recordings and shared audio go to OpenAI when they are saved, as do shared video links that have no subtitles, and their transcripts go to OpenRouter. Everything else is sent only when you use an AI feature. You can turn automatic transcription off in Settings. This permission applies to this account on this iPhone.")
                             .font(Theme.body(14))
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)

@@ -149,15 +149,21 @@ final class MediaToolsUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["Finish moving off Clerk"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Passkey"].exists)
+        XCTAssertTrue(app.staticTexts["Password or passkey"].exists)
         XCTAssertTrue(app.staticTexts["Recovery codes"].exists)
 
         app.buttons["clerk-migration.disconnect"].tap()
-        XCTAssertTrue(app.buttons["Disconnect Clerk"].waitForExistence(timeout: 5))
+        // The card's own button has the same label as the dialog's.
+        let confirm = app.buttons.matching(
+            NSPredicate(format: "label == 'Disconnect Clerk' AND identifier != 'clerk-migration.disconnect'")
+        ).firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         XCTAssertTrue(
-            app.staticTexts["Your recordings and current device session stay in Media Tools. Future sign-ins will use your password, passkey, or a recovery code."].exists
+            app.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS 'Future sign-ins will use your password, passkey, or a recovery code.'")
+            ).firstMatch.exists
         )
-        app.buttons["Disconnect Clerk"].tap()
+        confirm.tap()
         XCTAssertTrue(app.staticTexts["Media Tools sign-in active"].waitForExistence(timeout: 5))
     }
 
@@ -389,6 +395,56 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(
             app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch.exists
         )
+    }
+
+    func testSignedOutShareShowsItIsWaitingForSignIn() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-test-welcome",
+            "-ui-test-reset-recordings",
+            "-ui-test-staged-link",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Waiting for you to sign in"].waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS 'Fixture shared video'")
+            ).firstMatch.exists
+        )
+    }
+
+    func testDeclinedSharedLinkStaysAndCanBeSentWithATap() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + [
+            "-ui-test-reset-recordings",
+            "-ui-test-staged-link",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Allow third-party AI processing?"].waitForExistence(timeout: 10))
+        app.buttons["Not now"].tap()
+
+        app.tabBars.buttons["Record"].tap()
+        let transcribe = app.buttons["Transcribe"]
+        XCTAssertTrue(transcribe.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Fixture shared video"].exists)
+
+        // Relaunching keeps the share and does not ask again.
+        app.terminate()
+        app.launchArguments = signedInFixture
+        app.launch()
+        app.tabBars.buttons["Record"].tap()
+        XCTAssertTrue(transcribe.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Allow third-party AI processing?"].exists)
+
+        transcribe.tap()
+        XCTAssertTrue(app.staticTexts["Allow third-party AI processing?"].waitForExistence(timeout: 5))
+        app.buttons["Allow AI processing"].tap()
+
+        let waitingRow = app.staticTexts["Fixture shared video"]
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: waitingRow)
+        waitForExpectations(timeout: 10)
     }
 
     func testAbruptTerminationRecoversRecordingForTranscription() {

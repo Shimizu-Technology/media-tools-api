@@ -22,6 +22,27 @@ final class ShareInboxStoreTests: XCTestCase {
         XCTAssertTrue(try afterRelaunch.pendingItems().isEmpty)
     }
 
+    func testClaimSurvivesRelaunchAndOlderManifestsStartUnowned() throws {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        let inbox = try ShareInboxStore(rootURL: temp)
+        var item = try inbox.stageLink(try XCTUnwrap(URL(string: "https://youtu.be/abc")))
+        XCTAssertNil(try inbox.pendingItems().first?.ownerID)
+
+        item.ownerID = "owner-a"
+        item.autoTranscribeRequested = true
+        try inbox.update(item)
+
+        let afterRelaunch = try XCTUnwrap(ShareInboxStore(rootURL: temp).pendingItems().first)
+        XCTAssertEqual(afterRelaunch.ownerID, "owner-a")
+        XCTAssertEqual(afterRelaunch.autoTranscribeRequested, true)
+
+        let older = Data(#"{"id":"\#(item.id.uuidString)","originalName":"a","storedName":"link","createdAt":0}"#.utf8)
+        let decoded = try JSONDecoder().decode(ShareInboxStore.Item.self, from: older)
+        XCTAssertNil(decoded.ownerID)
+        XCTAssertNil(decoded.autoTranscribeRequested)
+    }
+
     func testIncompleteShareIsNeverPublished() throws {
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: temp) }

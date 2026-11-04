@@ -377,12 +377,12 @@ struct WelcomeView: View {
                             .stroke(Theme.borderSubtle, lineWidth: 1)
                     }
 
-                    if !recorder.availableRecordings.isEmpty || !recorder.pendingSharedItems.isEmpty {
+                    if !recorder.availableRecordings.isEmpty || !recorder.availableSharedItems.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
                             Label("Saved on this iPhone", systemImage: "iphone.and.arrow.forward")
                                 .font(Theme.body(16, weight: .semibold))
                                 .foregroundStyle(Theme.textPrimary)
-                            Text("These recordings are saved here. Sign in to review and transcribe them.")
+                            Text("These are saved here. Sign in to review and transcribe them.")
                                 .font(Theme.caption(13))
                                 .foregroundStyle(Theme.textSecondary)
                             ForEach(recorder.availableRecordings) { recording in
@@ -393,13 +393,24 @@ struct WelcomeView: View {
                                     .font(Theme.caption(13))
                                 }
                             }
-                            ForEach(recorder.pendingSharedItems) { item in
+                            ForEach(recorder.availableSharedItems) { item in
                                 VStack(alignment: .leading, spacing: 4) {
                                     if let fileURL = recorder.sharedFileURL(for: item) {
                                         ShareLink(item: fileURL) {
                                             Label(item.originalName, systemImage: "square.and.arrow.up")
                                         }
                                         .font(Theme.caption(13))
+                                    } else {
+                                        Label(item.originalName, systemImage: "link")
+                                            .font(Theme.caption(13))
+                                            .foregroundStyle(Theme.textPrimary)
+                                            .lineLimit(2)
+                                    }
+                                    if item.resolvedKind != .audio,
+                                       recorder.pendingSharedErrors[item.id] == nil {
+                                        Text("Waiting for you to sign in")
+                                            .font(Theme.caption(12))
+                                            .foregroundStyle(Theme.textSecondary)
                                     }
                                     if let reason = recorder.pendingSharedErrors[item.id] {
                                         Text(reason)

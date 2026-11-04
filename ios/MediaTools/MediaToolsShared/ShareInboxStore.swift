@@ -47,6 +47,13 @@ struct ShareInboxStore {
         /// Older shares predate this field and were always audio.
         var kind: Kind? = nil
         var link: String? = nil
+        /// The account this PDF or link belongs to. The extension cannot know who
+        /// is signed in, so a share starts unowned and the first signed-in account
+        /// claims it, the same way a signed-out recording is claimed.
+        var ownerID: String? = nil
+        /// Set when "Automatically transcribe" was on as the account claimed this
+        /// share. A link claimed with it off keeps waiting for a deliberate tap.
+        var autoTranscribeRequested: Bool? = nil
 
         var resolvedKind: Kind { kind ?? .audio }
     }
@@ -204,6 +211,12 @@ struct ShareInboxStore {
 
     func remove(_ item: Item) throws {
         try fileManager.removeItem(at: directoryURL(for: item.id))
+    }
+
+    /// Saves a claim before anything is sent, so a relaunch can never hand this
+    /// share to whichever account happens to be signed in next.
+    func update(_ item: Item) throws {
+        try writeManifest(item, in: directoryURL(for: item.id))
     }
 
     private func isComplete(_ item: Item) -> Bool {
