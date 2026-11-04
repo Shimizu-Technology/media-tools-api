@@ -138,7 +138,8 @@ and recovery methods; this work does not detach or remove Clerk.
   preserving its value across tabs. It does not rotate a secret beneath a tab
   with an in-flight mutation.
 - Exact old/new refresh retries still recover an interrupted response. Other
-  consumed-token replays return the existing `already_rotated`/retry response;
+  consumed-token replays return 409 `session_refresh_in_progress` on native
+  routes (or a retryable 503 `authentication_unavailable` on the web adapter);
   they never revoke the usable successor merely because a response was lost.
 - Cookie-authenticated mutations to the new signed-in email routes require the
   existing exact-Origin/double-submit checks. Signed-out JSON initiation is IP

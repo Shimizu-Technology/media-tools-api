@@ -21,8 +21,8 @@ Required scenarios (local PostgreSQL 16 `mta_test_auth`, HTTP and integration te
 - D09: monthly transcription and summary/chat caps reject excess work; owner bypass; concurrent reservations.
 - D10: purge removes expired tokens while preserving usable refresh recovery.
 
-Focused acceptance: **10/10 passed**. Full gate is in progress on the rebased
-source; final results will be recorded below. Execution uses local PostgreSQL 16,
+Focused acceptance: **10/10 passed**. Backend and frontend gates passed.
+Execution uses local PostgreSQL 16,
 full Gin routes over ephemeral loopback HTTP listeners, and synthetic accounts.
 
 | Case | Result and evidence |
@@ -53,3 +53,29 @@ No Resend key was sought. No production configuration or data was read.
 Limits to release acceptance: configure and verify proxy CIDRs, a verified
 Resend sender, owner exemption and client reauthentication inputs before public
 signup. These are rollout tasks, not claimed production verification.
+
+## Final validation
+
+Runtime source: `5951f20`, based on pipeline merge `896102f`. The final commit
+adds this evidence and makes the resend test tolerate a legitimate random-code
+collision; that test was rerun with `-race` and passed. No runtime code changed
+after the full gate.
+
+- **Passed:** Go 1.25.6 arm64 `go vet ./...` and `go test -p 1 -race -timeout 3m -v ./...`, against local PostgreSQL 16 over TCP, database `mta_test_auth`.
+- **Passed:** server build; binary byte inspection confirmed `/__test/email-code` is absent.
+- **Passed:** gofmt (no unformatted files), `git diff --check`, OpenAPI YAML parse (94 paths) and route inventory test.
+- **Passed:** frontend `npm ci`, lint, 31 tests, production build, and production audit (no high/critical production findings). No frontend source changes.
+- **Passed:** `scripts/scan-secrets.sh`, committed history and working tree; no findings.
+- **Not run locally:** iOS/Android builds and client UI; CI and E/F/G own those checks. No production deployment or real delivery was attempted.
+
+An initial gate overlapped `npm ci`, which removed a Go source inside the
+`flatted` dependency while Go enumerated packages. Validation was rerun after
+the frontend gate with its generated dependencies removed. A host Go 1.26.2 /
+Unix-socket run also stalled in an existing migration preflight and was stopped;
+the accepted run uses the repository's Go 1.25.6 and TCP. No shared PostgreSQL
+process was stopped.
+
+Task-owned HTTP listeners and worker processes exited; lifecycle cleanup/status
+showed no active owned resources. Generated frontend dependencies/build output
+and scratch Go build output were removed. The branch/worktree and the dedicated
+local test database remain available for the lead's review.

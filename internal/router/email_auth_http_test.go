@@ -332,6 +332,10 @@ func TestAuthHTTPVerificationExpiryAttemptsAndResend(t *testing.T) {
 	password := "attempt fixture synthetic password"
 	begin := func() { f.request("POST", "/api/v1/auth/signup", gin.H{"email": email, "password": password}, "", 202) }
 	begin()
+	var previousID string
+	if err := f.db.GetContext(context.Background(), &previousID, `SELECT id FROM auth_email_challenges WHERE email=$1 AND purpose='signup'`, email); err != nil {
+		t.Fatal(err)
+	}
 	code := f.code(email, "signup")
 	wrong := "000000"
 	if code == wrong {
@@ -346,10 +350,15 @@ func TestAuthHTTPVerificationExpiryAttemptsAndResend(t *testing.T) {
 	}
 	begin()
 	newCode := f.code(email, "signup")
-	if newCode == code {
-		t.Fatal("unexpected random collision; rerun")
+	var previousExists bool
+	if err := f.db.GetContext(context.Background(), &previousExists, `SELECT EXISTS(SELECT 1 FROM auth_email_challenges WHERE id=$1)`, previousID); err != nil || previousExists {
+		t.Fatal("resend retained the previous challenge")
 	}
-	f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": code}, "", 400)
+	// Uniform six-digit codes can coincide. Always assert challenge replacement;
+	// check rejection of the old digits only when the new digits differ.
+	if newCode != code {
+		f.request("POST", "/api/v1/auth/signup/verify", gin.H{"email": email, "code": code}, "", 400)
+	}
 	if _, err := f.db.ExecContext(context.Background(), `UPDATE auth_email_challenges SET expires_at=NOW()-INTERVAL '1 second' WHERE email=$1`, email); err != nil {
 		t.Fatal(err)
 	}
