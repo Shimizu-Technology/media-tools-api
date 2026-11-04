@@ -85,6 +85,10 @@ const defaultLeaseRecoveryGrace = 250 * time.Millisecond
 const whisperPreparedExtension = ".mp3"
 const whisperPreparedBitrate = "64k"
 
+// whisperEmptySegmentBytes is well under one second of prepared 64 kbps audio,
+// so an unprobeable file this small cannot be hiding real speech.
+const whisperEmptySegmentBytes = 4 * 1024
+
 func requiresWhisperTranscode(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
 	// We accept these uploads at the API boundary, but normalize them before
@@ -2279,7 +2283,26 @@ func splitAudioForWhisper(ctx context.Context, inputPath string, segmentSeconds 
 		return nil, fmt.Errorf("no segment outputs created")
 	}
 	sort.Strings(parts)
-	return parts, nil
+	return dropEmptyTailSegments(ctx, parts), nil
+}
+
+// dropEmptyTailSegments removes a trailing part holding no playable audio.
+// Stream copy cuts on packet boundaries, so some ffmpeg versions write a final
+// header-only file that Whisper would reject and fail the whole recording. Only
+// the tail is trimmed, so chunk indexes still line up with transcript timestamps.
+func dropEmptyTailSegments(ctx context.Context, parts []string) []string {
+	for len(parts) > 1 {
+		last := parts[len(parts)-1]
+		if _, err := probeMediaDuration(ctx, last); err == nil {
+			break
+		}
+		if info, err := os.Stat(last); err != nil || info.Size() >= whisperEmptySegmentBytes {
+			break
+		}
+		_ = os.Remove(last)
+		parts = parts[:len(parts)-1]
+	}
+	return parts
 }
 
 func transcodeForWhisper(ctx context.Context, inputPath, outputPath string, onProgress func(int)) error {

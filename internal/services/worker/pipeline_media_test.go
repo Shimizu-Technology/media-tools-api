@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -35,7 +36,8 @@ func TestMOVTranscodeAndStreamCopySplit(t *testing.T) {
 	for _, part := range parts {
 		duration, err := probeMediaDuration(context.Background(), part)
 		if err != nil {
-			t.Fatal(err)
+			info, _ := os.Stat(part)
+			t.Fatalf("part %s of %d (%v): %v", filepath.Base(part), len(parts), info.Size(), err)
 		}
 		total += duration
 	}
