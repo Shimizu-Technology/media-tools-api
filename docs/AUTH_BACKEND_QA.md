@@ -21,7 +21,8 @@ Required scenarios (local PostgreSQL 16 `mta_test_auth`, HTTP and integration te
 - D09: monthly transcription and summary/chat caps reject excess work; owner bypass; concurrent reservations.
 - D10: purge removes expired tokens while preserving usable refresh recovery.
 
-Focused acceptance: **10/10 passed**. Backend and frontend gates passed.
+Pre-review acceptance: **10/10 passed** at the original head. This is historical
+evidence; the review-fix acceptance below supersedes the affected contracts.
 Execution uses local PostgreSQL 16,
 full Gin routes over ephemeral loopback HTTP listeners, and synthetic accounts.
 
@@ -50,7 +51,7 @@ only in `_test.go` and cannot compile into the shipped server. Resend/HIBP are
 fake transports; real delivery and the production proxy chain are not tested.
 No Resend key was sought. No production configuration or data was read.
 
-Limits to release acceptance: configure and verify proxy CIDRs, a verified
+Limits to original release acceptance: configure and verify client-IP sources, a verified
 Resend sender, owner exemption and client reauthentication inputs before public
 signup. These are rollout tasks, not claimed production verification.
 
@@ -79,3 +80,116 @@ Task-owned HTTP listeners and worker processes exited; lifecycle cleanup/status
 showed no active owned resources. Generated frontend dependencies/build output
 and scratch Go build output were removed. The branch/worktree and the dedicated
 local test database remain available for the lead's review.
+
+
+## Independent-review fix pass (2026-11-04)
+
+Implementation branch `v1-auth-fixes` tracks `origin/codex/v1-auth-backend` at
+`9c5f751`. Fetched main is an ancestor (no rebase needed). Source brief: the
+current v1 plan's Ground rules and D, repository AGENTS.md, AUTH_API.md, and the
+prior ledger above. The supplied review decisions supersede the plan's older
+signup-password timing and per-challenge-only limits. Scope is backend auth,
+quotas, signed proxy routing and their public contract; E/F/G own client UI.
+Execution owner: implementation agent. Fixtures: synthetic accounts in local
+PostgreSQL 16 `mta_test_auth`, fake email/HIBP/AI transports and loopback HTTP.
+No production config or data, real email, or paid AI provider is used.
+
+Required acceptance:
+
+| Case | Expected outcome | Regression evidence |
+| --- | --- | --- |
+| R1 | Ten wrong codes and five sends per email/purpose in rolling 24h; increasing resend delay; replacement/purge/concurrency cannot reset budget | `TestEmailRollingBudgetsSurviveChallengeReplacement`, `TestEmailSendCapIncreasingDelayAndConcurrency` |
+| R2 | Paid malformed chat stays charged; every model input is allowlisted; formatting/manual+automatic/title/summary use shared cap; capped enrichment skips without failing transcription; no capped formatting requeue | `TestAuthHTTPPaidMalformedChatStaysChargedAndModelsAreRestricted`, `TestAuthHTTPOwnerModelBypassUsesExactIdentity`, `TestProviderCallTrackerSurvivesMalformedOutput`, `TestFormattingJobsChargeCapAndCannotRequeueWhenCapped`, `TestAutomaticEnrichmentChecksCapBeforeProvider`, `TestAutomaticUsageInitializesMissingPolicyAndExactOwner` |
+| R3 | Only owner user ID or exact key ID exempts account/model policy; prefix collisions do not | `TestUsageExemptionRequiresExactOwnerIdentity`, `TestAuthHTTPOwnerModelBypassUsesExactIdentity` |
+| R4 | Unused successor permits lost-response recovery; reuse after successor consumption revokes native and cookie sessions | `TestRefreshReuseAfterSuccessorConsumptionRevokesBothClientFlows`, `TestFirstPartyRefreshRecoversLostResponse`, `TestAuthHTTPBrowserLostRefreshResponseThenReuse` |
+| R5 | Signup stores no password before proof; code-holder supplies password on verify; attacker's initiation password cannot become a credential | `TestAuthHTTPSignupPasswordBelongsToEmailProver` |
+| R6 | Reset/email change atomically revoke classic, scoped and capture keys and sessions, with notice; ordinary password change preserves keys; account deletion removes keys | `TestAuthHTTPRecoveryRevokesClassicScopedAndCaptureKeysOnlyOnRecovery`, `TestRecoveryKeyRevocationSharesProofTransaction` |
+| R7 | Attacking one email cannot exhaust a shared proxy bucket; direct Render trust is opt-in; signed Netlify source validates signature/algorithm/issuer/expiry; unset secret fails safe | `TestAuthHTTPAccountLimitsDoNotShareProxyBucket`, `TestVerifiedProxyClientIPAndFailSafeDefaults`, `TestUnverifiedSharedProxyNeverExhaustsGlobalAuthBucket` |
+| R8 | Unverified passwordless session cannot add first password; verified stored email can; forgot password still proves ownership | `TestAuthHTTPFirstPasswordRequiresVerifiedStoredEmail`, `TestAuthHTTPPasswordlessResetChangesAndDeletion` |
+
+Regression sensitivity: **14/14 detected**. Temporarily removed each enforcement
+in isolation and ran its named regression test: rolling guesses, daily sends,
+paid-parse refund rule, model allowlist, exact-owner policy, refresh reuse,
+proof-time signup password, recovery key revocation, signed proxy verification,
+shared-IP fallback, first-password proof, formatting charge, formatting requeue
+cap and enrichment skip. Each failed behaviorally (no compilation failures),
+and every source file was restored before the full gate.
+
+The first fixture run caught two test-data errors (an undersized synthetic hash
+and an overlong synthetic key prefix); corrected fixtures pass. It also caught
+an implementation boundary mistake: the first-password proof check initially
+reached passwordless account deletion. The check now lives only in SetPassword;
+existing deletion acceptance was rerun. The formatting fake now returns its
+required JSON text envelope.
+
+Compatibility: checked iOS, web and CLI at current main. iOS sends nil model;
+web defaults to no override and its documented GPT-4o remains allowed; CLI's
+empty default works and arbitrary explicit models are restricted except for the
+owner. Build 13's persisted next_refresh_token retry and browser pending-cookie
+recovery are tested. Main has account-owned capture keys, with no separate
+session-key association or deleted-session key cleanup. Recovery deactivates all
+of those keys; account-deletion cleanup is tested for every key type.
+
+Migration 059 is additive and leaves strict SELECT * user/API-key structs alone.
+It adds durable email-limit history, clears pending signup hashes, and allows
+`skipped` summary/formatting status. Defaults keep public signup and Render
+header trust off. Netlify API and SPA catch-all rules move to TOML because
+_redirects runs first; domain/SEO behavior remains in _redirects.
+
+Proxy research: [Render documents overwritten CF-Connecting-IP and the spoofing
+risk of leftmost X-Forwarded-For](https://render.com/articles/host-pocketbase-on-render).
+[Netlify documents HS256 X-Nf-Sign with issuer and expiry and Runtime-scoped
+signed redirect secrets](https://docs.netlify.com/manage/routing/redirects/rewrites-proxies/).
+Only the documented public Render topology may enable the Render flag. Local
+cryptographic/header tests do not establish production edge acceptance.
+
+### Final validation of the review fixes
+
+Runtime/code source: `780fa522582f20e467de41cfa3e7701ced52b5b3`. The following
+commit changes this QA ledger only. Required review-fix acceptance: **8/8 passed**.
+Final local HTTP repeat: **13/13 TestAuthHTTP scenarios passed**, through full Gin
+routes on ephemeral loopback listeners, including persisted account/key/session/
+quota outcomes. The last HTTP run took 16.8 seconds. All original affected auth
+scenarios were repeated alongside the new ones.
+
+- **Passed:** focused PostgreSQL, middleware, HTTP, summary and worker tests.
+- **Passed:** gofmt and git diff --check; Go 1.25.6 arm64 `go vet ./...` and
+  `go test -p 1 -race -timeout 5m ./...` with the dedicated local database.
+  The router package took 160.5 seconds under race instrumentation; no race or
+  acceptance failures remained.
+- **Passed:** frontend npm ci, lint, 38 tests and production build. Production
+  dependency audit found no high/critical findings. The unchanged development
+  dependency tree reports two critical and thirteen moderate npm findings;
+  no dependency updates are part of this auth fix pass.
+- **Passed:** scripts/scan-secrets.sh over committed history and working tree;
+  no findings. OpenAPI YAML parsed (95 paths), signup payload assertions and
+  Netlify TOML/redirect-precedence assertions passed.
+- **Passed:** compiled release-mode server against local mta_test_auth, with a
+  clean environment and ephemeral local credentials: health 200, signup default
+  off (403), unknown forgot-password generic 202, and the required startup warning
+  when no client-IP source is configured. Binary inspection confirmed the
+  test-only email-code route is absent. The first startup attempt lacked the
+  repository-required admin credential; the local smoke environment was corrected
+  with an ephemeral credential, without reading any production configuration.
+- **Not run here:** native/web UI acceptance, local iOS/Android builds, live
+  Resend delivery, paid AI calls, actual Netlify signing or production Render edge
+  behavior. CI and E/F/G retain platform acceptance; the lead verifies edge trust
+  and delivery before enabling public signup. No production deployment occurred.
+
+Production setting names for the lead (no secrets or production values inspected):
+`RENDER_CLIENT_IP_ENABLED`, `NETLIFY_PROXY_SIGNATURE_SECRET`, `EMAIL_DELIVERY`,
+`RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `PUBLIC_SIGNUP_ENABLED`,
+`FIRST_PARTY_AUTH_ENABLED`, `FIRST_PARTY_PASSWORD_AUTH_ENABLED`,
+`OWNER_USER_ID` or `OWNER_API_KEY_ID`. The Netlify signature secret needs the
+Runtime scope as documented in AUTH_API.md; never expose it through VITE_*.
+
+Owned HTTP listeners, the compiled-server process, workers and test processes
+exited. Lifecycle cleanup/status reports **no active owned resources**. Shared
+PostgreSQL, other apps' simulators and baseline services stayed untouched.
+Generated frontend dependencies/build output were moved to Trash; the local
+binary and task scratch files were removed after verification. The dedicated
+test database and clean v1-auth-fixes worktree remain for the lead/reviewer.
+
+Implementation is pushed to codex/v1-auth-backend. This pass does not merge,
+request a duplicate review, or wait on CodeRabbit. The independent final-head
+review and remote CI are separate from the local evidence above.
