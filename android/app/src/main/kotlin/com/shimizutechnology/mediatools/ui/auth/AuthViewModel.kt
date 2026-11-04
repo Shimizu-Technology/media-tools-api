@@ -1,5 +1,6 @@
 package com.shimizutechnology.mediatools.ui.auth
 
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -29,7 +30,7 @@ data class AuthUiState(
     val busy: Boolean = false,
     val error: String? = null,
     val notice: String? = null,
-    /** Wall-clock millis before which "Resend code" stays disabled; 0 when not waiting. */
+    /** `SystemClock.elapsedRealtime()` millis before which "Resend code" stays disabled; 0 when not waiting. */
     val resendAvailableAtMillis: Long = 0,
 )
 
@@ -39,21 +40,39 @@ data class AuthUiState(
  */
 class AuthViewModel(
     private val auth: PasswordAuthController,
-    private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val nowMillis: () -> Long = SystemClock::elapsedRealtime,
 ) : ViewModel() {
     private val _state = MutableStateFlow(AuthUiState())
     val state: StateFlow<AuthUiState> = _state.asStateFlow()
 
+    /** The sign-up name is kept so a resend replaces the pending challenge without losing it. */
+    private var signupName: String? = null
+    private var checkingAvailability = false
+
     init {
+        refreshAvailability()
+    }
+
+    /**
+     * Sign-up is offered only when the server says it is open. If the check fails, sign-in
+     * still works and sign-up stays hidden until the screen asks again (it does on resume).
+     */
+    fun refreshAvailability() {
+        if (checkingAvailability || _state.value.signupEnabled) return
+        checkingAvailability = true
         viewModelScope.launch {
-            // Sign-up is offered only when the server says it is open. If the check fails,
-            // sign-in still works and sign-up simply stays hidden.
-            val open = runCatching { auth.availability().signupEnabled }.getOrDefault(false)
-            _state.update { it.copy(signupEnabled = open) }
+            try {
+                val open = runCatching { auth.availability().signupEnabled }.getOrDefault(false)
+                _state.update { it.copy(signupEnabled = open) }
+            } finally {
+                checkingAvailability = false
+            }
         }
     }
 
     fun go(step: AuthStep) {
+        // A request in flight finishes on its own step; moving now would be overwritten by it.
+        if (_state.value.busy) return
         _state.update { it.copy(step = step, error = null, notice = null, resendAvailableAtMillis = 0) }
     }
 
@@ -74,6 +93,7 @@ class AuthViewModel(
             fail("Sign-up is not open yet.")
             return@submit
         }
+        signupName = name
         auth.startSignup(current.email, name)
         awaitCode(AuthStep.SignUpCode)
     }
@@ -88,7 +108,7 @@ class AuthViewModel(
         if (current.busy || nowMillis() < current.resendAvailableAtMillis) return
         val signup = current.step == AuthStep.SignUpCode
         submit { c ->
-            if (signup) auth.startSignup(c.email) else auth.startPasswordReset(c.email)
+            if (signup) auth.startSignup(c.email, signupName) else auth.startPasswordReset(c.email)
             awaitCode(c.step)
         }
     }

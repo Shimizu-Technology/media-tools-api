@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Policy
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Public
@@ -41,6 +42,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -54,6 +56,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.shimizutechnology.mediatools.AppLinks
+import com.shimizutechnology.mediatools.api.MediaToolsAPIException
 import com.shimizutechnology.mediatools.api.MediaToolsApi
 import com.shimizutechnology.mediatools.api.PasswordAuthController
 import com.shimizutechnology.mediatools.api.RecoveryAuthController
@@ -90,6 +93,9 @@ fun SettingsScreen(
     var recoveryCodes by remember(ownerId) { mutableStateOf<List<String>>(emptyList()) }
     // Null until the server answers, so deletion never guesses whether a password is needed.
     var passwordConfigured by remember(ownerId) { mutableStateOf<Boolean?>(null) }
+    var loadingPassword by remember(ownerId) { mutableStateOf(false) }
+    // Bumped by the retry button so a failed status lookup can run again without leaving Settings.
+    var passwordStatusAttempt by remember(ownerId) { mutableIntStateOf(0) }
     var showChangePassword by remember { mutableStateOf(false) }
     var passwordNotice by remember(ownerId) { mutableStateOf<String?>(null) }
 
@@ -116,8 +122,10 @@ fun SettingsScreen(
     }
 
     LaunchedEffect(recoveryAuth, ownerId) { loadRecoveryStatus() }
-    LaunchedEffect(passwordAuth, ownerId) {
+    LaunchedEffect(passwordAuth, ownerId, passwordStatusAttempt) {
+        loadingPassword = true
         passwordConfigured = runCatching { passwordAuth.passwordConfigured() }.getOrNull()
+        loadingPassword = false
     }
 
     Column(
@@ -164,17 +172,27 @@ fun SettingsScreen(
                 when (passwordConfigured) {
                     true -> "Changing your password signs your other devices out."
                     false -> "No password is set for this account yet."
-                    null -> "Password status is unavailable."
+                    null -> if (loadingPassword) "Checking password status…" else "Password status is unavailable."
                 },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedButton(
-                enabled = passwordConfigured != null,
-                onClick = { passwordNotice = null; showChangePassword = true },
+                enabled = !loadingPassword,
+                onClick = {
+                    passwordNotice = null
+                    if (passwordConfigured == null) passwordStatusAttempt++ else showChangePassword = true
+                },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
-                Icon(Icons.Outlined.Lock, contentDescription = null)
-                Text(if (passwordConfigured == false) "Set a password" else "Change password", Modifier.padding(start = 8.dp))
+                Icon(if (passwordConfigured == null) Icons.Outlined.Refresh else Icons.Outlined.Lock, contentDescription = null)
+                Text(
+                    when (passwordConfigured) {
+                        null -> "Check again"
+                        false -> "Set a password"
+                        true -> "Change password"
+                    },
+                    Modifier.padding(start = 8.dp),
+                )
             }
             passwordNotice?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         }
@@ -278,6 +296,7 @@ fun SettingsScreen(
         DeleteAccountDialog(
             api = api,
             passwordConfigured = passwordConfigured,
+            onPasswordRequired = { passwordConfigured = true },
             onDismiss = { showDelete = false },
             onDeleted = {
                 consentStore.revoke(ownerId)
@@ -424,6 +443,7 @@ private fun AIProcessingDisclosure(onAllow: () -> Unit, onDecline: () -> Unit, o
 private fun DeleteAccountDialog(
     api: MediaToolsApi,
     passwordConfigured: Boolean?,
+    onPasswordRequired: () -> Unit,
     onDismiss: () -> Unit,
     onDeleted: () -> Unit,
     onError: (String) -> Unit,
@@ -475,6 +495,10 @@ private fun DeleteAccountDialog(
                         runCatching { api.deleteAccount(password) }
                             .onSuccess { onDeleted() }
                             .onFailure {
+                                // A password was set elsewhere after Settings loaded. Show the field now.
+                                if ((it as? MediaToolsAPIException)?.errorCode == "current_password_required") {
+                                    onPasswordRequired()
+                                }
                                 val message = it.authFailureMessage()
                                 error = message
                                 onError(message)

@@ -86,7 +86,11 @@ fun MediaToolsApp() {
             )
         }
     } else {
-        val authViewModel: AuthViewModel = viewModel(factory = AuthViewModel.factory(passwordAuth))
+        val authViewModel: AuthViewModel = viewModel(
+            // A fresh model per session revision, so nothing typed or shown before sign-out carries over.
+            key = "auth:$sessionRevision",
+            factory = AuthViewModel.factory(passwordAuth),
+        )
         AuthScreen(authViewModel, recoveryAuth)
     }
 }

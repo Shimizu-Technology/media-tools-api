@@ -63,6 +63,19 @@ class RecoveryAuthControllerTest {
     }
 
     @Test
+    fun `pending redeem code is readable until a definitive rejection clears it`() = runTest {
+        val store = FakeSessionStore(pendingRedeem = PendingRecoveryCodeRedeem("MTRFIRST", nextToken))
+        val transport = FakeTransport()
+        val controller = recovery(store, transport, deviceSession(store, transport))
+
+        assertEquals("MTRFIRST", controller.pendingRedeemCode())
+
+        transport.responses += SessionResponse(401, "{}")
+        runCatching { controller.redeem("MTR-FIRST") }
+        assertNull(controller.pendingRedeemCode())
+    }
+
+    @Test
     fun `rotation is stable-user bound and confirm retries after response loss`() = runTest {
         val store = FakeSessionStore(value = StoredDeviceSession(pair(expiresAt = "2027-01-01T00:00:00Z")))
         val beginTransport = FakeTransport().apply {

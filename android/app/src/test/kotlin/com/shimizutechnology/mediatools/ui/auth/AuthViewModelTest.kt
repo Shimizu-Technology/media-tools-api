@@ -52,6 +52,23 @@ class AuthViewModelTest {
     }
 
     @Test
+    fun `a failed availability check is requested again and then stops asking`() = runTest(dispatcher) {
+        val transport = FakeTransport().apply { errors += IOException("offline") }
+        val vm = viewModel(transport)
+        advanceUntilIdle()
+        assertFalse(vm.state.value.signupEnabled)
+
+        transport.responses += health(true)
+        vm.refreshAvailability()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.signupEnabled)
+
+        vm.refreshAvailability()
+        advanceUntilIdle()
+        assertEquals("no request once sign-up is known to be open", 2, transport.calls.size)
+    }
+
+    @Test
     fun `closed sign-up cannot be started and sends no request`() = runTest(dispatcher) {
         val transport = FakeTransport().apply { responses += health(false) }
         val vm = viewModel(transport)
@@ -123,6 +140,23 @@ class AuthViewModelTest {
         // The receipt and the code step stay in place so nothing typed is lost.
         assertEquals(AuthStep.SignUpCode, vm.state.value.step)
         assertEquals(GENERIC_EMAIL_RECEIPT, vm.state.value.notice)
+    }
+
+    @Test
+    fun `resend keeps the sign-up name`() = runTest(dispatcher) {
+        val transport = FakeTransport().apply { responses += health(true); responses += receipt; responses += receipt }
+        val vm = viewModel(transport)
+        advanceUntilIdle()
+        vm.setEmail("a@example.com")
+        vm.startSignup("  Pat  ")
+        advanceUntilIdle()
+
+        clock += AuthViewModel.RESEND_COOLDOWN_MILLIS
+        vm.resendCode()
+        advanceUntilIdle()
+
+        assertEquals(3, transport.calls.size)
+        assertTrue(transport.calls.last().body!!.contains(""""name":"Pat""""))
     }
 
     @Test
@@ -233,6 +267,21 @@ class AuthViewModelTest {
         assertNull(session.currentOwnerId())
         // The saved successor lets the retry recover a session whose response was lost.
         assertNotNull(store.pendingLogin)
+    }
+
+    @Test
+    fun `navigation is ignored while a request is in flight`() = runTest(dispatcher) {
+        val vm = viewModel(FakeTransport().apply { responses += health(false); responses += receipt })
+        advanceUntilIdle()
+        vm.setEmail("a@example.com")
+        vm.go(AuthStep.ForgotPassword)
+
+        vm.startReset()
+        vm.go(AuthStep.SignIn)
+        assertEquals(AuthStep.ForgotPassword, vm.state.value.step)
+        advanceUntilIdle()
+
+        assertEquals(AuthStep.ResetCode, vm.state.value.step)
     }
 
     @Test

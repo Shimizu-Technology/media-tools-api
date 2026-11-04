@@ -1,5 +1,6 @@
 package com.shimizutechnology.mediatools.ui.auth
 
+import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -45,6 +46,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.shimizutechnology.mediatools.api.RecoveryAuthController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -55,6 +57,11 @@ private val MinTouch = 48.dp
 @Composable
 fun AuthScreen(viewModel: AuthViewModel, recoveryAuth: RecoveryAuthController) {
     val state by viewModel.state.collectAsState()
+    // If the first availability check failed offline, ask again when the app returns.
+    LifecycleResumeEffect(viewModel) {
+        viewModel.refreshAvailability()
+        onPauseOrDispose {}
+    }
     var showRecovery by remember { mutableStateOf(false) }
 
     Column(
@@ -204,15 +211,15 @@ private fun CodeStep(
     LinkButton(backLabel, enabled = !state.busy) { viewModel.go(backTo) }
 }
 
-/** Counts down to a wall-clock deadline once a second; 0 when there is nothing to wait for. */
+/** Counts down to a monotonic (`elapsedRealtime`) deadline once a second; 0 when there is nothing to wait for. */
 @Composable
 private fun rememberSecondsUntil(deadlineMillis: Long): Long {
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(deadlineMillis) {
-        now = System.currentTimeMillis()
+        now = SystemClock.elapsedRealtime()
         while (now < deadlineMillis) {
             delay(1000)
-            now = System.currentTimeMillis()
+            now = SystemClock.elapsedRealtime()
         }
     }
     return ((deadlineMillis - now + 999) / 1000).coerceAtLeast(0)
@@ -335,6 +342,19 @@ private fun RecoveryCodeDialog(recoveryAuth: RecoveryAuthController, onDismiss: 
     var code by remember { mutableStateOf("") }
     var submitting by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // A redeem whose answer was lost stays saved, and the server only accepts that same code
+    // again. Load it before anything can be submitted, and put it back after every attempt.
+    var loaded by remember { mutableStateOf(false) }
+    var pendingCode by remember { mutableStateOf<String?>(null) }
+
+    suspend fun syncPending() {
+        pendingCode = runCatching { recoveryAuth.pendingRedeemCode() }.getOrNull()
+        pendingCode?.let { code = it }
+    }
+    LaunchedEffect(recoveryAuth) {
+        syncPending()
+        loaded = true
+    }
 
     AlertDialog(
         onDismissRequest = { if (!submitting) onDismiss() },
@@ -342,10 +362,17 @@ private fun RecoveryCodeDialog(recoveryAuth: RecoveryAuthController, onDismiss: 
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Enter one of the one-time codes you saved for this account.")
+                if (pendingCode != null) {
+                    Text(
+                        "A recovery sign-in is already in progress. Try it again to finish.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 OutlinedTextField(
                     value = code,
                     onValueChange = { code = it.uppercase().take(44); error = null },
                     label = { Text("Recovery code") },
+                    enabled = loaded && !submitting && pendingCode == null,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -355,7 +382,7 @@ private fun RecoveryCodeDialog(recoveryAuth: RecoveryAuthController, onDismiss: 
         },
         confirmButton = {
             Button(
-                enabled = code.isNotBlank() && !submitting,
+                enabled = loaded && code.isNotBlank() && !submitting,
                 modifier = Modifier.heightIn(min = MinTouch),
                 onClick = {
                     submitting = true
@@ -363,7 +390,10 @@ private fun RecoveryCodeDialog(recoveryAuth: RecoveryAuthController, onDismiss: 
                     scope.launch {
                         runCatching { recoveryAuth.redeem(code) }
                             .onSuccess { code = ""; onDismiss() }
-                            .onFailure { error = it.message ?: "Recovery sign-in could not be completed." }
+                            .onFailure {
+                                error = it.message ?: "Recovery sign-in could not be completed."
+                                syncPending()
+                            }
                         submitting = false
                     }
                 },

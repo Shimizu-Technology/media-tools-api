@@ -40,13 +40,13 @@ if search_file 'READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STO
   exit 1
 fi
 
-# Media Tools owns Android sign-in. Fail if a third-party sign-in SDK returns, so
+# Media Tools owns Android sign-in. Fail if a known third-party sign-in SDK returns, so
 # the Play data safety answers stay true.
-if grep -Eiq 'clerk' android/app/build.gradle.kts android/gradle/libs.versions.toml; then
+if grep -Eiq 'clerk|auth0|firebase-auth|play-services-auth|appauth|msal' android/app/build.gradle.kts android/gradle/libs.versions.toml; then
   echo "Android must not depend on a third-party sign-in SDK"
   exit 1
 fi
-require_source 'media-tools-api\.onrender\.com/api/v1' android/app/build.gradle.kts \
+require_source '^[[:space:]]*buildConfigField\("String", "API_BASE_URL", "\\"https://media-tools-api\.onrender\.com/api/v1\\""\)' android/app/build.gradle.kts \
   "Android API_BASE_URL must be https://media-tools-api.onrender.com/api/v1"
 if search_file 'FIRST_PARTY_ANDROID_AUTH' android/app/build.gradle.kts; then
   echo "Android first-party sign-in must be on in every build, not behind a flag"

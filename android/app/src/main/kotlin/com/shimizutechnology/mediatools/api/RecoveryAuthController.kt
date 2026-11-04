@@ -71,6 +71,9 @@ class RecoveryAuthController(
         pair
     }
 
+    /** The code of a redeem still in flight (for example after a lost response), or null. */
+    suspend fun pendingRedeemCode(): String? = mutex.withLock { store.loadPendingRecoveryRedeem()?.code }
+
     suspend fun status(): RecoveryCodeStatus = mutex.withLock {
         val owner = requireOwner()
         sendAuthenticated(owner, "/auth/recovery", null, "GET")
