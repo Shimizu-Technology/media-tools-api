@@ -19,14 +19,19 @@ export function AccountMenu() {
     <div className="relative">
       <Menu
         label={`Account: ${user?.email ?? 'signed in'}`}
-        triggerClassName="pressable flex h-11 w-11 items-center justify-center rounded-full hover:bg-fill"
-        trigger={<span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-fill text-meta font-bold text-on-accent">{initials}</span>}
+        align="start"
+        side="top"
+        triggerClassName="pressable flex min-h-11 w-full items-center gap-2.5 rounded-md px-2 py-1 text-left hover:bg-fill"
+        trigger={<>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-fill text-meta font-bold text-on-accent">{initials}</span>
+          <span className="min-w-0 flex-1 truncate text-meta font-medium text-text-secondary">{user?.email ?? 'Your account'}</span>
+        </>}
         items={[
           { label: 'Settings', icon: <Settings />, onSelect: () => navigate('/app/settings') },
           { label: 'Sign out', icon: <LogOut />, onSelect: () => void handleSignOut() },
         ]}
       />
-      {error && <p role="alert" className="absolute right-0 top-full mt-1 w-48 rounded-md bg-surface p-2 text-meta shadow-overlay">Could not sign out. Try again.</p>}
+      {error && <p role="alert" className="absolute bottom-full left-0 mb-1 w-48 rounded-md bg-surface p-2 text-meta shadow-overlay">Could not sign out. Try again.</p>}
     </div>
   );
 }

@@ -87,7 +87,7 @@ export function AddToCollectionModal({ open, onClose, itemType, itemId, itemTitl
                     <span className="block truncate text-body font-medium">{collection.name}</span>
                     <span className="block text-meta text-text-secondary">{collection.item_count} {collection.item_count === 1 ? 'item' : 'items'}</span>
                   </span>
-                  {adding === collection.id ? <Loader2 className="h-5 w-5 animate-spin text-text-secondary" /> : isAdded ? <span className="inline-flex items-center gap-1 text-meta font-semibold text-accent"><Check className="h-4 w-4" />Added</span> : <Plus className="h-5 w-5 text-accent" aria-label="Add" />}
+                  {adding === collection.id ? <Loader2 className="h-5 w-5 animate-spin text-text-secondary" /> : isAdded ? <span className="inline-flex items-center gap-1 text-meta font-semibold text-accent-text"><Check className="h-4 w-4" />Added</span> : <Plus className="h-5 w-5 text-accent-text" aria-label="Add" />}
                 </button>
               </li>
             );

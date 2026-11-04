@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import { Check } from 'lucide-react';
 import { AIContentReportButton } from '../AIContentReportButton';
 import { CitationRow } from '../CitationChip';
 import { Button } from '../ui/Button';
@@ -41,8 +42,9 @@ export function SummarySection({ summary, onSummarize, busy, onCitationClick, au
   const hasSummary = summary.status === 'completed' && Boolean(summary.text.trim() || summary.keyPoints.length);
 
   return (
-    <section aria-labelledby="summary-heading" className="mt-7">
-      <h2 id="summary-heading" className="text-heading">Summary</h2>
+    <section aria-labelledby="summary-heading">
+      {/* The tab above already says Summary. */}
+      <h2 id="summary-heading" className="sr-only">Summary</h2>
       {pending && (
         <div className="mt-3" role="status" aria-live="polite">
           <p className="text-callout text-text-secondary">Writing the summary. It appears here when it is ready, even if you leave and come back.</p>
@@ -88,12 +90,15 @@ function SummaryList({ title, items, citations, onCitationClick }: { title: stri
   if (!items?.length) return null;
   return (
     <div className="mt-5">
-      <h3 className="text-subheading">{title}</h3>
-      <ul className="mt-1.5 max-w-[68ch] list-disc space-y-1.5 pl-5 text-reading marker:text-text-secondary">
+      <h3 className="text-meta font-semibold text-text-secondary">{title}</h3>
+      <ul className="mt-2 max-w-[68ch] space-y-2">
         {items.map((item, index) => (
-          <li key={`${title}-${index}`}>
-            {item}
-            <CitationRow citations={citations?.[index]} onClick={onCitationClick} />
+          <li key={`${title}-${index}`} className="flex gap-2.5 text-callout">
+            <Check className="mt-[3px] h-4 w-4 shrink-0 text-accent-text" aria-hidden="true" />
+            <div className="min-w-0">
+              {item}
+              <CitationRow citations={citations?.[index]} onClick={onCitationClick} />
+            </div>
           </li>
         ))}
       </ul>

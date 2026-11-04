@@ -6,8 +6,8 @@ export type ThemePreference = 'system' | 'light' | 'dark';
 
 const STORAGE_KEY = 'mta_theme';
 const CHANGED_EVENT = 'media-tools:theme-changed';
-// Matches --color-bg in index.css, so the browser chrome blends with the page.
-const BAR_COLORS = { light: '#f7f5f0', dark: '#191714' } as const;
+// Matches --color-background in index.css, so the browser chrome blends with the page.
+const BAR_COLORS = { light: '#fff7ef', dark: '#15110f' } as const;
 
 export function parseThemePreference(value: string | null): ThemePreference {
   return value === 'light' || value === 'dark' ? value : 'system';

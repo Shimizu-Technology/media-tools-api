@@ -291,6 +291,8 @@ export interface AudioTranscription {
   key_points: string[];
   action_items: string[];
   decisions: string[];
+  /** 200 integers from 0 to 100, real audio peaks. Absent until the server has them. */
+  waveform?: number[];
   summary_model?: string;
   summary_length: 'short' | 'medium' | 'detailed';
   summary_status: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
@@ -393,6 +395,18 @@ export interface LibraryItem {
   archived: boolean;
   tags: string[];
   created_at: string;
+  /** Up to 200 plain-text characters. Omitted when there is no text yet. */
+  excerpt?: string;
+  /** 32 integers from 0 to 100, audio only. Absent until the server has them. */
+  waveform?: number[];
+  /** Oldest first. Absent from servers that predate it; rows show the first. */
+  collections?: LibraryItemCollection[];
+}
+
+export interface LibraryItemCollection {
+  id: string;
+  name: string;
+  color?: string;
 }
 
 export interface LibraryPreferences {
@@ -1080,6 +1094,8 @@ export interface Collection {
   user_id?: string;
   api_key_id?: string;
   item_count: number;
+  /** A key from lib/collections.ts. Absent until the server assigns colors. */
+  color?: string;
   created_at: string;
   updated_at: string;
 }

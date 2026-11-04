@@ -8,7 +8,7 @@ export function TermsPage() {
       <h1 className="text-large-title">Terms of Use</h1>
       <p className="mt-2 text-callout text-text-secondary">Effective August 22, 2026</p>
 
-      <div className="mt-10 space-y-9 text-body leading-7 text-text [&_a]:text-accent">
+      <div className="mt-10 space-y-9 text-body leading-7 text-text [&_a]:text-accent-text">
         <TermsSection title="Agreement and eligibility">
           <p>These terms govern your use of ST Media Tools, provided by Shimizu Technology. You must be at least 13 years old and able to enter a binding agreement where you live. If you use Media Tools for an organization, you confirm that you may accept these terms for it.</p>
         </TermsSection>
@@ -23,7 +23,7 @@ export function TermsPage() {
         </TermsSection>
 
         <TermsSection title="AI features">
-          <p>AI-generated transcripts, formatting, summaries, citations, and answers can be incomplete or wrong. Review important output against the original source and do not rely on it as professional medical, legal, financial, or safety advice. Use the in-app report control for harmful, deceptive, privacy-invasive, or otherwise inappropriate AI output. Media Tools asks before sharing content with third-party AI providers; processing, reporting, and revocation details are in the <Link to="/privacy#ai-processing" className="underline" style={{ color: 'var(--color-accent)' }}>Privacy Policy</Link>.</p>
+          <p>AI-generated transcripts, formatting, summaries, citations, and answers can be incomplete or wrong. Review important output against the original source and do not rely on it as professional medical, legal, financial, or safety advice. Use the in-app report control for harmful, deceptive, privacy-invasive, or otherwise inappropriate AI output. Media Tools asks before sharing content with third-party AI providers; processing, reporting, and revocation details are in the <Link to="/privacy#ai-processing" className="underline" style={{ color: 'var(--color-accent-text)' }}>Privacy Policy</Link>.</p>
         </TermsSection>
 
         <TermsSection title="Service availability and changes">
@@ -31,7 +31,7 @@ export function TermsPage() {
         </TermsSection>
 
         <TermsSection title="Account deletion and termination">
-          <p>You can permanently delete your account in iPhone or web Settings. Public instructions are available on the <Link to="/delete-account" className="underline" style={{ color: 'var(--color-accent)' }}>account deletion page</Link>. We may suspend or terminate access for material violations of these terms, security threats, or legal requirements.</p>
+          <p>You can permanently delete your account in iPhone or web Settings. Public instructions are available on the <Link to="/delete-account" className="underline" style={{ color: 'var(--color-accent-text)' }}>account deletion page</Link>. We may suspend or terminate access for material violations of these terms, security threats, or legal requirements.</p>
         </TermsSection>
 
         <TermsSection title="Liability">
@@ -39,7 +39,7 @@ export function TermsPage() {
         </TermsSection>
 
         <TermsSection title="Governing law and contact">
-          <p>These terms are governed by the laws applicable in Guam, without regard to conflict-of-law rules. Questions can be sent through our <Link to="/support" className="underline" style={{ color: 'var(--color-accent)' }}>support page</Link> or to <a href="mailto:shimizutechnology@gmail.com" className="underline" style={{ color: 'var(--color-accent)' }}>shimizutechnology@gmail.com</a>.</p>
+          <p>These terms are governed by the laws applicable in Guam, without regard to conflict-of-law rules. Questions can be sent through our <Link to="/support" className="underline" style={{ color: 'var(--color-accent-text)' }}>support page</Link> or to <a href="mailto:shimizutechnology@gmail.com" className="underline" style={{ color: 'var(--color-accent-text)' }}>shimizutechnology@gmail.com</a>.</p>
         </TermsSection>
       </div>
     </main>

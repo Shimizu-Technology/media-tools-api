@@ -142,14 +142,14 @@ export function JoinPage() {
   const missing = Boolean(!loading && !error && !completed && status && !status.pending && !status.onboarding_required);
 
   return (
-    <main className="min-h-screen px-4 py-6 sm:py-10" style={{ backgroundColor: 'var(--color-bg)' }}>
+    <main className="min-h-screen px-4 py-6 sm:py-10" style={{ backgroundColor: 'var(--color-background)' }}>
       <div className="mx-auto max-w-3xl">
         <header className="flex items-center justify-between gap-4">
-          <Link to="/" className="flex min-h-11 items-center gap-3 rounded-md pr-3 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]">
+          <Link to="/" className="flex min-h-11 items-center gap-3 rounded-md pr-3 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-text)]">
             <Mark size={40} />
             <span><span className="block text-sm font-semibold">Media Tools</span><span className="block text-xs" style={{ color: 'var(--color-text-secondary)' }}>Secure account setup</span></span>
           </Link>
-          <Link to="/support" className="inline-flex min-h-11 items-center px-3 text-sm font-semibold" style={{ color: 'var(--color-accent)' }}>Get help</Link>
+          <Link to="/support" className="inline-flex min-h-11 items-center px-3 text-sm font-semibold" style={{ color: 'var(--color-accent-text)' }}>Get help</Link>
         </header>
 
         <section className="mt-6 overflow-hidden rounded-xl border shadow-overlay sm:mt-10" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
@@ -192,8 +192,8 @@ export function JoinPage() {
                   <button type="button" onClick={() => void copyCodes()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border px-4 text-sm font-semibold" style={{ borderColor: 'var(--color-separator)' }}>{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{copied ? 'Copied' : 'Copy all codes'}</button>
                   <button type="button" onClick={downloadCodes} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border px-4 text-sm font-semibold" style={{ borderColor: 'var(--color-separator)' }}><Download className="h-4 w-4" />Download text file</button>
                 </div>
-                <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-lg border p-4" style={{ borderColor: saved ? 'var(--color-accent)' : 'var(--color-separator)', backgroundColor: 'var(--color-surface)' }}>
-                  <input type="checkbox" checked={saved} onChange={(event) => setSaved(event.target.checked)} className="mt-1 h-5 w-5 accent-[var(--color-accent)]" />
+                <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-lg border p-4" style={{ borderColor: saved ? 'var(--color-accent-text)' : 'var(--color-separator)', backgroundColor: 'var(--color-surface)' }}>
+                  <input type="checkbox" checked={saved} onChange={(event) => setSaved(event.target.checked)} className="mt-1 h-5 w-5 accent-[var(--color-accent-text)]" />
                   <span><span className="block text-sm font-semibold">I saved every code somewhere private</span><span className="mt-1 block text-xs leading-5" style={{ color: 'var(--color-text-secondary)' }}>Confirmation activates this set and completes account recovery setup.</span></span>
                 </label>
                 <button type="button" onClick={() => void activateRecoveryCodes()} disabled={!saved || confirmingCodes} className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md px-5 text-sm font-semibold text-on-accent disabled:opacity-50" style={{ backgroundColor: 'var(--color-accent-fill)' }}>{confirmingCodes && <Loader2 className="h-4 w-4 animate-spin" />}{confirmingCodes ? 'Finishing…' : codesConfirmed ? 'Finish account setup' : 'Activate codes and finish'}</button>
@@ -213,11 +213,11 @@ export function JoinPage() {
 }
 
 function ProgressStep({ number, label, done, active }: { number: string; label: string; done: boolean; active: boolean }) {
-  return <li className="flex items-center gap-3 rounded-md border px-3 py-3" aria-current={active ? 'step' : undefined} style={{ borderColor: active ? 'var(--color-accent)' : 'var(--color-separator)', backgroundColor: done ? 'var(--color-accent-tint)' : 'transparent' }}><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: done || active ? 'var(--color-accent)' : 'var(--color-fill)', color: done || active ? 'var(--color-on-accent)' : 'var(--color-text-secondary)' }}>{done ? <Check className="h-4 w-4" /> : number}</span><span className="text-sm font-semibold">{label}</span></li>;
+  return <li className="flex items-center gap-3 rounded-md border px-3 py-3" aria-current={active ? 'step' : undefined} style={{ borderColor: active ? 'var(--color-accent-text)' : 'var(--color-separator)', backgroundColor: done ? 'var(--color-accent-tint)' : 'transparent' }}><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: done || active ? 'var(--color-accent-text)' : 'var(--color-fill)', color: done || active ? 'var(--color-on-accent)' : 'var(--color-text-secondary)' }}>{done ? <Check className="h-4 w-4" /> : number}</span><span className="text-sm font-semibold">{label}</span></li>;
 }
 
 function StatusPanel({ icon, title, body, children }: { icon?: ReactNode; title: string; body: string; children?: ReactNode }) {
-  return <div className="mt-7 rounded-lg border p-5 sm:p-6" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-fill)' }}>{icon && <div className="flex h-12 w-12 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}>{icon}</div>}<h2 className={`${icon ? 'mt-4' : ''} text-xl font-semibold`}>{title}</h2><p className="mt-2 max-w-xl text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{body}</p>{children}</div>;
+  return <div className="mt-7 rounded-lg border p-5 sm:p-6" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-fill)' }}>{icon && <div className="flex h-12 w-12 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent-text)' }}>{icon}</div>}<h2 className={`${icon ? 'mt-4' : ''} text-xl font-semibold`}>{title}</h2><p className="mt-2 max-w-xl text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{body}</p>{children}</div>;
 }
 
 function messageFor(caught: unknown, fallback: string): string {

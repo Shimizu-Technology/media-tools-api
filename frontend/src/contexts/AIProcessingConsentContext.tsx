@@ -99,7 +99,7 @@ function AIProcessingDisclosureDialog({ onAllow, onDecline }: { onAllow: () => v
         <p>
           API content is not used to train OpenAI models by default. You can revoke this permission for future requests in Settings. Existing processing may finish.
         </p>
-        <a href="/privacy#ai-processing" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-1.5 font-semibold text-accent underline">
+        <a href="/privacy#ai-processing" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-1.5 font-semibold text-accent-text underline">
           Read AI and privacy details <ExternalLink className="h-4 w-4" aria-hidden="true" />
         </a>
       </div>

@@ -114,7 +114,7 @@ export function OpsPage() {
 
         <section className="mt-10">
           <div className="mb-3 flex items-center gap-2">
-            <Flag className="h-4 w-4" style={{ color: 'var(--color-accent)' }} />
+            <Flag className="h-4 w-4" style={{ color: 'var(--color-accent-text)' }} />
             <h2 className="text-lg font-semibold">AI output reports</h2>
             <span className="rounded-full px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: 'var(--color-fill)', color: 'var(--color-text-secondary)' }}>
               {reports.filter((report) => report.status === 'open' || report.status === 'reviewing').length} active
@@ -133,11 +133,11 @@ export function OpsPage() {
               <article key={report.id} className="rounded-md border p-4" style={{ borderColor: 'var(--color-separator)', backgroundColor: 'var(--color-surface)' }}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="rounded-full px-2 py-1 font-semibold capitalize" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent)' }}>{report.category.replaceAll('_', ' ')}</span>
+                    <span className="rounded-full px-2 py-1 font-semibold capitalize" style={{ backgroundColor: 'var(--color-accent-tint)', color: 'var(--color-accent-text)' }}>{report.category.replaceAll('_', ' ')}</span>
                     <span className="capitalize" style={{ color: 'var(--color-text-secondary)' }}>{report.target_type.replaceAll('_', ' ')}</span>
                     <span style={{ color: 'var(--color-text-secondary)' }}>{new Date(report.created_at).toLocaleString()}</span>
                   </div>
-                  <span className="text-meta font-semibold capitalize" style={{ color: report.status === 'open' ? 'var(--color-text)' : report.status === 'resolved' ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}>
+                  <span className="text-meta font-semibold capitalize" style={{ color: report.status === 'open' ? 'var(--color-text)' : report.status === 'resolved' ? 'var(--color-accent-text)' : 'var(--color-text-secondary)' }}>
                     {report.status}
                   </span>
                 </div>

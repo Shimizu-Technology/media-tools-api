@@ -36,7 +36,7 @@ type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & { label: string
 /** A 44px square for a single icon. The label is required: it is the accessible name. */
 export function IconButton({ label, tone = 'accent', className = '', children, type = 'button', ...rest }: IconButtonProps) {
   return (
-    <button type={type} aria-label={label} title={label} className={`pressable inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-fill disabled:opacity-40 ${tone === 'accent' ? 'text-accent' : 'text-text-secondary'} ${className}`} {...rest}>
+    <button type={type} aria-label={label} title={label} className={`pressable inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-fill disabled:opacity-40 ${tone === 'accent' ? 'text-accent-text' : 'text-text-secondary'} ${className}`} {...rest}>
       {children}
     </button>
   );

@@ -29,7 +29,7 @@ export function UsageSection() {
   const reset = usage ? nextUsageReset(usage.month) : null;
   return (
     <SettingsCard
-      title="Usage this month"
+      title="This month"
       description={usage?.exempt ? 'This account has no monthly limits.' : reset ? `Limits reset on ${formatDate(reset)} (UTC).` : undefined}
       action={error ? <SecondaryButton type="button" onClick={() => void load()}>Try again</SecondaryButton> : undefined}
     >
@@ -52,11 +52,11 @@ function Meter({ label, used, limit, unit }: { label: string; used: number; limi
     <div>
       <div className="flex items-baseline justify-between gap-3 text-sm">
         <span className="font-semibold">{label}</span>
-        <span style={{ color: 'var(--color-text-secondary)' }}>{limit > 0 ? `${used} of ${limit} ${unit}` : `${used} ${unit} used`}</span>
+        <span className="font-mono" style={{ color: 'var(--color-text-secondary)' }}>{limit > 0 ? `${used} of ${limit} ${unit}` : `${used} ${unit} used`}</span>
       </div>
       {limit > 0 && (
-        <div role="progressbar" aria-label={`${label} used`} aria-valuemin={0} aria-valuemax={limit} aria-valuenow={Math.min(used, limit)} className="mt-2 h-2 overflow-hidden rounded-full" style={{ backgroundColor: 'var(--color-fill)' }}>
-          <div className="h-full rounded-full" style={{ width: `${Math.round(fraction * 100)}%`, backgroundColor: near ? 'var(--color-text)' : 'var(--color-accent)' }} />
+        <div role="progressbar" aria-label={`${label} used`} aria-valuemin={0} aria-valuemax={limit} aria-valuenow={Math.min(used, limit)} className="mt-2 h-2 overflow-hidden rounded-full" style={{ backgroundColor: 'var(--color-surface-2)' }}>
+          <div className={`h-full rounded-full ${near ? 'bg-text' : 'bg-hero'}`} style={{ width: `${Math.round(fraction * 100)}%` }} />
         </div>
       )}
       {near && <p className="mt-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{fraction >= 1 ? 'Limit reached. New work waits until the reset.' : 'Close to this month’s limit.'}</p>}

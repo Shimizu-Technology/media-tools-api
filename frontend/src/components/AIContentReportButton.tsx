@@ -90,7 +90,7 @@ export function AIContentReportButton({ targetType, targetId, label = 'Report AI
                 id={`ai-report-category-${targetId}`}
                 value={category}
                 onChange={(event) => setCategory(event.target.value as AIContentReportCategory)}
-                className="mt-2 min-h-11 w-full rounded-md border border-separator bg-surface px-3 text-text outline-none focus:border-accent"
+                className="mt-2 min-h-11 w-full rounded-md border border-separator bg-surface px-3 text-text outline-none focus:border-accent-text"
               >
                 {categories.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>

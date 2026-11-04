@@ -7,14 +7,14 @@ import { buttonClass } from './ui/styles';
 export function PublicHeader() {
   const { accountAuthEnabled, isAuthenticated } = useAuthContext();
   const action = isAuthenticated || !accountAuthEnabled
-    ? { to: '/app', label: 'Open your library' }
+    ? { to: '/app', label: 'Open Media Tools' }
     : { to: '/sign-in', label: 'Sign in' };
   return (
-    <header className="bg-bg pt-[env(safe-area-inset-top)]">
+    <header className="bg-background pt-[env(safe-area-inset-top)]">
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-2 px-[max(1rem,env(safe-area-inset-left))] sm:px-8">
         <Link to="/" className="-ml-1 flex min-h-11 items-center gap-2.5 rounded-md px-1">
           <Mark size={30} />
-          <span className="font-serif text-lg font-semibold tracking-[-0.01em]">Media Tools</span>
+          <span className="font-display text-lg font-extrabold tracking-[-0.01em]">Media Tools</span>
         </Link>
         <div className="flex-1" />
         <nav aria-label="Site" className="hidden items-center sm:flex">
@@ -32,7 +32,7 @@ export function PublicFooter() {
   return (
     <footer className="bg-surface pb-[max(2rem,env(safe-area-inset-bottom))] pt-14">
       <div className="mx-auto max-w-6xl px-4 sm:px-8">
-        <p className="font-serif text-[clamp(2.5rem,8vw,5.5rem)] font-semibold leading-none tracking-[-0.03em]">Media Tools</p>
+        <p className="font-display text-[clamp(2.5rem,8vw,5.5rem)] font-extrabold leading-none tracking-[-0.03em]">Media Tools</p>
         <nav aria-label="Legal and help" className="mt-8 flex flex-wrap gap-x-1 text-callout">
           {[
             ['/privacy', 'Privacy'],

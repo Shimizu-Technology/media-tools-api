@@ -11,27 +11,24 @@ export type LibraryQuery = {
   type: LibraryType;
   status: LibraryStatus;
   view: LibraryView;
-  collection: string;
   sort: 'desc' | 'asc';
   page: number;
 };
 
-export const DEFAULT_LIBRARY_QUERY: LibraryQuery = { q: '', type: '', status: '', view: '', collection: '', sort: 'desc', page: 1 };
-
-const COLLECTION_ID = /^[A-Za-z0-9-]{1,64}$/;
+export const DEFAULT_LIBRARY_QUERY: LibraryQuery = { q: '', type: '', status: '', view: '', sort: 'desc', page: 1 };
 
 export function parseLibraryQuery(params: URLSearchParams): LibraryQuery {
   const type = params.get('type');
   const status = params.get('status');
+  // The names older links used, from before Library and Processing were one page.
+  const activeAlias = status === 'processing' || status === 'pending';
   const view = params.get('view');
-  const collection = params.get('collection') ?? '';
   const page = Number.parseInt(params.get('page') ?? '1', 10);
   return {
-    q: (params.get('q') ?? '').slice(0, 200),
+    q: (params.get('q') ?? params.get('search') ?? '').slice(0, 200),
     type: type === 'youtube' || type === 'audio' || type === 'pdf' ? type : '',
-    status: status === 'active' || status === 'failed' || status === 'completed' ? status : '',
+    status: activeAlias ? 'active' : status === 'active' || status === 'failed' || status === 'completed' ? status : '',
     view: view === 'favorites' || view === 'archive' ? view : '',
-    collection: COLLECTION_ID.test(collection) ? collection : '',
     sort: params.get('sort') === 'asc' ? 'asc' : 'desc',
     page: Number.isFinite(page) && page > 1 ? Math.min(page, 10000) : 1,
   };
@@ -41,7 +38,6 @@ export function parseLibraryQuery(params: URLSearchParams): LibraryQuery {
 export function serializeLibraryQuery(query: LibraryQuery): URLSearchParams {
   const params = new URLSearchParams();
   if (query.q.trim()) params.set('q', query.q.trim());
-  if (query.collection) params.set('collection', query.collection);
   if (query.type) params.set('type', query.type);
   if (query.status) params.set('status', query.status);
   if (query.view) params.set('view', query.view);
@@ -58,10 +54,8 @@ export function updateLibraryQuery(query: LibraryQuery, changes: Partial<Library
 }
 
 export function hasLibraryFilters(query: LibraryQuery): boolean {
-  return Boolean(query.q.trim() || query.type || query.status || query.view || query.collection || query.sort === 'asc');
+  return Boolean(query.q.trim() || query.type || query.status || query.view || query.sort === 'asc');
 }
-
-export type DayGroup<T> = { key: string; label: string; items: T[] };
 
 function startOfDay(date: Date): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
@@ -74,18 +68,5 @@ export function dayLabel(value: Date, now: Date): string {
   if (days === 1) return 'Yesterday';
   if (days > 1 && days < 7) return new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(value);
   const sameYear = value.getFullYear() === now.getFullYear();
-  return new Intl.DateTimeFormat(undefined, sameYear ? { month: 'long', day: 'numeric' } : { month: 'long', day: 'numeric', year: 'numeric' }).format(value);
-}
-
-export function groupByDay<T>(items: T[], createdAt: (item: T) => string, now = new Date()): DayGroup<T>[] {
-  const groups: DayGroup<T>[] = [];
-  for (const item of items) {
-    const date = new Date(createdAt(item));
-    const valid = !Number.isNaN(date.getTime());
-    const key = valid ? String(startOfDay(date)) : 'unknown';
-    const last = groups[groups.length - 1];
-    if (last && last.key === key) last.items.push(item);
-    else groups.push({ key, label: valid ? dayLabel(date, now) : 'Earlier', items: [item] });
-  }
-  return groups;
+  return new Intl.DateTimeFormat(undefined, sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' }).format(value);
 }

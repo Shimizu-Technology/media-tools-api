@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { AlertCircle, AlignLeft, Archive, ChevronLeft, Copy, Download, ExternalLink, FolderPlus, Loader2, MessageSquare, MoreHorizontal, Pencil, Play, RefreshCw, RotateCcw, Square, Star, Tag, Trash2, X } from 'lucide-react';
+import { flushSync } from 'react-dom';
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { AlertCircle, AlignLeft, Archive, ChevronLeft, Copy, Download, ExternalLink, FolderPlus, Loader2, MoreHorizontal, Pencil, Play, RefreshCw, RotateCcw, Sparkles, Square, Star, Tag, Trash2, X } from 'lucide-react';
 import {
   cancelAudioTranscription,
   createSummary,
@@ -40,6 +41,7 @@ import { formatClock, formatDuration, formatItemDate, pluralize } from '../lib/f
 import { notifyLibraryActivityChanged } from '../lib/libraryActivityEvents';
 import { addVideoLink } from '../lib/mediaUpload';
 import { parseKeyPoints } from '../lib/summaries';
+import { activeSegmentId } from '../lib/waveform';
 import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
 import { AddToCollectionModal } from '../components/AddToCollectionModal';
 import { ChatPanel } from '../components/ChatPanel';
@@ -49,7 +51,7 @@ import { TranscriptSection } from '../components/item/TranscriptSection';
 import { Menu, type MenuItem } from '../components/ui/Menu';
 import { Dialog } from '../components/ui/Dialog';
 import { Button, ButtonLink } from '../components/ui/Button';
-import { Input, Notice } from '../components/ui/Field';
+import { Input, Notice, Segmented } from '../components/ui/Field';
 import { APP_ROUTES } from '../lib/appRoutes';
 
 type DetailItem = Transcript | AudioTranscription | PDFExtraction;
@@ -103,6 +105,8 @@ export function ItemDetailPage() {
   const type = itemType as ItemDetailType;
   const validType = type === 'transcript' || type === 'audio' || type === 'pdf';
   const navigate = useNavigate();
+  const location = useLocation();
+  const backLabel = (location.state as { from?: string } | null)?.from ?? 'Library';
   const [searchParams, setSearchParams] = useSearchParams();
   const { requestConsent } = useAIProcessingConsent();
   const [item, setItem] = useState<DetailItem | null>(null);
@@ -119,6 +123,8 @@ export function ItemDetailPage() {
   const [automaticSummaries, setAutomaticSummaries] = useState<boolean | undefined>(undefined);
   const [showVideo, setShowVideo] = useState(false);
   const [videoStart, setVideoStart] = useState(0);
+  const [tab, setTab] = useState<'summary' | 'transcript'>('summary');
+  const [playback, setPlayback] = useState<{ segment: string | null; playing: boolean }>({ segment: null, playing: false });
   const [dialog, setDialog] = useState<'collection' | 'rename' | 'tags' | 'summarize' | 'ask' | 'export' | null>(null);
   const playerRef = useRef<PlayerHandle | null>(null);
   const videoRef = useRef<HTMLIFrameElement | null>(null);
@@ -145,7 +151,7 @@ export function ItemDetailPage() {
   }, [itemId, type]);
 
   useEffect(() => {
-    queueMicrotask(() => { setItem(null); setLoadError(''); setVideoSummary(undefined); setShowVideo(false); });
+    queueMicrotask(() => { setItem(null); setLoadError(''); setVideoSummary(undefined); setShowVideo(false); setTab('summary'); setPlayback({ segment: null, playing: false }); });
     void load();
     if (!itemId || !validType) return;
     getLibraryPreferences(type, itemId).then(setPreferences).catch(() => undefined);
@@ -169,6 +175,12 @@ export function ItemDetailPage() {
   }, [complete, itemId, type, validType]);
   const segmentsLoaded = segmentState?.key === `${type}:${itemId}`;
   const segments = useMemo(() => (segmentsLoaded && segmentState ? segmentState.list : []), [segmentState, segmentsLoaded]);
+  const timedSegments = useMemo(() => segments.filter((segment) => typeof segment.start_ms === 'number'), [segments]);
+  // Fires a few times a second; state only changes when the line does.
+  const onPlaybackTime = useCallback((seconds: number, playing: boolean) => {
+    const segment = activeSegmentId(timedSegments, seconds * 1000);
+    setPlayback((current) => (current.segment === segment && current.playing === playing ? current : { segment, playing }));
+  }, [timedSegments]);
 
   // The playback URL is fetched once per recording, not on every refresh of
   // the item, so background polling never resets the player.
@@ -210,6 +222,8 @@ export function ItemDetailPage() {
       }
       return;
     }
+    // The line may be behind the Transcript tab.
+    flushSync(() => setTab('transcript'));
     const target = typeof citation.page_number === 'number' ? document.querySelector(`[data-page="${citation.page_number}"]`) : document.getElementById(`segment-${citation.segment_id}`);
     target?.scrollIntoView({ block: 'start' });
   }, [itemId, navigate, showVideo, type]);
@@ -277,7 +291,7 @@ export function ItemDetailPage() {
   if (!item) {
     return (
       <div className="mx-auto max-w-2xl">
-        <BackLink onBack={goBack} />
+        <BackLink label={backLabel} onBack={goBack} />
         {loadError ? (
           <div className="py-12">
             <p className="text-title">This item could not be opened</p>
@@ -394,12 +408,12 @@ export function ItemDetailPage() {
   const askPlaceholder = type === 'audio' ? 'Ask about this recording' : type === 'transcript' ? 'Ask about this video' : 'Ask about this document';
 
   return (
-    <div className="mx-auto max-w-5xl pb-28 lg:grid lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-12 lg:pb-10">
-      <article className="min-w-0 lg:max-w-[42rem]">
+    <div className="mx-auto max-w-6xl xl:grid xl:grid-cols-[minmax(0,1fr)_21rem] xl:gap-10">
+      <article className="min-w-0">
         <div className="flex items-center gap-1">
-          <BackLink onBack={goBack} />
+          <BackLink label={backLabel} onBack={goBack} />
           <div className="flex-1" />
-          <button type="button" onClick={() => setDialog('collection')} aria-label="Add to collection" title="Add to collection" className="pressable inline-flex h-11 w-11 items-center justify-center rounded-full text-accent hover:bg-fill"><FolderPlus className="h-[22px] w-[22px]" /></button>
+          <button type="button" onClick={() => setDialog('collection')} aria-label="Add to collection" title="Add to collection" className="pressable inline-flex h-11 w-11 items-center justify-center rounded-full text-accent-text hover:bg-fill"><FolderPlus className="h-[22px] w-[22px]" /></button>
           <Menu label="More actions" trigger={<MoreHorizontal className="h-[22px] w-[22px]" />} items={menu} />
         </div>
 
@@ -412,7 +426,7 @@ export function ItemDetailPage() {
         {preferences.tags.length > 0 && <p className="mt-1 text-meta text-text-secondary">{preferences.tags.map((tag) => `#${tag}`).join('  ')}</p>}
 
         {type === 'audio' && audioURL && (
-          <div id="player"><AudioPlayer src={audioURL} fallbackDuration={audio?.duration} handleRef={playerRef} onExpired={fetchAudioURL} /></div>
+          <div id="player"><AudioPlayer src={audioURL} fallbackDuration={audio?.duration} waveform={audio?.waveform} handleRef={playerRef} onExpired={fetchAudioURL} onTime={onPlaybackTime} /></div>
         )}
         {type === 'transcript' && complete && (item as Transcript).youtube_id && (
           <div id="player" className="mt-4">
@@ -456,44 +470,56 @@ export function ItemDetailPage() {
           </Notice></div>
         )}
 
+        {complete && type !== 'pdf' && (
+          <div className="mt-3">
+            <Segmented block label="Show" value={tab} onChange={setTab} options={[{ value: 'summary', label: 'Summary' }, { value: 'transcript', label: 'Transcript' }]} />
+          </div>
+        )}
+
         {complete && summary && type !== 'pdf' && (
-          <SummarySection
-            summary={summary}
-            onSummarize={() => (type === 'audio' && summary.status !== 'none' ? setDialog('summarize') : void summarize())}
-            busy={busy === 'summary'}
-            onCitationClick={openCitation}
-            automaticSummaries={type === 'audio' ? automaticSummaries : undefined}
-          />
+          <div className="mt-4" hidden={tab !== 'summary'}>
+            <SummarySection
+              summary={summary}
+              onSummarize={() => (type === 'audio' && summary.status !== 'none' ? setDialog('summarize') : void summarize())}
+              busy={busy === 'summary'}
+              onCitationClick={openCitation}
+              automaticSummaries={type === 'audio' ? automaticSummaries : undefined}
+            />
+          </div>
         )}
 
         {complete && (
-          <TranscriptSection
-            title={type === 'pdf' ? 'Text' : 'Transcript'}
-            text={view.text}
-            originalText={audio?.transcript_text}
-            segments={segments}
-            onCitationClick={openCitation}
-            formatting={audio ? { status: audio.formatting_status, error: audio.formatting_error_message } : undefined}
-            onFormat={audio ? formatTranscript : undefined}
-            formatBusy={busy === 'format'}
-          />
+          <div className="mt-4" hidden={type !== 'pdf' && tab !== 'transcript'}>
+            <TranscriptSection
+              title={type === 'pdf' ? 'Text' : 'Transcript'}
+              text={view.text}
+              originalText={audio?.transcript_text}
+              segments={segments}
+              onCitationClick={openCitation}
+              formatting={audio ? { status: audio.formatting_status, error: audio.formatting_error_message } : undefined}
+              onFormat={audio ? formatTranscript : undefined}
+              formatBusy={busy === 'format'}
+              preferTimestamps={type === 'audio'}
+              activeSegment={playback.segment}
+              playing={playback.playing}
+            />
+          </div>
         )}
       </article>
 
       {complete && (
         <>
-          {/* Desktop: the conversation sits beside the reading column. */}
-          <aside className="hidden lg:block" aria-labelledby="ask-heading">
-            <div className="sticky top-20 flex h-[calc(100dvh-6.5rem)] flex-col pt-14">
+          {/* Wide windows: the conversation sits beside the reading column. */}
+          <aside className="hidden xl:block" aria-labelledby="ask-heading">
+            <div className="sticky top-8 flex h-[calc(100dvh-4rem)] flex-col rounded-lg bg-surface p-4">
               <h2 id="ask-heading" className="mb-3 text-heading">Ask</h2>
               <ChatPanel itemId={item.id} itemType={type} placeholder={askPlaceholder} onCitationClick={openCitation} fill />
             </div>
           </aside>
-          {/* Phones: a quiet bar at the thumb opens the conversation. */}
-          <div className="fixed inset-x-0 bottom-0 z-20 border-t border-separator bg-bar px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5 backdrop-blur-xl lg:hidden">
-            <button type="button" onClick={() => setDialog('ask')} className="pressable flex min-h-11 w-full items-center gap-2 rounded-full border border-separator bg-surface pl-4 pr-1.5 text-left text-body text-text-secondary">
-              <MessageSquare className="h-[18px] w-[18px]" aria-hidden="true" />
-              <span className="flex-1">{askPlaceholder}</span>
+          {/* Otherwise one button at the thumb opens it. */}
+          <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:left-[var(--sidebar-width)] md:px-8 xl:hidden" data-app-chrome>
+            <button type="button" onClick={() => setDialog('ask')} className="pressable pointer-events-auto mx-auto flex min-h-[3.25rem] w-full max-w-3xl items-center justify-center gap-2 rounded-full bg-accent-fill text-body font-semibold text-on-accent shadow-overlay">
+              <Sparkles className="h-[18px] w-[18px]" aria-hidden="true" />Ask about this
             </button>
           </div>
           <Dialog open={dialog === 'ask'} onClose={() => setDialog(null)} title="Ask" size="lg">
@@ -511,10 +537,10 @@ export function ItemDetailPage() {
   );
 }
 
-function BackLink({ onBack }: { onBack: () => void }) {
+function BackLink({ label, onBack }: { label: string; onBack: () => void }) {
   return (
-    <Link to={APP_ROUTES.library} onClick={(event) => { event.preventDefault(); onBack(); }} className="pressable -ml-2 inline-flex min-h-11 items-center gap-0.5 rounded-md pr-3 text-body text-accent hover:bg-fill">
-      <ChevronLeft className="h-6 w-6" aria-hidden="true" />Library
+    <Link to={APP_ROUTES.library} onClick={(event) => { event.preventDefault(); onBack(); }} className="pressable -ml-2 inline-flex min-h-11 items-center gap-0.5 rounded-md pr-3 text-body text-accent-text hover:bg-fill">
+      <ChevronLeft className="h-6 w-6 shrink-0" aria-hidden="true" /><span className="max-w-[12rem] truncate">{label}</span>
     </Link>
   );
 }
@@ -537,8 +563,8 @@ function FailedNote({ type, message, busy, onRetry, onDelete }: { type: ItemDeta
       ? 'Trying again starts a new attempt for the same link. This one stays until you delete it.'
       : 'A PDF cannot be retried from here. If it is a scan, it has no text to read; otherwise add the file again.';
   return (
-    <div className="mt-6 rounded-lg border border-separator bg-surface p-4" role="alert">
-      <p className="flex items-start gap-2 text-body font-semibold"><AlertCircle className="mt-0.5 h-[18px] w-[18px] shrink-0 text-text-secondary" aria-hidden="true" />{type === 'audio' ? 'Transcription failed' : type === 'transcript' ? 'The transcript could not be fetched' : 'This PDF could not be read'}</p>
+    <div className="mt-4 rounded-lg bg-warning-surface p-4" role="alert">
+      <p className="flex items-start gap-2 text-body font-semibold"><AlertCircle className="mt-0.5 h-[18px] w-[18px] shrink-0 text-warning" aria-hidden="true" />{type === 'audio' ? 'Transcription failed' : type === 'transcript' ? 'The transcript could not be fetched' : 'This PDF could not be read'}</p>
       {message && <p className="mt-1 text-callout">{message}</p>}
       {/* The server's message for recordings already says the audio is kept. */}
       {(type !== 'audio' || !message) && <p className="mt-1 text-callout text-text-secondary">{copy}</p>}
@@ -628,7 +654,7 @@ function SummarizeDialog({ open, initial, onClose, onSubmit, busy }: { open: boo
       <p className="text-callout text-text-secondary">What kind of recording is this? The summary looks for what matters in each.</p>
       <div className="mt-3 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Kind of recording">
         {CONTENT_TYPES.map((option) => (
-          <button key={option.value} type="button" role="radio" aria-checked={value === option.value} onClick={() => setValue(option.value)} className={`pressable min-h-11 rounded-md border px-3 text-left text-callout ${value === option.value ? 'border-accent bg-accent-tint font-semibold text-accent' : 'border-separator'}`}>
+          <button key={option.value} type="button" role="radio" aria-checked={value === option.value} onClick={() => setValue(option.value)} className={`pressable min-h-11 rounded-md border px-3 text-left text-callout ${value === option.value ? 'border-accent-text bg-accent-tint font-semibold text-accent-text' : 'border-separator'}`}>
             {option.label}
           </button>
         ))}

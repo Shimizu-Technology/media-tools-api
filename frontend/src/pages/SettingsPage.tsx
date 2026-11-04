@@ -1,6 +1,6 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, KeyRound, LogOut } from 'lucide-react';
+import { AlertTriangle, ChevronRight, CircleHelp, Code, KeyRound, Link2, LogOut, Sparkles, SunMoon, User } from 'lucide-react';
 import { useAuthContext } from '../contexts/useAuthContext';
 import { useTheme } from '../hooks/useTheme';
 import { localApiKeyMode } from '../lib/webSession';
@@ -21,14 +21,22 @@ import { APP_ROUTES } from '../lib/appRoutes';
 
 const DeleteAccountSection = lazy(() => import('../components/DeleteAccountSection').then((module) => ({ default: module.DeleteAccountSection })));
 
-/** Grouped like a phone's Settings: a group heading, then plain sections. */
-function Group({ title, children }: { title: string; children: ReactNode }) {
+/** Grouped like a phone's Settings: a small icon and heading, then cards. */
+function Group({ title, icon: Icon, children }: { title: string; icon: ComponentType<{ className?: string }>; children: ReactNode }) {
   return (
-    <section className="mt-10 first:mt-6" aria-label={title}>
-      <h2 className="border-b border-separator pb-2 text-callout font-semibold text-text-secondary">{title}</h2>
+    <section className="mt-7 first:mt-4" aria-label={title}>
+      <h2 className="mb-2 flex items-center gap-2 text-meta font-semibold text-text-secondary">
+        <span className="flex h-7 w-7 items-center justify-center rounded-sm bg-surface-2 text-accent-text"><Icon className="h-4 w-4" /></span>
+        {title}
+      </h2>
       <div>{children}</div>
     </section>
   );
+}
+
+/** Link rows share one card, with hairlines between them. */
+function LinkList({ children }: { children: ReactNode }) {
+  return <div className="rounded-lg bg-surface px-4">{children}</div>;
 }
 
 export function SettingsPage() {
@@ -56,11 +64,12 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl pb-12">
-      <h1 className="pt-2 text-large-title">Settings</h1>
+    <div className="mx-auto max-w-2xl">
+      <h1 className="text-large-title">Settings</h1>
 
       {signedIn && (
-        <Group title="Account">
+        <Group title="Account" icon={User}>
+          <UsageSection />
           <SettingsCard
             title={user?.name || 'Your account'}
             description={user?.email}
@@ -73,31 +82,32 @@ export function SettingsPage() {
           {capabilities.status === 'unknown' && !checkingCapabilities && (
             <SettingsCard title="Email and password" description="Could not reach Media Tools to check these settings." action={<Button onClick={() => void refreshCapabilities()} busy={checkingCapabilities}>Try again</Button>} />
           )}
-          <UsageSection />
         </Group>
       )}
 
-      <Group title="Processing">
+      <Group title="AI processing" icon={Sparkles}>
         {signedIn && <AutomaticSummariesSection />}
         <AIProcessingSection />
       </Group>
 
-      <Group title="Agents and developers">
-        <LinkRow to={APP_ROUTES.developer} title="Agent keys and activity" description="Give an agent or script its own key, choose what it may do, and see what it did." />
-        <LinkRow to={APP_ROUTES.webhooks} title="Webhooks" description="Tell another service when a transcript or summary is ready." />
-        <LinkRow to="/docs" title="API reference" description="Every endpoint, with examples." />
-        {!accountAuthEnabled && <LinkRow to={APP_ROUTES.ops} title="System health" description="Queues, workers, and AI content reports." />}
+      <Group title="Developer and agent keys" icon={Link2}>
+        <LinkList>
+          <LinkRow to={APP_ROUTES.developer} title="Agent keys and activity" description="Give an agent or script its own key, choose what it may do, and see what it did." />
+          <LinkRow to={APP_ROUTES.webhooks} title="Webhooks" description="Tell another service when a transcript or summary is ready." />
+          <LinkRow to="/docs" title="API reference" description="Every endpoint, with examples." />
+          {!accountAuthEnabled && <LinkRow to={APP_ROUTES.ops} title="System health" description="Queues, workers, and AI content reports." />}
+        </LinkList>
       </Group>
 
       {signedIn && (
-        <Group title="Security">
+        <Group title="Devices and passkeys" icon={KeyRound}>
           <DevicesSection />
           <PasskeySecuritySection />
           <RecoveryCodeSecuritySection />
         </Group>
       )}
 
-      <Group title="Appearance">
+      <Group title="Appearance" icon={SunMoon}>
         <SettingsCard
           title="Light or dark"
           description="Follow this device, or always use one."
@@ -105,17 +115,19 @@ export function SettingsPage() {
         />
       </Group>
 
-      <Group title="Help and legal">
-        <LinkRow to="/privacy" title="Privacy policy" />
-        <LinkRow to="/terms" title="Terms of use" />
-        <LinkRow to="/support" title="Support and safety" />
-        <LinkRow to="/delete-account" title="Account deletion help" />
+      <Group title="Help" icon={CircleHelp}>
+        <LinkList>
+          <LinkRow to="/privacy" title="Privacy policy" />
+          <LinkRow to="/terms" title="Terms of use" />
+          <LinkRow to="/support" title="Support and safety" />
+          <LinkRow to="/delete-account" title="Account deletion help" />
+        </LinkList>
       </Group>
 
-      {localApiKeyMode && <Group title="Development"><LocalKeySection /></Group>}
+      {localApiKeyMode && <Group title="Development" icon={Code}><LocalKeySection /></Group>}
 
       {accountAuthEnabled && (
-        <Group title="Danger zone">
+        <Group title="Danger zone" icon={AlertTriangle}>
           <Suspense fallback={null}>
             <DeleteAccountSection />
           </Suspense>
@@ -127,7 +139,7 @@ export function SettingsPage() {
 
 function LinkRow({ to, title, description }: { to: string; title: string; description?: string }) {
   return (
-    <Link to={to} className="flex min-h-14 items-center gap-3 border-b border-separator py-3 last:border-b-0 hover:bg-fill">
+    <Link to={to} className="flex min-h-14 items-center gap-3 border-b border-separator py-3 last:border-b-0 hover:opacity-80">
       <span className="min-w-0 flex-1">
         <span className="block text-body font-medium">{title}</span>
         {description && <span className="mt-0.5 block text-callout text-text-secondary">{description}</span>}
@@ -167,7 +179,7 @@ function AutomaticSummariesSection() {
   };
 
   return (
-    <section className="border-b border-separator py-5">
+    <section className="rounded-lg bg-surface p-4">
       <Switch
         label="Automatic summaries"
         checked={enabled ?? false}
@@ -189,7 +201,7 @@ function AIProcessingSection() {
       title="Third-party AI processing"
       description={<>
         {hasConsent ? 'Allowed for this account. Revoking stops future transcription, formatting, summary, and chat requests.' : 'Not allowed. Media Tools asks before sharing content with OpenAI, OpenRouter, or a selected model provider.'}{' '}
-        <a href="/privacy#ai-processing" className="font-semibold text-accent underline">AI and privacy details</a>
+        <a href="/privacy#ai-processing" className="font-semibold text-accent-text underline">AI and privacy details</a>
       </>}
       action={hasConsent ? <Button variant="danger-plain" onClick={revokeConsent}>Revoke permission</Button> : <Button onClick={() => void requestConsent()}>Review and allow</Button>}
     />

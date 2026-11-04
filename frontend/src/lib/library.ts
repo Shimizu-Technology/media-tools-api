@@ -1,4 +1,7 @@
-import type { LibraryItem } from './api';
+import type { LibraryItem, LibraryItemCollection } from './api';
+import { formatClock } from './format';
+import { dayLabel } from './libraryQuery';
+import { normalizeWaveform } from './waveform';
 
 export type ItemDetailType = 'transcript' | 'audio' | 'pdf';
 
@@ -38,4 +41,33 @@ const MEDIA_EXTENSION = /\.(m4a|mp3|wav|caf|aac|ogg|flac|webm|mp4|mov|qta)$/i;
 export function displayTitle(title: string): string {
   const trimmed = title.trim();
   return trimmed.replace(MEDIA_EXTENSION, '') || trimmed;
+}
+
+export type ItemRowView = {
+  excerpt: string | null;
+  waveform: number[] | null;
+  collection: LibraryItemCollection | null;
+  /** 8:36 for media, 18p for a PDF. */
+  length: string;
+  /** Where it came from, when that is not obvious: a channel, or PDF. */
+  source: string;
+  day: string;
+};
+
+/**
+ * One item as a row reads it. `excerpt`, `waveform` and `collections` are absent
+ * on servers that predate them and empty until a backfill reaches the item, so
+ * each collapses to null and the row drops that line or shows the type icon.
+ */
+export function itemRowView(item: LibraryItem, now = new Date()): ItemRowView {
+  const created = new Date(item.created_at);
+  const channel = item.subtitle && item.subtitle !== 'Unknown channel' ? item.subtitle : '';
+  return {
+    excerpt: item.excerpt?.trim() || null,
+    waveform: item.item_type === 'audio' ? normalizeWaveform(item.waveform) : null,
+    collection: item.collections?.[0] ?? null,
+    length: item.item_type === 'pdf' ? (item.page_count ? `${item.page_count}p` : '') : item.duration >= 1 ? formatClock(item.duration) : '',
+    source: item.item_type === 'pdf' ? 'PDF' : item.item_type === 'youtube' ? channel || 'Video' : '',
+    day: Number.isNaN(created.getTime()) ? '' : dayLabel(created, now),
+  };
 }

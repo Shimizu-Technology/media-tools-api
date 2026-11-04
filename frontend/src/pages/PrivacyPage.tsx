@@ -16,7 +16,7 @@ export function PrivacyPage() {
         Last updated: August 22, 2026
       </p>
 
-      <div className="space-y-9 text-body leading-7 text-text [&_a]:text-accent [&_a]:underline">
+      <div className="space-y-9 text-body leading-7 text-text [&_a]:text-accent-text [&_a]:underline">
         <PrivacySection title="Overview">
           <p>
             ST Media Tools ("Media Tools", "we", "our") is a media transcription
@@ -126,7 +126,7 @@ export function PrivacyPage() {
               <strong style={{ color: 'var(--color-text)' }}>Resend</strong> —
               Sends the sign-up, verification, and password-reset emails you
               request, so it receives your email address and the message.{' '}
-              <a href="https://resend.com/legal/privacy-policy" className="underline" style={{ color: 'var(--color-accent)' }}>
+              <a href="https://resend.com/legal/privacy-policy" className="underline" style={{ color: 'var(--color-accent-text)' }}>
                 Privacy policy
               </a>
             </li>
@@ -134,21 +134,21 @@ export function PrivacyPage() {
               <strong style={{ color: 'var(--color-text)' }}>Clerk</strong> —
               The previous sign-in provider, still used by older versions of
               the iOS app while they update.{' '}
-              <a href="https://clerk.com/privacy" className="underline" style={{ color: 'var(--color-accent)' }}>
+              <a href="https://clerk.com/privacy" className="underline" style={{ color: 'var(--color-accent-text)' }}>
                 Privacy policy
               </a>
             </li>
             <li>
               <strong style={{ color: 'var(--color-text)' }}>OpenAI (Whisper)</strong> —
               Audio transcription and fallback text processing.{' '}
-              <a href="https://openai.com/enterprise-privacy/" className="underline" style={{ color: 'var(--color-accent)' }}>
+              <a href="https://openai.com/enterprise-privacy/" className="underline" style={{ color: 'var(--color-accent-text)' }}>
                 API privacy details
               </a>
             </li>
             <li>
               <strong style={{ color: 'var(--color-text)' }}>OpenRouter</strong> —
               Zero-data-retention routing for AI chat, summaries, and readable formatting.{' '}
-              <a href="https://openrouter.ai/privacy" className="underline" style={{ color: 'var(--color-accent)' }}>
+              <a href="https://openrouter.ai/privacy" className="underline" style={{ color: 'var(--color-accent-text)' }}>
                 Privacy policy
               </a>
             </li>
@@ -183,7 +183,7 @@ export function PrivacyPage() {
             You can access, export, or delete your data at any time through the
             app. Complete account deletion is available in Settings on iPhone
             and web. See the{' '}
-            <Link to="/delete-account" className="underline" style={{ color: 'var(--color-accent)' }}>
+            <Link to="/delete-account" className="underline" style={{ color: 'var(--color-accent-text)' }}>
               account deletion instructions
             </Link>{' '}
             without needing to contact support.
@@ -194,14 +194,14 @@ export function PrivacyPage() {
           <p>
             If you have questions about this privacy policy, need help, or want
             to report a safety concern, visit our{' '}
-            <Link to="/support" className="underline" style={{ color: 'var(--color-accent)' }}>
+            <Link to="/support" className="underline" style={{ color: 'var(--color-accent-text)' }}>
               support page
             </Link>{' '}
             or contact us at:{' '}
             <a
               href="mailto:shimizutechnology@gmail.com"
               className="underline"
-              style={{ color: 'var(--color-accent)' }}
+              style={{ color: 'var(--color-accent-text)' }}
             >
               shimizutechnology@gmail.com
             </a>

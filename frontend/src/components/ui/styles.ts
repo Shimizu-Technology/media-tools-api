@@ -6,8 +6,8 @@ const base = 'pressable inline-flex select-none items-center justify-center gap-
 
 const variants: Record<ButtonVariant, string> = {
   primary: 'bg-accent-fill text-on-accent hover:opacity-90',
-  secondary: 'border border-separator bg-surface text-text hover:bg-fill',
-  plain: 'text-accent hover:bg-fill',
+  secondary: 'bg-surface-2 text-text hover:opacity-90',
+  plain: 'text-accent-text hover:bg-fill',
   danger: 'bg-danger text-on-danger hover:opacity-90',
   'danger-plain': 'text-danger hover:bg-fill',
 };
@@ -20,14 +20,14 @@ const sizes: Record<ButtonSize, string> = {
 };
 
 export function buttonClass({ variant = 'secondary', size = 'md', block = false, className = '' }: { variant?: ButtonVariant; size?: ButtonSize; block?: boolean; className?: string } = {}) {
-  // A caller's own radius wins; otherwise md is a soft rectangle and lg a pill.
-  const radius = /(^|\s)rounded-/.test(className) ? '' : size === 'lg' ? 'rounded-full' : 'rounded-md';
+  // A caller's own radius wins; buttons are pills.
+  const radius = /(^|\s)rounded-/.test(className) ? '' : 'rounded-full';
   return [base, variants[variant], sizes[size], radius, block ? 'w-full' : '', className].filter(Boolean).join(' ');
 }
 
 export function iconLinkClass(tone: 'accent' | 'neutral' = 'accent') {
-  return `pressable inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-fill ${tone === 'accent' ? 'text-accent' : 'text-text-secondary'}`;
+  return `pressable inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-fill ${tone === 'accent' ? 'text-accent-text' : 'text-text-secondary'}`;
 }
 
 /** Text inputs: 16px or more (index.css enforces it), 44px tall. */
-export const inputClass = 'min-h-11 w-full rounded-md border border-separator bg-surface px-3.5 text-text placeholder:text-text-secondary outline-none transition-colors focus:border-accent disabled:opacity-60';
+export const inputClass = 'min-h-11 w-full rounded-md border border-transparent bg-surface-2 px-3.5 text-text placeholder:text-text-secondary outline-none transition-colors focus:border-accent-text disabled:opacity-60';

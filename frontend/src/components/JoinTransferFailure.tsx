@@ -18,7 +18,7 @@ export function JoinTransferFailure({ initial }: { initial: Extract<JoinTransfer
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4 py-10" style={{ backgroundColor: 'var(--color-bg)' }}>
+    <main className="flex min-h-screen items-center justify-center px-4 py-10" style={{ backgroundColor: 'var(--color-background)' }}>
       <section className="w-full max-w-lg rounded-xl border p-7 text-center sm:p-9" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight" style={{ color: 'var(--color-text)' }}>We could not secure this link yet.</h1>
         <p className="mt-3 text-sm leading-6" role="alert" style={{ color: 'var(--color-text-secondary)' }}>{failure.message}</p>
