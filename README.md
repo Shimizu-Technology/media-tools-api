@@ -57,7 +57,7 @@ end-to-end workflows, architecture, ownership, and current boundaries. See
 - **Frontend:** React 19 + Vite + TypeScript + Tailwind CSS v4 + Framer Motion
 - **Native:** SwiftUI for iOS 18.5+
 - **Database:** PostgreSQL 16
-- **AI Summaries:** OpenRouter API (GPT-4o, Claude, Gemini, etc.)
+- **AI Summaries:** OpenRouter API, limited to models with zero data retention
 - **Audio Transcription:** OpenAI Whisper API
 - **YouTube Transcripts:** yt-dlp CLI tool
 
@@ -225,14 +225,14 @@ curl -X POST http://localhost:8080/api/v1/summaries \
     "transcript_id": "UUID",
     "length": "medium",
     "style": "bullet",
-    "model": "google/gemini-2.5-flash"
+    "model": "openai/gpt-4.1-mini"
   }'
 ```
 
 Options:
 - `length`: short, medium, detailed
 - `style`: bullet, narrative, academic
-- `model`: Any OpenRouter model
+- `model`: `openai/gpt-4o`, `openai/gpt-4o-mini`, or `openai/gpt-4.1-mini`. Other models return `400 invalid_model` unless the account is exempt.
 
 ## Product Roadmap
 
