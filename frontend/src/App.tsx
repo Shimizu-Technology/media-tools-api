@@ -7,6 +7,7 @@ import { ScrollToTop } from './components/ScrollToTop'
 import { AuthProvider } from './contexts/AuthContext'
 import { AIProcessingConsentProvider } from './contexts/AIProcessingConsentContext'
 import { getCurrentUser, isAPIError, type User } from './lib/api'
+import { announceSessionChange, sessionAccountChanged, subscribeSessionChanges } from './lib/sessionSync'
 import { getSessionPhase, isWebSessionActive, localApiKeyMode, logoutWebSession, restoreWebSession, setSessionPhase, setWebOnboardingRequired, setWebSessionActive, subscribeWebSession, webSessionStateChanged } from './lib/webSession'
 import { clearPasskeySignInJournal, recoverPendingPasskeySignIn } from './lib/passkeys'
 import { isJoinSetupPath } from './lib/onboarding'
@@ -170,6 +171,8 @@ function AccountAppContent() {
   const [user, setUser] = useState<User | null>(null)
   // restore() loads the account itself; the phase listener must not repeat it.
   const restoringRef = useRef(false)
+  const loadedUserIDRef = useRef<string | null>(null)
+  useEffect(() => { loadedUserIDRef.current = user?.id ?? null }, [user])
 
   const loadUser = useCallback(async (): Promise<boolean> => {
     try {
@@ -235,13 +238,44 @@ function AccountAppContent() {
       const current = getSessionPhase()
       if (current === lastPhase) return
       lastPhase = current
-      if (current === 'authenticated') { if (!restoringRef.current) void loadUser() }
+      if (current === 'authenticated') {
+        announceSessionChange()
+        if (!restoringRef.current) {
+          void loadUser().then((loaded) => {
+            // Signed in but the account can't be read yet: use the retry state,
+            // because the app can't work without knowing whose data this is.
+            if (!loaded && !loadedUserIDRef.current && getSessionPhase() === 'authenticated') setSessionPhase('unavailable')
+          })
+        }
+      }
       // Never show the previous account's details to whoever signs in next.
-      else if (current === 'signed_out') setUser(null)
+      else if (current === 'signed_out') { announceSessionChange(); setUser(null) }
     }
     window.addEventListener(webSessionStateChanged, onChange)
     return () => window.removeEventListener(webSessionStateChanged, onChange)
   }, [loadUser])
+
+  // Another tab may have signed out or switched accounts. Reloading is the one
+  // reliable way to drop every piece of state that belongs to the old account.
+  useEffect(() => {
+    const revalidate = async () => {
+      if (getSessionPhase() !== 'authenticated') return
+      const restored = await restoreWebSession()
+      if (restored.state === 'signed_out') {
+        setWebSessionActive(false)
+        setUser(null)
+      } else if (restored.state === 'authenticated' && sessionAccountChanged(loadedUserIDRef.current, restored.status.user_id)) {
+        window.location.reload()
+      }
+    }
+    const onVisible = () => { if (document.visibilityState === 'visible') void revalidate() }
+    const unsubscribe = subscribeSessionChanges(() => { void revalidate() })
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      unsubscribe()
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [])
 
   const retrySession = useCallback(async () => {
     // An established session only needs its account re-read: a failed retry
@@ -259,22 +293,33 @@ function AccountAppContent() {
     if (phase !== 'unavailable') return
     let delay = 5000
     let timer: number | undefined
-    const attempt = () => { void retrySession() }
+    let inFlight = false
+    let stopped = false
+    // Hidden or offline tabs make no requests, so a forgotten tab can't keep the
+    // database awake. One attempt at a time, so slow answers can't pile up.
+    const attempt = async () => {
+      if (inFlight || document.visibilityState !== 'visible' || !navigator.onLine) return
+      inFlight = true
+      try { await retrySession() } finally { inFlight = false }
+    }
     const schedule = () => {
       timer = window.setTimeout(() => {
-        attempt()
-        delay = Math.min(delay * 2, 60000)
-        schedule()
+        void attempt().finally(() => {
+          if (stopped) return
+          delay = Math.min(delay * 2, 60000)
+          schedule()
+        })
       }, delay)
     }
     schedule()
-    const onVisible = () => { if (document.visibilityState === 'visible') attempt() }
-    window.addEventListener('online', attempt)
-    document.addEventListener('visibilitychange', onVisible)
+    const onWake = () => { void attempt() }
+    window.addEventListener('online', onWake)
+    document.addEventListener('visibilitychange', onWake)
     return () => {
+      stopped = true
       window.clearTimeout(timer)
-      window.removeEventListener('online', attempt)
-      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('online', onWake)
+      document.removeEventListener('visibilitychange', onWake)
     }
   }, [phase, retrySession])
 
