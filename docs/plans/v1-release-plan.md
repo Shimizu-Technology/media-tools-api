@@ -61,7 +61,7 @@ a Clerk development instance, and App Review rejected build 9.
 | G | Android auth parity | D | Merged (#104) |
 | H | Design system and redesign, iOS and web | A, E, F | Merged (#107, #111) |
 | I | Server Clerk removal and cleanup | E, F, G, production verification | Merged (#110) |
-| J | Release: TestFlight build and QA | everything above | In progress |
+| J | Release: TestFlight build and QA | everything above | Build 14 uploaded; production test passed after #113 and #114; awaiting tester availability and Leon's device test |
 
 ### A. iOS capture and results flow
 
@@ -274,6 +274,21 @@ Bump the build, archive with Xcode, run `make ios-release-preflight` with the
 archive and export, upload to TestFlight, verify processing, and run comprehensive
 `application-qa` with a ledger. Leon then tests on his iPhone.
 
+Production test with the review account on 2026-11-05 found two bugs that CI could
+not see, both fixed:
+
+- #113: every usage-gated request returned 503, including all uploads. Production
+  uses prepared statements and the tests did not. CI and the gate now run the
+  database packages in both modes.
+- #114: summaries, chat, and titles returned 404 because the configured Gemini
+  models have no zero-data-retention endpoint on OpenRouter. Models must have one.
+
+Passing on production after those fixes: email reset, native login and refresh,
+upload, transcription, automatic title and summary, chat, library organizing,
+search, export, collections, agent keys, `mta`, deletion, and web cookie sign-in,
+refresh, and logout through Netlify. App Store Connect's session expired before
+build 14's processing could be checked. Device-only flows remain for Leon.
+
 ## Production configuration, in order
 
 Handled by the lead only.
@@ -284,12 +299,14 @@ Handled by the lead only.
    and `NETLIFY_PROXY_SIGNATURE_SECRET` on Render and Netlify. The startup log
    confirms the signature verifies.
 3. Done: `CLERK_*` removed from Render after #110 deployed.
-4. Open: set `PUBLIC_SIGNUP_ENABLED` once the cap and reset flows are verified in
-   production.
+4. Open, needs Leon's approval: set `PUBLIC_SIGNUP_ENABLED`. Reset is verified in
+   production and usage counts correctly; reaching a cap is tested in CI only.
 5. Open, needs Leon: rotate the production database password, rotate the HafaPass
    Resend webhook secret, delete the Clerk application, and remove
    `VITE_CLERK_PUBLISHABLE_KEY` and `VITE_API_URL` from Netlify.
-6. Later: a migration dropping `users.clerk_id`, `auth_identities` Clerk rows, and
+6. Done: `OPENROUTER_MODEL=openai/gpt-4.1-mini` on Render (#114). The chat and
+   title models use code defaults.
+7. Later: a migration dropping `users.clerk_id`, `auth_identities` Clerk rows, and
    `account_deletion_requests.clerk_*`, at least 30 days after #110 (2026-12-05).
 
 ## After Leon tests the TestFlight build
