@@ -36,31 +36,27 @@ private struct QuickRecordWidget: Widget {
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: QuickRecordProvider()) { _ in
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: "waveform.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.teal)
-                    Spacer()
-                    Text("MEDIA TOOLS")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Media Tools")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
 
                 Spacer(minLength: 0)
 
                 Button(intent: QuickRecordIntent()) {
-                    Label("Quick Record", systemImage: "mic.fill")
+                    Label("Record", systemImage: "mic")
                         .font(.headline)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .foregroundStyle(Theme.onAccent)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Theme.accentFill, in: Capsule())
                 }
                 .buttonStyle(.plain)
 
-                Text("Tap again or use the Live Activity to stop.")
+                Text("Tap again to stop.")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
-            .containerBackground(.fill.tertiary, for: .widget)
+            .containerBackground(Theme.bg, for: .widget)
         }
         .configurationDisplayName("Quick Record")
         .description("Open Media Tools to start recording, then stop from the Live Activity.")
@@ -78,6 +74,7 @@ private struct QuickRecordControl: ControlWidget {
             ControlWidgetButton(action: QuickRecordIntent()) {
                 Label("Quick Record", systemImage: "mic.fill")
             }
+            .tint(Theme.accentFill)
         }
         .displayName("Quick Record")
         .description("Start or stop a private Media Tools recording.")
@@ -90,24 +87,22 @@ private struct RecordingLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: RecordingActivityAttributes.self) { context in
             HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(activityColor(for: context.state).opacity(0.18))
-                    Image(systemName: activityIcon(for: context.state))
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(activityColor(for: context.state))
-                }
-                .frame(width: 44, height: 44)
+                Image(systemName: activityIcon(for: context.state))
+                    .font(.headline)
+                    .foregroundStyle(activityColor(for: context.state))
+                    .frame(width: 24)
+                    .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(activityTitle(for: context.state))
-                        .font(.headline)
+                        .font(.system(.headline, design: .serif, weight: .semibold))
+                        .foregroundStyle(Theme.text)
                     Text(context.attributes.contentTypeLabel)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                     RecordingTimer(state: context.state)
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                 }
 
                 Spacer()
@@ -118,9 +113,9 @@ private struct RecordingLiveActivity: Widget {
                             Button(intent: ResumeRecordingIntent()) {
                                 Image(systemName: "play.fill")
                                     .font(.headline)
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(Theme.text)
                                     .frame(width: 44, height: 44)
-                                    .background(.teal, in: Circle())
+                                    .background(Theme.fill, in: Circle())
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Resume recording")
@@ -128,9 +123,9 @@ private struct RecordingLiveActivity: Widget {
                             Button(intent: PauseRecordingIntent()) {
                                 Image(systemName: "pause.fill")
                                     .font(.headline)
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(Theme.text)
                                     .frame(width: 44, height: 44)
-                                    .background(.teal, in: Circle())
+                                    .background(Theme.fill, in: Circle())
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Pause recording")
@@ -140,17 +135,17 @@ private struct RecordingLiveActivity: Widget {
                     Button(intent: StopRecordingIntent()) {
                         Image(systemName: "stop.fill")
                             .font(.headline)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Theme.onRecord)
                             .frame(width: 44, height: 44)
-                            .background(.red, in: Circle())
+                            .background(Theme.record, in: Circle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Stop and save recording")
                 }
             }
             .padding(16)
-            .activityBackgroundTint(Color.black.opacity(0.92))
-            .activitySystemActionForegroundColor(.white)
+            .activityBackgroundTint(Theme.bg)
+            .activitySystemActionForegroundColor(Theme.text)
             .widgetURL(URL(string: "mediatools://record"))
         } dynamicIsland: { context in
             DynamicIsland {
@@ -176,14 +171,14 @@ private struct RecordingLiveActivity: Widget {
                                         .font(.caption.weight(.semibold))
                                 }
                                 .buttonStyle(.bordered)
-                                .tint(.teal)
+                                .tint(Theme.text)
                             } else {
                                 Button(intent: PauseRecordingIntent()) {
                                     Label("Pause", systemImage: "pause.fill")
                                         .font(.caption.weight(.semibold))
                                 }
                                 .buttonStyle(.bordered)
-                                .tint(.teal)
+                                .tint(Theme.text)
                             }
                         }
                         Button(intent: StopRecordingIntent()) {
@@ -191,7 +186,7 @@ private struct RecordingLiveActivity: Widget {
                                 .font(.caption.weight(.semibold))
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(.red)
+                        .tint(Theme.record)
                     }
                 }
             } compactLeading: {
@@ -202,11 +197,11 @@ private struct RecordingLiveActivity: Widget {
                     .font(.caption2.monospacedDigit())
                     .frame(maxWidth: 46)
             } minimal: {
-                Image(systemName: "mic.fill")
-                    .foregroundStyle(.red)
+                Image(systemName: activityIcon(for: context.state))
+                    .foregroundStyle(activityColor(for: context.state))
             }
             .widgetURL(URL(string: "mediatools://record"))
-            .keylineTint(.red)
+            .keylineTint(Theme.record)
         }
     }
 
@@ -219,11 +214,12 @@ private struct RecordingLiveActivity: Widget {
     private func activityIcon(for state: RecordingActivityAttributes.ContentState) -> String {
         if state.isInterrupted { return "exclamationmark.waveform" }
         if state.isPaused { return "pause.fill" }
-        return "waveform"
+        return "record.circle"
     }
 
     private func activityColor(for state: RecordingActivityAttributes.ContentState) -> Color {
-        state.isInterrupted || state.isPaused ? .orange : .red
+        // Red only while audio is actually being captured.
+        state.isInterrupted || state.isPaused ? Theme.text : Theme.record
     }
 }
 

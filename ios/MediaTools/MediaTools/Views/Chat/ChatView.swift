@@ -27,7 +27,7 @@ struct ChatView: View {
             // Messages
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 12) {
+                    LazyVStack(spacing: 16) {
                         ForEach(messages, id: \.stableId) { message in
                             ChatBubble(
                                 message: message,
@@ -35,62 +35,65 @@ struct ChatView: View {
                                 onReport: beginReport
                             )
                                 .id(message.stableId)
-                                .transition(.opacity.combined(with: .scale(scale: 0.95)))
                         }
 
                         if isSending {
-                            HStack {
-                                ProgressView()
-                                    .tint(Theme.brand400)
-                                    .padding(.horizontal, 8)
-                                Text("Thinking...")
-                                    .font(Theme.caption())
-                                    .foregroundStyle(Theme.textMuted)
-                                Spacer()
-                            }
-                            .padding(.horizontal)
-                            .id("loading")
+                            ProgressNote(text: "Thinking…")
+                                .id("loading")
                         }
                     }
-                    .padding()
+                    .readingMeasure()
+                    .ledgerPageMargin()
+                    .padding(.vertical)
                 }
                 .onChange(of: messages.count) {
-                    withAnimation(Theme.springSnappy) {
+                    withMotion(Theme.quick) {
                         proxy.scrollTo(messages.last?.stableId, anchor: .bottom)
                     }
                 }
             }
 
-            // Divider
-            Rectangle()
-                .fill(Theme.border)
-                .frame(height: 1)
+            Hairline()
 
             // Input bar
-            HStack(spacing: 8) {
-                TextField("Ask about this content...", text: $input, axis: .vertical)
-                    .textFieldStyle(.themed)
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Ask about this", text: $input, axis: .vertical)
                     .lineLimit(1...4)
                     .focused($inputFocused)
                     .submitLabel(.send)
                     .onSubmit { Task { await send() } }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .frame(minHeight: 44)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(Theme.separator, lineWidth: 0.5)
+                    }
 
                 Button {
                     Task { await send() }
                 } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(input.isEmpty || isSending ? Theme.textMuted : Theme.brand500)
+                    Image(systemName: "arrow.up")
+                        .font(.subheadline.weight(.semibold))
+                        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                        .foregroundStyle(Theme.onAccent)
+                        .frame(width: 44, height: 44)
+                        .background(Theme.accentFill, in: Circle())
+                        .opacity(input.isEmpty || isSending ? 0.45 : 1)
                 }
+                .buttonStyle(PressFeedbackButtonStyle())
                 .disabled(input.isEmpty || isSending)
+                .accessibilityLabel("Send")
+                .accessibilityIdentifier("chat.send")
             }
-            .padding(.horizontal)
+            .ledgerPageMargin()
             .padding(.vertical, 8)
-            .background(Theme.surfaceElevated)
-            .animation(.easeOut(duration: 0.15), value: inputFocused)
+            .ledgerBarBackground()
         }
-        .background(Theme.surface)
+        .background(Theme.bg)
         .task { await loadHistory() }
+        .onAppear { inputFocused = true }
         .sheet(item: $reportTarget) { target in
             AIContentReportSheet(target: target)
         }
@@ -107,9 +110,7 @@ struct ChatView: View {
     private func loadHistory() async {
         do {
             let response = try await service.getChatHistory(itemType: itemType, itemId: itemId)
-            withAnimation(Theme.springGentle) {
-                messages = response.messages
-            }
+            messages = response.messages
         } catch {
             // No history yet, that's fine
         }
@@ -122,25 +123,19 @@ struct ChatView: View {
         guard !isSending else { return }
 
         let tempId = UUID().uuidString
-        withAnimation(Theme.springSnappy) {
-            messages.append(ChatMessage(id: tempId, role: "user", content: text, citations: nil))
-        }
+        messages.append(ChatMessage(id: tempId, role: "user", content: text, citations: nil))
         input = ""
         isSending = true
         Haptics.light()
 
         do {
             let response = try await service.chat(itemType: itemType, itemId: itemId, message: text)
-            withAnimation(Theme.springGentle) {
-                // Remove the optimistic user message, then append the real pair
-                messages.removeAll { $0.id == tempId }
-                messages.append(contentsOf: response.messages)
-            }
+            // Remove the optimistic user message, then append the real pair
+            messages.removeAll { $0.id == tempId }
+            messages.append(contentsOf: response.messages)
         } catch {
             // Hand the message back so a failed send never loses what was typed.
-            withAnimation(Theme.springGentle) {
-                messages.removeAll { $0.id == tempId }
-            }
+            messages.removeAll { $0.id == tempId }
             if input.isEmpty {
                 input = text
             }
@@ -191,42 +186,54 @@ struct ChatBubble: View {
     private var isUser: Bool { message.role == "user" }
 
     var body: some View {
-        HStack {
-            if isUser { Spacer(minLength: 60) }
-
-            VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
+        if isUser {
+            HStack {
+                Spacer(minLength: 48)
                 Text(message.content)
-                    .font(Theme.body(15))
+                    .font(.body)
+                    .foregroundStyle(Theme.onAccent)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(isUser ? Theme.brand500 : Theme.surfaceCard)
-                    .foregroundStyle(isUser ? .white : Theme.textPrimary)
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusLarge))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.radiusLarge)
-                            .stroke(isUser ? Color.clear : Theme.borderSubtle, lineWidth: 1)
+                    .background(
+                        Theme.accentFill,
+                        in: RoundedRectangle(cornerRadius: Theme.radiusLarge, style: .continuous)
                     )
+                    .textSelection(.enabled)
+            }
+        } else {
+            // An answer reads like the rest of the page, not like a message bubble.
+            VStack(alignment: .leading, spacing: 2) {
+                Text(message.content)
+                    .readingText()
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                if !isUser, let citations = message.citations, !citations.isEmpty {
-                    CitationChips(citations: citations, onTap: onCitationTap)
-                }
-
-                if !isUser, message.id != nil {
-                    Button {
-                        onReport(message)
-                    } label: {
-                        Label("Report response", systemImage: "flag")
-                            .font(Theme.caption(12, weight: .semibold))
-                            .frame(minHeight: 44)
+                HStack(spacing: 8) {
+                    if let citations = message.citations, !citations.isEmpty {
+                        CitationChips(citations: citations, onTap: onCitationTap)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Theme.textMuted)
-                    .accessibilityHint("Opens an in-app safety report for this AI response")
+                    Spacer(minLength: 0)
+                    if message.id != nil {
+                        // App Review expects AI reporting to be findable. It sits one
+                        // tap away on every answer without interrupting the reading.
+                        Menu {
+                            Button {
+                                onReport(message)
+                            } label: {
+                                Label("Report Response", systemImage: "flag")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.footnote)
+                                .foregroundStyle(Theme.textSecondary)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("Response actions")
+                        .accessibilityHint("Includes reporting this AI response")
+                    }
                 }
             }
-            .textSelection(.enabled)
-
-            if !isUser { Spacer(minLength: 60) }
         }
     }
 }

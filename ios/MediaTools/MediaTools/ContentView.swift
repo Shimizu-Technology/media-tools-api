@@ -49,12 +49,15 @@ struct ContentView: View {
                     }
                     .accessibilityIdentifier("deletion-recovery.retry")
                 }
-                .padding()
+                .font(.body)
+                .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .foregroundStyle(Theme.textPrimary)
-                .background(Theme.surface)
+                .foregroundStyle(Theme.text)
+                .background(Theme.bg)
             } else if isReconcilingDeletion || isBlockedOnAccountResolution {
                 ProgressView("Restoring your workspace…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.bg)
             } else if deviceSession.isSessionStoreUnavailable,
                       activeUserID == nil,
                       !forceSignedOutForUITesting {
@@ -63,10 +66,11 @@ struct ContentView: View {
                         .multilineTextAlignment(.center)
                     tryAgainButton { deviceSession.reloadStoredSessionIfUnavailable() }
                 }
-                .padding()
+                .font(.body)
+                .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .foregroundStyle(Theme.textPrimary)
-                .background(Theme.surface)
+                .foregroundStyle(Theme.text)
+                .background(Theme.bg)
             } else if deviceSession.isAwaitingSessionRecovery,
                       activeUserID == nil,
                       !forceSignedOutForUITesting {
@@ -77,23 +81,25 @@ struct ContentView: View {
                     tryAgainButton { migrationRetry += 1 }
                         .accessibilityIdentifier("session-recovery.retry")
                 }
-                .padding()
+                .font(.body)
+                .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .foregroundStyle(Theme.textPrimary)
-                .background(Theme.surface)
+                .foregroundStyle(Theme.text)
+                .background(Theme.bg)
             } else if migrationFailed {
                 VStack(spacing: 16) {
                     Text("Your local recordings could not be connected to this account.")
                         .multilineTextAlignment(.center)
                     tryAgainButton { migrationRetry += 1 }
                 }
-                .padding()
+                .font(.body)
+                .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .foregroundStyle(Theme.textPrimary)
-                .background(Theme.surface)
+                .foregroundStyle(Theme.text)
+                .background(Theme.bg)
             } else if activeUserID != nil {
-                MainTabView()
-                    // A different account gets fresh tabs and library state. A
+                MainView()
+                    // A different account gets a fresh stack and library state. A
                     // background refresh of the same account never rebuilds them.
                     .id(activeUserID)
                     .safeAreaInset(edge: .top, spacing: 0) {
@@ -193,7 +199,7 @@ struct ContentView: View {
     }
 
     /// A background refresh must not cover an open workspace with a spinner:
-    /// that destroys the tabs and any route the Action Button just requested.
+    /// that destroys the stack and any route the Action Button just requested.
     private var isBlockedOnAccountResolution: Bool {
         isResolvingAccount && activeUserID == nil
     }
@@ -242,16 +248,9 @@ struct ContentView: View {
         }
     }
 
-    /// The height goes on the label: on the button, it would not grow the tap area.
     private func tryAgainButton(action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text("Try again")
-                .font(Theme.body(15, weight: .semibold))
-                .foregroundStyle(Theme.brand400)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        Button("Try again", action: action)
+            .buttonStyle(QuietButtonStyle())
     }
 
     private var legacyReconnectBanner: some View {
@@ -259,7 +258,7 @@ struct ContentView: View {
             Text(legacyReconnect == .failed
                 ? "Some recordings on this iPhone aren't connected to your account yet. They're safe."
                 : "Reconnecting recordings saved on this iPhone…")
-                .font(Theme.caption(13))
+                .font(.footnote)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -271,7 +270,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Theme.surfaceCard)
+        .background(Theme.surface)
     }
 
     /// Returns false when the workspace must stay closed. A partial migration
@@ -315,7 +314,6 @@ struct ContentView: View {
                     password: passwordValue
                 )
                 passwordValue = ""
-                activeSheet = nil
             case .recoveryCode:
                 try await FirstPartyAuthService.shared.redeemRecoveryCode(recoveryCode)
                 recoveryCode = ""
@@ -363,7 +361,6 @@ enum NativeAuthOperation {
 }
 
 enum WelcomeSheet: String, Identifiable {
-    case signIn
     case createAccount
     case forgotPassword
     case recoveryCode
@@ -394,8 +391,9 @@ struct AuthAvailability: Equatable {
     }
 }
 
-// MARK: - Welcome (unauthenticated)
+// MARK: - Sign in
 
+/// The first screen a signed-out person sees is the form itself.
 struct WelcomeView: View {
     @Binding var activeSheet: WelcomeSheet?
     @Binding var recoveryCode: String
@@ -409,231 +407,55 @@ struct WelcomeView: View {
     let onPasswordSignIn: () async -> Void
     let onRecoveryCodeSignIn: () async -> Void
     @Environment(RecordingCoordinator.self) private var recorder
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var isPasswordVisible = false
+    @ScaledMetric(relativeTo: .body) private var fieldLabelWidth: CGFloat = 92
+
+    private var canSubmitPassword: Bool {
+        !passwordEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !passwordValue.isEmpty
+    }
 
     var body: some View {
-        ZStack {
-            Theme.surface.ignoresSafeArea()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                brand
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 24)
+                    .padding(.bottom, 24)
 
-            ScrollView {
-                VStack(spacing: 24) {
-                    VStack(spacing: 16) {
-                        ZStack {
-                            Circle()
-                                .fill(Theme.brand500.opacity(0.06))
-                                .frame(width: 90, height: 90)
+                Text("Sign in")
+                    .font(.ledgerLargeTitle)
+                    .foregroundStyle(Theme.text)
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.bottom, 12)
 
-                            Circle()
-                                .fill(Theme.brand500.opacity(0.12))
-                                .frame(width: 62, height: 62)
-
-                            Image(systemName: "waveform.circle.fill")
-                                .font(.system(size: 36))
-                                .foregroundStyle(Theme.brand500)
-                        }
-
-                        VStack(spacing: 8) {
-                            Text("PRIVATE MEDIA WORKSPACE")
-                                .font(Theme.caption(11, weight: .semibold))
-                                .foregroundStyle(Theme.brand400)
-                                .tracking(1.2)
-
-                            Text("Media Tools")
-                                .font(Theme.heading(30))
-                                .foregroundStyle(Theme.textPrimary)
-
-                            Text("Sign in to record, transcribe, and organize your media in one private workspace.")
-                                .font(Theme.body(16))
-                                .foregroundStyle(Theme.textSecondary)
-                                .multilineTextAlignment(.center)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-
-                    VStack(spacing: 12) {
-                        FeatureRow(
-                            icon: "mic.fill",
-                            color: Theme.brand400,
-                            title: "Capture from your phone",
-                            subtitle: "Record live or upload existing audio and video files."
-                        )
-                        FeatureRow(
-                            icon: "play.rectangle.fill",
-                            color: Theme.videoColor,
-                            title: "Bring in videos and PDFs",
-                            subtitle: "Extract text, summaries, and answers from your source."
-                        )
-                        FeatureRow(
-                            icon: "lock.shield.fill",
-                            color: Theme.success,
-                            title: "Keep work connected",
-                            subtitle: "Reopen everything from your library on web or iPhone."
-                        )
-                    }
-                    .padding(16)
-                    .background(Theme.surfaceCard)
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusLarge))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: Theme.radiusLarge)
-                            .stroke(Theme.borderSubtle, lineWidth: 1)
-                    }
-
-                    if !recorder.availableRecordings.isEmpty || !recorder.availableSharedItems.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label("Saved on this iPhone", systemImage: "iphone.and.arrow.forward")
-                                .font(Theme.body(16, weight: .semibold))
-                                .foregroundStyle(Theme.textPrimary)
-                            Text("These are saved here. Sign in to review and transcribe them.")
-                                .font(Theme.caption(13))
-                                .foregroundStyle(Theme.textSecondary)
-                            ForEach(recorder.availableRecordings) { recording in
-                                if let fileURL = recorder.fileURL(for: recording) {
-                                    ShareLink(item: fileURL) {
-                                        Label(recording.displayTitle, systemImage: "square.and.arrow.up")
-                                    }
-                                    .font(Theme.caption(13))
-                                }
-                            }
-                            ForEach(recorder.availableSharedItems) { item in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    if let fileURL = recorder.sharedFileURL(for: item) {
-                                        ShareLink(item: fileURL) {
-                                            Label(item.originalName, systemImage: "square.and.arrow.up")
-                                        }
-                                        .font(Theme.caption(13))
-                                    } else {
-                                        Label(item.originalName, systemImage: "link")
-                                            .font(Theme.caption(13))
-                                            .foregroundStyle(Theme.textPrimary)
-                                            .lineLimit(2)
-                                    }
-                                    if item.resolvedKind != .audio,
-                                       recorder.pendingSharedErrors[item.id] == nil {
-                                        Text("Waiting for you to sign in")
-                                            .font(Theme.caption(12))
-                                            .foregroundStyle(Theme.textSecondary)
-                                    }
-                                    if let reason = recorder.pendingSharedErrors[item.id] {
-                                        Text(reason)
-                                            .font(Theme.caption(12))
-                                            .foregroundStyle(Theme.error)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                        .background(Theme.surfaceCard)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusLarge))
-                    }
-
-                    VStack(spacing: 10) {
-                        if availability.passwordAuth != false {
-                            Button {
-                                nativeAuthError = nil
-                                activeSheet = .signIn
-                            } label: {
-                                Label("Sign in", systemImage: "envelope.fill")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .brandButtonStyle()
-                            .disabled(nativeAuthOperation != nil)
-                            .accessibilityIdentifier("welcome.sign-in")
-                        }
-
-                        if availability.signup {
-                            Button {
-                                nativeAuthError = nil
-                                activeSheet = .createAccount
-                            } label: {
-                                Label("Create account", systemImage: "person.badge.plus")
-                                    .font(Theme.body(15, weight: .semibold))
-                                    .foregroundStyle(Theme.brand400)
-                                    .frame(maxWidth: .infinity, minHeight: 48)
-                                    .background(Theme.brand50)
-                                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-                            }
-                            .disabled(nativeAuthOperation != nil)
-                            .accessibilityIdentifier("welcome.create-account")
-                        }
-
-                        if availability.passwordReset != false, availability.passwordAuth != false {
-                            Button {
-                                nativeAuthError = nil
-                                activeSheet = .forgotPassword
-                            } label: {
-                                Text("Forgot password?")
-                                    .font(Theme.body(15, weight: .semibold))
-                                    .foregroundStyle(Theme.brand400)
-                                    .frame(maxWidth: .infinity, minHeight: 44)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(nativeAuthOperation != nil)
-                            .accessibilityIdentifier("welcome.forgot-password")
-
-                            Text("Never set a password? Use Forgot password with your account email.")
-                                .font(Theme.caption(12))
-                                .foregroundStyle(Theme.textMuted)
-                                .multilineTextAlignment(.center)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .accessibilityIdentifier("welcome.authentication.options")
-                        }
-
-                        if availability.passwordAuth == nil {
-                            Button("Check connection", action: onRetryAvailability)
-                                .font(Theme.caption(13, weight: .semibold))
-                                .foregroundStyle(Theme.textSecondary)
-                                .frame(minHeight: 44)
-                                .disabled(nativeAuthOperation != nil)
-                        }
-
-                        if let nativeAuthError, activeSheet == nil {
-                            Text(nativeAuthError)
-                                .font(Theme.caption(12))
-                                .foregroundStyle(Theme.error)
-                                .multilineTextAlignment(.center)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-
-                    HStack(spacing: 12) {
-                        Rectangle().fill(Theme.borderSubtle).frame(height: 1)
-                        Text("Other ways to sign in")
-                            .font(Theme.caption(12, weight: .semibold))
-                            .foregroundStyle(Theme.textMuted)
-                            .fixedSize()
-                        Rectangle().fill(Theme.borderSubtle).frame(height: 1)
-                    }
-
-                    VStack(spacing: 4) {
-                        secondarySignInButton(
-                            title: nativeAuthOperation == .passkey ? "Checking passkey…" : "Continue with passkey",
-                            icon: "key.fill",
-                            identifier: "welcome.passkey"
-                        ) {
-                            Task { await onPasskeySignIn() }
-                        }
-                        secondarySignInButton(
-                            title: "Use a recovery code",
-                            icon: "lifepreserver",
-                            identifier: "welcome.recovery-code"
-                        ) {
-                            nativeAuthError = nil
-                            activeSheet = .recoveryCode
-                        }
-                    }
-
-                    Text("Powered by Shimizu Technology")
-                        .font(Theme.caption(11))
-                        .foregroundStyle(Theme.textMuted)
+                if availability.passwordAuth != false {
+                    passwordForm
+                } else {
+                    passkeyPrimaryButton
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 24)
-                .padding(.bottom, 32)
+
+                if let nativeAuthError, activeSheet == nil {
+                    InlineError(nativeAuthError, identifier: "password-sign-in.error")
+                        .padding(.top, 12)
+                }
+
+                alternatives
+                    .padding(.top, 16)
+
+                if !recorder.availableRecordings.isEmpty || !recorder.availableSharedItems.isEmpty {
+                    savedOnThisPhone
+                        .padding(.top, 24)
+                }
             }
-            .scrollIndicators(.hidden)
+            .frame(maxWidth: 480)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 32)
         }
-        .sheet(item: $activeSheet, onDismiss: { passwordValue = "" }) { sheet in
+        .scrollDismissesKeyboard(.interactively)
+        .background(Theme.bg)
+        .sheet(item: $activeSheet) { sheet in
             sheetContent(sheet)
                 .presentationDetents(sheet == .recoveryCode ? [.medium, .large] : [.large])
                 .presentationDragIndicator(.visible)
@@ -641,40 +463,248 @@ struct WelcomeView: View {
         }
     }
 
-    private func secondarySignInButton(
-        title: String,
-        icon: String,
-        identifier: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(Theme.body(14, weight: .semibold))
-                .foregroundStyle(Theme.textSecondary)
-                .frame(maxWidth: .infinity, minHeight: 44)
+    private var brand: some View {
+        VStack(spacing: 12) {
+            Image("AppMark")
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 64, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 14.3, style: .continuous))
+                .accessibilityHidden(true)
+            Text("Media Tools")
+                .font(.ledgerTitle3)
+                .foregroundStyle(Theme.text)
         }
-        .buttonStyle(.plain)
+    }
+
+    private var passwordForm: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(spacing: 0) {
+                fieldRow("Email") {
+                    // Verbatim, or SwiftUI's markdown turns the address into a link.
+                    TextField("Email", text: $passwordEmail, prompt: Text(verbatim: "name@example.com"))
+                        .keyboardType(.emailAddress)
+                        .textContentType(.username)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.next)
+                        .accessibilityLabel("Email")
+                        .accessibilityIdentifier("password-sign-in.email")
+                }
+                Hairline()
+                fieldRow("Password") {
+                    HStack(spacing: 4) {
+                        Group {
+                            if isPasswordVisible {
+                                TextField("Required", text: $passwordValue)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            } else {
+                                SecureField("Required", text: $passwordValue)
+                            }
+                        }
+                        .textContentType(.password)
+                        .submitLabel(.go)
+                        .onSubmit(submitPassword)
+                        .accessibilityLabel("Password")
+                        .accessibilityIdentifier("password-sign-in.password")
+
+                        Button {
+                            isPasswordVisible.toggle()
+                        } label: {
+                            Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                                .font(.body)
+                                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                                .foregroundStyle(Theme.textSecondary)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(isPasswordVisible ? "Hide password" : "Show password")
+                    }
+                }
+            }
+            .background(Theme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Theme.radiusMedium, style: .continuous)
+                    .stroke(Theme.separator, lineWidth: 0.5)
+            }
+
+            if availability.passwordReset != false {
+                HStack {
+                    Spacer()
+                    Button("Forgot password?") {
+                        nativeAuthError = nil
+                        activeSheet = .forgotPassword
+                    }
+                    .buttonStyle(QuietButtonStyle())
+                    .disabled(nativeAuthOperation != nil)
+                    .accessibilityIdentifier("welcome.forgot-password")
+                }
+            }
+
+            AuthPrimaryButton(
+                title: "Sign in",
+                busyTitle: "Signing in…",
+                isBusy: nativeAuthOperation == .password,
+                isEnabled: canSubmitPassword && nativeAuthOperation == nil,
+                identifier: "password-sign-in.continue",
+                action: submitPassword
+            )
+            .padding(.top, 12)
+        }
+    }
+
+    private func submitPassword() {
+        guard nativeAuthOperation == nil, canSubmitPassword else { return }
+        Task { await onPasswordSignIn() }
+    }
+
+    /// Labels sit beside the fields until accessibility sizes, then above them.
+    private func fieldRow<Field: View>(_ label: String, @ViewBuilder field: () -> Field) -> some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            Text(label)
+                .font(.body)
+                .foregroundStyle(Theme.text)
+                .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : fieldLabelWidth, alignment: .leading)
+                .accessibilityHidden(true)
+            field()
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, 4)
+        .padding(.vertical, 3)
+        .frame(minHeight: 50)
+    }
+
+    private var passkeyPrimaryButton: some View {
+        Button {
+            Task { await onPasskeySignIn() }
+        } label: {
+            Text(nativeAuthOperation == .passkey ? "Checking passkey…" : "Continue with passkey")
+        }
+        .buttonStyle(PrimaryButtonStyle())
         .disabled(nativeAuthOperation != nil)
-        .accessibilityIdentifier(identifier)
+        .accessibilityIdentifier("welcome.passkey")
+    }
+
+    private var alternatives: some View {
+        VStack(spacing: 0) {
+            if availability.signup {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 4) { createAccountLine }
+                    VStack(spacing: 0) { createAccountLine }
+                }
+            }
+
+            if availability.passwordAuth != false {
+                Button(nativeAuthOperation == .passkey ? "Checking passkey…" : "Continue with passkey") {
+                    Task { await onPasskeySignIn() }
+                }
+                .buttonStyle(QuietButtonStyle(color: Theme.textSecondary))
+                .disabled(nativeAuthOperation != nil)
+                .accessibilityIdentifier("welcome.passkey")
+            }
+
+            Button("Use a recovery code") {
+                nativeAuthError = nil
+                activeSheet = .recoveryCode
+            }
+            .buttonStyle(QuietButtonStyle(color: Theme.textSecondary))
+            .disabled(nativeAuthOperation != nil)
+            .accessibilityIdentifier("welcome.recovery-code")
+
+            if availability.passwordReset != false, availability.passwordAuth != false {
+                Text("Never set a password? Use Forgot password with your account email.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+                    .accessibilityIdentifier("welcome.authentication.options")
+            }
+
+            if availability.passwordAuth == nil {
+                Button("Check connection", action: onRetryAvailability)
+                    .buttonStyle(QuietButtonStyle(color: Theme.textSecondary))
+                    .disabled(nativeAuthOperation != nil)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private var createAccountLine: some View {
+        Text("New here?")
+            .font(.subheadline)
+            .foregroundStyle(Theme.textSecondary)
+        Button("Create an account") {
+            nativeAuthError = nil
+            activeSheet = .createAccount
+        }
+        .buttonStyle(QuietButtonStyle())
+        .disabled(nativeAuthOperation != nil)
+        .accessibilityIdentifier("welcome.create-account")
+    }
+
+    private var savedOnThisPhone: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Saved on this iPhone")
+                .font(.ledgerSectionLabel)
+                .foregroundStyle(Theme.textSecondary)
+                .accessibilityAddTraits(.isHeader)
+            Text("These are saved here. Sign in to review and transcribe them.")
+                .font(.footnote)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(recorder.availableRecordings) { recording in
+                if let fileURL = recorder.fileURL(for: recording) {
+                    ShareLink(item: fileURL) {
+                        savedRowLabel(recording.displayTitle)
+                    }
+                }
+            }
+            ForEach(recorder.availableSharedItems) { item in
+                VStack(alignment: .leading, spacing: 2) {
+                    if let fileURL = recorder.sharedFileURL(for: item) {
+                        ShareLink(item: fileURL) {
+                            savedRowLabel(item.originalName)
+                        }
+                    } else {
+                        Text(item.originalName)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.text)
+                            .lineLimit(2)
+                    }
+                    if item.resolvedKind != .audio,
+                       recorder.pendingSharedErrors[item.id] == nil {
+                        Text("Waiting for you to sign in")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    if let reason = recorder.pendingSharedErrors[item.id] {
+                        InlineError(reason)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func savedRowLabel(_ title: String) -> some View {
+        Label(title, systemImage: "square.and.arrow.up")
+            .font(.subheadline)
+            .foregroundStyle(Theme.accent)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
     }
 
     @ViewBuilder
     private func sheetContent(_ sheet: WelcomeSheet) -> some View {
         switch sheet {
-        case .signIn:
-            PasswordSignInSheet(
-                email: $passwordEmail,
-                password: $passwordValue,
-                isSigningIn: nativeAuthOperation == .password,
-                errorMessage: nativeAuthError,
-                showsForgotPassword: availability.passwordReset != false,
-                onForgotPassword: {
-                    nativeAuthError = nil
-                    activeSheet = .forgotPassword
-                },
-                onCancel: { nativeAuthError = nil; activeSheet = nil },
-                onContinue: { Task { await onPasswordSignIn() } }
-            )
         case .createAccount, .forgotPassword:
             EmailPasswordFlowView(
                 purpose: sheet == .createAccount ? .createAccount : .resetPassword,
@@ -682,7 +712,7 @@ struct WelcomeView: View {
                 onSignInNeeded: { email in
                     passwordEmail = email
                     nativeAuthError = "Your password is saved. Sign in to continue."
-                    activeSheet = .signIn
+                    activeSheet = nil
                 },
                 onCancel: { activeSheet = nil }
             )
@@ -694,82 +724,6 @@ struct WelcomeView: View {
                 onCancel: { nativeAuthError = nil; activeSheet = nil },
                 onContinue: { Task { await onRecoveryCodeSignIn() } }
             )
-        }
-    }
-}
-
-private struct PasswordSignInSheet: View {
-    @Binding var email: String
-    @Binding var password: String
-    let isSigningIn: Bool
-    let errorMessage: String?
-    let showsForgotPassword: Bool
-    let onForgotPassword: () -> Void
-    let onCancel: () -> Void
-    let onContinue: () -> Void
-
-    private var canSubmit: Bool {
-        !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty
-    }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Sign in")
-                            .font(Theme.heading(24))
-                            .foregroundStyle(Theme.textPrimary)
-                        Text("Use your Media Tools email and password. This iPhone stays signed in until you sign out or revoke it.")
-                            .font(Theme.body(14))
-                            .foregroundStyle(Theme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    TextField("Email", text: $email)
-                        .keyboardType(.emailAddress)
-                        .textContentType(.username)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .authFieldStyle()
-                        .accessibilityIdentifier("password-sign-in.email")
-                    SecureField("Password", text: $password)
-                        .textContentType(.password)
-                        .submitLabel(.go)
-                        .onSubmit {
-                            guard !isSigningIn, canSubmit else { return }
-                            onContinue()
-                        }
-                        .authFieldStyle()
-                        .accessibilityIdentifier("password-sign-in.password")
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .font(Theme.caption(13))
-                            .foregroundStyle(Theme.error)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("password-sign-in.error")
-                    }
-                    AuthPrimaryButton(
-                        title: "Sign in",
-                        busyTitle: "Signing in…",
-                        isBusy: isSigningIn,
-                        isEnabled: canSubmit,
-                        identifier: "password-sign-in.continue",
-                        action: onContinue
-                    )
-                    if showsForgotPassword {
-                        Button("Forgot password?", action: onForgotPassword)
-                            .font(Theme.body(14, weight: .semibold))
-                            .foregroundStyle(Theme.brand400)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .disabled(isSigningIn)
-                            .accessibilityIdentifier("password-sign-in.forgot-password")
-                    }
-                }
-                .padding(20)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .background(Theme.surface)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { onCancel() }.disabled(isSigningIn) } }
         }
     }
 }
@@ -787,10 +741,10 @@ private struct RecoveryCodeSignInSheet: View {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Use recovery code")
-                            .font(Theme.heading(24))
-                            .foregroundStyle(Theme.textPrimary)
+                            .font(.ledgerTitle2)
+                            .foregroundStyle(Theme.text)
                         Text("Enter one saved code to restore access on this iPhone. Each code works once.")
-                            .font(Theme.body(14))
+                            .font(.subheadline)
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -798,34 +752,21 @@ private struct RecoveryCodeSignInSheet: View {
                     TextField("Recovery code", text: $code)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .font(Theme.mono(16))
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 50)
-                        .background(Theme.surfaceCard)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: Theme.radiusMedium)
-                                .stroke(Theme.borderSubtle, lineWidth: 1)
-                        }
+                        .font(.system(.body, design: .monospaced))
+                        .ledgerField()
                         .accessibilityIdentifier("recovery-code.sign-in-field")
 
                     if let errorMessage {
-                        Text(errorMessage)
-                            .font(Theme.caption(13))
-                            .foregroundStyle(Theme.error)
-                            .fixedSize(horizontal: false, vertical: true)
+                        InlineError(errorMessage)
                     }
 
                     Button { onContinue() } label: {
                         HStack(spacing: 8) {
-                            if isSigningIn { ProgressView().tint(.white) }
+                            if isSigningIn { ProgressView().tint(Theme.onAccent) }
                             Text(isSigningIn ? "Checking code…" : "Continue")
                         }
-                        .font(Theme.body(15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .background(Theme.brand500, in: RoundedRectangle(cornerRadius: Theme.radiusMedium))
                     }
+                    .buttonStyle(PrimaryButtonStyle())
                     .disabled(isSigningIn || code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityIdentifier("recovery-code.continue")
 
@@ -833,7 +774,7 @@ private struct RecoveryCodeSignInSheet: View {
                 }
                 .padding(20)
             }
-            .background(Theme.surface)
+            .background(Theme.bg)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { onCancel() }
@@ -849,7 +790,7 @@ struct RecoveryCodeSignInPreviewHost: View {
     @State private var isPresented = true
 
     var body: some View {
-        Theme.surface
+        Theme.bg
             .ignoresSafeArea()
             .sheet(isPresented: $isPresented) {
                 RecoveryCodeSignInSheet(
@@ -864,35 +805,8 @@ struct RecoveryCodeSignInPreviewHost: View {
             }
     }
 }
-struct FeatureRow: View {
-    let icon: String
-    let color: Color
-    let title: String
-    let subtitle: String
-
-    var body: some View {
-        HStack(spacing: 16) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundStyle(color)
-                .frame(width: 36)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(Theme.body(15, weight: .medium))
-                    .foregroundStyle(Theme.textPrimary)
-                Text(subtitle)
-                    .font(Theme.caption(13))
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-}
 
 #Preview {
     ContentView()
         .environment(RecordingUploadCoordinator.shared)
-        .preferredColorScheme(.dark)
 }

@@ -25,8 +25,8 @@ struct PasswordManagementSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(configured ? "Change password" : "Create a password")
-                        .font(Theme.heading(24))
-                        .foregroundStyle(Theme.textPrimary)
+                        .font(.ledgerTitle2)
+                        .foregroundStyle(Theme.text)
                     if needsEmailProof {
                         proofStep
                     } else {
@@ -36,7 +36,7 @@ struct PasswordManagementSheet: View {
                 .padding(20)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.surface)
+            .background(Theme.bg)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { onCancel() }.disabled(isBusy)
@@ -51,7 +51,7 @@ struct PasswordManagementSheet: View {
             Text(configured
                  ? "Changing your password signs out your other devices. This iPhone stays signed in."
                  : "Use this password with your account email on iPhone and web.")
-                .font(Theme.body(14))
+                .font(.subheadline)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             // Read-only, but password managers pair the new password with it.
@@ -92,7 +92,7 @@ struct PasswordManagementSheet: View {
             Text(codeSent
                  ? AuthCopy.emailReceipt + ". Enter the code it contains."
                  : "First, confirm that \(email) is yours. We will email you a code.")
-                .font(Theme.body(14))
+                .font(.subheadline)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             if codeSent {
@@ -129,11 +129,7 @@ struct PasswordManagementSheet: View {
     @ViewBuilder
     private var errorText: some View {
         if let errorMessage {
-            Text(errorMessage)
-                .font(Theme.caption(13))
-                .foregroundStyle(Theme.error)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("password-setup.error")
+            InlineError(errorMessage, identifier: "password-setup.error")
         }
     }
 
@@ -218,11 +214,11 @@ struct ChangeEmailSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Change email")
-                        .font(Theme.heading(24))
-                        .foregroundStyle(Theme.textPrimary)
+                        .font(.ledgerTitle2)
+                        .foregroundStyle(Theme.text)
                     if isAwaitingCode {
                         Text(AuthCopy.emailReceipt + ". Enter the code sent to \(trimmedEmail).")
-                            .font(Theme.body(14))
+                            .font(.subheadline)
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                         EmailCodeField(idPrefix: "change-email", code: $code)
@@ -241,7 +237,7 @@ struct ChangeEmailSheet: View {
                         }
                     } else {
                         Text("Currently \(currentEmail). Changing it signs out your other devices and removes your developer keys.")
-                            .font(Theme.body(14))
+                            .font(.subheadline)
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                         TextField("New email", text: $newEmail)
@@ -270,7 +266,7 @@ struct ChangeEmailSheet: View {
                 .padding(20)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.surface)
+            .background(Theme.bg)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { onCancel() }.disabled(isBusy)
@@ -282,11 +278,7 @@ struct ChangeEmailSheet: View {
     @ViewBuilder
     private var errorText: some View {
         if let errorMessage {
-            Text(errorMessage)
-                .font(Theme.caption(13))
-                .foregroundStyle(Theme.error)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("change-email.error")
+            InlineError(errorMessage, identifier: "change-email.error")
         }
     }
 
@@ -332,8 +324,8 @@ struct UsageSummaryView: View {
         VStack(alignment: .leading, spacing: 12) {
             if usage.exempt {
                 Text("This account has no monthly limit.")
-                    .font(Theme.body(14))
-                    .foregroundStyle(Theme.textPrimary)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.text)
                     .accessibilityIdentifier("usage.exempt")
             }
             meter(
@@ -352,8 +344,8 @@ struct UsageSummaryView: View {
             )
             if !usage.exempt, let resetDate {
                 Text("Resets \(resetDate).")
-                    .font(Theme.caption(12))
-                    .foregroundStyle(Theme.textMuted)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
             }
         }
         .accessibilityIdentifier("usage.summary")
@@ -363,16 +355,16 @@ struct UsageSummaryView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(title)
-                    .font(Theme.body(14, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text)
                 Spacer()
                 Text(detail)
-                    .font(Theme.caption(12))
+                    .font(.footnote)
                     .foregroundStyle(Theme.textSecondary)
             }
             if let fraction {
                 ProgressView(value: fraction)
-                    .tint(fraction >= 1 ? Theme.error : Theme.brand400)
+                    .tint(Theme.accent)
             }
         }
         .accessibilityElement(children: .combine)
@@ -409,37 +401,36 @@ struct DevicesListView: View {
     @State private var revokeError: String?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if let sessions {
-                    ForEach(sessions) { session in
-                        row(session)
-                    }
-                    if sessions.isEmpty {
-                        Text("No signed-in devices.")
-                            .font(Theme.body(14))
-                            .foregroundStyle(Theme.textSecondary)
-                    }
-                } else if isLoading {
-                    ProgressView("Loading devices…")
-                        .frame(maxWidth: .infinity)
+        List {
+            if let sessions {
+                ForEach(sessions) { session in
+                    row(session)
                 }
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(Theme.caption(13))
-                        .foregroundStyle(Theme.error)
-                    Button("Try again") { Task { await load() } }
-                        .frame(minHeight: 44)
+                if sessions.isEmpty {
+                    Text("No signed-in devices.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                        .listRowBackground(Color.clear)
                 }
-                if let revokeError {
-                    Text(revokeError)
-                        .font(Theme.caption(13))
-                        .foregroundStyle(Theme.error)
-                }
+            } else if isLoading {
+                ProgressView("Loading devices…")
+                    .frame(maxWidth: .infinity)
+                    .listRowBackground(Color.clear)
             }
-            .padding(16)
+            if let errorMessage {
+                VStack(alignment: .leading, spacing: 0) {
+                    InlineError(errorMessage)
+                    Button("Try again") { Task { await load() } }
+                        .buttonStyle(QuietButtonStyle())
+                }
+                .listRowBackground(Color.clear)
+            }
+            if let revokeError {
+                InlineError(revokeError)
+                    .listRowBackground(Color.clear)
+            }
         }
-        .background(Theme.surface)
+        .ledgerListBackground()
         .navigationTitle("Devices")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
@@ -463,31 +454,27 @@ struct DevicesListView: View {
 
     private func row(_ session: DeviceSessionSummary) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: session.clientType == "web" ? "globe" : "iphone")
-                .foregroundStyle(Theme.brand400)
-                .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayName(session))
-                    .font(Theme.body(14, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
+                    .font(.body)
+                    .foregroundStyle(Theme.text)
                 Text(detail(session))
-                    .font(Theme.caption(12))
+                    .font(.footnote)
                     .foregroundStyle(Theme.textSecondary)
             }
-            Spacer()
+            Spacer(minLength: 8)
             if session.id == currentSessionID {
                 Text("This iPhone")
-                    .font(Theme.caption(12, weight: .semibold))
-                    .foregroundStyle(Theme.textMuted)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
             } else {
                 Button("Sign out") { revoking = session }
-                    .font(Theme.body(14, weight: .semibold))
-                    .foregroundStyle(Theme.error)
-                    .frame(minHeight: 44)
+                    .buttonStyle(QuietButtonStyle(color: Theme.danger))
                     .accessibilityIdentifier("devices.revoke.\(session.id)")
             }
         }
-        .cardStyle(padding: 12)
+        .frame(minHeight: 44)
+        .listRowBackground(Theme.surface)
     }
 
     private func displayName(_ session: DeviceSessionSummary) -> String {

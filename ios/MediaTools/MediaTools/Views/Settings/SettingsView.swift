@@ -8,7 +8,6 @@ struct SettingsView: View {
     @Environment(DeviceSessionController.self) private var deviceSession
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
 
     @State private var health: HealthResponse?
     @State private var healthError: String?
@@ -49,24 +48,20 @@ struct SettingsView: View {
     @State private var oneTimeRecoveryCodes: [String] = []
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                accountSection
-                usageSection
-                accountSecuritySection
-                preferencesSection
-                quickCaptureSection
-                aiProcessingSection
-                helpSection
-                advancedSection
-                deleteAccountSection
-                signOutSection
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 32)
+        List {
+            recordingSection
+            usageSection
+            accountSection
+            accountSecuritySection
+            aiProcessingSection
+            helpSection
+            developerSection
+            signOutSection
+            deleteAccountSection
         }
-        .background(Theme.surface)
+        .ledgerListBackground()
         .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
         .task { await refreshNotificationState() }
         .task(id: "\(deviceSession.activeUserID ?? "")|\(deviceAccountRetry)") {
             deviceAccount = nil
@@ -160,169 +155,201 @@ struct SettingsView: View {
         }
     }
 
-    private var quickCaptureSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(text: "Quick Capture", icon: "button.programmable")
+    // MARK: - Daily settings
 
-            VStack(alignment: .leading, spacing: 14) {
-                Label {
-                    Text("One press opens Media Tools and begins recording. Use it only when everyone who must consent has done so. After capture starts, you can lock your phone or use another app.")
-                        .font(Theme.body(14))
-                        .foregroundStyle(Theme.textPrimary)
-                } icon: {
-                    Image(systemName: "mic.badge.plus")
-                        .foregroundStyle(Theme.brand400)
+    private var recordingSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { aiProcessingConsent.isAutoTranscribeEnabled },
+                set: { aiProcessingConsent.setAutoTranscribeEnabled($0) }
+            )) {
+                settingLabel("Automatically transcribe", detail: autoTranscribeDetail)
+            }
+            .tint(Theme.accentFill)
+            .frame(minHeight: 44)
+            .listRowBackground(Theme.surface)
+            .accessibilityIdentifier("settings.auto-transcribe")
+
+            if aiProcessingConsent.isAutoTranscribeEnabled,
+               aiProcessingConsent.hasConsent,
+               !aiProcessingConsent.hasAutomaticConsent {
+                Button("Review automatic transcription") {
+                    Task { _ = await aiProcessingConsent.requestAutomaticPermission() }
                 }
+                .foregroundStyle(Theme.accent)
+                .frame(minHeight: 44)
+                .listRowBackground(Theme.surface)
+            }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    setupStep(number: 1, text: "Open Shortcuts and find Media Tools → Quick Record.")
-                    setupStep(number: 2, text: "In Settings → Action Button, choose Shortcut and select Quick Record.")
-                    setupStep(number: 3, text: "Press once to start; press again or use the Live Activity to stop.")
-                }
-
-                Button {
-                    guard let shortcutsURL = URL(string: "shortcuts://") else { return }
-                    openURL(shortcutsURL)
-                } label: {
-                    Label("Open Shortcuts", systemImage: "arrow.up.forward.app")
-                        .font(Theme.body(14, weight: .semibold))
-                        .foregroundStyle(Theme.brand400)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Theme.brand50)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-                }
-                .accessibilityHint("Opens the Shortcuts app to configure Quick Record")
-
-                Button {
-                    hasCompletedOnboarding = false
-                } label: {
-                    Label("Review setup", systemImage: "checklist")
-                        .font(Theme.body(14, weight: .semibold))
+            Button(action: handleNotificationAction) {
+                HStack {
+                    settingLabel("Completion alerts", detail: notificationDetail)
+                    Spacer(minLength: 8)
+                    Text(notificationTrailing)
+                        .font(.subheadline)
                         .foregroundStyle(Theme.textSecondary)
-                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint(
-                    "Shows microphone, alert, privacy, and Quick Record guidance again"
-                )
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
-            .cardStyle(padding: 14)
+            .buttonStyle(.plain)
+            .listRowBackground(Theme.surface)
+            .accessibilityLabel("Notification settings")
+            .accessibilityValue(notificationTrailing)
+
+            NavigationLink {
+                QuickRecordSetupView()
+            } label: {
+                settingLabel("Quick Record", detail: "Start recording with the Action Button.")
+                    .frame(minHeight: 44)
+            }
+            .listRowBackground(Theme.surface)
+            .accessibilityIdentifier("settings.quick-record")
+        } header: {
+            sectionHeader("Recording")
         }
     }
 
-    private func setupStep(number: Int, text: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text("\(number)")
-                .font(Theme.caption(11, weight: .bold))
-                .foregroundStyle(Theme.surface)
-                .frame(width: 22, height: 22)
-                .background(Theme.brand400, in: Circle())
-                .accessibilityHidden(true)
-
-            Text(text)
-                .font(Theme.caption(13))
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder
-    private var accountSection: some View {
-        if deviceSession.activeUserID != nil {
-            VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(text: "Account", icon: "person.circle")
-                VStack(alignment: .leading, spacing: 8) {
-                    if let deviceAccount {
-                        Text(deviceAccount.name.isEmpty ? "Media Tools account" : deviceAccount.name)
-                            .font(Theme.body(16, weight: .semibold))
-                            .foregroundStyle(Theme.textPrimary)
-                        Text(deviceAccount.email)
-                            .font(Theme.caption(13))
-                            .foregroundStyle(Theme.textSecondary)
-                            .accessibilityIdentifier("settings.account-email")
-                        if passwordAuthAvailable {
-                            Button {
-                                securityMessage = nil
-                                showChangeEmail = true
-                            } label: {
-                                Label("Change email", systemImage: "envelope")
-                                    .font(Theme.body(14, weight: .semibold))
-                                    .foregroundStyle(Theme.brand400)
-                                    .frame(minHeight: 44)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("settings.change-email")
-                        }
-                    } else if isLoadingDeviceAccount {
-                        ProgressView("Loading account…")
-                    } else if let deviceAccountError {
-                        Text(deviceAccountError)
-                            .font(Theme.caption(13))
-                            .foregroundStyle(Theme.error)
-                        Button("Try again") { deviceAccountRetry += 1 }
-                            .frame(minHeight: 44)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .cardStyle()
+    private func settingLabel(_ title: String, detail: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(Theme.text)
+            if let detail {
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.ledgerSectionLabel)
+            .foregroundStyle(Theme.textSecondary)
+            .textCase(nil)
     }
 
     @ViewBuilder
     private var usageSection: some View {
         if deviceSession.activeUserID != nil, usage != nil || usageError != nil {
-            VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(text: "This month", icon: "chart.bar.fill")
-                VStack(alignment: .leading, spacing: 8) {
-                    if let usage {
-                        UsageSummaryView(usage: usage)
-                    } else if let usageError {
-                        Text(usageError)
-                            .font(Theme.caption(13))
-                            .foregroundStyle(Theme.error)
+            Section {
+                if let usage {
+                    UsageSummaryView(usage: usage)
+                        .listRowBackground(Theme.surface)
+                } else if let usageError {
+                    VStack(alignment: .leading, spacing: 0) {
+                        InlineError(usageError)
                         Button("Try again") { usageRetry += 1 }
-                            .frame(minHeight: 44)
+                            .buttonStyle(QuietButtonStyle())
                     }
+                    .listRowBackground(Theme.surface)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .cardStyle(padding: 14)
+            } header: {
+                sectionHeader("This month")
+            }
+        }
+    }
+
+    // MARK: - Account
+
+    @ViewBuilder
+    private var accountSection: some View {
+        if deviceSession.activeUserID != nil {
+            Section {
+                if let deviceAccount {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(deviceAccount.name.isEmpty ? "Media Tools account" : deviceAccount.name)
+                            .font(.body)
+                            .foregroundStyle(Theme.text)
+                        Text(deviceAccount.email)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.textSecondary)
+                            .accessibilityIdentifier("settings.account-email")
+                    }
+                    .frame(minHeight: 44, alignment: .leading)
+                    .listRowBackground(Theme.surface)
+                    if passwordAuthAvailable {
+                        Button("Change email") {
+                            securityMessage = nil
+                            showChangeEmail = true
+                        }
+                        .foregroundStyle(Theme.accent)
+                        .frame(minHeight: 44)
+                        .listRowBackground(Theme.surface)
+                        .accessibilityIdentifier("settings.change-email")
+                    }
+                } else if isLoadingDeviceAccount {
+                    ProgressView("Loading account…")
+                        .frame(minHeight: 44)
+                        .listRowBackground(Theme.surface)
+                } else if let deviceAccountError {
+                    VStack(alignment: .leading, spacing: 0) {
+                        InlineError(deviceAccountError)
+                        Button("Try again") { deviceAccountRetry += 1 }
+                            .buttonStyle(QuietButtonStyle())
+                    }
+                    .listRowBackground(Theme.surface)
+                }
+            } header: {
+                sectionHeader("Account")
+            }
+        }
+    }
+
+    private var signOutSection: some View {
+        Section {
+            Button {
+                showSignOutConfirmation = true
+            } label: {
+                HStack(spacing: 8) {
+                    if isSigningOut { ProgressView() }
+                    Text(isSigningOut ? "Signing out…" : "Sign out")
+                }
+                .foregroundStyle(Theme.accent)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .disabled(isSigningOut)
+            .listRowBackground(Theme.surface)
+            .confirmationDialog(
+                "Sign out of Media Tools?",
+                isPresented: $showSignOutConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Sign Out", role: .destructive) {
+                    Task { await signOut() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Recordings saved on this iPhone stay here and finish after you sign back in.")
+            }
+
+            if let signOutError {
+                InlineError(signOutError)
+                    .listRowBackground(Theme.surface)
             }
         }
     }
 
     private var deleteAccountSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(text: "Danger zone", icon: "exclamationmark.triangle")
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Delete account")
-                    .font(Theme.body(15, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Text("Permanently removes your recordings, transcripts, PDFs, chats, collections, developer keys, and account. Device recordings owned by this account are also removed.")
-                    .font(Theme.caption(13))
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Button(role: .destructive) {
-                    deletionConfirmation = ""
-                    deleteAccountPassword = ""
-                    deleteAccountError = nil
-                    showDeleteAccount = true
-                } label: {
-                    Label("Delete account and data", systemImage: "trash")
-                        .font(Theme.body(14, weight: .semibold))
-                        .foregroundStyle(Theme.error)
-                        .frame(maxWidth: .infinity, minHeight: 46)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: Theme.radiusMedium)
-                                .stroke(Theme.error.opacity(0.45), lineWidth: 1)
-                        }
-                }
-                .disabled(isDeletingAccount)
+        Section {
+            Button(role: .destructive) {
+                deletionConfirmation = ""
+                deleteAccountPassword = ""
+                deleteAccountError = nil
+                showDeleteAccount = true
+            } label: {
+                Text("Delete account and data")
+                    .foregroundStyle(Theme.danger)
+                    .frame(minHeight: 44)
             }
-            .cardStyle(padding: 14)
+            .disabled(isDeletingAccount)
+            .listRowBackground(Theme.surface)
+        } footer: {
+            Text("Permanently removes your recordings, transcripts, PDFs, chats, collections, developer keys, and account. Device recordings owned by this account are also removed.")
+                .foregroundStyle(Theme.textSecondary)
         }
     }
 
@@ -330,36 +357,25 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Image(systemName: "trash.circle.fill")
-                        .font(.system(size: 44))
-                        .foregroundStyle(Theme.error)
-
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Permanently delete your account?")
-                            .font(Theme.heading(24))
-                            .foregroundStyle(Theme.textPrimary)
+                            .font(.ledgerTitle2)
+                            .foregroundStyle(Theme.text)
                         Text("This cannot be undone. Export any device recordings you want to keep before continuing. Server data is purged immediately; secure provider cleanup continues in the background.")
-                            .font(Theme.body(14))
+                            .font(.subheadline)
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Type DELETE to confirm")
-                            .font(Theme.caption(12, weight: .semibold))
+                            .font(.footnote.weight(.semibold))
                             .foregroundStyle(Theme.textSecondary)
                         TextField("DELETE", text: $deletionConfirmation)
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
-                            .font(Theme.mono(16))
-                            .padding(.horizontal, 14)
-                            .frame(minHeight: 48)
-                            .background(Theme.surfaceCard)
-                            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: Theme.radiusMedium)
-                                    .stroke(Theme.borderSubtle, lineWidth: 1)
-                            }
+                            .font(.system(.body, design: .monospaced))
+                            .ledgerField()
                     }
 
                     if DeletionPasswordPolicy.showsField(status: passwordStatus) {
@@ -375,31 +391,23 @@ struct SettingsView: View {
                     }
 
                     if let deleteAccountError {
-                        Text(deleteAccountError)
-                            .font(Theme.caption(13))
-                            .foregroundStyle(Theme.error)
+                        InlineError(deleteAccountError)
                     }
 
                     Button(role: .destructive) {
                         Task { await deleteAccount() }
                     } label: {
                         HStack(spacing: 8) {
-                            if isDeletingAccount { ProgressView().tint(.white) }
+                            if isDeletingAccount { ProgressView().tint(Theme.onDanger) }
                             Text(isDeletingAccount ? "Deleting…" : "Permanently delete account")
                         }
-                        .font(Theme.body(15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .background(
-                            canSubmitDeletion ? Theme.error : Theme.textMuted,
-                            in: RoundedRectangle(cornerRadius: Theme.radiusMedium)
-                        )
                     }
+                    .buttonStyle(PrimaryButtonStyle(fill: Theme.danger, foreground: Theme.onDanger))
                     .disabled(!canSubmitDeletion || isDeletingAccount)
                 }
                 .padding(20)
             }
-            .background(Theme.surface)
+            .background(Theme.bg)
             .navigationTitle("Delete account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -416,162 +424,109 @@ struct SettingsView: View {
             && (!DeletionPasswordPolicy.isRequired(status: passwordStatus) || !deleteAccountPassword.isEmpty)
     }
 
+    // MARK: - Security
+
     @ViewBuilder
     private var accountSecuritySection: some View {
         if deviceSession.activeUserID != nil {
-            VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(text: "Sign-in security", icon: "key.fill")
-
-                VStack(alignment: .leading, spacing: 14) {
-                    Button {
-                        Task { await enrollPasskey() }
-                    } label: {
-                        HStack(spacing: 10) {
-                            if isEnrollingPasskey {
-                                ProgressView().tint(Theme.brand400)
-                            } else {
-                                Image(systemName: "person.badge.key.fill")
-                                    .foregroundStyle(Theme.brand400)
-                            }
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(isEnrollingPasskey ? "Opening passkey setup…" : "Add a passkey")
-                                    .font(Theme.body(14, weight: .semibold))
-                                    .foregroundStyle(Theme.textPrimary)
-                                Text(passkeyDetail)
-                                    .font(Theme.caption(12))
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                            Spacer()
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .contentShape(Rectangle())
+            Section {
+                Button {
+                    Task { await enrollPasskey() }
+                } label: {
+                    HStack {
+                        settingLabel(
+                            isEnrollingPasskey ? "Opening passkey setup…" : "Add a passkey",
+                            detail: passkeyDetail
+                        )
+                        Spacer(minLength: 8)
+                        if isEnrollingPasskey { ProgressView() }
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isEnrollingPasskey || isGeneratingRecoveryCodes)
-
-                    if passwordAuthAvailable {
-                        Divider().overlay(Theme.borderSubtle)
-
-                        Button {
-                            securityMessage = nil
-                            showPasswordSetup = true
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "lock.fill").foregroundStyle(Theme.brand400)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(passwordStatus?.configured == true ? "Change password" : "Create a password")
-                                        .font(Theme.body(14, weight: .semibold))
-                                        .foregroundStyle(Theme.textPrimary)
-                                    Text(passwordStatus?.configured == true
-                                         ? "Sign in with your email on any device."
-                                         : "Add a password you control for email sign-in.")
-                                        .font(Theme.caption(12))
-                                        .foregroundStyle(Theme.textSecondary)
-                                }
-                                Spacer()
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 52)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        // The sheet needs the account's email for AutoFill and proof.
-                        .disabled(deviceAccount == nil)
-                        .accessibilityIdentifier("sign-in-security.password")
-                    }
-
-                    Divider().overlay(Theme.borderSubtle)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "lifepreserver")
-                                .foregroundStyle(Theme.brand400)
-                                .frame(width: 24)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Recovery codes")
-                                    .font(Theme.body(14, weight: .semibold))
-                                    .foregroundStyle(Theme.textPrimary)
-                                Text(recoveryDetail)
-                                    .font(Theme.caption(12))
-                                    .foregroundStyle(Theme.textSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer(minLength: 8)
-                            if isLoadingRecoveryStatus {
-                                ProgressView().tint(Theme.brand400)
-                            } else if let remaining = recoveryStatus?.remaining {
-                                Text("\(remaining) left")
-                                    .font(Theme.caption(12, weight: .semibold))
-                                    .foregroundStyle(Theme.textMuted)
-                                    .fixedSize()
-                            }
-                        }
-
-                        Button {
-                            showReplaceRecoveryCodesConfirmation = true
-                        } label: {
-                            HStack(spacing: 8) {
-                                if isGeneratingRecoveryCodes { ProgressView().tint(.white) }
-                                Text(recoveryStatus?.remaining ?? 0 > 0 ? "Replace recovery codes" : "Create recovery codes")
-                            }
-                            .font(Theme.body(14, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity, minHeight: 48)
-                            .background(Theme.brand500, in: RoundedRectangle(cornerRadius: Theme.radiusMedium))
-                        }
-                        .disabled(isGeneratingRecoveryCodes || isEnrollingPasskey)
-                    }
-
-                    Divider().overlay(Theme.borderSubtle)
-
-                    NavigationLink {
-                        DevicesListView(currentSessionID: deviceSession.currentSessionID)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "iphone.gen3").foregroundStyle(Theme.brand400)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Devices")
-                                    .font(Theme.body(14, weight: .semibold))
-                                    .foregroundStyle(Theme.textPrimary)
-                                Text("See where you are signed in, and sign out a device.")
-                                    .font(Theme.caption(12))
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(Theme.textMuted)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("sign-in-security.devices")
-
-                    if let securityStatusError {
-                        SecurityStatusRetryBanner(
-                            message: securityStatusError,
-                            isRetrying: isLoadingRecoveryStatus
-                        ) {
-                            Task { await loadRecoveryStatus() }
-                        }
-                    }
-
-                    if let securityMessage {
-                        Text(securityMessage)
-                            .font(Theme.caption(12))
-                            .foregroundStyle(Theme.success)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    if let securityError {
-                        Text(securityError)
-                            .font(Theme.caption(12))
-                            .foregroundStyle(Theme.error)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
-                .cardStyle(padding: 14)
+                .buttonStyle(.plain)
+                .disabled(isEnrollingPasskey || isGeneratingRecoveryCodes)
+                .listRowBackground(Theme.surface)
+
+                if passwordAuthAvailable {
+                    Button {
+                        securityMessage = nil
+                        showPasswordSetup = true
+                    } label: {
+                        settingLabel(
+                            passwordStatus?.configured == true ? "Change password" : "Create a password",
+                            detail: passwordStatus?.configured == true
+                                ? "Sign in with your email on any device."
+                                : "Add a password you control for email sign-in."
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    // The sheet needs the account's email for AutoFill and proof.
+                    .disabled(deviceAccount == nil)
+                    .listRowBackground(Theme.surface)
+                    .accessibilityIdentifier("sign-in-security.password")
+                }
+
+                Button {
+                    showReplaceRecoveryCodesConfirmation = true
+                } label: {
+                    HStack {
+                        settingLabel(
+                            recoveryStatus?.remaining ?? 0 > 0 ? "Replace recovery codes" : "Create recovery codes",
+                            detail: recoveryDetail
+                        )
+                        Spacer(minLength: 8)
+                        if isLoadingRecoveryStatus || isGeneratingRecoveryCodes {
+                            ProgressView()
+                        } else if let remaining = recoveryStatus?.remaining {
+                            Text("\(remaining) left")
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.textSecondary)
+                                .fixedSize()
+                        }
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isGeneratingRecoveryCodes || isEnrollingPasskey)
+                .listRowBackground(Theme.surface)
+
+                NavigationLink {
+                    DevicesListView(currentSessionID: deviceSession.currentSessionID)
+                } label: {
+                    settingLabel("Devices", detail: "See where you are signed in, and sign out a device.")
+                        .frame(minHeight: 44)
+                }
+                .listRowBackground(Theme.surface)
+                .accessibilityIdentifier("sign-in-security.devices")
+
+                if let securityStatusError {
+                    SecurityStatusRetryBanner(
+                        message: securityStatusError,
+                        isRetrying: isLoadingRecoveryStatus
+                    ) {
+                        Task { await loadRecoveryStatus() }
+                    }
+                    .listRowBackground(Theme.surface)
+                }
+
+                if let securityMessage {
+                    Label(securityMessage, systemImage: "checkmark.circle")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .listRowBackground(Theme.surface)
+                }
+
+                if let securityError {
+                    InlineError(securityError)
+                        .listRowBackground(Theme.surface)
+                }
+            } header: {
+                sectionHeader("Sign-in and security")
             }
         }
     }
@@ -601,106 +556,38 @@ struct SettingsView: View {
         return "Each code works once. Replacing codes disables the old set."
     }
 
-    private var preferencesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(text: "Preferences", icon: "slider.horizontal.3")
-
-            VStack(spacing: 0) {
-                Button(action: handleNotificationAction) {
-                    SettingsActionRow(
-                        icon: notificationIcon,
-                        label: "Completion alerts",
-                        detail: notificationDetail,
-                        trailing: notificationTrailing
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Notification settings")
-
-                Divider().overlay(Theme.borderSubtle)
-
-                SettingsActionRow(
-                    icon: "lock.shield.fill",
-                    label: "Private workspace",
-                    detail: "Media stays connected to your account.",
-                    trailing: "On"
-                )
-            }
-            .cardStyle(padding: 12)
-        }
-    }
+    // MARK: - AI processing
 
     private var aiProcessingSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(text: "AI processing", icon: "brain.head.profile")
+        Section {
+            settingLabel(
+                aiProcessingConsent.hasConsent
+                    ? "Allowed for this account on this iPhone"
+                    : "Not allowed",
+                detail: aiProcessingConsent.hasConsent
+                    ? nil
+                    : "Media Tools will ask before sending content to third-party AI services."
+            )
+            .frame(minHeight: 44, alignment: .leading)
+            .listRowBackground(Theme.surface)
 
-            VStack(alignment: .leading, spacing: 12) {
-                Label {
-                    Text(aiProcessingConsent.hasConsent
-                         ? "Allowed for this account on this iPhone."
-                         : "Not allowed. Media Tools will ask before sending content to third-party AI providers.")
-                        .font(Theme.body(14))
-                        .foregroundStyle(Theme.textPrimary)
-                } icon: {
-                    Image(systemName: aiProcessingConsent.hasConsent ? "checkmark.shield.fill" : "hand.raised.fill")
-                        .foregroundStyle(aiProcessingConsent.hasConsent ? Theme.success : Theme.brand400)
+            Button {
+                if aiProcessingConsent.hasConsent {
+                    aiProcessingConsent.revoke()
+                } else {
+                    Task { _ = await aiProcessingConsent.requestPermission() }
                 }
-
-                Text("This controls future transcription, readable formatting, summary, and chat requests. Processing already started may finish.")
-                    .font(Theme.caption(13))
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Toggle(isOn: Binding(
-                    get: { aiProcessingConsent.isAutoTranscribeEnabled },
-                    set: { aiProcessingConsent.setAutoTranscribeEnabled($0) }
-                )) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Automatically transcribe")
-                            .font(Theme.body(14, weight: .semibold))
-                            .foregroundStyle(Theme.textPrimary)
-                        Text(autoTranscribeDetail)
-                            .font(Theme.caption(13))
-                            .foregroundStyle(Theme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .tint(Theme.brand500)
-                .frame(minHeight: 44)
-                .accessibilityIdentifier("settings.auto-transcribe")
-
-                if aiProcessingConsent.isAutoTranscribeEnabled,
-                   aiProcessingConsent.hasConsent,
-                   !aiProcessingConsent.hasAutomaticConsent {
-                    Button {
-                        Task { _ = await aiProcessingConsent.requestAutomaticPermission() }
-                    } label: {
-                        Label("Review automatic transcription", systemImage: "info.circle")
-                            .font(Theme.body(14, weight: .semibold))
-                            .foregroundStyle(Theme.brand400)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Button {
-                    if aiProcessingConsent.hasConsent {
-                        aiProcessingConsent.revoke()
-                    } else {
-                        Task { _ = await aiProcessingConsent.requestPermission() }
-                    }
-                } label: {
-                    Label(
-                        aiProcessingConsent.hasConsent ? "Revoke permission" : "Review and allow",
-                        systemImage: aiProcessingConsent.hasConsent ? "xmark.shield" : "info.circle"
-                    )
-                    .font(Theme.body(14, weight: .semibold))
-                    .foregroundStyle(aiProcessingConsent.hasConsent ? Theme.error : Theme.brand400)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .buttonStyle(.plain)
+            } label: {
+                Text(aiProcessingConsent.hasConsent ? "Revoke permission" : "Review and allow")
+                    .foregroundStyle(aiProcessingConsent.hasConsent ? Theme.danger : Theme.accent)
+                    .frame(minHeight: 44)
             }
-            .cardStyle(padding: 14)
+            .listRowBackground(Theme.surface)
+        } header: {
+            sectionHeader("AI processing")
+        } footer: {
+            Text("This controls future transcription, readable formatting, summary, and chat requests. Processing already started may finish.")
+                .foregroundStyle(Theme.textSecondary)
         }
     }
 
@@ -709,175 +596,69 @@ struct SettingsView: View {
             return "New recordings stay on this iPhone until you tap Transcribe."
         }
         return aiProcessingConsent.hasAutomaticConsent
-            ? "New recordings, shared audio, and shared video links with no subtitles go to OpenAI when they are saved."
+            ? "New recordings, shared audio, and shared video links with no subtitles are sent for transcription when they are saved."
             : "New recordings stay on this iPhone until you allow AI processing."
     }
 
+    // MARK: - Help
+
     private var helpSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(text: "Help & information", icon: "questionmark.circle")
-
-            VStack(spacing: 0) {
-                settingsLink(
-                    title: "Privacy",
-                    detail: "How Media Tools handles your content",
-                    systemImage: "hand.raised.fill",
-                    destination: Configuration.privacyURL
-                )
-
-                Divider().overlay(Theme.borderSubtle)
-
-                settingsLink(
-                    title: "Terms of use",
-                    detail: "Rules for recording, uploads, and AI features",
-                    systemImage: "doc.text.fill",
-                    destination: Configuration.termsURL
-                )
-
-                Divider().overlay(Theme.borderSubtle)
-
-                settingsLink(
-                    title: "Support & safety",
-                    detail: "Get help or report a content concern",
-                    systemImage: "lifepreserver.fill",
-                    destination: Configuration.supportURL
-                )
-
-                Divider().overlay(Theme.borderSubtle)
-
-                settingsLink(
-                    title: "Account deletion help",
-                    detail: "Public instructions available without signing in",
-                    systemImage: "person.crop.circle.badge.minus",
-                    destination: Configuration.accountDeletionURL
-                )
-
-                Divider().overlay(Theme.borderSubtle)
-
-                SettingsRow(label: "Version") {
-                    Text(appVersion)
-                        .font(Theme.body(14))
-                        .foregroundStyle(Theme.textSecondary)
-                }
-            }
-            .cardStyle(padding: 12)
+        Section {
+            settingsLink(title: "Privacy", destination: Configuration.privacyURL)
+            settingsLink(title: "Terms of use", destination: Configuration.termsURL)
+            settingsLink(title: "Support and safety", destination: Configuration.supportURL)
+            settingsLink(title: "Account deletion help", destination: Configuration.accountDeletionURL)
+        } header: {
+            sectionHeader("Help")
         }
     }
 
-    private var advancedSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            DisclosureGroup(isExpanded: $showAdvanced) {
-                VStack(spacing: 0) {
-                    Divider().overlay(Theme.borderSubtle)
-
-                    if isCheckingHealth {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .tint(Theme.brand400)
-                            Text("Checking service…")
-                                .font(Theme.body(14))
-                                .foregroundStyle(Theme.textSecondary)
-                            Spacer()
+    private var developerSection: some View {
+        Section {
+            DisclosureGroup("Service status", isExpanded: $showAdvanced) {
+                if isCheckingHealth {
+                    ProgressNote(text: "Checking service…")
+                        .listRowBackground(Theme.surface)
+                } else if let health {
+                    LabeledContent("Service", value: health.status == "ok" ? "Available" : "Degraded")
+                        .listRowBackground(Theme.surface)
+                    LabeledContent("Workers", value: "\(health.workers)")
+                        .listRowBackground(Theme.surface)
+                } else if let healthError {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(healthError)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.textSecondary)
+                        Button("Try again") {
+                            Task { await checkHealth() }
                         }
-                        .padding(.vertical, 12)
-                    } else if let health {
-                        SettingsRow(label: "Service") {
-                            Label(
-                                health.status == "ok" ? "Available" : "Degraded",
-                                systemImage: health.status == "ok" ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
-                            )
-                            .font(Theme.body(14))
-                            .foregroundStyle(health.status == "ok" ? Theme.success : Theme.warning)
-                        }
-                        Divider().overlay(Theme.borderSubtle)
-                        SettingsRow(label: "Workers") {
-                            Text("\(health.workers)")
-                                .font(Theme.body(14))
-                                .foregroundStyle(Theme.textSecondary)
-                        }
-                    } else if let healthError {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(healthError)
-                                .font(Theme.caption(13))
-                                .foregroundStyle(Theme.textSecondary)
-                            Button("Try again") {
-                                Task { await checkHealth() }
-                            }
-                            .font(Theme.body(14, weight: .semibold))
-                            .foregroundStyle(Theme.brand400)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 12)
+                        .buttonStyle(QuietButtonStyle())
                     }
-
-                    Divider().overlay(Theme.borderSubtle)
-
-                    SettingsRow(label: "API") {
-                        Text(Configuration.apiBaseURL)
-                            .font(Theme.mono(11))
-                            .foregroundStyle(Theme.textMuted)
-                            .lineLimit(1)
-                    }
+                    .listRowBackground(Theme.surface)
                 }
-            } label: {
-                Label("Advanced", systemImage: "wrench.and.screwdriver")
-                    .font(Theme.body(15, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(minHeight: 44)
+                LabeledContent("API") {
+                    Text(Configuration.apiBaseURL)
+                        .font(.system(.footnote, design: .monospaced))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.trailing)
+                }
+                .listRowBackground(Theme.surface)
             }
-            .tint(Theme.textMuted)
-            .cardStyle(padding: 12)
+            .foregroundStyle(Theme.text)
+            .frame(minHeight: 44)
+            .listRowBackground(Theme.surface)
             .onChange(of: showAdvanced) { _, isExpanded in
                 guard isExpanded, health == nil else { return }
                 Task { await checkHealth() }
             }
-        }
-    }
 
-    private var signOutSection: some View {
-        VStack(spacing: 8) {
-            Button(role: .destructive) {
-                showSignOutConfirmation = true
-            } label: {
-                HStack(spacing: 8) {
-                    if isSigningOut {
-                        ProgressView()
-                            .tint(Theme.error)
-                    } else {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                    }
-                    Text(isSigningOut ? "Signing out…" : "Sign out")
-                }
-                .font(Theme.body(15, weight: .semibold))
-                .foregroundStyle(Theme.error)
-                .frame(maxWidth: .infinity, minHeight: 48)
-                .background(Theme.surfaceCard)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-                .overlay {
-                    RoundedRectangle(cornerRadius: Theme.radiusMedium)
-                        .stroke(Theme.error.opacity(0.35), lineWidth: 1)
-                }
-            }
-            .disabled(isSigningOut)
-            .confirmationDialog(
-                "Sign out of Media Tools?",
-                isPresented: $showSignOutConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Sign Out", role: .destructive) {
-                    Task { await signOut() }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Recordings saved on this iPhone stay here and finish after you sign back in.")
-            }
-
-            if let signOutError {
-                Text(signOutError)
-                    .font(Theme.caption(12))
-                    .foregroundStyle(Theme.error)
-                    .multilineTextAlignment(.center)
-            }
+            LabeledContent("Version", value: appVersion)
+                .foregroundStyle(Theme.text)
+                .frame(minHeight: 44)
+                .listRowBackground(Theme.surface)
+        } header: {
+            sectionHeader("Developer")
         }
     }
 
@@ -886,14 +667,6 @@ struct SettingsView: View {
         let version = info?["CFBundleShortVersionString"] as? String ?? "1.0"
         let build = info?["CFBundleVersion"] as? String ?? "1"
         return "\(version) (\(build))"
-    }
-
-    private var notificationIcon: String {
-        switch notificationState {
-        case .enabled: "bell.badge.fill"
-        case .denied: "bell.slash.fill"
-        case .notRequested: "bell.fill"
-        }
     }
 
     private var notificationDetail: String {
@@ -912,20 +685,22 @@ struct SettingsView: View {
         }
     }
 
-    private func settingsLink(
-        title: String,
-        detail: String,
-        systemImage: String,
-        destination: URL
-    ) -> some View {
+    private func settingsLink(title: String, destination: URL) -> some View {
         Link(destination: destination) {
-            SettingsActionRow(
-                icon: systemImage,
-                label: title,
-                detail: detail,
-                trailing: ""
-            )
+            HStack {
+                Text(title)
+                    .foregroundStyle(Theme.text)
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.up.right")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
+                    .accessibilityHidden(true)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
+        .listRowBackground(Theme.surface)
+        .accessibilityAddTraits(.isLink)
     }
 
     private func handleNotificationAction() {
@@ -1127,28 +902,78 @@ struct SettingsView: View {
 
 }
 
+/// Quick Record setup lives a level down: it is done once, then rarely revisited.
+private struct QuickRecordSetupView: View {
+    @Environment(\.openURL) private var openURL
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(Array(Self.steps.enumerated()), id: \.offset) { index, step in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text("\(index + 1).")
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(Theme.textSecondary)
+                        Text(step)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .listRowBackground(Theme.surface)
+                    .accessibilityElement(children: .combine)
+                }
+            } footer: {
+                Text("One press opens Media Tools and begins recording. Use it only when everyone who must consent has done so. After capture starts, you can lock your phone or use another app.")
+                    .foregroundStyle(Theme.textSecondary)
+            }
+
+            Section {
+                Button("Open Shortcuts") {
+                    guard let shortcutsURL = URL(string: "shortcuts://") else { return }
+                    openURL(shortcutsURL)
+                }
+                .foregroundStyle(Theme.accent)
+                .frame(minHeight: 44)
+                .listRowBackground(Theme.surface)
+                .accessibilityHint("Opens the Shortcuts app to configure Quick Record")
+
+                Button("Review setup") {
+                    hasCompletedOnboarding = false
+                }
+                .foregroundStyle(Theme.accent)
+                .frame(minHeight: 44)
+                .listRowBackground(Theme.surface)
+                .accessibilityHint("Shows microphone, alert, and privacy guidance again")
+            }
+        }
+        .ledgerListBackground()
+        .navigationTitle("Quick Record")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private static let steps = [
+        "Open Shortcuts and find Media Tools, then Quick Record.",
+        "In Settings, under Action Button, choose Shortcut and select Quick Record.",
+        "Press once to start. Press again, or use the Live Activity, to stop.",
+    ]
+}
+
 private struct SecurityStatusRetryBanner: View {
     let message: String
     let isRetrying: Bool
     let onRetry: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(message)
-                .font(Theme.caption(12))
-                .foregroundStyle(Theme.error)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 0) {
+            InlineError(message)
             Button { onRetry() } label: {
                 HStack(spacing: 8) {
-                    if isRetrying { ProgressView().tint(Theme.brand400) }
+                    if isRetrying { ProgressView() }
                     Text(isRetrying ? "Checking…" : "Retry")
                 }
-                .font(Theme.body(14, weight: .semibold))
-                .foregroundStyle(Theme.brand400)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .background(Theme.brand50)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
             }
+            .buttonStyle(QuietButtonStyle())
             .disabled(isRetrying)
             .accessibilityIdentifier("sign-in-security.retry")
         }
@@ -1182,13 +1007,13 @@ struct SignInSecurityStatusFailurePreviewHost: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Sign-in security")
-                .font(Theme.heading(24))
-                .foregroundStyle(Theme.textPrimary)
+                .font(.ledgerTitle2)
+                .foregroundStyle(Theme.text)
             Text("1 passkey is set up.")
-                .font(Theme.body(14))
+                .font(.subheadline)
                 .foregroundStyle(Theme.textSecondary)
             Text("2 recovery codes left")
-                .font(Theme.body(14))
+                .font(.subheadline)
                 .foregroundStyle(Theme.textSecondary)
             if let message {
                 SecurityStatusRetryBanner(message: message, isRetrying: false) {
@@ -1198,13 +1023,13 @@ struct SignInSecurityStatusFailurePreviewHost: View {
             }
             if didRetry {
                 Text("Security status refreshed")
-                    .font(Theme.caption(12))
-                    .foregroundStyle(Theme.success)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.text)
             }
             Spacer()
         }
         .padding(20)
-        .background(Theme.surface)
+        .background(Theme.bg)
     }
 }
 
@@ -1225,10 +1050,10 @@ private struct RecoveryCodesOneTimeSheet: View {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Save recovery codes")
-                            .font(Theme.heading(24))
-                            .foregroundStyle(Theme.textPrimary)
+                            .font(.ledgerTitle2)
+                            .foregroundStyle(Theme.text)
                         Text("These codes are shown once. Copy or share them now, then keep them somewhere private.")
-                            .font(Theme.body(14))
+                            .font(.subheadline)
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -1236,65 +1061,63 @@ private struct RecoveryCodesOneTimeSheet: View {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(codes, id: \.self) { code in
                             Text(code)
-                                .font(Theme.mono(15))
-                                .foregroundStyle(Theme.textPrimary)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(Theme.text)
+                                .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.vertical, 8)
                                 .padding(.horizontal, 10)
-                                .background(Theme.surfaceCard)
-                                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall))
+                                .background(Theme.bg)
+                                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous))
                         }
                     }
 
-                    HStack(spacing: 10) {
-                        Button {
-                            RecoveryCodeClipboard.copy(joinedCodes)
-                            didCopy = true
-                        } label: {
-                            Label(didCopy ? "Copied" : "Copy for 60 seconds", systemImage: didCopy ? "checkmark" : "doc.on.doc")
-                                .font(Theme.body(14, weight: .semibold))
-                                .foregroundStyle(Theme.brand400)
-                                .frame(maxWidth: .infinity, minHeight: 48)
-                                .background(Theme.brand50)
-                                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-                        }
-                        .accessibilityIdentifier("recovery-codes.copy-all")
-
-                        ShareLink(item: joinedCodes) {
-                            Label("Share", systemImage: "square.and.arrow.up")
-                                .font(Theme.body(14, weight: .semibold))
-                                .foregroundStyle(Theme.brand400)
-                                .frame(maxWidth: .infinity, minHeight: 48)
-                                .background(Theme.brand50)
-                                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium))
-                        }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 24) { recoveryCodeActions }
+                        VStack(alignment: .leading, spacing: 0) { recoveryCodeActions }
                     }
 
                     if let errorMessage {
-                        Text(errorMessage)
-                            .font(Theme.caption(13))
-                            .foregroundStyle(Theme.error)
-                            .fixedSize(horizontal: false, vertical: true)
+                        InlineError(errorMessage)
                     }
 
                     Button { onDone() } label: {
                         HStack(spacing: 8) {
-                            if isSaving { ProgressView().tint(.white) }
+                            if isSaving { ProgressView().tint(Theme.onAccent) }
                             Text(isSaving ? "Saving…" : "I saved these codes")
                         }
-                        .font(Theme.body(15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .background(Theme.brand500, in: RoundedRectangle(cornerRadius: Theme.radiusMedium))
                     }
+                    .buttonStyle(PrimaryButtonStyle())
                     .disabled(isSaving)
                     .accessibilityIdentifier("recovery-codes.saved")
                 }
                 .padding(20)
             }
-            .background(Theme.surface)
+            .background(Theme.bg)
             .navigationTitle("Recovery codes")
             .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+private extension RecoveryCodesOneTimeSheet {
+    @ViewBuilder
+    var recoveryCodeActions: some View {
+        Button {
+            RecoveryCodeClipboard.copy(joinedCodes)
+            didCopy = true
+        } label: {
+            Label(didCopy ? "Copied" : "Copy for 60 seconds", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+        }
+        .buttonStyle(QuietButtonStyle())
+        .accessibilityIdentifier("recovery-codes.copy-all")
+
+        ShareLink(item: joinedCodes) {
+            Label("Share", systemImage: "square.and.arrow.up")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
         }
     }
 }
@@ -1303,7 +1126,7 @@ struct RecoveryCodesOneTimePreviewHost: View {
     @State private var isPresented = true
 
     var body: some View {
-        Theme.surface
+        Theme.bg
             .ignoresSafeArea()
             .sheet(isPresented: $isPresented) {
                 RecoveryCodesOneTimeSheet(
@@ -1317,67 +1140,6 @@ struct RecoveryCodesOneTimePreviewHost: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
-    }
-}
-
-private struct SettingsActionRow: View {
-    let icon: String
-    let label: String
-    let detail: String
-    let trailing: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(Theme.brand400)
-                .frame(width: 32, height: 32)
-                .background(Theme.brand50)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label)
-                    .font(Theme.body(14, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Text(detail)
-                    .font(Theme.caption(12))
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .layoutPriority(1)
-
-            Spacer(minLength: 8)
-
-            if !trailing.isEmpty {
-                Text(trailing)
-                    .font(Theme.caption(12, weight: .semibold))
-                    .foregroundStyle(Theme.textMuted)
-                    .fixedSize()
-            }
-
-            Image(systemName: "chevron.right")
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(Theme.textMuted)
-        }
-        .frame(minHeight: 56)
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
-    }
-}
-
-struct SettingsRow<Content: View>: View {
-    let label: String
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(Theme.body(14))
-                .foregroundStyle(Theme.textSecondary)
-            Spacer()
-            content
-        }
-        .padding(.vertical, 8)
     }
 }
 

@@ -88,7 +88,7 @@ and provide its non-expiring review credentials outside this repository.
 MediaTools/
 ├── MediaToolsApp.swift              # Entry point, onboarding gate
 ├── Configuration.swift              # API URL, app group
-├── ContentView.swift                # Auth gate (welcome vs main tab view)
+├── ContentView.swift                # Auth gate (sign-in vs main view)
 ├── Info.plist                       # Permissions (mic), ATS config
 │
 ├── Models/
@@ -109,10 +109,11 @@ MediaTools/
 │   └── SpotlightService.swift       # CoreSpotlight indexing for system search
 │
 ├── Views/
-│   ├── MainTabView.swift            # Current five-tab navigation
-│   ├── OnboardingView.swift         # First-launch walkthrough (4 pages)
+│   ├── MainView.swift               # One navigation stack over the Library, and its routes
+│   ├── OnboardingView.swift         # Permissions and privacy (3 steps)
 │   ├── Library/
-│   │   ├── LibraryView.swift        # Unified paginated library + typed actions
+│   │   ├── LibraryView.swift        # Home: paginated library, search, Record control
+│   │   ├── LibraryDaySections.swift # Groups rows under Today, Yesterday, and dates
 │   │   ├── ItemDetailView.swift     # Detail + chat/summary/copy/share/collect
 │   │   ├── TranscribeView.swift     # URL capture and visible status updates
 │   │   └── PDFUploadView.swift      # File picker with security-scoped access
@@ -134,14 +135,16 @@ MediaTools/
 │   └── URL+MediaTools.swift         # Video/audio/PDF URL detection
 │
 ├── Assets.xcassets/
-│   ├── AccentColor (teal #2F9E8F)
-│   └── AppIcon (1024x1024 waveform)
+│   ├── AccentColor (ink blue, light and dark)
+│   └── AppIcon (1024x1024, quote marks on ink blue, no alpha)
 │
 ├── ShareExtension/                  # iOS Share Sheet
 │   ├── ShareViewController.swift    # Handles URLs + audio + PDF files
 │   └── Info.plist                   # Activation rules
 │
-├── MediaToolsShared/                # Types compiled into app + widget extension
+├── MediaToolsShared/                # Compiled into the app and its extensions
+│   ├── LedgerTheme.swift            # Color tokens, type scale, and motion curves
+│   ├── Ledger.xcassets              # Light, dark, and Increase Contrast color values
 │   ├── QuickCaptureIntents.swift    # Action Button/Siri/Shortcuts recording actions
 │   └── RecordingActivityAttributes.swift
 │
@@ -149,6 +152,25 @@ MediaTools/
     ├── MediaToolsWidget.swift       # Widget, system control, Live Activity
     └── Info.plist
 ```
+
+## Design system
+
+The app uses Ledger, "paper and ink": warm paper in light mode, warm graphite in
+dark mode, and one ink blue accent. The color names (`bg`, `surface`, `text`,
+`text-secondary`, `separator`, `accent`, `accent-fill`, `on-accent`, `record`,
+`on-record`, `danger`, `on-danger`) match the web tokens in
+`frontend/src/index.css`, so change the two together.
+
+- Red means a recording is running. Errors stay in ink with an icon, and
+  destructive actions use `danger`.
+- New York carries titles, summaries, and transcripts through the `Font.ledger*`
+  styles. SF carries controls and metadata through the plain system text styles.
+  Everything follows Dynamic Type. The one explicit size is the recording timer,
+  which scales with a `@ScaledMetric` and shrinks to fit.
+- Status appears only when something needs attention. A finished item shows none.
+- Use `withMotion` rather than `withAnimation`, so Reduce Motion is honored.
+- The app icon comes from `ios/scripts/generate-icon.swift`. Verify it with
+  `sips -g hasAlpha`: App Store Connect rejects an icon with an alpha channel.
 
 ## Features
 
@@ -174,7 +196,7 @@ MediaTools/
   removes the corresponding typed search entry
 - **Local Notifications** — Get notified when transcriptions complete
 - **Background recording** — User-initiated microphone capture is owned at the
-  app level, supports Bluetooth input, and survives tab changes and ordinary
+  app level, supports Bluetooth input, and survives navigation and ordinary
   backgrounding; the audio session ends immediately when capture stops
 - **Background upload service source** — Present but not wired to the active
   flow; current recording uploads must be treated as foreground app work

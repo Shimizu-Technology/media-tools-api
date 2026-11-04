@@ -10,95 +10,58 @@ struct PDFUploadView: View {
     private let service = MediaToolsService.shared
 
     var body: some View {
-        VStack(spacing: 32) {
-            Spacer()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Choose a PDF and its text joins your Library, ready to search and ask about.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            // Drop zone
-            Button {
-                showFilePicker = true
-            } label: {
-                VStack(spacing: 16) {
-                    Image(systemName: "doc.badge.plus")
-                        .font(.system(size: 48))
-                        .foregroundStyle(Theme.pdfColor.opacity(0.7))
+                Button {
+                    showFilePicker = true
+                } label: {
+                    Label("Choose PDF", systemImage: "doc")
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(isUploading)
 
-                    VStack(spacing: 4) {
-                        Text("Select PDF")
-                            .font(Theme.heading(16))
-                            .foregroundStyle(Theme.textPrimary)
-                        Text("Tap to browse your files")
-                            .font(Theme.caption())
-                            .foregroundStyle(Theme.textSecondary)
+                if isUploading {
+                    ProgressNote(text: "Uploading and extracting…")
+                }
+
+                if let result {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(result.displayTitle)
+                            .font(.ledgerRowTitle)
+                            .foregroundStyle(Theme.text)
+                        if let pages = result.pageCount {
+                            Text("\(pages) pages")
+                                .font(.footnote)
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                        NavigationLink {
+                            ItemDetailView(item: .pdf(result))
+                        } label: {
+                            Text("Open")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.accent)
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: 200)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.radiusLarge)
-                        .fill(Theme.surfaceCard)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.radiusLarge)
-                        .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [8]))
-                        .foregroundStyle(Theme.border)
-                )
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal)
 
-            if isUploading {
-                VStack(spacing: 8) {
-                    ProgressView()
-                        .tint(Theme.brand400)
-                    Text("Uploading & extracting...")
-                        .font(Theme.caption())
-                        .foregroundStyle(Theme.textSecondary)
+                if let error {
+                    InlineError(error)
                 }
             }
-
-            if let result {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(Theme.success)
-                        Text("Extracted!")
-                            .font(Theme.heading(16))
-                            .foregroundStyle(Theme.textPrimary)
-                    }
-                    Text(result.displayTitle)
-                        .font(Theme.body(14))
-                        .foregroundStyle(Theme.textSecondary)
-                    if let pages = result.pageCount {
-                        Text("\(pages) pages")
-                            .font(Theme.caption())
-                            .foregroundStyle(Theme.textMuted)
-                    }
-                    NavigationLink {
-                        ItemDetailView(item: .pdf(result))
-                    } label: {
-                        Label("Open", systemImage: "arrow.right.circle.fill")
-                            .font(Theme.body(14, weight: .semibold))
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.brand500)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accentCardStyle()
-                .padding(.horizontal)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-
-            if let error {
-                Text(error)
-                    .font(Theme.caption())
-                    .foregroundStyle(Theme.error)
-            }
-
-            Spacer()
+            .readingMeasure()
+            .padding(16)
         }
-        .background(Theme.surface)
-        .navigationTitle("Upload PDF")
+        .background(Theme.bg)
+        .navigationTitle("Upload a PDF")
+        .navigationBarTitleDisplayMode(.inline)
         .fileImporter(
             isPresented: $showFilePicker,
             allowedContentTypes: [.pdf],
@@ -134,7 +97,7 @@ struct PDFUploadView: View {
                 filename: url.lastPathComponent,
                 mimeType: "application/pdf"
             )
-            withAnimation(Theme.springGentle) {
+            withMotion {
                 result = extraction
             }
             await service.loadPDFs()
