@@ -160,7 +160,7 @@ export function DeveloperPage() {
               API docs
               <ExternalLink className="h-4 w-4" />
             </Link>
-            <Link to="/app/developer/webhooks" className="inline-flex min-h-11 items-center gap-2 rounded-md px-4 text-sm font-semibold text-on-accent transition-colors hover:opacity-90" style={{ backgroundColor: 'var(--color-accent-fill)' }}>
+            <Link to="/app/settings/webhooks" className="inline-flex min-h-11 items-center gap-2 rounded-md px-4 text-sm font-semibold text-on-accent transition-colors hover:opacity-90" style={{ backgroundColor: 'var(--color-accent-fill)' }}>
               Webhooks
               <Webhook className="h-4 w-4" />
             </Link>
@@ -385,7 +385,7 @@ export function DeveloperPage() {
           <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>Review endpoints, request shapes, and curl examples.</p>
           <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--color-accent)' }}>Open docs <ArrowRight className="h-4 w-4" /></span>
         </Link>
-        <Link to="/app/developer/webhooks" className="group rounded-xl border p-5 transition-colors" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
+        <Link to="/app/settings/webhooks" className="group rounded-xl border p-5 transition-colors" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
           <p className="font-semibold" style={{ color: 'var(--color-text)' }}>Webhook delivery settings</p>
           <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>Subscribe your integration to transcript, audio, PDF, and summary events.</p>
           <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--color-accent)' }}>Configure webhooks <ArrowRight className="h-4 w-4" /></span>

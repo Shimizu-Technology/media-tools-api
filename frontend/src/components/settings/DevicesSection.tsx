@@ -49,7 +49,6 @@ export function DevicesSection() {
 
   return (
     <SettingsCard
-      icon={<Laptop className="h-5 w-5" />}
       title="Signed-in devices"
       description="Each browser or phone signed in to your account. Signing one out ends its session right away. If it is the device you are using now, you will need to sign in again."
       action={error ? <SecondaryButton type="button" onClick={() => void load()}>Try again</SecondaryButton> : undefined}

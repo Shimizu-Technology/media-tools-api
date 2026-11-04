@@ -358,12 +358,6 @@ export interface User {
   created_at: string;
 }
 
-export interface WorkspaceResponse {
-  transcripts: Transcript[];
-  audio: AudioTranscription[];
-  pdfs: PDFExtraction[];
-}
-
 export interface Webhook {
   id: string;
   url: string;
@@ -728,32 +722,6 @@ export async function downloadExport(transcriptId: string, format: ExportFormat)
   return res.blob();
 }
 
-// ── LocalStorage History ──
-
-const HISTORY_KEY = 'mta_transcript_ids';
-
-export function getStoredTranscriptIds(): string[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw) as string[];
-  } catch { return []; }
-}
-
-export function addTranscriptToHistory(id: string): void {
-  const ids = getStoredTranscriptIds();
-  if (!ids.includes(id)) {
-    ids.unshift(id);
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(ids.slice(0, 100)));
-  }
-}
-
-export function removeTranscriptsFromHistory(idsToRemove: string[]): void {
-  const ids = getStoredTranscriptIds();
-  const filtered = ids.filter((id) => !idsToRemove.includes(id));
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(filtered));
-}
-
 // ── Audio Transcription (MTA-16) ──
 
 export async function transcribeAudio(file: File): Promise<AudioTranscription> {
@@ -1013,39 +981,6 @@ export async function deletePDFExtraction(id: string): Promise<void> {
   }
 }
 
-// ── Workspace (MTA-20) ──
-
-export async function getWorkspace(): Promise<WorkspaceResponse> {
-  const res = await fetchWithAuth(`${API_BASE}/workspace`, { headers: await getHeaders() });
-  return handleResponse<WorkspaceResponse>(res);
-}
-
-export async function saveToWorkspace(itemType: string, itemId: string): Promise<void> {
-  const res = await fetchWithAuth(`${API_BASE}/workspace`, {
-    method: 'POST',
-    headers: await getHeaders(),
-    body: JSON.stringify({ item_type: itemType, item_id: itemId }),
-  });
-  if (!res.ok) {
-    const error: APIError = await res.json().catch(() => ({
-      error: 'unknown', message: `HTTP ${res.status}`, code: res.status,
-    }));
-    throw error;
-  }
-}
-
-export async function removeFromWorkspace(itemType: string, itemId: string): Promise<void> {
-  const res = await fetchWithAuth(`${API_BASE}/workspace/${itemType}/${itemId}`, {
-    method: 'DELETE', headers: await getHeaders(),
-  });
-  if (!res.ok) {
-    const error: APIError = await res.json().catch(() => ({
-      error: 'unknown', message: `HTTP ${res.status}`, code: res.status,
-    }));
-    throw error;
-  }
-}
-
 // ── Webhooks (MTA-18) ──
 
 export async function createWebhook(url: string, events: string[]): Promise<Webhook> {
@@ -1186,4 +1121,25 @@ export async function addCollectionItems(id: string, items: { item_type: string;
 export async function removeCollectionItem(collectionId: string, itemId: string): Promise<void> {
   const res = await fetchWithAuth(`${API_BASE}/collections/${collectionId}/items/${itemId}`, { method: 'DELETE', headers: await getHeaders() });
   if (!res.ok) throw new Error('Failed to remove item from collection');
+}
+
+// ── Processing preferences ──
+
+export interface ProcessingPreferences {
+  /** New transcripts get a title and summary without anyone asking. */
+  automatic_summaries: boolean;
+}
+
+export async function getProcessingPreferences(): Promise<ProcessingPreferences> {
+  const res = await fetchWithAuth(`${API_BASE}/account/processing-preferences`, { headers: await getHeaders() });
+  return handleResponse<ProcessingPreferences>(res);
+}
+
+export async function updateProcessingPreferences(preferences: ProcessingPreferences): Promise<ProcessingPreferences> {
+  const res = await fetchWithAuth(`${API_BASE}/account/processing-preferences`, {
+    method: 'PATCH',
+    headers: await getHeaders(),
+    body: JSON.stringify(preferences),
+  });
+  return handleResponse<ProcessingPreferences>(res);
 }

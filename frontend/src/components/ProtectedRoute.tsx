@@ -55,7 +55,7 @@ export function ProtectedRoute({ children, requireOwner = false }: ProtectedRout
   // ops gated by API-key auth in the API client itself instead of pretending
   // every account is an owner.
   if (requireOwner && accountAuthEnabled) {
-    return <Navigate to="/app/developer" replace />;
+    return <Navigate to="/app/settings/developer" replace />;
   }
 
   return <>{children}</>;
