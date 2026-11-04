@@ -14,6 +14,7 @@ struct AudioPlayerView: View {
     @State private var hasStarted = false
     @Environment(RecordingCoordinator.self) private var recorder
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
         player: AudioPlayerService,
@@ -59,7 +60,7 @@ struct AudioPlayerView: View {
                 }
             }
         }
-        .animation(Theme.quick, value: hasStarted)
+        .animation(reduceMotion ? nil : Theme.quick, value: hasStarted)
         .task {
             await loadAudio()
         }

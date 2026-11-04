@@ -62,7 +62,13 @@ struct MainView: View {
             guard current.count < previous.count,
                   case .item = previous.last
             else { return }
-            Task { await libraryModel.refresh() }
+            // A selected collection renders its own rows, so it needs its own reload.
+            Task {
+                await libraryModel.refresh()
+                if libraryModel.selectedCollection != nil {
+                    await libraryModel.loadSelectedCollection()
+                }
+            }
         }
     }
 

@@ -13,6 +13,7 @@ private enum TranscriptViewMode: String, CaseIterable, Identifiable {
 }
 
 struct ItemDetailView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let item: LibraryItem
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
@@ -313,7 +314,7 @@ struct ItemDetailView: View {
                 }
             }
             .ledgerBarBackground()
-            .animation(Theme.quick, value: showsMiniPlayer)
+            .animation(reduceMotion ? nil : Theme.quick, value: showsMiniPlayer)
         }
     }
 
