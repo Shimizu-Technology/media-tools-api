@@ -1,10 +1,11 @@
 package handlers
 
 import (
-	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
-	"github.com/gin-gonic/gin"
 	"log"
 	"strings"
+
+	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
+	"github.com/gin-gonic/gin"
 )
 
 // Current iOS/web/CLI clients default to the server model (empty override).
