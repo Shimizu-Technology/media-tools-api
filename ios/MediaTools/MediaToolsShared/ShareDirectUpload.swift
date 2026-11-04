@@ -89,6 +89,9 @@ protocol ShareUploadCredentialStoring: Sendable {
     func load() -> ShareUploadCredentialLoadResult
     func save(_ credential: ShareUploadCredential) throws
     func delete()
+    /// Removes the stored key only if it is still the one with this ID, as a
+    /// single step. A late rejection of an old key must not remove its replacement.
+    func delete(ifKeyID keyID: String)
 }
 
 /// The one credential the extension can read. It lives in the App Group's Keychain
@@ -127,7 +130,10 @@ struct ShareUploadKeychainStore: ShareUploadCredentialStoring {
         let data = try JSONEncoder().encode(credential)
         let status = SecItemUpdate(
             baseQuery as CFDictionary,
-            [kSecValueData as String: data] as CFDictionary
+            [
+                kSecValueData as String: data,
+                kSecAttrGeneric as String: Data(credential.keyID.utf8),
+            ] as CFDictionary
         )
         if status == errSecSuccess { return }
         guard status == errSecItemNotFound else {
@@ -135,6 +141,7 @@ struct ShareUploadKeychainStore: ShareUploadCredentialStoring {
         }
         var attributes = baseQuery
         attributes[kSecValueData as String] = data
+        attributes[kSecAttrGeneric as String] = Data(credential.keyID.utf8)
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let addStatus = SecItemAdd(attributes as CFDictionary, nil)
         guard addStatus == errSecSuccess else {
@@ -144,6 +151,16 @@ struct ShareUploadKeychainStore: ShareUploadCredentialStoring {
 
     func delete() {
         SecItemDelete(baseQuery as CFDictionary)
+    }
+
+    /// The key ID is stored as an attribute, so the Keychain itself does the
+    /// comparison inside the delete. A load followed by a delete would leave a
+    /// gap in which the app could save a new key. A key stored before this
+    /// attribute existed does not match and is replaced the next time the app saves.
+    func delete(ifKeyID keyID: String) {
+        var query = baseQuery
+        query[kSecAttrGeneric as String] = Data(keyID.utf8)
+        SecItemDelete(query as CFDictionary)
     }
 }
 
@@ -364,8 +381,9 @@ struct ShareDirectUploader {
             return .uploading
         } catch ShareUploadRejection.invalidKey {
             // A password reset or email change revoked every key. The app mints
-            // another once it is signed in again.
-            credentials.delete()
+            // another once it is signed in again. Only this key goes: a sign-out
+            // while the request was out may already have saved its replacement.
+            credentials.delete(ifKeyID: credential.keyID)
             return releaseReservation(item)
         } catch {
             return releaseReservation(item)
@@ -417,7 +435,7 @@ struct ShareDirectUploader {
         guard let (_, response) = try? await http.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 401
         else { return }
-        credentials.delete()
+        credentials.delete(ifKeyID: credential.keyID)
     }
 
     /// If this write fails, the reservation expires and the app imports the share.

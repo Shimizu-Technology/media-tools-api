@@ -14,6 +14,10 @@ private final class MemoryCredentials: ShareUploadCredentialStoring, @unchecked 
         deletes += 1
         result = .missing
     }
+    func delete(ifKeyID keyID: String) {
+        guard case .found(let stored) = result, stored.keyID == keyID else { return }
+        delete()
+    }
 }
 
 private final class ScriptedHTTP: ShareUploadHTTP, @unchecked Sendable {
@@ -197,6 +201,35 @@ final class ShareDirectUploaderTests: XCTestCase {
 
         XCTAssertEqual(credentials.deletes, 1)
         XCTAssertEqual(try inbox.pendingItems().first?.directUpload?.uploadFinished, true, "The bytes still arrived")
+    }
+
+    func testALate401ForAnOldKeyNeverDeletesItsReplacementAtPresign() async throws {
+        try allow()
+        let item = try stage(for: "owner-a")
+        let replacement = ShareUploadCredential(keyID: "k2", rawKey: "raw-2", ownerID: "owner-a")
+        http.status = 401
+        http.duringRequest = { self.credentials.result = .found(replacement) }
+
+        let outcome = await uploader.start(item)
+
+        XCTAssertEqual(outcome, .savedForApp)
+        XCTAssertEqual(credentials.result, .found(replacement), "The new key was not the one rejected")
+        XCTAssertEqual(credentials.deletes, 0)
+    }
+
+    func testALate401ForAnOldKeyNeverDeletesItsReplacementAtComplete() async throws {
+        try allow()
+        let item = try stage(for: "owner-a")
+        _ = await uploader.start(item)
+        let metadata = try XCTUnwrap(starter.calls.first?.metadata)
+        let replacement = ShareUploadCredential(keyID: "k2", rawKey: "raw-2", ownerID: "owner-a")
+        http.status = 401
+        http.duringRequest = { self.credentials.result = .found(replacement) }
+
+        await uploader.finishTransfer(metadata, statusCode: 200)
+
+        XCTAssertEqual(credentials.result, .found(replacement))
+        XCTAssertEqual(credentials.deletes, 0)
     }
 
     func testARevokedKeyIsForgottenAndTheShareWaitsForTheApp() async throws {
@@ -631,6 +664,38 @@ final class ShareUploadKeyManagerTests: XCTestCase {
         await manager.ensureKey(ownerID: "owner-a")
         let revoked = await api.revokedWithSession
         XCTAssertEqual(revoked, ["key-1"])
+    }
+
+    func testAnOwnerWhoAsksDuringAnotherMintIsServedWhenItEnds() async throws {
+        await api.holdNextMint()
+        let first = Task { await manager.ensureKey(ownerID: "owner-a") }
+        await api.waitForHeldMint()
+
+        await manager.ensureKey(ownerID: "owner-b")
+        await api.releaseMint()
+        await first.value
+
+        guard case .found(let saved) = credentials.result else { return XCTFail("Expected a key") }
+        XCTAssertEqual(saved.ownerID, "owner-b", "The latest owner is not left waiting for a foreground")
+        let minted = await api.minted.count
+        XCTAssertEqual(minted, 2)
+    }
+
+    func testOrphanCleanupSkipsAKeyThatOnlySharesTheName() async throws {
+        await manager.ensureKey(ownerID: "owner-a")
+        guard case .found(let first) = credentials.result else { return XCTFail("Expected a key") }
+        let name = await api.minted[0]
+        credentials.delete()
+        await api.set(listed: [
+            ListedAPIKey(id: first.keyID, name: name, active: true, scopes: ["capture:upload"]),
+            ListedAPIKey(id: "hand-made", name: name, active: true, scopes: ["library:read"]),
+            ListedAPIKey(id: "unscoped", name: name, active: true, scopes: nil),
+        ])
+
+        await manager.ensureKey(ownerID: "owner-a")
+
+        let revoked = await api.revokedWithSession
+        XCTAssertEqual(revoked, [first.keyID])
     }
 
     func testAPasswordResetRevokedKeyIsJustReplaced() async throws {

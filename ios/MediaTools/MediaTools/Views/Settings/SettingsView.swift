@@ -362,8 +362,13 @@ struct SettingsView: View {
                             }
                     }
 
-                    if passwordStatus?.configured == true {
-                        SecureField("Current password", text: $deleteAccountPassword)
+                    if DeletionPasswordPolicy.showsField(status: passwordStatus) {
+                        SecureField(
+                            DeletionPasswordPolicy.isRequired(status: passwordStatus)
+                                ? "Current password"
+                                : "Current password, if you have one",
+                            text: $deleteAccountPassword
+                        )
                             .textContentType(.password)
                             .authFieldStyle()
                             .accessibilityIdentifier("delete-account.password")
@@ -408,7 +413,7 @@ struct SettingsView: View {
 
     private var canSubmitDeletion: Bool {
         deletionConfirmation == "DELETE"
-            && (passwordStatus?.configured != true || !deleteAccountPassword.isEmpty)
+            && (!DeletionPasswordPolicy.isRequired(status: passwordStatus) || !deleteAccountPassword.isEmpty)
     }
 
     @ViewBuilder
@@ -1100,7 +1105,10 @@ struct SettingsView: View {
         do {
             let pending = try await AccountDeletionRecoveryService.shared.requestDeletion(
                 ownerID: ownerID,
-                currentPassword: passwordStatus?.configured == true ? deleteAccountPassword : nil
+                currentPassword: DeletionPasswordPolicy.passwordToSend(
+                    status: passwordStatus,
+                    entered: deleteAccountPassword
+                )
             )
             try await AccountDeletionRecoveryService.shared.finishLocalDeletion(
                 pending,
@@ -1370,5 +1378,28 @@ struct SettingsRow<Content: View>: View {
             content
         }
         .padding(.vertical, 8)
+    }
+}
+
+/// Whether the delete sheet asks for a password. An unknown status, from a failed
+/// lookup, offers the field without requiring it: the server decides, and a
+/// rejection then has a field to fix. Hiding it would leave "your password is
+/// incorrect" with nothing to correct, and requiring it would block deleting an
+/// account that has no password.
+enum DeletionPasswordPolicy {
+    static func isRequired(status: PasswordStatus?) -> Bool {
+        status?.configured == true
+    }
+
+    static func showsField(status: PasswordStatus?) -> Bool {
+        status?.configured != false
+    }
+
+    static func passwordToSend(status: PasswordStatus?, entered: String) -> String? {
+        switch status?.configured {
+        case true: return entered
+        case false: return nil
+        default: return entered.isEmpty ? nil : entered
+        }
     }
 }

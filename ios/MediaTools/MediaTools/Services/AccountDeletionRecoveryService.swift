@@ -203,6 +203,53 @@ final class AccountDeletionRecoveryService {
         }
     }
 
+    /// What launch learned about a deletion journal. Only `.none` and `.completed`
+    /// let a stored workspace open: while a deletion might have committed, that
+    /// account's content, consent, and uploads stay closed.
+    enum PendingDeletionResolution: Equatable {
+        case none
+        case completed
+        case unresolved
+    }
+
+    /// Reconciles a journal before the stored account opens. A lookup that
+    /// cannot finish, a cleanup that cannot finish, or an unproven retry for the
+    /// signed-in account is `.unresolved`, never "no deletion". A journal for a
+    /// different account does not block this one.
+    func resolvePendingDeletion(
+        retryOwnerID: String?,
+        uploadCoordinator: any AccountDeletionLocalDataRemoving,
+        consent: AIProcessingConsentManager,
+        deviceSession: DeviceSessionController,
+        shareKeys: ShareUploadKeyManager
+    ) async -> PendingDeletionResolution {
+        guard (try? journal.load()) != nil else { return .none }
+        let confirmed: PendingAccountDeletion?
+        do {
+            confirmed = try await confirmedPendingDeletion(retryOwnerID: retryOwnerID)
+        } catch {
+            return .unresolved
+        }
+        if let confirmed {
+            do {
+                try await finishLocalDeletion(
+                    confirmed,
+                    uploadCoordinator: uploadCoordinator,
+                    consent: consent,
+                    deviceSession: deviceSession,
+                    shareKeys: shareKeys
+                )
+                return .completed
+            } catch {
+                return .unresolved
+            }
+        }
+        if let remaining = try? journal.load(), remaining.ownerID == retryOwnerID {
+            return .unresolved
+        }
+        return .none
+    }
+
     private static func isDefinitiveRejection(_ error: Error) -> Bool {
         guard case APIError.httpError(let statusCode, let code, _) = error else {
             return false

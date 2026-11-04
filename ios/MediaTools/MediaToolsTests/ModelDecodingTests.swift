@@ -121,6 +121,57 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     @MainActor
+    func testRetriesWaitAtLeastAsLongAsTheServerAsked() {
+        XCTAssertEqual(RecordingUploadCoordinator.retryDelay(attempt: 1), 2)
+        XCTAssertEqual(RecordingUploadCoordinator.retryDelay(attempt: 1, serverWait: 45), 45)
+        XCTAssertEqual(RecordingUploadCoordinator.retryDelay(attempt: 10, serverWait: 5), 60, "Backoff still wins when it is longer")
+        XCTAssertEqual(RecordingUploadCoordinator.retryDelay(attempt: 1, serverWait: 100_000), 900, "A bad header cannot park work for hours")
+        XCTAssertEqual(RecordingUploadCoordinator.retryDelay(attempt: 1, serverWait: -3), 2)
+        XCTAssertEqual(RecordingUploadCoordinator.watchRetryDelay(after: 1, serverWait: 30), .seconds(30))
+        XCTAssertEqual(RecordingUploadCoordinator.watchRetryDelay(after: 1, serverWait: nil), .seconds(5))
+        XCTAssertEqual(
+            RecordingUploadCoordinator.serverRequestedWait(APIError.rateLimited(retryAfter: 12, message: "slow")),
+            12
+        )
+        XCTAssertNil(RecordingUploadCoordinator.serverRequestedWait(URLError(.timedOut)))
+    }
+
+    @MainActor
+    func testAnOwnerChangeKeepsShareUploadsRunning() {
+        let appOwned = UUID()
+        let shareOwned = UUID()
+        let cancelled = RecordingUploadCoordinator.transfersToCancelOnOwnerChange(
+            paused: [appOwned, shareOwned],
+            shareUploadRecordingIDs: [shareOwned]
+        )
+        XCTAssertEqual(cancelled, [appOwned])
+    }
+
+    @MainActor
+    func testResendCooldownStartsOnlyAfterACodeWasSent() {
+        XCTAssertEqual(ResendCodeButton.secondsLeft(afterSend: true, current: 0), 60)
+        XCTAssertEqual(ResendCodeButton.secondsLeft(afterSend: false, current: 0), 0)
+    }
+
+    func testDeletionPasswordFieldIsOfferedWheneverThePasswordStatusIsNotKnownToBeAbsent() {
+        let configured = PasswordStatus(configured: true, updatedAt: nil)
+        let absent = PasswordStatus(configured: false, updatedAt: nil)
+
+        XCTAssertTrue(DeletionPasswordPolicy.showsField(status: configured))
+        XCTAssertTrue(DeletionPasswordPolicy.isRequired(status: configured))
+        XCTAssertFalse(DeletionPasswordPolicy.showsField(status: absent))
+        XCTAssertFalse(DeletionPasswordPolicy.isRequired(status: absent))
+        // A failed lookup: a field to fix a rejection, but deletion is never blocked.
+        XCTAssertTrue(DeletionPasswordPolicy.showsField(status: nil))
+        XCTAssertFalse(DeletionPasswordPolicy.isRequired(status: nil))
+
+        XCTAssertEqual(DeletionPasswordPolicy.passwordToSend(status: configured, entered: "pw"), "pw")
+        XCTAssertNil(DeletionPasswordPolicy.passwordToSend(status: absent, entered: "ignored"))
+        XCTAssertEqual(DeletionPasswordPolicy.passwordToSend(status: nil, entered: "pw"), "pw")
+        XCTAssertNil(DeletionPasswordPolicy.passwordToSend(status: nil, entered: ""))
+    }
+
+    @MainActor
     func testTranscriptionWatchClassifiesTransientAuthenticationAndPermanentFailures() {
         XCTAssertEqual(
             RecordingUploadCoordinator.watchFailureDisposition(

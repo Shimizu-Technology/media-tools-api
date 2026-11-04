@@ -22,12 +22,20 @@ def check_public_files(public: Path) -> None:
     # netlify.toml holds the SPA fallback, because _redirects runs first and a
     # catch-all there would swallow the signed API proxy.
     netlify = tomllib.loads((public.parents[1] / "netlify.toml").read_text())
-    fallback = [rule for rule in netlify.get("redirects", []) if rule.get("from") == "/*"]
+    rules = netlify.get("redirects", [])
+    fallback = [rule for rule in rules if rule.get("from") == "/*"]
     assert len(fallback) == 1 and fallback[0].get("to") == "/index.html" and fallback[0].get("status") == 200, (
         "netlify.toml must hold the SPA fallback"
     )
     assert not fallback[0].get("force", False), (
         "SPA fallback must remain unforced so Netlify serves the AASA file"
+    )
+
+    # Netlify applies the first matching rule, top to bottom. Below the fallback,
+    # the proxy would never run and /api/* would be answered with index.html.
+    proxy = [index for index, rule in enumerate(rules) if rule.get("from") == "/api/*"]
+    assert len(proxy) == 1 and proxy[0] < rules.index(fallback[0]), (
+        "netlify.toml must place exactly one /api/* proxy before the SPA fallback"
     )
 
     redirects = (public / "_redirects").read_text().splitlines()

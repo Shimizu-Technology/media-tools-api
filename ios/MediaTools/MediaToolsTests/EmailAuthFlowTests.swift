@@ -223,6 +223,100 @@ final class EmailAuthFlowTests: XCTestCase {
         XCTAssertEqual(store.value?.pair.sessionID, "session-new")
     }
 
+    func testALostResponseForOneAddressNeverSignsInAnother() async throws {
+        let invalid = APIError.httpError(statusCode: 400, code: "invalid_code", message: "Code invalid")
+        await api.script("/auth/password/reset", .failure(URLError(.timedOut)))
+        await api.script("/auth/password/reset", .failure(invalid))
+        try await prepareLogin(email: "other@example.com")
+
+        do {
+            try await service.finishPasswordReset(email: "first@example.com", code: "123456", password: "a long enough password")
+            XCTFail("The first attempt has no answer yet")
+        } catch is URLError {}
+
+        do {
+            try await service.finishPasswordReset(email: "other@example.com", code: "000000", password: "a long enough password")
+            XCTFail("A wrong code for another address must stay wrong")
+        } catch {
+            XCTAssertTrue(AuthCopy.message(for: error, fallback: "").contains("Send a new code"))
+        }
+        let logins = await api.callCount("/auth/password/login")
+        XCTAssertEqual(logins, 0)
+        XCTAssertNil(session.activeUserID)
+    }
+
+    func testAnInvalidCodeOnAStillValidSessionNeverSignsInOverIt() async throws {
+        store.value = signedInSession()
+        session = DeviceSessionController(transport: NoNetwork(), baseURL: URL(string: "https://example.test/api/v1")!, store: store, retiredLegacyIdentities: UpdateRetiredIdentities())
+        service = FirstPartyAuthService(api: api, deviceSession: session, passwordLoginJournal: journal)
+        await api.script("/auth/email/change/verify", .failure(URLError(.networkConnectionLost)))
+        await api.script("/auth/email/change/verify", .failure(
+            APIError.httpError(statusCode: 400, code: "invalid_code", message: "Code invalid")
+        ))
+        await api.script("/auth/me", .json(#"{"id":"server-a","email":"old@example.com","name":"Person"}"#))
+        try await prepareLogin(email: "new@example.com")
+
+        do {
+            try await service.finishEmailChange(newEmail: "new@example.com", code: "123456", currentPassword: "the password")
+            XCTFail("The first attempt has no answer yet")
+        } catch is URLError {}
+        do {
+            try await service.finishEmailChange(newEmail: "new@example.com", code: "123456", currentPassword: "the password")
+            XCTFail("The change never committed, so the code is simply wrong")
+        } catch {
+            XCTAssertTrue(AuthCopy.message(for: error, fallback: "").contains("Send a new code"))
+        }
+
+        let logins = await api.callCount("/auth/password/login")
+        XCTAssertEqual(logins, 0, "Signing in would have revoked a session that is still good")
+        XCTAssertEqual(store.value?.pair.sessionID, "session-old")
+        XCTAssertEqual(session.activeUserID, "server-a")
+    }
+
+    func testAnInvalidCodeOnARevokedSessionSignsInBecauseTheChangeCommitted() async throws {
+        store.value = signedInSession()
+        session = DeviceSessionController(transport: RevokedEverywhere(), baseURL: URL(string: "https://example.test/api/v1")!, store: store, retiredLegacyIdentities: UpdateRetiredIdentities())
+        service = FirstPartyAuthService(api: api, deviceSession: session, passwordLoginJournal: journal)
+        await api.script("/auth/email/change/verify", .failure(URLError(.networkConnectionLost)))
+        await api.script("/auth/email/change/verify", .failure(
+            APIError.httpError(statusCode: 400, code: "invalid_code", message: "Code invalid")
+        ))
+        await api.script("/auth/me", .failure(APIError.httpError(statusCode: 401, code: "unauthorized", message: "")))
+        try await prepareLogin(email: "new@example.com")
+
+        do {
+            try await service.finishEmailChange(newEmail: "new@example.com", code: "123456", currentPassword: "the password")
+            XCTFail("The first attempt has no answer yet")
+        } catch is URLError {}
+        try await service.finishEmailChange(newEmail: "new@example.com", code: "123456", currentPassword: "the password")
+
+        XCTAssertEqual(session.activeUserID, "server-a")
+        XCTAssertEqual(store.value?.pair.sessionID, "session-new")
+    }
+
+    func testAnUncheckableSessionKeepsTheLostResponseNoteForTheNextTry() async throws {
+        store.value = signedInSession()
+        session = DeviceSessionController(transport: RevokedEverywhere(), baseURL: URL(string: "https://example.test/api/v1")!, store: store, retiredLegacyIdentities: UpdateRetiredIdentities())
+        service = FirstPartyAuthService(api: api, deviceSession: session, passwordLoginJournal: journal)
+        let invalid = APIError.httpError(statusCode: 400, code: "invalid_code", message: "Code invalid")
+        await api.script("/auth/email/change/verify", .failure(URLError(.networkConnectionLost)))
+        await api.script("/auth/email/change/verify", .failure(invalid))
+        await api.script("/auth/me", .failure(URLError(.notConnectedToInternet)))
+        await api.script("/auth/email/change/verify", .failure(invalid))
+        await api.script("/auth/me", .failure(APIError.httpError(statusCode: 401, code: "unauthorized", message: "")))
+        try await prepareLogin(email: "new@example.com")
+
+        do { try await service.finishEmailChange(newEmail: "new@example.com", code: "123456", currentPassword: "pw"); XCTFail("lost") } catch is URLError {}
+        do { try await service.finishEmailChange(newEmail: "new@example.com", code: "123456", currentPassword: "pw"); XCTFail("uncheckable") } catch is URLError {}
+        let loginsBefore = await api.callCount("/auth/password/login")
+        XCTAssertEqual(loginsBefore, 0, "No sign-in while the session's state is unknown")
+
+        // The note survived, so the next answer can still be recognized.
+        try await service.finishEmailChange(newEmail: "new@example.com", code: "123456", currentPassword: "pw")
+        let loginsAfter = await api.callCount("/auth/password/login")
+        XCTAssertEqual(loginsAfter, 1)
+    }
+
     // MARK: - Error copy
 
     func testRejectedLoginMentionsTheGuessGapAndKeepsTheRetryCredential() async throws {

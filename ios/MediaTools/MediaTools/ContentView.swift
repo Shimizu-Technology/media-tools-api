@@ -8,6 +8,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var isResolvingAccount = true
     @State private var isReconcilingDeletion: Bool
+    @State private var isDeletionUnresolved = false
     @State private var migrationFailed = false
     @State private var migrationRetry = 0
     @State private var legacyReconnect = LegacyRecordingReconnect.idle
@@ -37,7 +38,22 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if isReconcilingDeletion || isBlockedOnAccountResolution {
+            if isReconcilingDeletion && isDeletionUnresolved {
+                VStack(spacing: 16) {
+                    Text("Media Tools is confirming a previous account deletion. Your recordings are safe on this iPhone. Check your connection and try again.")
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("deletion-recovery.message")
+                    tryAgainButton {
+                        isDeletionUnresolved = false
+                        migrationRetry += 1
+                    }
+                    .accessibilityIdentifier("deletion-recovery.retry")
+                }
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .foregroundStyle(Theme.textPrimary)
+                .background(Theme.surface)
+            } else if isReconcilingDeletion || isBlockedOnAccountResolution {
                 ProgressView("Restoring your workspace…")
             } else if deviceSession.isSessionStoreUnavailable,
                       activeUserID == nil,
@@ -104,6 +120,7 @@ struct ContentView: View {
             deviceSession.reloadStoredSessionIfUnavailable()
             // Launch reaches this while the first attempt is still on the wire.
             if deviceSession.isAwaitingSessionRecovery, !isResolvingAccount { migrationRetry += 1 }
+            if isDeletionUnresolved { isDeletionUnresolved = false; migrationRetry += 1 }
             startShareKeySetup()
         }
         .onChange(of: deviceSession.activeUserID) { _, ownerID in
@@ -129,18 +146,23 @@ struct ContentView: View {
                 guard !Task.isCancelled else { return }
                 isResolvingAccount = false
             }
-            if let pending = try? await AccountDeletionRecoveryService.shared.confirmedPendingDeletion(
-                retryOwnerID: deviceSession.storedUserID
-            ) {
-                try? await AccountDeletionRecoveryService.shared.finishLocalDeletion(
-                    pending,
-                    uploadCoordinator: uploadCoordinator,
-                    consent: aiProcessingConsent,
-                    deviceSession: deviceSession,
-                    shareKeys: .shared
-                )
-            }
+            let resolution = await AccountDeletionRecoveryService.shared.resolvePendingDeletion(
+                retryOwnerID: deviceSession.storedUserID,
+                uploadCoordinator: uploadCoordinator,
+                consent: aiProcessingConsent,
+                deviceSession: deviceSession,
+                shareKeys: .shared
+            )
             guard !Task.isCancelled else { return }
+            // An unconfirmed deletion keeps the workspace closed, with the stored
+            // session and every recording untouched, until a later try resolves it.
+            if resolution == .unresolved {
+                isReconcilingDeletion = true
+                isDeletionUnresolved = true
+                isResolvingAccount = false
+                return
+            }
+            isDeletionUnresolved = false
             isReconcilingDeletion = false
             let ownerID = await deviceSession.activate()
             guard !Task.isCancelled else { return }
@@ -179,7 +201,7 @@ struct ContentView: View {
     /// Never awaited by anything the person is waiting on. Without a key, a share
     /// simply waits for this app, so a failure here has no visible effect.
     private func startShareKeySetup() {
-        guard !forceSignedOutForUITesting, let ownerID = activeUserID,
+        guard !forceSignedOutForUITesting, !isReconcilingDeletion, let ownerID = activeUserID,
               deviceSession.hasNativeFirstPartySession else { return }
         Task { await ShareUploadKeyManager.shared.ensureKey(ownerID: ownerID) }
     }

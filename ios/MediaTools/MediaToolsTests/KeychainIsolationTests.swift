@@ -112,6 +112,22 @@ final class KeychainIsolationTests: XCTestCase {
         }
     }
 
+    func testTheCaptureKeyIsDeletedOnlyByItsOwnID() throws {
+        try requireKeychain()
+        let store = ShareUploadKeychainStore(account: account)
+        addTeardownBlock { store.delete() }
+        let old = ShareUploadCredential(keyID: "old", rawKey: "raw", ownerID: "server-a")
+        let replacement = ShareUploadCredential(keyID: "new", rawKey: "raw2", ownerID: "server-a")
+        try store.save(old)
+        try store.save(replacement)
+
+        store.delete(ifKeyID: "old")
+        XCTAssertEqual(store.load(), .found(replacement), "A late rejection of the old key leaves the new one")
+
+        store.delete(ifKeyID: "new")
+        XCTAssertEqual(store.load(), .missing)
+    }
+
     func testTheCaptureKeyLivesInTheSharedGroup() throws {
         try requireKeychain()
         let store = ShareUploadKeychainStore(account: account)

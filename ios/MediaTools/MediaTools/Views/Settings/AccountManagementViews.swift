@@ -161,17 +161,20 @@ struct PasswordManagementSheet: View {
         }
     }
 
-    private func sendCode() async {
-        guard !isBusy else { return }
+    @discardableResult
+    private func sendCode() async -> Bool {
+        guard !isBusy else { return false }
         isBusy = true
         errorMessage = nil
         defer { isBusy = false }
         do {
             try await service.beginEmailVerification(email: email)
             codeSent = true
+            return true
         } catch {
             errorMessage = AuthCopy.message(for: error, fallback: "Could not send a code. Please try again.")
         }
+        return false
     }
 
     private func confirmEmail() async {
@@ -287,17 +290,20 @@ struct ChangeEmailSheet: View {
         }
     }
 
-    private func sendCode() async {
-        guard !isBusy else { return }
+    @discardableResult
+    private func sendCode() async -> Bool {
+        guard !isBusy else { return false }
         isBusy = true
         errorMessage = nil
         defer { isBusy = false }
         do {
             try await service.beginEmailChange(newEmail: trimmedEmail, currentPassword: currentPassword)
             isAwaitingCode = true
+            return true
         } catch {
             errorMessage = AuthCopy.message(for: error, fallback: "Could not send a code. Please try again.")
         }
+        return false
     }
 
     private func finish() async {

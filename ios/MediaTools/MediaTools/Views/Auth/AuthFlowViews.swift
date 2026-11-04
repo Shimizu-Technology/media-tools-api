@@ -111,14 +111,22 @@ struct EmailCodeField: View {
 struct ResendCodeButton: View {
     let isBusy: Bool
     let idPrefix: String
-    let onResend: () async -> Void
-    @State private var secondsLeft = 60
+    /// True only when a code was actually sent.
+    let onResend: () async -> Bool
+    @State private var secondsLeft = Self.cooldownSeconds
+
+    static let cooldownSeconds = 60
+
+    /// A failed send put no code in the inbox, so it must not lock out a retry.
+    static func secondsLeft(afterSend sent: Bool, current: Int) -> Int {
+        sent ? cooldownSeconds : current
+    }
 
     var body: some View {
         Button {
             Task {
-                await onResend()
-                secondsLeft = 60
+                let sent = await onResend()
+                secondsLeft = Self.secondsLeft(afterSend: sent, current: secondsLeft)
             }
         } label: {
             Text(secondsLeft > 0 ? "Send a new code in \(secondsLeft)s" : "Send a new code")
@@ -301,8 +309,9 @@ struct EmailPasswordFlowView: View {
         }
     }
 
-    private func sendCode() async {
-        guard !isBusy else { return }
+    @discardableResult
+    private func sendCode() async -> Bool {
+        guard !isBusy else { return false }
         isBusy = true
         errorMessage = nil
         defer { isBusy = false }
@@ -314,12 +323,14 @@ struct EmailPasswordFlowView: View {
                 try await service.beginPasswordReset(email: trimmedEmail)
             }
             isAwaitingCode = true
+            return true
         } catch {
             errorMessage = AuthCopy.message(
                 for: error,
                 fallback: "Could not send a code. Please try again."
             )
         }
+        return false
     }
 
     private func submit() async {

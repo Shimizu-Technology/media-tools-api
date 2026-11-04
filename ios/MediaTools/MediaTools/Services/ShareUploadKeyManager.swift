@@ -80,6 +80,8 @@ final class ShareUploadKeyManager {
     /// install a key for a session that no longer exists.
     private var generation = 0
     private var mintInProgress = false
+    /// The latest owner that asked for a key while a mint was running.
+    private var queuedOwnerID: String?
 
     init(
         credentials: any ShareUploadCredentialStoring = ShareUploadKeychainStore(),
@@ -104,10 +106,23 @@ final class ShareUploadKeyManager {
     /// Called at sign-in, and on each launch for a session that predates this
     /// feature. A missing key just means another try on the next foreground.
     func ensureKey(ownerID: String) async {
-        guard !mintInProgress else { return }
+        // Another owner's request arriving mid-mint is remembered, not dropped, so
+        // the account that just signed in does not wait for the next foreground.
+        guard !mintInProgress else {
+            queuedOwnerID = ownerID
+            return
+        }
         mintInProgress = true
-        defer { mintInProgress = false }
+        var next: String? = ownerID
+        while let current = next {
+            queuedOwnerID = nil
+            await mintOrReuseKey(ownerID: current)
+            next = queuedOwnerID
+        }
+        mintInProgress = false
+    }
 
+    private func mintOrReuseKey(ownerID: String) async {
         await flushPendingRevocations(ownerID: ownerID)
         switch credentials.load() {
         case .found(let credential) where credential.ownerID == ownerID:
@@ -226,7 +241,10 @@ final class ShareUploadKeyManager {
 
     private func rememberInstallKeys(in keys: [ListedAPIKey], keeping keptID: String?, ownerID: String) {
         let name = keyName
-        for key in keys where key.active && key.name == name && key.id != keptID {
+        // The name is only this install's by convention, since the server accepts
+        // any name. A key made by hand is never a share key, so it needs the scope.
+        for key in keys where key.active && key.name == name && key.id != keptID
+            && (key.scopes ?? []).contains("capture:upload") {
             addPendingRevocation(PendingRevocation(keyID: key.id, ownerID: ownerID))
         }
     }

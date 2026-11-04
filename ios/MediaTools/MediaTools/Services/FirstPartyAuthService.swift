@@ -399,7 +399,9 @@ final class FirstPartyAuthService {
     private var authorizationController: ASAuthorizationController?
     private var delegate: PasskeyAuthorizationDelegate?
     private var activePasskeyCeremony: ActivePasskeyCeremony?
-    /// Proof requests whose last attempt ended with no answer from the server.
+    /// Proof requests whose last attempt ended with no answer from the server,
+    /// keyed by endpoint and address: one address's lost response proves nothing
+    /// about another's.
     private var unconfirmedProofPaths: Set<String> = []
 #if DEBUG
     private(set) var authorizationRequestStartCountForTesting = 0
@@ -595,18 +597,19 @@ final class FirstPartyAuthService {
     /// A proof response can be lost after the server committed it, and repeating
     /// the code then gets `invalid_code`. The new password is what tells them apart.
     private func finishSignedOutProof(_ path: String, email: String, code: String, password: String) async throws {
+        let proofKey = Self.proofKey(path, email: email)
         do {
             let _: EmailProofResult = try await api.postPublic(
                 path,
                 body: EmailProofRequest(email: email, code: code, password: password)
             )
-            unconfirmedProofPaths.remove(path)
+            unconfirmedProofPaths.remove(proofKey)
         } catch {
             if Self.isConnectionFailure(error) {
-                unconfirmedProofPaths.insert(path)
+                unconfirmedProofPaths.insert(proofKey)
                 throw error
             }
-            guard Self.isInvalidCode(error), unconfirmedProofPaths.remove(path) != nil else { throw error }
+            guard Self.isInvalidCode(error), unconfirmedProofPaths.remove(proofKey) != nil else { throw error }
             do {
                 try await signInWithPassword(email: email, password: password)
                 return
@@ -655,24 +658,46 @@ final class FirstPartyAuthService {
     func finishEmailChange(newEmail: String, code: String, currentPassword: String) async throws {
         let email = Self.normalized(newEmail)
         let path = "/auth/email/change/verify"
+        let proofKey = Self.proofKey(path, email: email)
         do {
             let _: EmailProofResult = try await api.post(
                 path,
                 body: EmailCodeRequest(email: email, code: code),
                 expectedOwnerID: activeRecoveryOwnerID()
             )
-            unconfirmedProofPaths.remove(path)
+            unconfirmedProofPaths.remove(proofKey)
         } catch {
             if Self.isConnectionFailure(error) {
-                unconfirmedProofPaths.insert(path)
+                unconfirmedProofPaths.insert(proofKey)
                 throw error
             }
             // A lost success already revoked this session, so the retry comes back
             // as a rejected credential rather than a used code.
             guard Self.isInvalidCode(error) || Self.isAuthenticationFailure(error),
-                  unconfirmedProofPaths.remove(path) != nil else { throw error }
+                  unconfirmedProofPaths.remove(proofKey) != nil else { throw error }
+            if Self.isInvalidCode(error) {
+                // Signing in first would revoke a session that is still good if the
+                // change never committed. A committed change has already revoked it,
+                // so the session itself says which happened.
+                var sessionRevoked = false
+                do {
+                    let _: AccountProfile = try await api.get("/auth/me", expectedOwnerID: nil)
+                } catch let probeError {
+                    guard Self.isAuthenticationFailure(probeError) else {
+                        // Unknown either way: keep the lost-response note for the next try.
+                        unconfirmedProofPaths.insert(proofKey)
+                        throw probeError
+                    }
+                    sessionRevoked = true
+                }
+                if !sessionRevoked { throw error }
+            }
         }
         try await signInAfterProof(email: email, password: currentPassword)
+    }
+
+    private static func proofKey(_ path: String, email: String) -> String {
+        "\(path)|\(email)"
     }
 
     private static func normalized(_ email: String) -> String {

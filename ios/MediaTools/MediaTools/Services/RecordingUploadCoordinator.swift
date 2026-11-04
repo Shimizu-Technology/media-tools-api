@@ -431,6 +431,18 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         }
     }
 
+    /// A share upload goes straight to storage with its own presigned URL and
+    /// never carries the bearer token, so another account becoming active cannot
+    /// misuse it. Cancelling it would only force a new presign and a full re-upload
+    /// when its owner returns. A late completion is recorded without a credential,
+    /// and account deletion still cancels it by owner.
+    nonisolated static func transfersToCancelOnOwnerChange(
+        paused: Set<UUID>,
+        shareUploadRecordingIDs: Set<UUID>
+    ) -> Set<UUID> {
+        paused.subtracting(shareUploadRecordingIDs)
+    }
+
     /// Keeps upload/finalization credentials aligned with the signed-in account.
     /// Work owned by another account is paused instead of ever being finalized
     /// with the new account's bearer token.
@@ -459,7 +471,12 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
             retryTasks[recordingID] = nil
             retryAttempts[recordingID] = nil
         }
-        await transport.cancel(recordingIDs: pausedRecordingIDs)
+        await transport.cancel(recordingIDs: Self.transfersToCancelOnOwnerChange(
+            paused: pausedRecordingIDs,
+            shareUploadRecordingIDs: Set(pausedRecordingIDs.filter {
+                recorder.recording(withID: $0)?.shareUploadSessionIdentifier != nil
+            })
+        ))
         hasReconciledTransfers = false
 
         for watch in watches where watch.ownerID != ownerID {
@@ -935,7 +952,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                     self.pauseForAuthentication(recordingID: recordingID, finalizing: true)
                 } else if Self.isRetryable(error) {
                     self.statusMessage = "Upload is safe. Finishing will retry automatically."
-                    self.scheduleRetry(recordingID: recordingID, finalizing: true)
+                    self.scheduleRetry(recordingID: recordingID, finalizing: true, after: error)
                 } else {
                     self.recorder.markUploadFailed(recordingID, message: error.localizedDescription)
                     self.statusMessage = error.localizedDescription
@@ -1053,7 +1070,10 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                         // The persisted watch must remain live while the app does.
                         // A short outage should delay status delivery, not silently
                         // disable it until the next scene activation.
-                        try? await Task.sleep(for: Self.watchRetryDelay(after: failures))
+                        try? await Task.sleep(for: Self.watchRetryDelay(
+                            after: failures,
+                            serverWait: Self.serverRequestedWait(error)
+                        ))
                     case .pauseForAuthentication:
                         let pausedWatch = self.recordAuthenticationPause(for: watch)
                         if Self.authenticationPauseHasExpired(pausedWatch) {
@@ -1141,7 +1161,7 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
                 recordingID,
                 message: "Waiting for a connection. Media Tools will retry automatically."
             )
-            scheduleRetry(recordingID: recordingID)
+            scheduleRetry(recordingID: recordingID, after: error)
         } else {
             recorder.markUploadFailed(recordingID, message: error.localizedDescription)
             statusMessage = error.localizedDescription
@@ -1164,11 +1184,13 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         statusMessage = message
     }
 
-    private func scheduleRetry(recordingID: UUID, finalizing: Bool = false) {
+    /// `error` is what made this retry necessary. A 429 says how long the server
+    /// wants to be left alone, and retrying before then only earns another 429.
+    private func scheduleRetry(recordingID: UUID, finalizing: Bool = false, after error: Error? = nil) {
         guard retryTasks[recordingID] == nil else { return }
         let attempt = (retryAttempts[recordingID] ?? 0) + 1
         retryAttempts[recordingID] = attempt
-        let delay = min(pow(2, Double(attempt - 1)) * 2, 60)
+        let delay = Self.retryDelay(attempt: attempt, serverWait: error.flatMap(Self.serverRequestedWait))
         retryTasks[recordingID] = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard let self, !Task.isCancelled else { return }
@@ -1199,8 +1221,24 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         return false
     }
 
-    static func watchRetryDelay(after failureCount: Int) -> Duration {
-        .seconds(min(max(failureCount, 1) * 5, 60))
+    static func watchRetryDelay(after failureCount: Int, serverWait: TimeInterval? = nil) -> Duration {
+        .seconds(max(Double(min(max(failureCount, 1) * 5, 60)), cappedServerWait(serverWait)))
+    }
+
+    /// Never sooner than the backoff, and never sooner than the server asked.
+    static func retryDelay(attempt: Int, serverWait: TimeInterval? = nil) -> TimeInterval {
+        max(min(pow(2, Double(max(attempt, 1) - 1)) * 2, 60), cappedServerWait(serverWait))
+    }
+
+    static func serverRequestedWait(_ error: Error) -> TimeInterval? {
+        if case APIError.rateLimited(let retryAfter, _) = error { return retryAfter }
+        return nil
+    }
+
+    /// A bad header must not park a recording for hours.
+    private static func cappedServerWait(_ wait: TimeInterval?) -> TimeInterval {
+        guard let wait, wait.isFinite, wait > 0 else { return 0 }
+        return min(wait, 15 * 60)
     }
 
     static func watchFailureDisposition(for error: Error) -> TranscriptionWatchFailureDisposition {
