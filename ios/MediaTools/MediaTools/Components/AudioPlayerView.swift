@@ -50,6 +50,7 @@ struct AudioPlayerView: View {
             }
             .font(.number)
             .lineLimit(1)
+            .minimumScaleFactor(0.5)
 
             if hasStarted {
                 secondaryControls

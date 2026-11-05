@@ -203,7 +203,7 @@ final class MediaToolsUITests: XCTestCase {
         app.launch()
 
         openSettings(in: app)
-        app.buttons["settings.help"].tap()
+        openHelp(in: app)
         XCTAssertTrue(app.navigationBars["Help"].waitForExistence(timeout: 5))
 
         app.buttons["tab.collections"].tap()
@@ -257,7 +257,7 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Service status"].exists)
         goBack(in: app)
 
-        app.buttons["settings.help"].tap()
+        openHelp(in: app)
         for link in ["Privacy", "Terms of use", "Support and safety", "Account deletion help"] {
             XCTAssertTrue(
                 app.links[link].waitForExistence(timeout: 5) || app.buttons[link].exists,
@@ -1106,7 +1106,10 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Account"].exists, "Dismissing must not sign out")
     }
 
-    func testQuickCaptureLiveActivityCanStopFromTheDynamicIsland() {
+    func testQuickCaptureLiveActivityCanStopFromTheDynamicIsland() throws {
+        // A phone with a home button has no Dynamic Island to expand.
+        let screen = XCUIScreen.main.screenshot().image.size
+        try XCTSkipIf(screen.height / screen.width < 2, "No Dynamic Island on this device")
         let app = XCUIApplication()
         app.launchArguments = [
             "-ui-test-quick-capture",
@@ -1318,6 +1321,16 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(tab.waitForExistence(timeout: 10), file: file, line: line)
         tab.tap()
         XCTAssertTrue(app.buttons["settings.help"].waitForExistence(timeout: 5), file: file, line: line)
+    }
+
+    /// On a small phone Help starts under the raised Record button, so scroll it clear.
+    private func openHelp(in app: XCUIApplication) {
+        let help = app.buttons["settings.help"]
+        let bar = app.buttons["tab.settings"]
+        for _ in 0..<3 where help.frame.maxY > bar.frame.minY - 40 {
+            app.swipeUp()
+        }
+        help.tap()
     }
 
     private func openCollections(

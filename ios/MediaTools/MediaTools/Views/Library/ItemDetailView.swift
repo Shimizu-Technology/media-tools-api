@@ -340,7 +340,11 @@ struct ItemDetailView: View {
             }
         } label: {
             Label("Ask about this", systemImage: "sparkles")
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
+        // It floats over the page, so past this size it would hide what it asks about.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .buttonStyle(PrimaryButtonStyle(shape: .pill))
         .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
         .accessibilityLabel("Ask about this")
@@ -648,6 +652,8 @@ struct ItemDetailView: View {
         } label: {
             Text(title)
                 .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .foregroundStyle(isSelected ? Theme.text : Theme.textSecondary)
                 .frame(maxWidth: .infinity, minHeight: 38)
                 .background {
