@@ -7,7 +7,7 @@ implements it. Run `make ios-release-preflight` before an archive and again with
 ## Current release status
 
 - Version: `1.0`
-- TestFlight build: `14`, the first build with no Clerk, for owner testing before App Review
+- TestFlight build: `15`, the Sunrise and Studio redesign, for owner testing before submission.
 - Bundle ID: `com.ShimizuTechnology.MediaTools`
 - Apple team: `4T358A5S74`
 - Minimum OS: iOS 18.5
