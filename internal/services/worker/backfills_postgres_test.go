@@ -362,3 +362,54 @@ func TestEnrichmentBackfillRetitlesOnlyOldExactPlaceholders(t *testing.T) {
 		}
 	}
 }
+
+// Models sometimes omit citations on long recordings, and a later run succeeds.
+func TestRejectedSummaryIsGeneratedOnceMore(t *testing.T) {
+	for name, tc := range map[string]struct {
+		goodFromCall int
+		wantStatus   string
+		wantCalls    int
+	}{
+		"third call succeeds": {3, "completed", 3},
+		"fifth call succeeds": {5, "failed", 4},
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := backfillDB(t)
+			id := uuid.NewString()
+			if _, err := db.Exec(`INSERT INTO audio_transcriptions(id,filename,original_name,status,transcript_text,summary_status) VALUES($1,'a.m4a','Meeting.m4a','completed','Please call tomorrow morning.','pending')`, id); err != nil {
+				t.Fatal(err)
+			}
+			defer db.Exec(`DELETE FROM audio_transcriptions WHERE id=$1`, id)
+			pool := NewPool(1, 1, db, nil, summary.New("synthetic-test-key", "test/model"))
+			defer pool.cancel()
+			calls := 0
+			original := http.DefaultTransport
+			http.DefaultTransport = emailTestTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				body, _ := io.ReadAll(r.Body)
+				ids := regexp.MustCompile(`id=\\"([0-9a-f-]{36})\\"`).FindSubmatch(body)
+				citations := ""
+				if calls >= tc.goodFromCall && len(ids) == 2 {
+					citations = fmt.Sprintf("%q", string(ids[1]))
+				}
+				content := fmt.Sprintf(`{"summary":{"text":"Call tomorrow.","citations":[%s]},"key_points":[],"action_items":[],"decisions":[],"topics":[]}`, citations)
+				encoded, _ := json.Marshal(content)
+				response := fmt.Sprintf(`{"model":"test/model","choices":[{"message":{"content":%s},"finish_reason":"stop"}]}`, encoded)
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(response))}, nil
+			})
+			defer func() { http.DefaultTransport = original }()
+			payload, _ := json.Marshal(map[string]any{"audio_id": id, "length": "medium"})
+			err := pool.processAudioSummary(Job{ID: id, Payload: payload})
+			if (err != nil) != (tc.wantStatus == "failed") {
+				t.Fatalf("err=%v", err)
+			}
+			var status string
+			if err := db.Get(&status, `SELECT summary_status FROM audio_transcriptions WHERE id=$1`, id); err != nil {
+				t.Fatal(err)
+			}
+			if status != tc.wantStatus || calls != tc.wantCalls {
+				t.Fatalf("status=%s calls=%d, want %s and %d", status, calls, tc.wantStatus, tc.wantCalls)
+			}
+		})
+	}
+}

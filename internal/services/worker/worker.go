@@ -1255,16 +1255,22 @@ func (p *Pool) processAudioSummary(job Job) error {
 		_ = p.db.UpdateAudioSummary(ctx, at)
 		return fmt.Errorf("load audio evidence: %w", err)
 	}
-	result, err := p.summarizer.SummarizeAudioEvidence(
-		ctx,
-		evidenceservice.ToSummarySegments(segments, at.OriginalName),
-		summary.Options{
-			Model:       payload.Model,
-			Length:      payload.Length,
-			ContentType: string(at.ContentType),
-			Style:       "bullet",
-		},
-	)
+	options := summary.Options{
+		Model:       payload.Model,
+		Length:      payload.Length,
+		ContentType: string(at.ContentType),
+		Style:       "bullet",
+	}
+	evidence := evidenceservice.ToSummarySegments(segments, at.OriginalName)
+	result, err := p.summarizer.SummarizeAudioEvidence(ctx, evidence, options)
+	// On long recordings a model sometimes leaves out the citations a summary must
+	// carry: 4 of 106 did in the first backfill, and all 4 passed when run again.
+	// One more run spares the person a failed summary, and stays cheap and bounded.
+	var rejected *summary.StructuredOutputError
+	if errors.As(err, &rejected) {
+		log.Printf("↻ Audio summary %s was rejected; generating it once more: %v", at.ID, err)
+		result, err = p.summarizer.SummarizeAudioEvidence(ctx, evidence, options)
+	}
 	if err != nil {
 		if isRetryableError(err) {
 			return err
