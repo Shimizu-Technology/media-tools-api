@@ -60,7 +60,7 @@ waveform[i] = round(100 * sqrt(p[i] / max(M, 327.68)))
 The denominator has a −40 dBFS floor on the signed-16-bit scale. Square-root
 compression lifts quiet speech while preserving relative measured amplitudes;
 silence stays zero. Library rows max-pool overlapping time ranges from those 200
-stored values into 32. Responses then stretch each recording's own nonzero range to
+stored values into 32. Every response then stretches each recording's own nonzero range to
 12 through 100 (`waveform.Stretch`), because speech at this scale sits near the top:
 on production's 117 recordings, 25% of 32-bar rows were nearly flat before this and
 none after. The order of values never changes, and stored peaks are untouched. The 100 ms source-frame resolution is explicit; timestamps

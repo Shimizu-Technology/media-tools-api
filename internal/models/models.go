@@ -4,6 +4,8 @@ package models
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/waveform"
 )
 
 // TranscriptStatus represents the processing state of a transcript.
@@ -276,8 +278,23 @@ var ValidContentTypes = map[AudioContentType]bool{
 	ContentLecture:   true,
 }
 
+// WaveformPeaks holds stored peaks and shapes them whenever a recording is written
+// as JSON. Every response that returns a recording, such as rename or retry, then
+// sends the same values as the detail route, and clients replacing their copy with
+// that response keep the same shape. A value that cannot decode, or is the wrong
+// length, sends null, which clients treat as having no waveform.
+type WaveformPeaks json.RawMessage
+
+func (w WaveformPeaks) MarshalJSON() ([]byte, error) {
+	var peaks []int
+	if json.Unmarshal(w, &peaks) != nil || len(peaks) != waveform.DetailPeaks {
+		return []byte("null"), nil
+	}
+	return json.Marshal(waveform.Stretch(peaks))
+}
+
 type AudioTranscription struct {
-	Waveform            json.RawMessage  `json:"waveform,omitempty" db:"waveform"`
+	Waveform            WaveformPeaks    `json:"waveform,omitempty" db:"waveform"`
 	WaveformStatus      string           `json:"-" db:"waveform_status"`
 	ID                  string           `json:"id" db:"id"`
 	Filename            string           `json:"filename" db:"filename"`

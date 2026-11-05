@@ -128,13 +128,14 @@ func Stretch(peaks []int) []int {
 		high = max(high, v)
 	}
 	result := make([]int, len(peaks))
-	if high == low {
-		// Silence or a perfectly level signal has no range to spread.
-		copy(result, peaks)
-		return result
-	}
 	for i, v := range peaks {
-		if v > 0 {
+		switch {
+		case v <= 0:
+			// Silence stays silent, and result[i] is already zero.
+		case high == low:
+			// A perfectly level signal has no range to spread.
+			result[i] = min(v, 100)
+		default:
 			result[i] = displayFloor + (v-low)*(100-displayFloor)/(high-low)
 		}
 	}
