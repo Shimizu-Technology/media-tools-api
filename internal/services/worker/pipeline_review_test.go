@@ -26,6 +26,7 @@ func TestIsGeneratedRecordingName(t *testing.T) {
 		"3f1c9f1e-7a56-4a1b-9c1e-1234567890ab.caf",
 		"2026-11-04 08.30.12.m4a",
 		"Voice Memo",
+		"recording-2026-02-03-14-22-01.webm",
 	} {
 		if !isGeneratedRecordingName(name) {
 			t.Errorf("%q should count as generated", name)
@@ -34,6 +35,31 @@ func TestIsGeneratedRecordingName(t *testing.T) {
 	for _, name := range []string{"Payroll call v2.1", "Meeting with Dana", "Recording of the board call", "Tumon Bay Rd 5.m4a"} {
 		if isGeneratedRecordingName(name) {
 			t.Errorf("%q is a name a person chose", name)
+		}
+	}
+}
+
+// Names copied in shape from production, where migration 055 flagged every old row.
+func TestLegacyPlaceholderNameOnlyMatchesGeneratedFormats(t *testing.T) {
+	for _, name := range []string{
+		"recording-2026-02-03-14-22-01.webm",
+		"Recording — Aug 26, 2026 at 10:35 AM.m4a",
+		"New Recording 42.m4a",
+		"3F1C9F1E-7A56-4A1B-9C1E-1234567890AB.caf",
+	} {
+		if !isLegacyPlaceholderName(name) || !isGeneratedRecordingName(name) {
+			t.Errorf("%q should qualify", name)
+		}
+	}
+	for _, name := range []string{
+		"New Recording Mr. Mon Mendiola for UOG and Coffee.m4a",
+		"Recording of the 2024 budget meeting.m4a",
+		"Recording 2026 goals.m4a",
+		"Audio 3.m4a",
+		"Hafa Baby updates",
+	} {
+		if isLegacyPlaceholderName(name) {
+			t.Errorf("%q may have been typed by a person", name)
 		}
 	}
 }

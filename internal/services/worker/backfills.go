@@ -18,11 +18,14 @@ func (p *Pool) RunBackfill(ctx context.Context, kind, userID string, dryRun bool
 	}
 	for _, candidate := range candidates {
 		title := ""
-		if kind == "enrichment" && candidate.Manual && isGeneratedRecordingName(candidate.Name) {
+		// The flag on old rows came from migration 055, so only the exact placeholder
+		// formats qualify. It stays set for anything a person may have typed.
+		candidate.LegacyFlag = candidate.LegacyFlag && candidate.Manual && isLegacyPlaceholderName(candidate.Name)
+		if kind == "enrichment" && candidate.Manual && !candidate.LegacyFlag && isGeneratedRecordingName(candidate.Name) {
 			result.ProtectedTitles++
 		}
 		summary := candidate.NeedsSummary && candidate.AutomaticSummaries
-		if kind == "enrichment" && !candidate.Manual && !candidate.FinishedTitle && isGeneratedRecordingName(candidate.Name) {
+		if kind == "enrichment" && (!candidate.Manual || candidate.LegacyFlag) && !candidate.FinishedTitle && isGeneratedRecordingName(candidate.Name) {
 			title = candidate.Name
 		}
 		if kind == "enrichment" && !summary && title == "" {

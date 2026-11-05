@@ -13,6 +13,10 @@ import (
 // user_id says otherwise. Classic API-key reads still use the exact key.
 const audioAccountOwnership = `(a.user_id=$1::uuid OR (a.user_id IS NULL AND a.api_key_id IN (SELECT id FROM api_keys WHERE user_id=$1::uuid)))`
 
+// Migration 055 ran on 2026-11-04 UTC and flagged every existing recording. Rows
+// newer than this only carry the flag because a person renamed them.
+const legacyTitleFlagCutoff = "2026-11-05T00:00:00Z"
+
 type BackfillCandidate struct {
 	ID                 string `db:"id"`
 	Name               string `db:"original_name"`
@@ -20,6 +24,9 @@ type BackfillCandidate struct {
 	NeedsSummary       bool   `db:"needs_summary"`
 	FinishedTitle      bool   `db:"finished_title"`
 	AutomaticSummaries bool   `db:"automatic_summaries"`
+	// LegacyFlag means migration 055 may have set title_manually_set, rather than a
+	// person. Set this only after checking the name's format.
+	LegacyFlag bool `db:"legacy_flag"`
 }
 
 type BackfillResult struct {
@@ -40,14 +47,15 @@ func (db *DB) ListBackfillCandidates(ctx context.Context, kind, userID string) (
 	var args []any
 	switch kind {
 	case "waveforms":
-		query = `SELECT a.id,a.original_name,a.title_manually_set,false AS needs_summary,true AS automatic_summaries,false AS finished_title
- FROM audio_transcriptions a WHERE a.status='completed' AND a.audio_s3_status='stored' AND a.audio_s3_key<>''
+		query = `SELECT a.id,a.original_name,a.title_manually_set,false AS needs_summary,true AS automatic_summaries,false AS finished_title,false AS legacy_flag
+ FROM audio_transcriptions a WHERE a.status='completed' AND a.audio_s3_status='uploaded' AND a.audio_s3_key<>''
  AND a.waveform IS NULL AND a.waveform_status='' AND NOT EXISTS
  (SELECT 1 FROM background_jobs j WHERE j.resource_id=a.id AND j.job_type='audio_waveform') ORDER BY a.created_at,a.id`
 	case "enrichment":
 		query = `SELECT a.id,a.original_name,a.title_manually_set,
  (btrim(a.summary_text)='' AND a.summary_status NOT IN ('pending','processing')) AS needs_summary,
  COALESCE(p.automatic_summaries,true) AS automatic_summaries,
+ (a.created_at < '` + legacyTitleFlagCutoff + `'::timestamptz) AS legacy_flag,
  EXISTS(SELECT 1 FROM background_jobs j WHERE j.resource_id=a.id AND j.job_type='audio_summary' AND j.status='completed' AND j.payload->>'backfill'='true' AND j.payload->>'title_only'='true') AS finished_title
  FROM audio_transcriptions a LEFT JOIN processing_preferences p ON p.user_id=$1::uuid
  WHERE ` + audioAccountOwnership + ` AND a.status='completed' AND btrim(a.transcript_text)<>''
@@ -73,7 +81,7 @@ func (db *DB) QueueBackfillCandidate(ctx context.Context, kind, userID string, c
 	}
 	defer tx.Rollback()
 	var ok bool
-	predicate := `status='completed' AND audio_s3_status='stored' AND audio_s3_key<>'' AND waveform IS NULL AND waveform_status=''`
+	predicate := `status='completed' AND audio_s3_status='uploaded' AND audio_s3_key<>'' AND waveform IS NULL AND waveform_status=''`
 	args := []any{c.ID}
 	if kind == "enrichment" {
 		predicate = `status='completed' AND btrim(transcript_text)<>'' AND ` + `(a.user_id=$2::uuid OR (a.user_id IS NULL AND a.api_key_id IN (SELECT id FROM api_keys WHERE user_id=$2::uuid)))`
@@ -98,11 +106,17 @@ func (db *DB) QueueBackfillCandidate(ctx context.Context, kind, userID string, c
 		needsSummary = needsSummary && missing && enabled
 		if titleSource != "" {
 			var valid bool
-			if err := tx.GetContext(ctx, &valid, `SELECT original_name=$2::text AND NOT title_manually_set FROM audio_transcriptions WHERE id=$1`, c.ID, titleSource); err != nil {
+			if err := tx.GetContext(ctx, &valid, `SELECT original_name=$2::text AND (NOT title_manually_set OR ($3::bool AND created_at < '`+legacyTitleFlagCutoff+`'::timestamptz)) FROM audio_transcriptions WHERE id=$1`, c.ID, titleSource, c.LegacyFlag); err != nil {
 				return false, err
 			}
 			if !valid {
 				titleSource = ""
+			} else if c.LegacyFlag {
+				// The worker's rename requires an unflagged row, and still compares
+				// the name, so a rename during the provider call keeps winning.
+				if _, err := tx.ExecContext(ctx, `UPDATE audio_transcriptions SET title_manually_set=false WHERE id=$1 AND original_name=$2::text`, c.ID, titleSource); err != nil {
+					return false, err
+				}
 			}
 		}
 		if !needsSummary && titleSource == "" {

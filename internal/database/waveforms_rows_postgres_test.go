@@ -34,7 +34,7 @@ func TestWaveformCompletionFailureAndPriority(t *testing.T) {
 		}
 	})
 	maintenance := insertTestAudio(t, db, "processing")
-	if _, err := db.Exec(`UPDATE audio_transcriptions SET audio_s3_key='test/source',audio_s3_status='stored' WHERE id=$1`, maintenance); err != nil {
+	if _, err := db.Exec(`UPDATE audio_transcriptions SET audio_s3_key='test/source',audio_s3_status='uploaded' WHERE id=$1`, maintenance); err != nil {
 		t.Fatal(err)
 	}
 	at, err := db.GetAudioTranscription(ctx, maintenance)

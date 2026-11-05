@@ -23,7 +23,7 @@ func (p *Pool) processAudioWaveform(job Job) error {
 	if status != "completed" || exists {
 		return nil
 	}
-	if key == "" || stored != "stored" {
+	if key == "" || stored != "uploaded" {
 		return fmt.Errorf("waveform source is not stored")
 	}
 	if !p.audioStorage.IsConfigured() {

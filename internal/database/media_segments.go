@@ -253,7 +253,7 @@ func (db *DB) CompleteAudioTranscriptionWithSegments(ctx context.Context, audio 
 	// Waveforms are local processing, independent of AI preferences or billing.
 	if _, err := tx.ExecContext(ctx, `
  WITH ready AS (UPDATE audio_transcriptions SET waveform_status='pending'
- WHERE id=$1 AND status='completed' AND audio_s3_status='stored' AND audio_s3_key<>'' AND waveform IS NULL
+ WHERE id=$1 AND status='completed' AND audio_s3_status='uploaded' AND audio_s3_key<>'' AND waveform IS NULL
  RETURNING id)
  INSERT INTO background_jobs(job_type,resource_id,priority,max_attempts)
  SELECT 'audio_waveform',id,5,3 FROM ready

@@ -2605,7 +2605,18 @@ func (p *Pool) finishAudioFailure(ctx context.Context, audioID, message string) 
 
 // generatedRecordingName matches names no person chose: the app's dated
 // recording titles, device file ids, and bare defaults like "New Recording 5".
-var generatedRecordingName = regexp.MustCompile(`(?i)^(recording( .*\d{4}.*)?|new recording( \d+)?|voice memo( \d+)?|audio( \d+)?|untitled|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{4}-\d{2}-\d{2}[ t_\d:.-]*)$`)
+var generatedRecordingName = regexp.MustCompile(`(?i)^(recording( .*\d{4}.*)?|recording-\d{4}-\d{2}-\d{2}([-_ t]\d+)*|new recording( \d+)?|voice memo( \d+)?|audio( \d+)?|untitled|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{4}-\d{2}-\d{2}[ t_\d:.-]*)$`)
+
+// Migration 055 flagged every recording that existed then as named by hand, to be
+// safe, so that flag cannot identify an old placeholder. For the owner's backfill
+// only, these exact formats written by the apps and Voice Memos still qualify. It
+// is narrower than generatedRecordingName on purpose: "Recording of the 2024 budget
+// meeting" stays protected.
+var legacyPlaceholderName = regexp.MustCompile(`(?i)^(recording|recording-\d{4}-\d{2}-\d{2}([-_ t]\d+)*|recording — .+ at \d{1,2}:\d{2}\s?(am|pm)|new recording( \d+)?|voice memo( \d+)?|untitled|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$`)
+
+func isLegacyPlaceholderName(name string) bool {
+	return legacyPlaceholderName.MatchString(strings.TrimSpace(strings.TrimSuffix(name, filepath.Ext(name))))
+}
 
 func isGeneratedRecordingName(name string) bool {
 	base := strings.TrimSpace(strings.TrimSuffix(name, filepath.Ext(name)))

@@ -155,7 +155,7 @@ func TestBackfillDryRunDispatchAndLegacyCitedSummary(t *testing.T) {
 func TestWaveformFailureRetriesStayIndependent(t *testing.T) {
 	db := backfillDB(t)
 	id := uuid.NewString()
-	if _, err := db.Exec(`INSERT INTO audio_transcriptions(id,filename,original_name,status,transcript_text,summary_status,waveform_status,audio_s3_key,audio_s3_status) VALUES($1,'bad','bad','completed','Existing speech','completed','pending','bad-source','stored')`, id); err != nil {
+	if _, err := db.Exec(`INSERT INTO audio_transcriptions(id,filename,original_name,status,transcript_text,summary_status,waveform_status,audio_s3_key,audio_s3_status) VALUES($1,'bad','bad','completed','Existing speech','completed','pending','bad-source','uploaded')`, id); err != nil {
 		t.Fatal(err)
 	}
 	defer db.Exec(`DELETE FROM audio_transcriptions WHERE id=$1`, id)
@@ -199,7 +199,7 @@ func TestWaveformFailureRetriesStayIndependent(t *testing.T) {
 func TestStoredAudioWaveformDurableJob(t *testing.T) {
 	db := backfillDB(t)
 	id := uuid.NewString()
-	if _, err := db.Exec(`INSERT INTO audio_transcriptions(id,filename,original_name,status,transcript_text,summary_status,waveform_status,audio_s3_key,audio_s3_status) VALUES($1,'source.qta','Chosen title','completed','Existing speech','completed','pending','test/source','stored')`, id); err != nil {
+	if _, err := db.Exec(`INSERT INTO audio_transcriptions(id,filename,original_name,status,transcript_text,summary_status,waveform_status,audio_s3_key,audio_s3_status) VALUES($1,'source.qta','Chosen title','completed','Existing speech','completed','pending','test/source','uploaded')`, id); err != nil {
 		t.Fatal(err)
 	}
 	defer db.Exec(`DELETE FROM audio_transcriptions WHERE id=$1`, id)
@@ -281,5 +281,63 @@ func TestBackfillProtectsChosenTitlesAndSummaryOptOut(t *testing.T) {
 	}
 	if !strings.Contains(payload, `"title_only": true`) {
 		t.Fatal("summary opt-out did not produce a title-only job")
+	}
+}
+
+// Migration 055 flagged every recording that existed on 2026-11-04, so the flag on
+// an old row does not mean a person chose its name.
+func TestEnrichmentBackfillRetitlesOnlyOldExactPlaceholders(t *testing.T) {
+	db := backfillDB(t)
+	user := uuid.NewString()
+	if _, err := db.Exec(`INSERT INTO users(id,email,password_hash) VALUES($1,$2,'unused')`, user, user+"@example.invalid"); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Exec(`DELETE FROM users WHERE id=$1`, user)
+	if _, err := db.Exec(`INSERT INTO processing_preferences(user_id,automatic_summaries) VALUES($1,false)`, user); err != nil {
+		t.Fatal(err)
+	}
+	old, recent := "2026-02-03T10:00:00Z", "2026-11-06T10:00:00Z"
+	ids := map[string]string{}
+	for _, tc := range []struct{ name, created string }{
+		{"recording-2026-02-03-14-22-01.webm", old},
+		{"Recording of the 2024 budget meeting.m4a", old},
+		{"New Recording Mr. Mon Mendiola for UOG.m4a", old},
+		{"New Recording 7.m4a", recent},
+	} {
+		id := uuid.NewString()
+		ids[tc.name] = id
+		if _, err := db.Exec(`INSERT INTO audio_transcriptions(id,filename,original_name,status,user_id,transcript_text,title_manually_set,created_at) VALUES($1,'source.m4a',$2,'completed',$3,'Some source speech',true,$4)`, id, tc.name, user, tc.created); err != nil {
+			t.Fatal(err)
+		}
+		defer db.Exec(`DELETE FROM audio_transcriptions WHERE id=$1`, id)
+		defer db.Exec(`DELETE FROM background_jobs WHERE resource_id=$1`, id)
+	}
+	pool := NewPool(3, 10, db, nil, nil)
+	defer pool.cancel()
+	dry, err := pool.RunBackfill(context.Background(), "enrichment", user, true)
+	if err != nil || dry.Titles != 1 || dry.Enqueued != 0 {
+		t.Fatalf("dry run %+v %v", dry, err)
+	}
+	var flagged bool
+	if err := db.Get(&flagged, `SELECT title_manually_set FROM audio_transcriptions WHERE id=$1`, ids["recording-2026-02-03-14-22-01.webm"]); err != nil || !flagged {
+		t.Fatalf("dry run changed the flag: %v %v", flagged, err)
+	}
+	result, err := pool.RunBackfill(context.Background(), "enrichment", user, false)
+	if err != nil || result.Enqueued != 1 {
+		t.Fatalf("real run %+v %v", result, err)
+	}
+	for name, id := range ids {
+		var manual bool
+		var jobs int
+		if err := db.Get(&manual, `SELECT title_manually_set FROM audio_transcriptions WHERE id=$1`, id); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Get(&jobs, `SELECT count(*) FROM background_jobs WHERE resource_id=$1`, id); err != nil {
+			t.Fatal(err)
+		}
+		placeholder := name == "recording-2026-02-03-14-22-01.webm"
+		if manual == placeholder || (jobs == 1) != placeholder {
+			t.Errorf("%q: manual=%v jobs=%d", name, manual, jobs)
+		}
 	}
 }
