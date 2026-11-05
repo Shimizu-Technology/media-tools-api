@@ -223,25 +223,20 @@ private struct WaveformScrubber: View {
     let player: AudioPlayerService
     let peaks: [Int]
     @State private var scrubFraction: CGFloat?
-    @State private var isHorizontalDrag: Bool?
-    @GestureState private var isDragging = false
 
     var body: some View {
         GeometryReader { geometry in
             WaveformBars(peaks: peaks, progress: scrubFraction ?? player.progress)
                 .contentShape(Rectangle())
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 8)
-                        .updating($isDragging) { _, state, _ in state = true }
-                        .onChanged { value in
-                            if isHorizontalDrag == nil {
-                                isHorizontalDrag = abs(value.translation.width) > abs(value.translation.height)
-                            }
-                            guard isHorizontalDrag == true else { return }
-                            let fraction = WaveformDisplay.fraction(atX: value.location.x, width: geometry.size.width)
+                .gesture(
+                    HorizontalPanGesture(
+                        onChanged: { x in
+                            let fraction = WaveformDisplay.fraction(atX: x, width: geometry.size.width)
                             scrubFraction = fraction
                             player.seek(to: fraction)
-                        }
+                        },
+                        onEnded: { scrubFraction = nil }
+                    )
                 )
                 .simultaneousGesture(
                     SpatialTapGesture().onEnded { value in
@@ -251,14 +246,44 @@ private struct WaveformScrubber: View {
         }
         .frame(height: 64)
         .allowsHitTesting(player.duration > 0)
-        // Runs however the drag ends, including when the page takes it over.
-        .onChange(of: isDragging) { _, dragging in
-            guard !dragging else { return }
-            isHorizontalDrag = nil
-            scrubFraction = nil
-        }
         .playbackAdjustable(player: player)
         .accessibilityIdentifier("player.waveform")
+    }
+}
+
+/// A pan that declines to begin when it starts vertically, which hands the touch to the
+/// scroll view around it. A SwiftUI drag cannot decline, so it would hold the page still.
+private struct HorizontalPanGesture: UIGestureRecognizerRepresentable {
+    let onChanged: (CGFloat) -> Void
+    let onEnded: () -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        switch recognizer.state {
+        case .began, .changed:
+            onChanged(context.converter.localLocation.x)
+        case .ended, .cancelled, .failed:
+            onEnded()
+        default:
+            break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+            let velocity = pan.velocity(in: pan.view)
+            return abs(velocity.x) > abs(velocity.y)
+        }
     }
 }
 
