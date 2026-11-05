@@ -9,6 +9,7 @@ final class MediaToolsService {
     private(set) var audioItems: [AudioTranscription] = []
     private(set) var pdfItems: [PDFExtraction] = []
     private(set) var collections: [Collection] = []
+    @ObservationIgnored private var libraryRows: [LibraryReference: LibraryListItem] = [:]
     private(set) var isLoading = false
 
     private let api = APIClient.shared
@@ -274,17 +275,33 @@ final class MediaToolsService {
         status: String? = nil,
         search: String? = nil,
         sortDirection: String = "desc",
-        archivedOnly: Bool = false
+        archivedOnly: Bool = false,
+        favoriteOnly: Bool = false
     ) async throws -> LibraryListResponse {
-        try await api.get(Self.libraryItemsPath(
+        let response: LibraryListResponse = try await api.get(Self.libraryItemsPath(
             page: page,
             perPage: perPage,
             itemType: itemType,
             status: status,
             search: search,
             sortDirection: sortDirection,
-            archivedOnly: archivedOnly
+            archivedOnly: archivedOnly,
+            favoriteOnly: favoriteOnly
         ))
+        rememberLibraryRows(response.data)
+        return response
+    }
+
+    /// The list is the only place an item's collections and short waveform come from,
+    /// so the detail screen reads them here instead of waiting on another request.
+    func rememberLibraryRows(_ items: [LibraryListItem]) {
+        for item in items {
+            libraryRows[item.reference] = item
+        }
+    }
+
+    func libraryRow(for reference: LibraryReference) -> LibraryListItem? {
+        libraryRows[reference]
     }
 
     static func libraryItemsPath(
@@ -294,7 +311,8 @@ final class MediaToolsService {
         status: String?,
         search: String?,
         sortDirection: String,
-        archivedOnly: Bool = false
+        archivedOnly: Bool = false,
+        favoriteOnly: Bool = false
     ) -> String {
         var components = URLComponents()
         components.path = "/library/items"
@@ -314,6 +332,9 @@ final class MediaToolsService {
         }
         if archivedOnly {
             queryItems.append(URLQueryItem(name: "archive", value: "only"))
+        }
+        if favoriteOnly {
+            queryItems.append(URLQueryItem(name: "favorite", value: "true"))
         }
         components.queryItems = queryItems
         return components.string ?? "/library/items"

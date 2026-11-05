@@ -36,6 +36,8 @@ final class RecordingCoordinator {
     private(set) var activeOwnerID: String?
     private(set) var duration: TimeInterval = 0
     private(set) var audioLevel: CGFloat = 0
+    /// The microphone's recent levels, for the bars on the recording screen.
+    private(set) var levelMeter = LiveLevelMeter()
     private(set) var statusMessage: String?
     private(set) var storageIsLow = false
     var errorMessage: String?
@@ -111,6 +113,9 @@ final class RecordingCoordinator {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-ui-test-reset-recordings") {
             try? self.store?.deleteAllRecordings()
+        }
+        if ProcessInfo.processInfo.arguments.contains("-ui-test-needs-you") {
+            seedNeedsYouFixtures()
         }
         #endif
         restorePendingRecordings()
@@ -739,6 +744,26 @@ final class RecordingCoordinator {
         }
     }
 
+    /// Checks an unfinalized recording again on a deliberate tap. A file that now
+    /// passes, or one only the server rejected, becomes uploadable; one that still
+    /// fails stays exactly as it was, because nothing here may lose a recording.
+    func recheckInvalidRecording(_ recordingID: UUID) -> Result<LocalRecording, RecordingIntegrityError> {
+        guard let current = recording(withID: recordingID), let store else {
+            return .failure(.emptyFile)
+        }
+        guard current.state == .invalid else { return .success(current) }
+        switch RecordingIntegrityValidator.validate(url: store.fileURL(for: current)) {
+        case .success:
+            updateRecording(recordingID) { recording in
+                recording.state = .ready
+                recording.lastError = nil
+            }
+            return .success(recording(withID: recordingID) ?? current)
+        case .failure(let error):
+            return .failure(error)
+        }
+    }
+
     /// A 202 response proves that the server created a job, not that the audio
     /// can be decoded. Keep the only known-good local source until that job
     /// reaches a successful terminal state.
@@ -985,6 +1010,7 @@ final class RecordingCoordinator {
             lastCheckpointedDuration = 0
             lastStorageCheckDuration = 0
             audioLevel = 0
+            levelMeter = LiveLevelMeter()
             statusMessage = "Recording securely on this iPhone"
             startMeterTimer()
         } catch {
@@ -1031,6 +1057,7 @@ final class RecordingCoordinator {
             lastCheckpointedDuration = 0
             lastStorageCheckDuration = 0
             audioLevel = 0.35
+            levelMeter = LiveLevelMeter()
             statusMessage = "Recording securely on this iPhone"
             startMeterTimer()
         } catch {
@@ -1056,7 +1083,9 @@ final class RecordingCoordinator {
         guard captureState == .recording else { return }
         if simulatesCapture {
             duration += 0.1
-            audioLevel = 0.2 + (0.25 * CGFloat((sin(duration * 4) + 1) / 2))
+            // A believable speech envelope for simulator runs, which have no microphone.
+            audioLevel = 0.02 + (0.3 * CGFloat(abs(sin(duration * 4.3) * cos(duration * 1.7))))
+            levelMeter.append(linearLevel: audioLevel)
             checkpointActiveRecordingIfNeeded()
             enforceStorageSafetyIfNeeded()
             return
@@ -1066,6 +1095,7 @@ final class RecordingCoordinator {
         duration = audioRecorder.currentTime
         let power = max(-60, min(0, audioRecorder.averagePower(forChannel: 0)))
         audioLevel = CGFloat(pow(10, power / 20))
+        levelMeter.append(linearLevel: audioLevel)
         checkpointActiveRecordingIfNeeded()
         enforceStorageSafetyIfNeeded()
     }
@@ -1268,6 +1298,33 @@ final class RecordingCoordinator {
 
     private static let invalidRecordingMessage =
         "This older recording ended before its audio index was saved. Export and keep the original file for a best-effort recovery attempt on a computer."
+
+    #if DEBUG
+    /// The two shapes on a real iPhone: a recording recovered after an interruption,
+    /// never flagged for automatic transcription, and an old `.m4a` with no index.
+    private func seedNeedsYouFixtures() {
+        guard let store else { return }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let day: (Int) -> Date = { calendar.date(from: DateComponents(year: 2026, month: 8, day: $0, hour: 19, minute: 30)) ?? Date() }
+        let interrupted = LocalRecording(
+            id: UUID(), filename: "needs-you-interrupted.caf", originalFilename: nil, createdAt: day(26),
+            duration: 5_352, contentType: "general", state: .interrupted,
+            lastError: "Recovered and verified after Media Tools stopped unexpectedly."
+        )
+        let invalid = LocalRecording(
+            id: UUID(), filename: "needs-you-invalid.m4a", originalFilename: nil, createdAt: day(21),
+            duration: 1_705, contentType: "general", state: .invalid,
+            lastError: Self.invalidRecordingMessage
+        )
+        // An ISO media header and audio bytes with no `moov` box, as a crash leaves it.
+        let unfinalized = Data([0, 0, 0, 16]) + Data("ftypM4A ".utf8) + Data(count: 4)
+            + Data([0, 0, 0, 16]) + Data("mdat".utf8) + Data(count: 8)
+        try? Self.simulatedCAFData.write(to: store.fileURL(for: interrupted))
+        try? unfinalized.write(to: store.fileURL(for: invalid))
+        try? store.saveRecordings([interrupted, invalid])
+    }
+    #endif
 
     private static let simulatedCAFData: Data = {
         func chunk(_ type: String, payload: Data) -> Data {

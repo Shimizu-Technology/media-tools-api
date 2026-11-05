@@ -2,18 +2,368 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+/// One screen of everyday choices and short rows into the rest. Every account and
+/// security action lives one level down, in the page its row names.
 struct SettingsView: View {
-    @Environment(RecordingUploadCoordinator.self) private var uploadCoordinator
     @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @Environment(DeviceSessionController.self) private var deviceSession
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
 
-    @State private var health: HealthResponse?
-    @State private var healthError: String?
-    @State private var isCheckingHealth = false
-    @State private var showAdvanced = false
     @State private var notificationState: NotificationPermissionState = .notRequested
+    @State private var usage: AccountUsage?
+    @State private var usageError: String?
+    @State private var usageRetry = 0
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                ScreenHeader("Settings")
+                recordingCard
+                usageCard
+                destinationsCard
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 32)
+            .frame(maxWidth: 640)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Theme.background)
+        .navigationTitle("Settings")
+        .toolbar(.hidden, for: .navigationBar)
+        .statusBarBackdrop()
+        .task { await refreshNotificationState() }
+        .task(id: "usage|\(deviceSession.activeUserID ?? "")|\(usageRetry)") {
+            await loadUsage()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await refreshNotificationState() }
+        }
+    }
+
+    // MARK: - Daily settings
+
+    private var recordingCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SettingsCard {
+                Toggle(isOn: Binding(
+                    get: { aiProcessingConsent.isAutoTranscribeEnabled },
+                    set: { aiProcessingConsent.setAutoTranscribeEnabled($0) }
+                )) {
+                    SettingsRowLabel("Auto-transcribe", systemImage: "waveform")
+                }
+                .tint(Theme.accentFill)
+                .settingsCardRow()
+                .accessibilityIdentifier("settings.auto-transcribe")
+                SettingsCardDivider()
+
+                if aiProcessingConsent.isAutoTranscribeEnabled,
+                   aiProcessingConsent.hasConsent,
+                   !aiProcessingConsent.hasAutomaticConsent {
+                    Button("Review automatic transcription") {
+                        Task { _ = await aiProcessingConsent.requestAutomaticPermission() }
+                    }
+                    .foregroundStyle(Theme.accentText)
+                    .settingsCardRow()
+                    SettingsCardDivider()
+                }
+
+                Button(action: handleNotificationAction) {
+                    HStack {
+                        SettingsRowLabel("Completion alerts", systemImage: "bell")
+                        Spacer(minLength: 8)
+                        Text(notificationTrailing)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    .settingsCardRow()
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(RowButtonStyle())
+                .accessibilityLabel("Notification settings")
+                .accessibilityValue(notificationTrailing)
+                SettingsCardDivider()
+
+                NavigationLink(value: AppRoute.settings(.quickRecord)) {
+                    SettingsLinkRow("Quick Record", systemImage: "mic", trailing: "Action Button")
+                }
+                .buttonStyle(RowButtonStyle())
+                .accessibilityIdentifier("settings.quick-record")
+            }
+            Text(autoTranscribeDetail)
+                .font(.footnote)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    @ViewBuilder
+    private var usageCard: some View {
+        if deviceSession.activeUserID != nil, usage != nil || usageError != nil {
+            SettingsCard {
+                if let usage {
+                    UsageSummaryView(usage: usage)
+                        .padding(14)
+                } else if let usageError {
+                    VStack(alignment: .leading, spacing: 0) {
+                        InlineError(usageError)
+                        Button("Try again") { usageRetry += 1 }
+                            .buttonStyle(QuietButtonStyle())
+                    }
+                    .padding(14)
+                }
+            }
+        }
+    }
+
+    private var destinationsCard: some View {
+        SettingsCard {
+            if deviceSession.activeUserID != nil {
+                destination("Account", systemImage: "person", page: .account, identifier: "settings.account")
+                SettingsCardDivider()
+                destination("Devices and passkeys", systemImage: "key", page: .security, identifier: "settings.security")
+                SettingsCardDivider()
+            }
+            destination("AI processing", systemImage: "sparkles", page: .aiProcessing, identifier: "settings.ai")
+            SettingsCardDivider()
+            destination("Developer and agent keys", systemImage: "link", page: .developer, identifier: "settings.developer")
+            SettingsCardDivider()
+            destination("Help", systemImage: "questionmark.circle", page: .help, identifier: "settings.help")
+        }
+    }
+
+    private func destination(
+        _ title: String,
+        systemImage: String,
+        page: SettingsPage,
+        identifier: String
+    ) -> some View {
+        NavigationLink(value: AppRoute.settings(page)) {
+            SettingsLinkRow(title, systemImage: systemImage)
+        }
+        .buttonStyle(RowButtonStyle())
+        .accessibilityIdentifier(identifier)
+    }
+
+    private var autoTranscribeDetail: String {
+        guard aiProcessingConsent.isAutoTranscribeEnabled else {
+            return "New recordings stay on this iPhone until you tap Transcribe."
+        }
+        return aiProcessingConsent.hasAutomaticConsent
+            ? "New recordings, shared audio, and shared video links with no subtitles are sent for transcription when they are saved."
+            : "New recordings stay on this iPhone until you allow AI processing."
+    }
+
+    private var notificationTrailing: String {
+        switch notificationState {
+        case .enabled: "On"
+        case .denied: "Settings"
+        case .notRequested: "Enable"
+        }
+    }
+
+    private func handleNotificationAction() {
+        switch notificationState {
+        case .enabled, .denied:
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            openURL(url)
+        case .notRequested:
+            Task {
+                _ = await NotificationService.requestPermission()
+                await refreshNotificationState()
+            }
+        }
+    }
+
+    private func refreshNotificationState() async {
+        notificationState = await NotificationService.permissionState()
+    }
+
+    private func loadUsage() async {
+        guard deviceSession.activeUserID != nil else {
+            usage = nil
+            usageError = nil
+            return
+        }
+        do {
+            let loaded = try await FirstPartyAuthService.shared.usage()
+            guard !Task.isCancelled else { return }
+            usage = loaded
+            usageError = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            if usage == nil { usageError = "Could not load this month's usage." }
+        }
+    }
+}
+
+/// The pages one level under Settings. They are routes, so a second tap on the tab
+/// comes back from any of them.
+enum SettingsPage: Hashable {
+    case quickRecord
+    case account
+    case security
+    case devices
+    case aiProcessing
+    case developer
+    case help
+}
+
+struct SettingsPageView: View {
+    let page: SettingsPage
+    @Environment(DeviceSessionController.self) private var deviceSession
+
+    var body: some View {
+        switch page {
+        case .quickRecord: QuickRecordSetupView()
+        case .account: AccountSettingsView()
+        case .security: SecuritySettingsView()
+        case .devices: DevicesListView(currentSessionID: deviceSession.currentSessionID)
+        case .aiProcessing: AIProcessingSettingsView()
+        case .developer: DeveloperSettingsView()
+        case .help: HelpSettingsView()
+        }
+    }
+}
+
+/// A rounded group of rows, as in the mockup.
+private struct SettingsCard<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            content
+        }
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct SettingsCardDivider: View {
+    var body: some View {
+        Hairline()
+            .padding(.leading, 56)
+    }
+}
+
+private extension View {
+    func settingsCardRow() -> some View {
+        self
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .padding(.horizontal, 14)
+    }
+}
+
+/// A row that goes somewhere, with what it currently says and a chevron.
+private struct SettingsLinkRow: View {
+    let title: String
+    let systemImage: String
+    var trailing: String?
+
+    init(_ title: String, systemImage: String, trailing: String? = nil) {
+        self.title = title
+        self.systemImage = systemImage
+        self.trailing = trailing
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            SettingsRowLabel(title, systemImage: systemImage)
+            Spacer(minLength: 8)
+            if let trailing {
+                Text(trailing)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .accessibilityHidden(true)
+        }
+        .settingsCardRow()
+        .contentShape(Rectangle())
+    }
+}
+
+/// A settings row: a small tinted tile, then its name.
+struct SettingsRowLabel: View {
+    let title: String
+    let systemImage: String
+    var detail: String?
+    @ScaledMetric(relativeTo: .body) private var tileSize: CGFloat = 30
+
+    init(_ title: String, systemImage: String, detail: String? = nil) {
+        self.title = title
+        self.systemImage = systemImage
+        self.detail = detail
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.accentText)
+                .frame(width: tileSize, height: tileSize)
+                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(Theme.text)
+                if let detail {
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
+private func settingLabel(_ title: String, detail: String? = nil) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+        Text(title)
+            .font(.body)
+            .foregroundStyle(Theme.text)
+        if let detail {
+            Text(detail)
+                .font(.footnote)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// A settings page's own list, with the shared width and title treatment.
+private extension View {
+    func settingsPage(_ title: String) -> some View {
+        self
+            .themedListBackground()
+            .readableContentWidth(640, minimumMargin: 16)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - Account
+
+private struct AccountSettingsView: View {
+    @Environment(RecordingUploadCoordinator.self) private var uploadCoordinator
+    @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
+    @Environment(DeviceSessionController.self) private var deviceSession
+
+    @State private var deviceAccount: AccountProfile?
+    @State private var isLoadingDeviceAccount = false
+    @State private var deviceAccountError: String?
+    @State private var deviceAccountRetry = 0
+    @State private var passwordStatus: PasswordStatus?
+    @State private var passwordAuthAvailable = false
+    @State private var showChangeEmail = false
+    @State private var accountMessage: String?
     @State private var isSigningOut = false
     @State private var showSignOutConfirmation = false
     @State private var signOutError: String?
@@ -22,47 +372,14 @@ struct SettingsView: View {
     @State private var isDeletingAccount = false
     @State private var deleteAccountError: String?
     @State private var deleteAccountPassword = ""
-    @State private var deviceAccount: AccountProfile?
-    @State private var isLoadingDeviceAccount = false
-    @State private var deviceAccountError: String?
-    @State private var deviceAccountRetry = 0
-    @State private var passkeyStatus: PasskeyStatus?
-    @State private var passwordStatus: PasswordStatus?
-    @State private var passwordAuthAvailable = false
-    @State private var showPasswordSetup = false
-    @State private var showChangeEmail = false
-    @State private var usage: AccountUsage?
-    @State private var usageError: String?
-    @State private var usageRetry = 0
-    @State private var recoveryStatus: RecoveryCodeStatus?
-    @State private var isLoadingRecoveryStatus = false
-    @State private var isEnrollingPasskey = false
-    @State private var isGeneratingRecoveryCodes = false
-    @State private var isConfirmingRecoveryCodes = false
-    @State private var recoveryCodesSaveError: String?
-    @State private var securityMessage: String?
-    @State private var securityError: String?
-    @State private var securityStatusError: String?
-    @State private var showReplaceRecoveryCodesConfirmation = false
-    @State private var showRecoveryCodesSheet = false
-    @State private var oneTimeRecoveryCodes: [String] = []
 
     var body: some View {
         List {
-            recordingSection
-            usageSection
             accountSection
-            accountSecuritySection
-            aiProcessingSection
-            helpSection
-            developerSection
             signOutSection
             deleteAccountSection
         }
-        .ledgerListBackground()
-        .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.inline)
-        .task { await refreshNotificationState() }
+        .settingsPage("Account")
         .task(id: "\(deviceSession.activeUserID ?? "")|\(deviceAccountRetry)") {
             deviceAccount = nil
             deviceAccountError = nil
@@ -78,58 +395,20 @@ struct SettingsView: View {
             }
             isLoadingDeviceAccount = false
         }
-        .task(id: "security|\(deviceSession.activeUserID ?? "")") {
-            await loadRecoveryStatus()
-        }
-        .task(id: "usage|\(deviceSession.activeUserID ?? "")|\(usageRetry)") {
-            await loadUsage()
-        }
-        .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
-            Task { await refreshNotificationState() }
+        .task(id: "password|\(deviceSession.activeUserID ?? "")") {
+            await loadPasswordStatus()
         }
         .sheet(isPresented: $showDeleteAccount) {
             deleteAccountConfirmationSheet
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showRecoveryCodesSheet) {
-            RecoveryCodesOneTimeSheet(
-                codes: oneTimeRecoveryCodes,
-                isSaving: isConfirmingRecoveryCodes,
-                errorMessage: recoveryCodesSaveError
-            ) {
-                Task { await confirmRecoveryCodesSaved() }
-            }
-            .interactiveDismissDisabled()
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $showPasswordSetup) {
-            PasswordManagementSheet(
-                configured: passwordStatus?.configured == true,
-                email: deviceAccount?.email ?? "",
-                emailVerified: deviceAccount?.emailVerified == true,
-                onSaved: { status in
-                    let wasConfigured = passwordStatus?.configured == true
-                    passwordStatus = status
-                    showPasswordSetup = false
-                    securityMessage = wasConfigured
-                        ? "Password changed. Other devices were signed out."
-                        : "Password created. You can now sign in with your email."
-                },
-                onEmailVerified: { deviceAccountRetry += 1 },
-                onCancel: { showPasswordSetup = false }
-            )
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-        }
         .sheet(isPresented: $showChangeEmail) {
             ChangeEmailSheet(
                 currentEmail: deviceAccount?.email ?? "",
                 onFinished: {
                     showChangeEmail = false
-                    securityMessage = "Email changed. Other devices were signed out."
+                    accountMessage = "Email changed. Other devices were signed out."
                     deviceAccountRetry += 1
                 },
                 onCancel: { showChangeEmail = false }
@@ -137,163 +416,52 @@ struct SettingsView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
-        .confirmationDialog(
-            recoveryStatus?.remaining ?? 0 > 0 ? "Replace recovery codes?" : "Create recovery codes?",
-            isPresented: $showReplaceRecoveryCodesConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button(recoveryStatus?.remaining ?? 0 > 0 ? "Replace codes" : "Create codes") {
-                Task { await generateRecoveryCodes() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            if recoveryStatus?.remaining ?? 0 > 0 {
-                Text("Old recovery codes keep working until you save and confirm the new codes on the next screen.")
-            } else {
-                Text("Save these codes somewhere private. They are shown once and each code can be used one time.")
-            }
-        }
     }
-
-    // MARK: - Daily settings
-
-    private var recordingSection: some View {
-        Section {
-            Toggle(isOn: Binding(
-                get: { aiProcessingConsent.isAutoTranscribeEnabled },
-                set: { aiProcessingConsent.setAutoTranscribeEnabled($0) }
-            )) {
-                settingLabel("Automatically transcribe", detail: autoTranscribeDetail)
-            }
-            .tint(Theme.accentFill)
-            .frame(minHeight: 44)
-            .listRowBackground(Theme.surface)
-            .accessibilityIdentifier("settings.auto-transcribe")
-
-            if aiProcessingConsent.isAutoTranscribeEnabled,
-               aiProcessingConsent.hasConsent,
-               !aiProcessingConsent.hasAutomaticConsent {
-                Button("Review automatic transcription") {
-                    Task { _ = await aiProcessingConsent.requestAutomaticPermission() }
-                }
-                .foregroundStyle(Theme.accent)
-                .frame(minHeight: 44)
-                .listRowBackground(Theme.surface)
-            }
-
-            Button(action: handleNotificationAction) {
-                HStack {
-                    settingLabel("Completion alerts", detail: notificationDetail)
-                    Spacer(minLength: 8)
-                    Text(notificationTrailing)
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.textSecondary)
-                }
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .listRowBackground(Theme.surface)
-            .accessibilityLabel("Notification settings")
-            .accessibilityValue(notificationTrailing)
-
-            NavigationLink {
-                QuickRecordSetupView()
-            } label: {
-                settingLabel("Quick Record", detail: "Start recording with the Action Button.")
-                    .frame(minHeight: 44)
-            }
-            .listRowBackground(Theme.surface)
-            .accessibilityIdentifier("settings.quick-record")
-        } header: {
-            sectionHeader("Recording")
-        }
-    }
-
-    private func settingLabel(_ title: String, detail: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.body)
-                .foregroundStyle(Theme.text)
-            if let detail {
-                Text(detail)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.ledgerSectionLabel)
-            .foregroundStyle(Theme.textSecondary)
-            .textCase(nil)
-    }
-
-    @ViewBuilder
-    private var usageSection: some View {
-        if deviceSession.activeUserID != nil, usage != nil || usageError != nil {
-            Section {
-                if let usage {
-                    UsageSummaryView(usage: usage)
-                        .listRowBackground(Theme.surface)
-                } else if let usageError {
-                    VStack(alignment: .leading, spacing: 0) {
-                        InlineError(usageError)
-                        Button("Try again") { usageRetry += 1 }
-                            .buttonStyle(QuietButtonStyle())
-                    }
-                    .listRowBackground(Theme.surface)
-                }
-            } header: {
-                sectionHeader("This month")
-            }
-        }
-    }
-
-    // MARK: - Account
 
     @ViewBuilder
     private var accountSection: some View {
-        if deviceSession.activeUserID != nil {
-            Section {
-                if let deviceAccount {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(deviceAccount.name.isEmpty ? "Media Tools account" : deviceAccount.name)
-                            .font(.body)
-                            .foregroundStyle(Theme.text)
-                        Text(deviceAccount.email)
-                            .font(.footnote)
-                            .foregroundStyle(Theme.textSecondary)
-                            .accessibilityIdentifier("settings.account-email")
-                    }
-                    .frame(minHeight: 44, alignment: .leading)
-                    .listRowBackground(Theme.surface)
-                    if passwordAuthAvailable {
-                        Button("Change email") {
-                            securityMessage = nil
-                            showChangeEmail = true
-                        }
-                        .foregroundStyle(Theme.accent)
-                        .frame(minHeight: 44)
-                        .listRowBackground(Theme.surface)
-                        .accessibilityIdentifier("settings.change-email")
-                    }
-                } else if isLoadingDeviceAccount {
-                    ProgressView("Loading account…")
-                        .frame(minHeight: 44)
-                        .listRowBackground(Theme.surface)
-                } else if let deviceAccountError {
-                    VStack(alignment: .leading, spacing: 0) {
-                        InlineError(deviceAccountError)
-                        Button("Try again") { deviceAccountRetry += 1 }
-                            .buttonStyle(QuietButtonStyle())
-                    }
-                    .listRowBackground(Theme.surface)
+        Section {
+            if let deviceAccount {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(deviceAccount.name.isEmpty ? "Media Tools account" : deviceAccount.name)
+                        .font(.body)
+                        .foregroundStyle(Theme.text)
+                    Text(deviceAccount.email)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.textSecondary)
+                        .accessibilityIdentifier("settings.account-email")
                 }
-            } header: {
-                sectionHeader("Account")
+                .frame(minHeight: 44, alignment: .leading)
+                .listRowBackground(Theme.surface)
+                if passwordAuthAvailable {
+                    Button("Change email") {
+                        accountMessage = nil
+                        showChangeEmail = true
+                    }
+                    .foregroundStyle(Theme.accentText)
+                    .frame(minHeight: 44)
+                    .listRowBackground(Theme.surface)
+                    .accessibilityIdentifier("settings.change-email")
+                }
+            } else if isLoadingDeviceAccount {
+                ProgressView("Loading account…")
+                    .frame(minHeight: 44)
+                    .listRowBackground(Theme.surface)
+            } else if let deviceAccountError {
+                VStack(alignment: .leading, spacing: 0) {
+                    InlineError(deviceAccountError)
+                    Button("Try again") { deviceAccountRetry += 1 }
+                        .buttonStyle(QuietButtonStyle())
+                }
+                .listRowBackground(Theme.surface)
+            }
+
+            if let accountMessage {
+                Label(accountMessage, systemImage: "checkmark.circle")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .listRowBackground(Theme.surface)
             }
         }
     }
@@ -307,7 +475,7 @@ struct SettingsView: View {
                     if isSigningOut { ProgressView() }
                     Text(isSigningOut ? "Signing out…" : "Sign out")
                 }
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Theme.accentText)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
@@ -359,7 +527,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Permanently delete your account?")
-                            .font(.ledgerTitle2)
+                            .font(.displayTitle2)
                             .foregroundStyle(Theme.text)
                         Text("This cannot be undone. Export any device recordings you want to keep before continuing. Server data is purged immediately; secure provider cleanup continues in the background.")
                             .font(.subheadline)
@@ -375,7 +543,7 @@ struct SettingsView: View {
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
                             .font(.system(.body, design: .monospaced))
-                            .ledgerField()
+                            .themedField()
                     }
 
                     if DeletionPasswordPolicy.showsField(status: passwordStatus) {
@@ -407,7 +575,7 @@ struct SettingsView: View {
                 }
                 .padding(20)
             }
-            .background(Theme.bg)
+            .background(Theme.background)
             .navigationTitle("Delete account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -422,6 +590,160 @@ struct SettingsView: View {
     private var canSubmitDeletion: Bool {
         deletionConfirmation == "DELETE"
             && (!DeletionPasswordPolicy.isRequired(status: passwordStatus) || !deleteAccountPassword.isEmpty)
+    }
+
+    private func loadPasswordStatus() async {
+        do {
+            let health: HealthResponse = try await APIClient.shared.getPublic("/health")
+            guard !Task.isCancelled else { return }
+            passwordAuthAvailable = health.passwordAuthEnabled == true
+            passwordStatus = passwordAuthAvailable
+                ? try await FirstPartyAuthService.shared.passwordStatus()
+                : nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            // Password rollout can be disabled independently, and an unknown status
+            // still offers the deletion password field. See DeletionPasswordPolicy.
+            passwordAuthAvailable = false
+            passwordStatus = nil
+        }
+    }
+
+    private func signOut() async {
+        isSigningOut = true
+        signOutError = nil
+        defer { isSigningOut = false }
+
+        // Stop every local workspace and background-upload path first. Server
+        // cleanup can safely retry without letting the old account continue work
+        // in the meantime. Recordings stay here under their owner.
+        await uploadCoordinator.setActiveOwnerID(nil)
+        aiProcessingConsent.setActiveOwnerID(nil)
+        // The share extension stops here, whether or not the server can be reached.
+        ShareUploadKeyManager.shared.endCredential()
+
+        do {
+            try await deviceSession.revokeOrSuspend()
+            FirstPartyAuthService.shared.clearSessionScopedJournals()
+        } catch {
+            signOutError = "Couldn’t sign out. Please try again."
+        }
+    }
+
+    private func deleteAccount() async {
+        guard canSubmitDeletion,
+              let ownerID = deviceSession.activeUserID else { return }
+        isDeletingAccount = true
+        deleteAccountError = nil
+        defer { isDeletingAccount = false }
+
+        do {
+            let pending = try await AccountDeletionRecoveryService.shared.requestDeletion(
+                ownerID: ownerID,
+                currentPassword: DeletionPasswordPolicy.passwordToSend(
+                    status: passwordStatus,
+                    entered: deleteAccountPassword
+                )
+            )
+            try await AccountDeletionRecoveryService.shared.finishLocalDeletion(
+                pending,
+                uploadCoordinator: uploadCoordinator,
+                consent: aiProcessingConsent,
+                deviceSession: deviceSession,
+                shareKeys: .shared
+            )
+        } catch {
+            deleteAccountError = error.localizedDescription
+            return
+        }
+        deleteAccountPassword = ""
+        showDeleteAccount = false
+    }
+}
+
+// MARK: - Devices and passkeys
+
+private struct SecuritySettingsView: View {
+    @Environment(DeviceSessionController.self) private var deviceSession
+
+    @State private var deviceAccount: AccountProfile?
+    @State private var passkeyStatus: PasskeyStatus?
+    @State private var passwordStatus: PasswordStatus?
+    @State private var passwordAuthAvailable = false
+    @State private var showPasswordSetup = false
+    @State private var recoveryStatus: RecoveryCodeStatus?
+    @State private var isLoadingRecoveryStatus = false
+    @State private var isEnrollingPasskey = false
+    @State private var isGeneratingRecoveryCodes = false
+    @State private var isConfirmingRecoveryCodes = false
+    @State private var recoveryCodesSaveError: String?
+    @State private var securityMessage: String?
+    @State private var securityError: String?
+    @State private var securityStatusError: String?
+    @State private var showReplaceRecoveryCodesConfirmation = false
+    @State private var showRecoveryCodesSheet = false
+    @State private var oneTimeRecoveryCodes: [String] = []
+    @State private var accountRetry = 0
+
+    var body: some View {
+        List {
+            accountSecuritySection
+        }
+        .settingsPage("Devices and passkeys")
+        .task(id: "\(deviceSession.activeUserID ?? "")|\(accountRetry)") {
+            guard deviceSession.activeUserID != nil else { return }
+            deviceAccount = try? await FirstPartyAuthService.shared.accountProfile()
+        }
+        .task(id: "security|\(deviceSession.activeUserID ?? "")") {
+            await loadRecoveryStatus()
+        }
+        .sheet(isPresented: $showRecoveryCodesSheet) {
+            RecoveryCodesOneTimeSheet(
+                codes: oneTimeRecoveryCodes,
+                isSaving: isConfirmingRecoveryCodes,
+                errorMessage: recoveryCodesSaveError
+            ) {
+                Task { await confirmRecoveryCodesSaved() }
+            }
+            .interactiveDismissDisabled()
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showPasswordSetup) {
+            PasswordManagementSheet(
+                configured: passwordStatus?.configured == true,
+                email: deviceAccount?.email ?? "",
+                emailVerified: deviceAccount?.emailVerified == true,
+                onSaved: { status in
+                    let wasConfigured = passwordStatus?.configured == true
+                    passwordStatus = status
+                    showPasswordSetup = false
+                    securityMessage = wasConfigured
+                        ? "Password changed. Other devices were signed out."
+                        : "Password created. You can now sign in with your email."
+                },
+                onEmailVerified: { accountRetry += 1 },
+                onCancel: { showPasswordSetup = false }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .confirmationDialog(
+            recoveryStatus?.remaining ?? 0 > 0 ? "Replace recovery codes?" : "Create recovery codes?",
+            isPresented: $showReplaceRecoveryCodesConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(recoveryStatus?.remaining ?? 0 > 0 ? "Replace codes" : "Create codes") {
+                Task { await generateRecoveryCodes() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if recoveryStatus?.remaining ?? 0 > 0 {
+                Text("Old recovery codes keep working until you save and confirm the new codes on the next screen.")
+            } else {
+                Text("Save these codes somewhere private. They are shown once and each code can be used one time.")
+            }
+        }
     }
 
     // MARK: - Security
@@ -494,9 +816,7 @@ struct SettingsView: View {
                 .disabled(isGeneratingRecoveryCodes || isEnrollingPasskey)
                 .listRowBackground(Theme.surface)
 
-                NavigationLink {
-                    DevicesListView(currentSessionID: deviceSession.currentSessionID)
-                } label: {
+                NavigationLink(value: AppRoute.settings(.devices)) {
                     settingLabel("Devices", detail: "See where you are signed in, and sign out a device.")
                         .frame(minHeight: 44)
                 }
@@ -525,8 +845,6 @@ struct SettingsView: View {
                     InlineError(securityError)
                         .listRowBackground(Theme.surface)
                 }
-            } header: {
-                sectionHeader("Sign-in and security")
             }
         }
     }
@@ -554,203 +872,6 @@ struct SettingsView: View {
             return "No saved codes are available. Create a new set and save it now."
         }
         return "Each code works once. Replacing codes disables the old set."
-    }
-
-    // MARK: - AI processing
-
-    private var aiProcessingSection: some View {
-        Section {
-            settingLabel(
-                aiProcessingConsent.hasConsent
-                    ? "Allowed for this account on this iPhone"
-                    : "Not allowed",
-                detail: aiProcessingConsent.hasConsent
-                    ? nil
-                    : "Media Tools will ask before sending content to third-party AI services."
-            )
-            .frame(minHeight: 44, alignment: .leading)
-            .listRowBackground(Theme.surface)
-
-            Button {
-                if aiProcessingConsent.hasConsent {
-                    aiProcessingConsent.revoke()
-                } else {
-                    Task { _ = await aiProcessingConsent.requestPermission() }
-                }
-            } label: {
-                Text(aiProcessingConsent.hasConsent ? "Revoke permission" : "Review and allow")
-                    .foregroundStyle(aiProcessingConsent.hasConsent ? Theme.danger : Theme.accent)
-                    .frame(minHeight: 44)
-            }
-            .listRowBackground(Theme.surface)
-        } header: {
-            sectionHeader("AI processing")
-        } footer: {
-            Text("This controls future transcription, readable formatting, summary, and chat requests. Processing already started may finish.")
-                .foregroundStyle(Theme.textSecondary)
-        }
-    }
-
-    private var autoTranscribeDetail: String {
-        guard aiProcessingConsent.isAutoTranscribeEnabled else {
-            return "New recordings stay on this iPhone until you tap Transcribe."
-        }
-        return aiProcessingConsent.hasAutomaticConsent
-            ? "New recordings, shared audio, and shared video links with no subtitles are sent for transcription when they are saved."
-            : "New recordings stay on this iPhone until you allow AI processing."
-    }
-
-    // MARK: - Help
-
-    private var helpSection: some View {
-        Section {
-            settingsLink(title: "Privacy", destination: Configuration.privacyURL)
-            settingsLink(title: "Terms of use", destination: Configuration.termsURL)
-            settingsLink(title: "Support and safety", destination: Configuration.supportURL)
-            settingsLink(title: "Account deletion help", destination: Configuration.accountDeletionURL)
-        } header: {
-            sectionHeader("Help")
-        }
-    }
-
-    private var developerSection: some View {
-        Section {
-            DisclosureGroup("Service status", isExpanded: $showAdvanced) {
-                if isCheckingHealth {
-                    ProgressNote(text: "Checking service…")
-                        .listRowBackground(Theme.surface)
-                } else if let health {
-                    LabeledContent("Service", value: health.status == "ok" ? "Available" : "Degraded")
-                        .listRowBackground(Theme.surface)
-                    LabeledContent("Workers", value: "\(health.workers)")
-                        .listRowBackground(Theme.surface)
-                } else if let healthError {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(healthError)
-                            .font(.footnote)
-                            .foregroundStyle(Theme.textSecondary)
-                        Button("Try again") {
-                            Task { await checkHealth() }
-                        }
-                        .buttonStyle(QuietButtonStyle())
-                    }
-                    .listRowBackground(Theme.surface)
-                }
-                LabeledContent("API") {
-                    Text(Configuration.apiBaseURL)
-                        .font(.system(.footnote, design: .monospaced))
-                        .foregroundStyle(Theme.textSecondary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.trailing)
-                }
-                .listRowBackground(Theme.surface)
-            }
-            .foregroundStyle(Theme.text)
-            .frame(minHeight: 44)
-            .listRowBackground(Theme.surface)
-            .onChange(of: showAdvanced) { _, isExpanded in
-                guard isExpanded, health == nil else { return }
-                Task { await checkHealth() }
-            }
-
-            LabeledContent("Version", value: appVersion)
-                .foregroundStyle(Theme.text)
-                .frame(minHeight: 44)
-                .listRowBackground(Theme.surface)
-        } header: {
-            sectionHeader("Developer")
-        }
-    }
-
-    private var appVersion: String {
-        let info = Bundle.main.infoDictionary
-        let version = info?["CFBundleShortVersionString"] as? String ?? "1.0"
-        let build = info?["CFBundleVersion"] as? String ?? "1"
-        return "\(version) (\(build))"
-    }
-
-    private var notificationDetail: String {
-        switch notificationState {
-        case .enabled: "Alert me when a transcription finishes."
-        case .denied: "Turn alerts on in device settings."
-        case .notRequested: "Alert me when a transcription finishes."
-        }
-    }
-
-    private var notificationTrailing: String {
-        switch notificationState {
-        case .enabled: "On"
-        case .denied: "Settings"
-        case .notRequested: "Enable"
-        }
-    }
-
-    private func settingsLink(title: String, destination: URL) -> some View {
-        Link(destination: destination) {
-            HStack {
-                Text(title)
-                    .foregroundStyle(Theme.text)
-                Spacer(minLength: 8)
-                Image(systemName: "arrow.up.right")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.textSecondary)
-                    .accessibilityHidden(true)
-            }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .listRowBackground(Theme.surface)
-        .accessibilityAddTraits(.isLink)
-    }
-
-    private func handleNotificationAction() {
-        switch notificationState {
-        case .enabled:
-            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-            openURL(url)
-        case .denied:
-            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-            openURL(url)
-        case .notRequested:
-            Task {
-                _ = await NotificationService.requestPermission()
-                await refreshNotificationState()
-            }
-        }
-    }
-
-    private func refreshNotificationState() async {
-        notificationState = await NotificationService.permissionState()
-    }
-
-    private func checkHealth() async {
-        isCheckingHealth = true
-        healthError = nil
-        defer { isCheckingHealth = false }
-
-        do {
-            health = try await APIClient.shared.get("/ready")
-        } catch {
-            health = nil
-            healthError = "Service status is unavailable right now."
-        }
-    }
-
-    private func loadUsage() async {
-        guard deviceSession.activeUserID != nil else {
-            usage = nil
-            usageError = nil
-            return
-        }
-        do {
-            let loaded = try await FirstPartyAuthService.shared.usage()
-            guard !Task.isCancelled else { return }
-            usage = loaded
-            usageError = nil
-        } catch {
-            guard !Task.isCancelled else { return }
-            if usage == nil { usageError = "Could not load this month's usage." }
-        }
     }
 
     private func loadRecoveryStatus() async {
@@ -848,58 +969,167 @@ struct SettingsView: View {
                 : error.localizedDescription
         }
     }
+}
 
-    private func signOut() async {
-        isSigningOut = true
-        signOutError = nil
-        defer { isSigningOut = false }
+// MARK: - AI processing
 
-        // Stop every local workspace and background-upload path first. Server
-        // cleanup can safely retry without letting the old account continue work
-        // in the meantime. Recordings stay here under their owner.
-        await uploadCoordinator.setActiveOwnerID(nil)
-        aiProcessingConsent.setActiveOwnerID(nil)
-        // The share extension stops here, whether or not the server can be reached.
-        ShareUploadKeyManager.shared.endCredential()
+private struct AIProcessingSettingsView: View {
+    @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
 
-        do {
-            try await deviceSession.revokeOrSuspend()
-            FirstPartyAuthService.shared.clearSessionScopedJournals()
-        } catch {
-            signOutError = "Couldn’t sign out. Please try again."
-        }
-    }
-
-    private func deleteAccount() async {
-        guard canSubmitDeletion,
-              let ownerID = deviceSession.activeUserID else { return }
-        isDeletingAccount = true
-        deleteAccountError = nil
-        defer { isDeletingAccount = false }
-
-        do {
-            let pending = try await AccountDeletionRecoveryService.shared.requestDeletion(
-                ownerID: ownerID,
-                currentPassword: DeletionPasswordPolicy.passwordToSend(
-                    status: passwordStatus,
-                    entered: deleteAccountPassword
+    var body: some View {
+        List {
+            Section {
+                settingLabel(
+                    aiProcessingConsent.hasConsent
+                        ? "Allowed for this account on this iPhone"
+                        : "Not allowed",
+                    detail: aiProcessingConsent.hasConsent
+                        ? nil
+                        : "Media Tools will ask before sending content to third-party AI services."
                 )
-            )
-            try await AccountDeletionRecoveryService.shared.finishLocalDeletion(
-                pending,
-                uploadCoordinator: uploadCoordinator,
-                consent: aiProcessingConsent,
-                deviceSession: deviceSession,
-                shareKeys: .shared
-            )
-        } catch {
-            deleteAccountError = error.localizedDescription
-            return
+                .frame(minHeight: 44, alignment: .leading)
+                .listRowBackground(Theme.surface)
+
+                Button {
+                    if aiProcessingConsent.hasConsent {
+                        aiProcessingConsent.revoke()
+                    } else {
+                        Task { _ = await aiProcessingConsent.requestPermission() }
+                    }
+                } label: {
+                    Text(aiProcessingConsent.hasConsent ? "Revoke permission" : "Review and allow")
+                        .foregroundStyle(aiProcessingConsent.hasConsent ? Theme.danger : Theme.accentText)
+                        .frame(minHeight: 44)
+                }
+                .listRowBackground(Theme.surface)
+            } footer: {
+                Text("This controls future transcription, readable formatting, summary, and chat requests. Processing already started may finish.")
+                    .foregroundStyle(Theme.textSecondary)
+            }
         }
-        deleteAccountPassword = ""
-        showDeleteAccount = false
+        .settingsPage("AI processing")
+    }
+}
+
+// MARK: - Developer
+
+/// Keys are created and revoked on the web, where their scopes can be read in full.
+private struct DeveloperSettingsView: View {
+    @State private var health: HealthResponse?
+    @State private var healthError: String?
+    @State private var isCheckingHealth = false
+    @State private var showAdvanced = false
+
+    var body: some View {
+        List {
+            Section {
+                settingsLink(title: "Manage developer and agent keys", destination: Configuration.developerURL)
+            } footer: {
+                Text("Keys let your agents and tools read and act on your library. They open on the web, signed in to this account.")
+                    .foregroundStyle(Theme.textSecondary)
+            }
+
+            Section {
+                DisclosureGroup("Service status", isExpanded: $showAdvanced) {
+                    if isCheckingHealth {
+                        ProgressNote(text: "Checking service…")
+                            .listRowBackground(Theme.surface)
+                    } else if let health {
+                        LabeledContent("Service", value: health.status == "ok" ? "Available" : "Degraded")
+                            .listRowBackground(Theme.surface)
+                        LabeledContent("Workers", value: "\(health.workers)")
+                            .listRowBackground(Theme.surface)
+                    } else if let healthError {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(healthError)
+                                .font(.footnote)
+                                .foregroundStyle(Theme.textSecondary)
+                            Button("Try again") {
+                                Task { await checkHealth() }
+                            }
+                            .buttonStyle(QuietButtonStyle())
+                        }
+                        .listRowBackground(Theme.surface)
+                    }
+                    LabeledContent("API") {
+                        Text(Configuration.apiBaseURL)
+                            .font(.system(.footnote, design: .monospaced))
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    .listRowBackground(Theme.surface)
+                }
+                .foregroundStyle(Theme.text)
+                .frame(minHeight: 44)
+                .listRowBackground(Theme.surface)
+                .onChange(of: showAdvanced) { _, isExpanded in
+                    guard isExpanded, health == nil else { return }
+                    Task { await checkHealth() }
+                }
+
+                LabeledContent("Version", value: appVersion)
+                    .foregroundStyle(Theme.text)
+                    .frame(minHeight: 44)
+                    .listRowBackground(Theme.surface)
+            }
+        }
+        .settingsPage("Developer and agent keys")
     }
 
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = info?["CFBundleVersion"] as? String ?? "1"
+        return "\(version) (\(build))"
+    }
+
+    private func checkHealth() async {
+        isCheckingHealth = true
+        healthError = nil
+        defer { isCheckingHealth = false }
+
+        do {
+            health = try await APIClient.shared.get("/ready")
+        } catch {
+            health = nil
+            healthError = "Service status is unavailable right now."
+        }
+    }
+}
+
+// MARK: - Help
+
+private struct HelpSettingsView: View {
+    var body: some View {
+        List {
+            Section {
+                settingsLink(title: "Privacy", destination: Configuration.privacyURL)
+                settingsLink(title: "Terms of use", destination: Configuration.termsURL)
+                settingsLink(title: "Support and safety", destination: Configuration.supportURL)
+                settingsLink(title: "Account deletion help", destination: Configuration.accountDeletionURL)
+            }
+        }
+        .settingsPage("Help")
+    }
+}
+
+private func settingsLink(title: String, destination: URL) -> some View {
+    Link(destination: destination) {
+        HStack {
+            Text(title)
+                .foregroundStyle(Theme.text)
+            Spacer(minLength: 8)
+            Image(systemName: "arrow.up.right")
+                .font(.footnote)
+                .foregroundStyle(Theme.textSecondary)
+                .accessibilityHidden(true)
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+    .listRowBackground(Theme.surface)
+    .accessibilityAddTraits(.isLink)
 }
 
 /// Quick Record setup lives a level down: it is done once, then rarely revisited.
@@ -933,7 +1163,7 @@ private struct QuickRecordSetupView: View {
                     guard let shortcutsURL = URL(string: "shortcuts://") else { return }
                     openURL(shortcutsURL)
                 }
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Theme.accentText)
                 .frame(minHeight: 44)
                 .listRowBackground(Theme.surface)
                 .accessibilityHint("Opens the Shortcuts app to configure Quick Record")
@@ -941,13 +1171,13 @@ private struct QuickRecordSetupView: View {
                 Button("Review setup") {
                     hasCompletedOnboarding = false
                 }
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Theme.accentText)
                 .frame(minHeight: 44)
                 .listRowBackground(Theme.surface)
                 .accessibilityHint("Shows microphone, alert, and privacy guidance again")
             }
         }
-        .ledgerListBackground()
+        .themedListBackground()
         .navigationTitle("Quick Record")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -1007,7 +1237,7 @@ struct SignInSecurityStatusFailurePreviewHost: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Sign-in security")
-                .font(.ledgerTitle2)
+                .font(.displayTitle2)
                 .foregroundStyle(Theme.text)
             Text("1 passkey is set up.")
                 .font(.subheadline)
@@ -1029,7 +1259,7 @@ struct SignInSecurityStatusFailurePreviewHost: View {
             Spacer()
         }
         .padding(20)
-        .background(Theme.bg)
+        .background(Theme.background)
     }
 }
 
@@ -1050,7 +1280,7 @@ private struct RecoveryCodesOneTimeSheet: View {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Save recovery codes")
-                            .font(.ledgerTitle2)
+                            .font(.displayTitle2)
                             .foregroundStyle(Theme.text)
                         Text("These codes are shown once. Copy or share them now, then keep them somewhere private.")
                             .font(.subheadline)
@@ -1067,7 +1297,7 @@ private struct RecoveryCodesOneTimeSheet: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.vertical, 8)
                                 .padding(.horizontal, 10)
-                                .background(Theme.bg)
+                                .background(Theme.background)
                                 .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous))
                         }
                     }
@@ -1093,7 +1323,7 @@ private struct RecoveryCodesOneTimeSheet: View {
                 }
                 .padding(20)
             }
-            .background(Theme.bg)
+            .background(Theme.background)
             .navigationTitle("Recovery codes")
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -1115,7 +1345,7 @@ private extension RecoveryCodesOneTimeSheet {
         ShareLink(item: joinedCodes) {
             Label("Share", systemImage: "square.and.arrow.up")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Theme.accentText)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
         }
@@ -1126,7 +1356,7 @@ struct RecoveryCodesOneTimePreviewHost: View {
     @State private var isPresented = true
 
     var body: some View {
-        Theme.bg
+        Theme.background
             .ignoresSafeArea()
             .sheet(isPresented: $isPresented) {
                 RecoveryCodesOneTimeSheet(

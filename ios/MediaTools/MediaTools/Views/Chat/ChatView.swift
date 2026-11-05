@@ -43,7 +43,7 @@ struct ChatView: View {
                         }
                     }
                     .readingMeasure()
-                    .ledgerPageMargin()
+                    .pageMargin()
                     .padding(.vertical)
                 }
                 .onChange(of: messages.count) {
@@ -87,11 +87,11 @@ struct ChatView: View {
                 .accessibilityLabel("Send")
                 .accessibilityIdentifier("chat.send")
             }
-            .ledgerPageMargin()
+            .pageMargin()
             .padding(.vertical, 8)
-            .ledgerBarBackground()
+            .barBackground()
         }
-        .background(Theme.bg)
+        .background(Theme.background)
         .task { await loadHistory() }
         .onAppear { inputFocused = true }
         .sheet(item: $reportTarget) { target in

@@ -150,38 +150,221 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertEqual(code.value as? String, "123456")
     }
 
-    func testLibraryIsHomeAndReachesEveryDestination() {
+    func testHomeOpensFirstAndTheBarReachesEveryTab() {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-test-main", "-ui-test-reset-recordings"]
         app.launch()
 
-        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.tabBars.firstMatch.exists, "The Library is home, with no tab bar")
-        XCTAssertTrue(app.searchFields["Search"].exists)
-        XCTAssertTrue(app.buttons["library.record"].isHittable)
-        XCTAssertGreaterThanOrEqual(app.buttons["library.record"].frame.height.rounded(), 44)
+        XCTAssertTrue(app.buttons["home.record"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["tab.home"].isSelected)
+        XCTAssertTrue(app.buttons["home.import"].exists)
+        XCTAssertTrue(app.buttons["home.link"].exists)
+        XCTAssertTrue(app.buttons["home.pdf"].exists)
+        XCTAssertFalse(app.tabBars.firstMatch.exists, "The bar is custom, on every OS")
 
+        for name in ["tab.home", "tab.library", "tab.record", "tab.collections", "tab.settings"] {
+            XCTAssertTrue(app.buttons[name].isHittable, name)
+            XCTAssertGreaterThanOrEqual(app.buttons[name].frame.height.rounded(), 44, name)
+        }
+
+        app.buttons["home.link"].tap()
+        XCTAssertTrue(app.navigationBars["Add a Link"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["tab.library"].exists, "A form takes the whole screen")
+        goBack(in: app)
+
+        app.buttons["home.pdf"].tap()
+        XCTAssertTrue(app.navigationBars["Upload a PDF"].waitForExistence(timeout: 5))
+        goBack(in: app)
+
+        openLibrary(in: app)
+        XCTAssertTrue(app.textFields["library.search"].exists)
         app.buttons["library.add"].tap()
+        for action in ["Import Audio", "Add a Link", "Upload a PDF"] {
+            XCTAssertTrue(app.buttons[action].waitForExistence(timeout: 5), action)
+        }
         app.buttons["Add a Link"].tap()
         XCTAssertTrue(app.navigationBars["Add a Link"].waitForExistence(timeout: 5))
         goBack(in: app)
 
-        app.buttons["library.add"].tap()
-        app.buttons["Upload a PDF"].tap()
-        XCTAssertTrue(app.navigationBars["Upload a PDF"].waitForExistence(timeout: 5))
-        goBack(in: app)
-
         openCollections(in: app)
-        goBack(in: app)
 
-        app.buttons["library.settings"].tap()
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        openSettings(in: app)
         XCTAssertTrue(app.buttons["Notification settings"].exists)
         let quickRecord = app.buttons["settings.quick-record"]
         XCTAssertTrue(quickRecord.waitForExistence(timeout: 5))
         quickRecord.tap()
         XCTAssertTrue(app.buttons["Open Shortcuts"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Review setup"].exists)
+    }
+
+    func testEachTabKeepsItsOwnPlace() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + ["-ui-test-rich-content", "-ui-test-reset-recordings"]
+        app.launch()
+
+        openSettings(in: app)
+        app.buttons["settings.help"].tap()
+        XCTAssertTrue(app.navigationBars["Help"].waitForExistence(timeout: 5))
+
+        app.buttons["tab.collections"].tap()
+        XCTAssertTrue(app.staticTexts["Baby"].waitForExistence(timeout: 5))
+        app.staticTexts["Baby"].tap()
+        XCTAssertTrue(app.navigationBars["Baby"].waitForExistence(timeout: 5))
+
+        app.buttons["tab.settings"].tap()
+        XCTAssertTrue(app.navigationBars["Help"].waitForExistence(timeout: 5), "Settings kept its page")
+
+        // A second tap on the current tab goes back to its top.
+        app.buttons["tab.settings"].tap()
+        XCTAssertTrue(app.buttons["settings.help"].waitForExistence(timeout: 5))
+
+        app.buttons["tab.collections"].tap()
+        XCTAssertTrue(app.navigationBars["Baby"].waitForExistence(timeout: 5), "Collections kept its page")
+    }
+
+    func testEverySettingAndAccountActionStaysReachable() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + ["-ui-test-rich-content", "-ui-test-reset-recordings"]
+        app.launch()
+
+        openSettings(in: app)
+        XCTAssertTrue(app.switches["settings.auto-transcribe"].exists)
+        XCTAssertTrue(app.buttons["Notification settings"].exists)
+        XCTAssertTrue(app.otherElements["usage.summary"].waitForExistence(timeout: 5)
+            || app.staticTexts["This month"].waitForExistence(timeout: 5))
+
+        app.buttons["settings.account"].tap()
+        XCTAssertTrue(app.staticTexts["settings.account-email"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["settings.change-email"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Sign out"].exists)
+        XCTAssertTrue(app.buttons["Delete account and data"].exists)
+        goBack(in: app)
+
+        app.buttons["settings.security"].tap()
+        XCTAssertTrue(app.staticTexts["Add a passkey"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["sign-in-security.password"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Replace recovery codes"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["sign-in-security.devices"].exists)
+        goBack(in: app)
+
+        app.buttons["settings.ai"].tap()
+        XCTAssertTrue(app.buttons["Review and allow"].waitForExistence(timeout: 5))
+        goBack(in: app)
+
+        app.buttons["settings.developer"].tap()
+        XCTAssertTrue(app.links["Manage developer and agent keys"].waitForExistence(timeout: 5)
+            || app.buttons["Manage developer and agent keys"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Service status"].exists)
+        goBack(in: app)
+
+        app.buttons["settings.help"].tap()
+        for link in ["Privacy", "Terms of use", "Support and safety", "Account deletion help"] {
+            XCTAssertTrue(
+                app.links[link].waitForExistence(timeout: 5) || app.buttons[link].exists,
+                link
+            )
+        }
+    }
+
+    func testNeedsYouOffersTranscribeAndOptionsAndNeverDeletesUnasked() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + [
+            "-ui-test-ai-consent",
+            "-ui-test-simulated-upload",
+            "-ui-test-reset-recordings",
+            "-ui-test-needs-you",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Needs you"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Aug 26 recording"].exists)
+        XCTAssertTrue(app.staticTexts["1:29:12, not sent yet"].exists)
+        XCTAssertTrue(app.staticTexts["Aug 21 recording"].exists)
+        XCTAssertTrue(app.staticTexts["28:25, did not save fully"].exists)
+
+        // The unfinalized one: options, and trying again leaves it safe.
+        let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'needs-you.options.'")).firstMatch
+        XCTAssertTrue(options.exists)
+        options.tap()
+        XCTAssertTrue(app.buttons["options.save"].waitForExistence(timeout: 5))
+        app.buttons["options.retry"].tap()
+        XCTAssertTrue(app.staticTexts["options.retry-message"].waitForExistence(timeout: 5))
+
+        // Delete asks first, and Keep keeps it.
+        app.buttons["options.delete"].tap()
+        XCTAssertTrue(app.alerts.buttons["Keep"].waitForExistence(timeout: 5))
+        app.alerts.buttons["Keep"].tap()
+        app.buttons["options.close"].tap()
+        XCTAssertTrue(app.staticTexts["Aug 21 recording"].waitForExistence(timeout: 5))
+
+        // Both stay visible in the Library, with the same actions.
+        openLibrary(in: app)
+        XCTAssertTrue(app.staticTexts["Aug 21 recording"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'recording.transcribe.'")).firstMatch.exists)
+
+        // The other one goes with one tap, from Home, on no other screen.
+        app.buttons["tab.home"].tap()
+        let transcribe = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'needs-you.transcribe.'")).firstMatch
+        XCTAssertTrue(transcribe.waitForExistence(timeout: 5))
+        transcribe.tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["Aug 26 recording"])
+        waitForExpectations(timeout: 20)
+
+        // The stuck row is gone once the last one is dealt with.
+        options.tap()
+        app.buttons["options.delete"].tap()
+        XCTAssertTrue(app.alerts.buttons["Delete"].waitForExistence(timeout: 5))
+        app.alerts.buttons["Delete"].tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["Needs you"])
+        waitForExpectations(timeout: 10)
+    }
+
+    func testChipsFilterTheLibraryIncludingStarredAndArchived() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + ["-ui-test-rich-content", "-ui-test-reset-recordings"]
+        app.launch()
+
+        openLibrary(in: app)
+        XCTAssertTrue(app.staticTexts["Hafa Baby updates"].waitForExistence(timeout: 10))
+
+        app.buttons["library.chip.starred"].tap()
+        XCTAssertTrue(app.staticTexts["Monday planning call"].waitForExistence(timeout: 5))
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["Hafa Baby updates"])
+        waitForExpectations(timeout: 5)
+
+        app.buttons["library.chip.pdfs"].swipeLeft()
+        let archived = app.buttons["library.chip.archived"]
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: archived)
+        waitForExpectations(timeout: 5)
+        archived.tap()
+        XCTAssertTrue(app.staticTexts["Archived hallway recording"].waitForExistence(timeout: 5))
+
+        archived.swipeRight()
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: app.buttons["library.chip.pdfs"])
+        waitForExpectations(timeout: 5)
+        app.buttons["library.chip.pdfs"].tap()
+        XCTAssertTrue(app.staticTexts["Lease agreement"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Monday planning call"].exists)
+    }
+
+    func testWaveformsAreOptionalAndTheDetailHasTabs() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + [
+            "-ui-test-rich-content",
+            "-ui-test-notification-route",
+            "-ui-test-reset-recordings",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Monday planning call"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.otherElements["player.waveform"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["detail.tab.summary"].isSelected, "A summary opens first when there is one")
+        XCTAssertTrue(app.staticTexts["Launch moves to the 18th."].exists)
+
+        app.buttons["detail.tab.transcript"].tap()
+        XCTAssertTrue(app.buttons["detail.tab.transcript"].isSelected)
+        XCTAssertTrue(app.buttons["detail.transcript-mode"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["detail.transcript-mode"].value as? String, "Timestamps", "Timed lines lead")
     }
 
     func testSignInSecurityStatusFailureShowsRetryAndKeepsPreviousCounts() {
@@ -263,7 +446,6 @@ final class MediaToolsUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.buttons["Start recording"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["00:00"].exists)
 
         // The type stays optional and keeps its default.
         XCTAssertEqual(app.buttons["record.content-type"].value as? String, "General")
@@ -332,7 +514,6 @@ final class MediaToolsUITests: XCTestCase {
             NSPredicate(format: "label BEGINSWITH 'Recording — '")
         ).firstMatch
         XCTAssertTrue(savedRecordingTitle.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["00:00"].exists)
         XCTAssertTrue(app.staticTexts["Ready for another recording"].exists)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch.exists)
 
@@ -357,7 +538,7 @@ final class MediaToolsUITests: XCTestCase {
         ]
         app.launch()
 
-        recordFromTheLibraryAndStop(in: app)
+        recordFromHomeAndStop(in: app)
 
         // Stop is the last tap. Everything from here happens on its own.
         XCTAssertTrue(app.staticTexts["Transcription complete!"].waitForExistence(timeout: 15))
@@ -382,16 +563,15 @@ final class MediaToolsUITests: XCTestCase {
         ]
         app.launch()
 
-        XCTAssertTrue(app.buttons["library.settings"].waitForExistence(timeout: 10))
-        app.buttons["library.settings"].tap()
+        openSettings(in: app)
         let toggle = app.switches["settings.auto-transcribe"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         XCTAssertEqual(toggle.value as? String, "1", "Automatic transcription defaults to on")
         toggle.switches.firstMatch.tap()
         XCTAssertEqual(toggle.value as? String, "0")
-        goBack(in: app)
+        app.buttons["tab.home"].tap()
 
-        recordFromTheLibraryAndStop(in: app)
+        recordFromHomeAndStop(in: app)
 
         let transcribe = app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch
         XCTAssertTrue(transcribe.waitForExistence(timeout: 5))
@@ -409,7 +589,7 @@ final class MediaToolsUITests: XCTestCase {
         ]
         app.launch()
 
-        recordFromTheLibraryAndStop(in: app)
+        recordFromHomeAndStop(in: app)
 
         let disclosure = app.staticTexts["Allow third-party AI processing?"]
         XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
@@ -428,12 +608,16 @@ final class MediaToolsUITests: XCTestCase {
             "-ui-test-simulated-upload",
         ]
         app.launch()
+        // Home offers it right there, and the Library shows it too.
+        XCTAssertTrue(
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'needs-you.transcribe.'"))
+                .firstMatch.waitForExistence(timeout: 10)
+        )
+        XCTAssertFalse(disclosure.waitForExistence(timeout: 2))
+        openLibrary(in: app)
         openFirstDeviceRow(in: app)
         assertSavedRecordingQueueIsVisible(in: app)
-        XCTAssertFalse(disclosure.waitForExistence(timeout: 2))
-        XCTAssertTrue(
-            app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch.exists
-        )
+        XCTAssertTrue(app.buttons["options.transcribe"].exists)
     }
 
     func testSignedOutShareShowsItIsWaitingForSignIn() {
@@ -464,8 +648,10 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Allow third-party AI processing?"].waitForExistence(timeout: 10))
         app.buttons["Not now"].tap()
 
-        openFirstShareRow(in: app)
-        let transcribe = app.buttons["Transcribe"]
+        // Home offers the tap right on the row.
+        let transcribe = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'needs-you.share.'")
+        ).firstMatch
         XCTAssertTrue(transcribe.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Fixture shared video"].exists)
 
@@ -473,8 +659,7 @@ final class MediaToolsUITests: XCTestCase {
         app.terminate()
         app.launchArguments = signedInFixture
         app.launch()
-        openFirstShareRow(in: app)
-        XCTAssertTrue(transcribe.waitForExistence(timeout: 5))
+        XCTAssertTrue(transcribe.waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Allow third-party AI processing?"].exists)
 
         transcribe.tap()
@@ -525,26 +710,50 @@ final class MediaToolsUITests: XCTestCase {
         ]
         app.launch()
 
-        let record = app.buttons["library.record"]
+        let record = app.buttons["tab.record"]
         XCTAssertTrue(record.waitForExistence(timeout: 10))
         record.tap()
         XCTAssertTrue(app.buttons["Stop and save recording"].waitForExistence(timeout: 5))
+        XCTAssertFalse(record.exists, "The recording screen covers the bar")
 
-        // Back to reading, with the Record control showing what is still running.
-        goBack(in: app)
-        let returnToRecording = app.buttons["library.recording"]
+        // Back to reading, with the bar showing what is still running.
+        app.buttons["recording.minimize"].tap()
+        let returnToRecording = app.buttons["tab.recording"]
         XCTAssertTrue(returnToRecording.waitForExistence(timeout: 5))
         XCTAssertFalse(record.exists)
+        XCTAssertTrue(app.buttons["home.recording"].exists)
 
-        app.buttons["library.settings"].tap()
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
-        goBack(in: app)
+        app.buttons["tab.settings"].tap()
+        XCTAssertTrue(app.buttons["settings.help"].waitForExistence(timeout: 5))
 
         returnToRecording.tap()
         let stop = app.buttons["Stop and save recording"]
         XCTAssertTrue(stop.waitForExistence(timeout: 5))
         stop.tap()
         assertSavedRecordingQueueIsVisible(in: app)
+
+        // Closing goes back to where the person was, with the Record button restored.
+        app.buttons["record.close"].tap()
+        XCTAssertTrue(app.buttons["settings.help"].waitForExistence(timeout: 5))
+        XCTAssertTrue(record.waitForExistence(timeout: 5))
+    }
+
+    func testTheKeyboardHidesTheBar() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-test-main",
+            "-ui-test-reset-recordings",
+        ]
+        app.launch()
+
+        openLibrary(in: app)
+        let search = app.textFields["library.search"]
+        search.tap()
+        let bar = app.buttons["tab.home"]
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: bar)
+        waitForExpectations(timeout: 5)
+        app.swipeDown()
+        XCTAssertTrue(bar.waitForExistence(timeout: 5), "The bar returns with the keyboard gone")
     }
 
     func testSystemQuickCaptureStartsAndCanBeStoppedInTheApp() {
@@ -562,7 +771,6 @@ final class MediaToolsUITests: XCTestCase {
         stop.tap()
 
         assertSavedRecordingQueueIsVisible(in: app)
-        XCTAssertTrue(app.staticTexts["00:00"].exists)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch.exists)
     }
 
@@ -601,7 +809,17 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Transcription complete!"].waitForExistence(timeout: 15))
     }
 
-    func testStoredSessionOpensLibraryEvenWhenTheNetworkNeverAnswers() {
+    func testLiveActivityLinkOpensTheRecorder() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + ["-ui-test-reset-recordings"]
+        app.launch()
+        XCTAssertTrue(app.buttons["home.record"].waitForExistence(timeout: 10))
+
+        app.open(URL(string: "mediatools://record")!)
+        XCTAssertTrue(app.buttons["Start recording"].waitForExistence(timeout: 10))
+    }
+
+    func testStoredSessionOpensHomeEvenWhenTheNetworkNeverAnswers() {
         let app = XCUIApplication()
         app.launchArguments = signedInFixture + [
             "-ui-test-expired-session",
@@ -610,7 +828,7 @@ final class MediaToolsUITests: XCTestCase {
         ]
         app.launch()
 
-        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["home.record"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Restoring your workspace…"].exists)
     }
 
@@ -624,10 +842,11 @@ final class MediaToolsUITests: XCTestCase {
         ]
         app.launch()
 
+        openLibrary(in: app)
         XCTAssertTrue(app.staticTexts["Your Library Is Ready"].waitForExistence(timeout: 10))
 
-        recordFromTheLibraryAndStop(in: app)
-        goBack(in: app)
+        recordFromTheBarAndStop(in: app)
+        app.buttons["record.close"].tap()
 
         // The finished server row appears on its own. No pull-to-refresh here.
         let serverRow = app.buttons["library-row-audio:ui-test-audio"]
@@ -644,8 +863,9 @@ final class MediaToolsUITests: XCTestCase {
         ]
         app.launch()
 
-        recordFromTheLibraryAndStop(in: app)
-        goBack(in: app)
+        recordFromHomeAndStop(in: app)
+        app.buttons["record.close"].tap()
+        openLibrary(in: app)
 
         let deviceRow = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH 'library-device-'")
@@ -657,7 +877,7 @@ final class MediaToolsUITests: XCTestCase {
             ).firstMatch.waitForExistence(timeout: 10)
         )
 
-        // Tapping an in-progress row goes to where it can be managed.
+        // Tapping an in-progress row shows what can be done with it.
         deviceRow.tap()
         assertSavedRecordingQueueIsVisible(in: app)
     }
@@ -704,10 +924,9 @@ final class MediaToolsUITests: XCTestCase {
         app.launchArguments = signedInFixture + ["-ui-test-reset-recordings"]
         app.launch()
 
-        let add = app.buttons["library.add"]
-        XCTAssertTrue(add.waitForExistence(timeout: 10))
-        add.tap()
-        app.buttons["Add a Link"].tap()
+        let link = app.buttons["home.link"]
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        link.tap()
         let field = app.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
@@ -730,7 +949,7 @@ final class MediaToolsUITests: XCTestCase {
         broken.tap()
         XCTAssertTrue(app.staticTexts["Couldn’t Open Collection"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Try Again"].exists)
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        goBack(in: app)
 
         let working = app.staticTexts["Fixture collection"]
         XCTAssertTrue(working.waitForExistence(timeout: 5))
@@ -746,12 +965,14 @@ final class MediaToolsUITests: XCTestCase {
         app.launchArguments = signedInFixture + ["-ui-test-reset-recordings"]
         app.launch()
 
-        let filter = app.buttons["library.collections"]
-        XCTAssertTrue(filter.waitForExistence(timeout: 10))
-        XCTAssertEqual(filter.value as? String, "All collections")
-        filter.tap()
+        openCollections(in: app)
+        XCTAssertTrue(app.staticTexts["Fixture collection"].waitForExistence(timeout: 10))
+        openLibrary(in: app)
+        app.buttons["Library actions"].tap()
+        let submenu = app.buttons["Collection"]
+        XCTAssertTrue(submenu.waitForExistence(timeout: 5))
+        submenu.tap()
         app.buttons["Fixture collection"].tap()
-        XCTAssertEqual(filter.value as? String, "Fixture collection")
 
         let item = app.buttons["UI test recording"]
         XCTAssertTrue(item.waitForExistence(timeout: 10))
@@ -820,13 +1041,12 @@ final class MediaToolsUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["Monday planning call"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["Add to Collection"].exists)
         XCTAssertTrue(app.buttons["Export"].exists)
 
         let more = app.buttons["detail.more"]
         XCTAssertTrue(more.waitForExistence(timeout: 5))
         more.tap()
-        for action in ["Rename Recording", "Star", "Tags", "Copy Text", "Summarize Again", "Report Summary", "Archive", "Delete"] {
+        for action in ["Add to Collection", "Rename Recording", "Star", "Tags", "Copy Text", "Summarize Again", "Report Summary", "Archive", "Delete"] {
             XCTAssertTrue(app.buttons[action].waitForExistence(timeout: 5), action)
         }
 
@@ -845,13 +1065,10 @@ final class MediaToolsUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["Monday planning call"].waitForExistence(timeout: 10))
-        let modes = app.buttons["detail.transcript-mode"]
-        // Clear of the bottom bar, which a control can pass under while still "hittable".
-        for _ in 0..<4 where !modes.isHittable || modes.frame.midY > app.frame.height * 0.6 {
-            app.swipeUp()
-        }
-        modes.tap()
-        app.buttons["Timestamps"].tap()
+        let transcriptTab = app.buttons["detail.tab.transcript"]
+        XCTAssertTrue(transcriptTab.waitForExistence(timeout: 5))
+        transcriptTab.tap()
+        XCTAssertTrue(app.buttons["detail.transcript-mode"].waitForExistence(timeout: 5))
 
         // Move on from the player, then use whichever row sits clear of the bars.
         app.swipeUp()
@@ -878,12 +1095,10 @@ final class MediaToolsUITests: XCTestCase {
         app.launchArguments = signedInFixture + ["-ui-test-reset-recordings"]
         app.launch()
 
-        XCTAssertTrue(app.buttons["library.settings"].waitForExistence(timeout: 10))
-        app.buttons["library.settings"].tap()
+        openSettings(in: app)
+        app.buttons["settings.account"].tap()
         let signOut = app.buttons["Sign out"]
-        for _ in 0..<10 where !signOut.isHittable {
-            app.swipeUp()
-        }
+        XCTAssertTrue(signOut.waitForExistence(timeout: 5))
         signOut.tap()
         XCTAssertTrue(app.staticTexts["Sign out of Media Tools?"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Sign Out"].exists)
@@ -891,7 +1106,7 @@ final class MediaToolsUITests: XCTestCase {
         // iOS 26 shows this as a popover whose cancel action is tapping away.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
         XCTAssertTrue(app.staticTexts["Sign out of Media Tools?"].waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.navigationBars["Settings"].exists, "Dismissing must not sign out")
+        XCTAssertTrue(app.navigationBars["Account"].exists, "Dismissing must not sign out")
     }
 
     func testQuickCaptureLiveActivityCanStopFromTheDynamicIsland() {
@@ -940,8 +1155,8 @@ final class MediaToolsUITests: XCTestCase {
         app.launchArguments = ["-ui-test-library"]
         app.launch()
 
-        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.searchFields["Search"].exists)
+        let search = app.textFields["library.search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Weekly product review"].exists)
         XCTAssertTrue(app.staticTexts["Team planning session"].exists)
 
@@ -950,19 +1165,19 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Completed"].exists)
 
         app.buttons["Library actions"].tap()
-        XCTAssertTrue(app.buttons["PDFs"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Select Items"].exists)
+        XCTAssertTrue(app.buttons["Select Items"].waitForExistence(timeout: 5))
         app.buttons["Select Items"].tap()
 
         let firstItem = app.buttons["Select Weekly product review"]
         XCTAssertTrue(firstItem.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["tab.home"].exists, "The selection bar takes the tab bar's place")
         firstItem.tap()
         XCTAssertTrue(app.staticTexts["1 selected"].exists)
         XCTAssertTrue(app.buttons["Delete"].isHittable)
-        XCTAssertTrue(app.buttons["Done"].isHittable)
+        XCTAssertTrue(app.buttons["library.done"].isHittable)
 
-        app.buttons["Done"].tap()
-        let search = app.searchFields["Search"]
+        app.buttons["library.done"].tap()
+        XCTAssertTrue(app.buttons["tab.home"].waitForExistence(timeout: 5))
         search.tap()
         search.typeText("client")
         XCTAssertTrue(app.staticTexts["Client discovery notes"].waitForExistence(timeout: 5))
@@ -974,7 +1189,7 @@ final class MediaToolsUITests: XCTestCase {
         app.launchArguments = ["-ui-test-library-pagination"]
         app.launch()
 
-        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["library.search"].waitForExistence(timeout: 10))
         let target = app.buttons["library-row-audio:audio-25"]
         for _ in 0..<12 where !target.isHittable {
             app.swipeUp()
@@ -986,7 +1201,6 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Recording 25"].waitForExistence(timeout: 5))
         app.navigationBars["Recording 25"].buttons.element(boundBy: 0).tap()
 
-        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 5))
         XCTAssertTrue(target.waitForExistence(timeout: 5))
         XCTAssertTrue(target.isHittable)
         XCTAssertFalse(app.buttons["library-row-audio:audio-1"].isHittable)
@@ -1005,7 +1219,7 @@ final class MediaToolsUITests: XCTestCase {
 
         app.buttons["session-recovery.retry"].tap()
 
-        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["home.record"].waitForExistence(timeout: 10))
         XCTAssertFalse(message.exists)
         XCTAssertFalse(app.buttons["welcome.sign-in"].exists)
     }
@@ -1019,7 +1233,7 @@ final class MediaToolsUITests: XCTestCase {
         XCUIDevice.shared.press(.home)
         app.activate()
 
-        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["home.record"].waitForExistence(timeout: 10))
     }
 
     func testRecordingsThatCouldNotReconnectSayWhyAndRetry() {
@@ -1056,13 +1270,26 @@ final class MediaToolsUITests: XCTestCase {
     /// API stub in place of Keychain and network.
     private var signedInFixture: [String] { ["-ui-test-signed-in"] }
 
-    /// Starting and stopping from home, which is how a recording usually begins.
-    private func recordFromTheLibraryAndStop(
+    /// Starting and stopping from Home, which is how a recording usually begins.
+    private func recordFromHomeAndStop(
         in app: XCUIApplication,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let record = app.buttons["library.record"]
+        let record = app.buttons["home.record"]
+        XCTAssertTrue(record.waitForExistence(timeout: 10), file: file, line: line)
+        record.tap()
+        let stop = app.buttons["Stop and save recording"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 5), file: file, line: line)
+        stop.tap()
+    }
+
+    private func recordFromTheBarAndStop(
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let record = app.buttons["tab.record"]
         XCTAssertTrue(record.waitForExistence(timeout: 10), file: file, line: line)
         record.tap()
         let stop = app.buttons["Stop and save recording"]
@@ -1074,18 +1301,37 @@ final class MediaToolsUITests: XCTestCase {
         app.navigationBars.buttons.element(boundBy: 0).tap()
     }
 
+    private func openLibrary(
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let tab = app.buttons["tab.library"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 10), file: file, line: line)
+        tab.tap()
+        XCTAssertTrue(app.textFields["library.search"].waitForExistence(timeout: 5), file: file, line: line)
+    }
+
+    private func openSettings(
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let tab = app.buttons["tab.settings"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 10), file: file, line: line)
+        tab.tap()
+        XCTAssertTrue(app.buttons["settings.help"].waitForExistence(timeout: 5), file: file, line: line)
+    }
+
     private func openCollections(
         in app: XCUIApplication,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let filter = app.buttons["library.collections"]
-        XCTAssertTrue(filter.waitForExistence(timeout: 10), file: file, line: line)
-        filter.tap()
-        let manage = app.buttons["Manage Collections"]
-        XCTAssertTrue(manage.waitForExistence(timeout: 5), file: file, line: line)
-        manage.tap()
-        XCTAssertTrue(app.navigationBars["Collections"].waitForExistence(timeout: 5), file: file, line: line)
+        let tab = app.buttons["tab.collections"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 10), file: file, line: line)
+        tab.tap()
+        XCTAssertTrue(app.buttons["collections.add"].waitForExistence(timeout: 5), file: file, line: line)
     }
 
     private func openFirstDeviceRow(
@@ -1095,18 +1341,6 @@ final class MediaToolsUITests: XCTestCase {
     ) {
         let row = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH 'library-device-'")
-        ).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 10), file: file, line: line)
-        row.tap()
-    }
-
-    private func openFirstShareRow(
-        in app: XCUIApplication,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let row = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH 'library-share-'")
         ).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), file: file, line: line)
         row.tap()
@@ -1133,5 +1367,125 @@ final class MediaToolsUITests: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(savedQueue.waitForExistence(timeout: 5), file: file, line: line)
+    }
+
+    // MARK: - Screenshots
+
+    /// Not a check: walks every screen in the current appearance and keeps a screenshot
+    /// of each in the result bundle, for design review on whichever device runs it.
+    func testScreenshotTour() {
+        for appearance in [XCUIDevice.Appearance.light, .dark] {
+            XCUIDevice.shared.appearance = appearance
+            let suffix = appearance == .dark ? "dark" : "light"
+            tour(suffix: suffix)
+        }
+        XCUIDevice.shared.appearance = .light
+    }
+
+    func testScreenshotTourAtTheLargestTextSize() {
+        XCUIDevice.shared.appearance = .light
+        tour(
+            suffix: "ax5",
+            extraArguments: [
+                "-UIPreferredContentSizeCategoryName",
+                "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
+            ]
+        )
+    }
+
+    func testScreenshotTourEmptyStates() {
+        XCUIDevice.shared.appearance = .light
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + ["-ui-test-reset-recordings"]
+        app.launch()
+        XCTAssertTrue(app.buttons["home.record"].waitForExistence(timeout: 10))
+        sleep(2)
+        keepScreenshot("empty-home", in: app)
+        openLibrary(in: app)
+        sleep(1)
+        keepScreenshot("empty-library", in: app)
+    }
+
+    private func tour(suffix: String, extraArguments: [String] = []) {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + [
+            "-ui-test-rich-content",
+            "-ui-test-ai-consent",
+            "-ui-test-simulated-recording",
+            "-ui-test-reset-recordings",
+            "-ui-test-needs-you",
+        ] + extraArguments
+        app.launch()
+
+        XCTAssertTrue(app.buttons["home.record"].waitForExistence(timeout: 15))
+        sleep(2)
+        keepScreenshot("home-\(suffix)", in: app)
+
+        app.buttons["tab.library"].tap()
+        XCTAssertTrue(app.textFields["library.search"].waitForExistence(timeout: 5))
+        sleep(2)
+        keepScreenshot("library-\(suffix)", in: app)
+        app.swipeUp()
+        sleep(1)
+        keepScreenshot("library-more-\(suffix)", in: app)
+
+        app.buttons["tab.collections"].tap()
+        XCTAssertTrue(app.buttons["collections.add"].waitForExistence(timeout: 5))
+        sleep(1)
+        keepScreenshot("collections-\(suffix)", in: app)
+
+        app.buttons["tab.settings"].tap()
+        XCTAssertTrue(app.buttons["settings.help"].waitForExistence(timeout: 5))
+        sleep(2)
+        keepScreenshot("settings-\(suffix)", in: app)
+        app.buttons["settings.account"].tap()
+        sleep(2)
+        keepScreenshot("settings-account-\(suffix)", in: app)
+        goBack(in: app)
+
+        app.buttons["tab.home"].tap()
+        let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'needs-you.options.'")).firstMatch
+        if !options.isHittable { app.swipeUp() }
+        if options.isHittable {
+            options.tap()
+            XCTAssertTrue(app.buttons["options.delete"].waitForExistence(timeout: 5))
+            sleep(1)
+            keepScreenshot("needs-you-options-\(suffix)", in: app)
+            app.buttons["options.close"].tap()
+            sleep(1)
+        }
+
+        // A recording's detail, reached by its row.
+        app.buttons["tab.library"].tap()
+        let row = app.buttons["library-row-audio:ui-test-audio"]
+        for _ in 0..<4 where !row.isHittable { app.swipeDown() }
+        if row.waitForExistence(timeout: 5) {
+            row.tap()
+            sleep(2)
+            keepScreenshot("detail-summary-\(suffix)", in: app)
+            let transcript = app.buttons["detail.tab.transcript"]
+            if transcript.exists {
+                transcript.tap()
+                sleep(1)
+                keepScreenshot("detail-transcript-\(suffix)", in: app)
+            }
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+        }
+
+        app.buttons["tab.record"].tap()
+        XCTAssertTrue(app.buttons["Stop and save recording"].waitForExistence(timeout: 10))
+        sleep(4)
+        keepScreenshot("recording-\(suffix)", in: app)
+        app.buttons["Stop and save recording"].tap()
+        sleep(1)
+        keepScreenshot("recorder-after-stop-\(suffix)", in: app)
+        app.terminate()
+    }
+
+    private func keepScreenshot(_ name: String, in app: XCUIApplication) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }

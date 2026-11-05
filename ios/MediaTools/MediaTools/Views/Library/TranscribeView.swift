@@ -17,7 +17,7 @@ struct TranscribeView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
-                        .ledgerField()
+                        .themedField()
 
                     Button {
                         if let clipboard = UIPasteboard.general.string {
@@ -26,7 +26,7 @@ struct TranscribeView: View {
                         }
                     } label: {
                         Image(systemName: "doc.on.clipboard")
-                            .foregroundStyle(Theme.accent)
+                            .foregroundStyle(Theme.accentText)
                             .frame(width: 44, height: 50)
                             .contentShape(Rectangle())
                     }
@@ -62,7 +62,7 @@ struct TranscribeView: View {
                             .foregroundStyle(Theme.text)
 
                         Text(result.displayTitle)
-                            .font(.ledgerRowTitle)
+                            .font(.rowTitle)
                             .foregroundStyle(Theme.text)
 
                         if let wc = result.wordCount, wc > 0 {
@@ -79,7 +79,7 @@ struct TranscribeView: View {
                             } label: {
                                 Text("Open")
                                     .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(Theme.accent)
+                                    .foregroundStyle(Theme.accentText)
                                     .frame(minHeight: 44)
                                     .contentShape(Rectangle())
                             }
@@ -97,7 +97,7 @@ struct TranscribeView: View {
             .padding(16)
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(Theme.bg)
+        .background(Theme.background)
         .navigationTitle("Add a Link")
         .navigationBarTitleDisplayMode(.inline)
     }

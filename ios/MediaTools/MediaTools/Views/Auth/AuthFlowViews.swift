@@ -3,7 +3,7 @@ import UIKit
 
 extension View {
     func authFieldStyle() -> some View {
-        ledgerField()
+        themedField()
     }
 }
 
@@ -121,7 +121,7 @@ struct ResendCodeButton: View {
             Text(secondsLeft > 0 ? "Send a new code in \(secondsLeft)s" : "Send a new code")
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
-                .foregroundStyle(secondsLeft > 0 ? Theme.textSecondary : Theme.accent)
+                .foregroundStyle(secondsLeft > 0 ? Theme.textSecondary : Theme.accentText)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .contentShape(Rectangle())
         }
@@ -191,7 +191,7 @@ struct EmailPasswordFlowView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(purpose.title)
-                        .font(.ledgerTitle2)
+                        .font(.displayTitle2)
                         .foregroundStyle(Theme.text)
                     if isAwaitingCode {
                         codeStep
@@ -202,7 +202,7 @@ struct EmailPasswordFlowView: View {
                 .padding(20)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.bg)
+            .background(Theme.background)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { onCancel() }.disabled(isBusy)

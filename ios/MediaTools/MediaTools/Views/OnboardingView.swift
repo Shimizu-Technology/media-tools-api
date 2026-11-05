@@ -27,7 +27,7 @@ struct OnboardingView: View {
                 .transition(.opacity)
         }
         .scrollBounceBehavior(.basedOnSize)
-        .background(Theme.bg)
+        .background(Theme.background)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 12) {
                 pageIndicator
@@ -43,7 +43,7 @@ struct OnboardingView: View {
             .padding(.horizontal, 24)
             .padding(.top, 12)
             .padding(.bottom, 12)
-            .background(Theme.bg)
+            .background(Theme.background)
         }
         .task { await refreshPermissionStates() }
         .onChange(of: scenePhase) { _, phase in
@@ -114,7 +114,7 @@ struct OnboardingView: View {
     private func legalLink(_ title: String, destination: URL) -> some View {
         Link(title, destination: destination)
             .font(.footnote.weight(.semibold))
-            .foregroundStyle(Theme.accent)
+            .foregroundStyle(Theme.accentText)
             .frame(minWidth: 44, minHeight: 44)
             .contentShape(Rectangle())
     }
@@ -128,7 +128,7 @@ struct OnboardingView: View {
         HStack(spacing: 6) {
             ForEach(0..<pageCount, id: \.self) { index in
                 Circle()
-                    .fill(index == currentPage ? Theme.accent : Theme.separator)
+                    .fill(index == currentPage ? Theme.accentText : Theme.separator)
                     .frame(width: 7, height: 7)
             }
         }
@@ -145,7 +145,7 @@ struct OnboardingView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(title)
-                .font(.ledgerLargeTitle)
+                .font(.displayLargeTitle)
                 .foregroundStyle(Theme.text)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)

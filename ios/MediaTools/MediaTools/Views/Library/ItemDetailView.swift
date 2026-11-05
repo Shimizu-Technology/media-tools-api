@@ -12,6 +12,11 @@ private enum TranscriptViewMode: String, CaseIterable, Identifiable {
     }
 }
 
+private enum DetailTab: String, Hashable {
+    case summary
+    case transcript
+}
+
 struct ItemDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let item: LibraryItem
@@ -40,7 +45,10 @@ struct ItemDetailView: View {
     @State private var renameValue = ""
     @State private var isRenaming = false
     @State private var isRetrying = false
-    @State private var transcriptViewMode: TranscriptViewMode = .readable
+    /// Nil until someone picks: timed lines when the audio has them, otherwise text.
+    @State private var transcriptModeChoice: TranscriptViewMode?
+    /// Nil until someone picks: the summary when there is one, otherwise the transcript.
+    @State private var tabChoice: DetailTab?
     @State private var isFormattingTranscript = false
     @State private var detailError: String?
     @State private var pollingWarning: String?
@@ -88,23 +96,30 @@ struct ItemDetailView: View {
                     headerSection
                     audioPlayerSection
                     noticesSection
-                    summarySection
-                    transcriptSection
+                    contentTabs
+                    switch visibleTab {
+                    case .summary: summarySection
+                    case .transcript: transcriptSection
+                    }
                 }
                 .readingMeasure()
-                .ledgerPageMargin()
+                .pageMargin()
                 .padding(.top, 4)
                 .padding(.bottom, 24)
             }
             .onChange(of: scrollTarget) {
                 guard let scrollTarget else { return }
-                withMotion {
-                    proxy.scrollTo(scrollTarget, anchor: .center)
+                // The target may be on the tab that was only just selected.
+                Task { @MainActor in
+                    await Task.yield()
+                    withMotion {
+                        proxy.scrollTo(scrollTarget, anchor: .center)
+                    }
+                    self.scrollTarget = nil
                 }
-                self.scrollTarget = nil
             }
         }
-        .background(Theme.bg)
+        .background(Theme.background)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
@@ -154,8 +169,8 @@ struct ItemDetailView: View {
         .toolbar { detailToolbar }
         .task { await loadDetail() }
         .onChange(of: audio?.hasDistinctReadableTranscript) { _, hasDistinctOriginal in
-            if hasDistinctOriginal != true, transcriptViewMode == .original {
-                transcriptViewMode = .readable
+            if hasDistinctOriginal != true, transcriptModeChoice == .original {
+                transcriptModeChoice = .readable
             }
         }
         .onDisappear { detailPollingTask?.cancel() }
@@ -163,23 +178,14 @@ struct ItemDetailView: View {
 
     // MARK: - Toolbar
 
-    /// The three things people reach for, with everything rarer in the menu.
+    /// Sharing and everything else, with the rarer actions in the menu.
     @ToolbarContentBuilder
     private var detailToolbar: some ToolbarContent {
         // The title sits in the page, where a long name can wrap. It stays set on the
-        // bar for Back and VoiceOver, but three actions leave too little room to show it.
+        // bar for Back and VoiceOver, but the actions leave too little room to show it.
         ToolbarItem(placement: .principal) {
             Text(verbatim: "")
                 .accessibilityHidden(true)
-        }
-        ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                showAddToCollection = true
-            } label: {
-                Image(systemName: "folder.badge.plus")
-                    .frame(minWidth: 44, minHeight: 44)
-            }
-            .accessibilityLabel("Add to Collection")
         }
         ToolbarItem(placement: .topBarTrailing) {
             Button {
@@ -200,6 +206,11 @@ struct ItemDetailView: View {
     private var moreMenu: some View {
         Menu {
             Section {
+                Button {
+                    showAddToCollection = true
+                } label: {
+                    Label("Add to Collection", systemImage: "folder.badge.plus")
+                }
                 if isAudioItem {
                     Button(action: beginRename) {
                         Label("Rename Recording", systemImage: "pencil")
@@ -287,7 +298,7 @@ struct ItemDetailView: View {
                 .disabled(isDeleting)
             }
         } label: {
-            Image(systemName: "ellipsis.circle")
+            Image(systemName: "ellipsis")
                 .frame(minWidth: 44, minHeight: 44)
         }
         .accessibilityLabel("More actions")
@@ -296,24 +307,26 @@ struct ItemDetailView: View {
 
     // MARK: - Bottom bar
 
+    /// Floats over the page, so reading continues underneath it.
     @ViewBuilder
     private var bottomBar: some View {
         let showsMiniPlayer = !isPlayerVisible && player.isPlaying
         if canUseContentActions || showsMiniPlayer {
-            VStack(spacing: 0) {
-                Hairline()
+            VStack(spacing: 8) {
                 if showsMiniPlayer {
-                    AudioMiniBar(player: player)
-                        .ledgerPageMargin()
+                    AudioMiniBar(player: player, onLocate: locateActiveSegment)
+                        .padding(.horizontal, 8)
+                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusLarge, style: .continuous))
+                        .shadow(color: .black.opacity(0.14), radius: 10, y: 3)
                         .transition(.opacity)
                 }
                 if canUseContentActions {
                     askBox
-                        .ledgerPageMargin()
-                        .padding(.vertical, 8)
                 }
             }
-            .ledgerBarBackground()
+            .readingMeasure()
+            .pageMargin()
+            .padding(.bottom, 8)
             .animation(reduceMotion ? nil : Theme.quick, value: showsMiniPlayer)
         }
     }
@@ -326,27 +339,10 @@ struct ItemDetailView: View {
                 showChat = true
             }
         } label: {
-            HStack(spacing: 8) {
-                Text("Ask about this")
-                    .font(.body)
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "arrow.up")
-                    .font(.subheadline.weight(.semibold))
-                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-                    .foregroundStyle(Theme.onAccent)
-                    .frame(width: 34, height: 34)
-                    .background(Theme.accentFill, in: Circle())
-                    .accessibilityHidden(true)
-            }
-            .padding(.leading, 16)
-            .padding(.trailing, 5)
-            .frame(minHeight: 44)
-            .background(Theme.surface, in: Capsule())
-            .overlay { Capsule().stroke(Theme.separator, lineWidth: 0.5) }
-            .contentShape(Capsule())
+            Label("Ask about this", systemImage: "sparkles")
         }
-        .buttonStyle(PressFeedbackButtonStyle(pressedScale: 0.98))
+        .buttonStyle(PrimaryButtonStyle(shape: .pill))
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
         .accessibilityLabel("Ask about this")
         .accessibilityIdentifier("detail.ask")
     }
@@ -354,18 +350,25 @@ struct ItemDetailView: View {
     // MARK: - Header
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.ledgerTitle)
+                .font(.displayTitle)
+                .tracking(-0.3)
                 .foregroundStyle(Theme.text)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
 
             if let metadataText {
-                Text(metadataText)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let collection = rowMetadata?.primaryCollection {
+                        CollectionDot(colorKey: collection.color)
+                            .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                    }
+                    Text(metadataText)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             if !preferences.tags.isEmpty {
@@ -377,15 +380,23 @@ struct ItemDetailView: View {
         }
     }
 
+    /// What the list already knows and the detail endpoint does not send.
+    private var rowMetadata: LibraryListItem? {
+        service.libraryRow(for: itemReference)
+    }
+
     private var metadataText: String? {
         var parts: [String] = []
+        if let collection = rowMetadata?.primaryCollection {
+            parts.append(collection.name)
+        }
         if let date = createdAt {
-            let day = LibraryDaySection.dayTitle(for: date, now: Date(), calendar: .current)
+            let day = MediaFormat.dayTitle(for: date)
             parts.append("\(day), \(date.formatted(date: .omitted, time: .shortened))")
         }
-        if let duration = audioDuration.flatMap(LedgerFormat.duration) {
+        if audio?.isComplete != true, let duration = audioDuration.flatMap(MediaFormat.duration) {
             parts.append(duration)
-        } else if let words = wordCount, words > 0 {
+        } else if !isAudioItem, let words = wordCount, words > 0 {
             parts.append("\(words) words")
         }
         if let type = RecordingContentType.all.first(where: { $0.value == audio?.contentType }),
@@ -548,7 +559,7 @@ struct ItemDetailView: View {
                     }
                 }
             }
-            .ledgerListBackground()
+            .themedListBackground()
             .navigationTitle("Tags")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -562,6 +573,14 @@ struct ItemDetailView: View {
 
     // MARK: - Audio Player
 
+    /// The detail's 200 peaks when the server has them, else the row's 32. Without
+    /// either the player keeps a plain track, because it must not draw invented bars.
+    private var playerWaveform: [Int]? {
+        if let peaks = audio?.waveform, WaveformDisplay.hasData(peaks) { return peaks }
+        if let peaks = rowMetadata?.waveform, WaveformDisplay.hasData(peaks) { return peaks }
+        return nil
+    }
+
     @ViewBuilder
     private var audioPlayerSection: some View {
         if let audio, audio.isComplete {
@@ -569,9 +588,10 @@ struct ItemDetailView: View {
                 player: player,
                 audioId: audio.id,
                 knownDuration: audio.duration,
+                waveform: playerWaveform,
                 seekTime: $audioSeekTime
             )
-            .padding(.top, 12)
+            .padding(.top, 14)
             .onScrollVisibilityChange(threshold: 0.2) { isPlayerVisible = $0 }
         }
     }
@@ -587,18 +607,70 @@ struct ItemDetailView: View {
         return nil
     }
 
-    /// Summary first: the reason most people opened this item.
+    private var hasSummarySection: Bool {
+        summary?.summary != nil || isSummaryRunning || isLoadingSummary
+            || summaryFailureMessage != nil || canSummarize
+    }
+
+    private var hasTranscript: Bool {
+        contentText?.isEmpty == false
+    }
+
+    private var visibleTab: DetailTab {
+        if let tabChoice {
+            if tabChoice == .summary, !hasSummarySection { return .transcript }
+            if tabChoice == .transcript, !hasTranscript { return .summary }
+            return tabChoice
+        }
+        let summaryIsWorthOpening = summary?.summary != nil || isSummaryRunning
+            || isLoadingSummary || summaryFailureMessage != nil
+        return summaryIsWorthOpening || !hasTranscript ? .summary : .transcript
+    }
+
+    /// Only when there is a real choice. A PDF has its text and nothing to switch to.
+    @ViewBuilder
+    private var contentTabs: some View {
+        if hasSummarySection, hasTranscript {
+            HStack(spacing: 0) {
+                tabButton("Summary", tab: .summary)
+                tabButton(pdf == nil ? "Transcript" : "Text", tab: .transcript)
+            }
+            .padding(3)
+            .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.radiusMedium, style: .continuous))
+            .padding(.top, 14)
+        }
+    }
+
+    private func tabButton(_ title: String, tab: DetailTab) -> some View {
+        let isSelected = visibleTab == tab
+        return Button {
+            withMotion(Theme.quick) { tabChoice = tab }
+        } label: {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(isSelected ? Theme.text : Theme.textSecondary)
+                .frame(maxWidth: .infinity, minHeight: 38)
+                .background {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(Theme.surface)
+                            .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("detail.tab.\(tab.rawValue)")
+    }
+
+    /// The reason most people opened this item.
     @ViewBuilder
     private var summarySection: some View {
         let summaryText = summary?.summary
         let isWorking = isSummaryRunning || isLoadingSummary
-        if summaryText != nil || isWorking || summaryFailureMessage != nil || canSummarize {
+        if hasSummarySection {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Summary")
-                    .font(.ledgerTitle2)
-                    .foregroundStyle(Theme.text)
-                    .accessibilityAddTraits(.isHeader)
-
                 if isWorking {
                     ProgressNote(text: "Summarizing…")
                 } else if let summaryFailureMessage {
@@ -617,7 +689,7 @@ struct ItemDetailView: View {
                     summarizeButton(title: "Summarize")
                 }
             }
-            .padding(.top, 22)
+            .padding(.top, 16)
         }
     }
 
@@ -670,19 +742,16 @@ struct ItemDetailView: View {
     }
 
     private func summaryListHeading(_ title: String) -> some View {
-        Text(title)
-            .font(.ledgerHeadline)
-            .foregroundStyle(Theme.text)
-            .padding(.top, 10)
-            .accessibilityAddTraits(.isHeader)
+        SectionLabel(title)
+            .padding(.top, 12)
     }
 
     private func summaryListItem(_ text: String, citations: [Citation]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(verbatim: "•")
-                    .font(.ledgerReading)
-                    .foregroundStyle(Theme.textSecondary)
+                Image(systemName: "checkmark")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.accentText)
                     .accessibilityHidden(true)
                 Text(text)
                     .readingText()
@@ -698,25 +767,21 @@ struct ItemDetailView: View {
     private var transcriptSection: some View {
         if let text = contentText, !text.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(pdf == nil ? "Transcript" : "Text")
-                        .font(.ledgerTitle2)
-                        .foregroundStyle(Theme.text)
-                        .accessibilityAddTraits(.isHeader)
-                    Spacer(minLength: 8)
-                    if isAudioItem, availableTranscriptViewModes.count > 1 {
-                        transcriptModeMenu
-                    }
-                }
-
                 if isAudioItem {
+                    HStack(alignment: .firstTextBaseline) {
+                        if transcriptViewMode != .readable || audio?.hasDistinctReadableTranscript == true {
+                            Text(transcriptViewDescription)
+                                .font(.footnote)
+                                .foregroundStyle(Theme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 8)
+                        if availableTranscriptViewModes.count > 1 {
+                            transcriptModeMenu
+                        }
+                    }
                     if transcriptViewMode == .readable {
                         transcriptFormattingState
-                    }
-                    if transcriptViewMode != .readable || audio?.hasDistinctReadableTranscript == true {
-                        Text(transcriptViewDescription)
-                            .font(.footnote)
-                            .foregroundStyle(Theme.textSecondary)
                     }
                 }
 
@@ -728,13 +793,16 @@ struct ItemDetailView: View {
                     ReadingBody(text: visibleTranscriptText ?? text)
                 }
             }
-            .padding(.top, 26)
+            .padding(.top, 12)
         }
     }
 
     private var transcriptModeMenu: some View {
         Menu {
-            Picker("Transcript view", selection: $transcriptViewMode) {
+            Picker("Transcript view", selection: Binding(
+                get: { transcriptViewMode },
+                set: { transcriptModeChoice = $0 }
+            )) {
                 ForEach(availableTranscriptViewModes) { mode in
                     Text(mode.title).tag(mode)
                 }
@@ -747,7 +815,7 @@ struct ItemDetailView: View {
                     .accessibilityHidden(true)
             }
             .font(.subheadline.weight(.medium))
-            .foregroundStyle(Theme.accent)
+            .foregroundStyle(Theme.accentText)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
@@ -758,26 +826,27 @@ struct ItemDetailView: View {
 
     /// Tapping a timestamp plays that moment and leaves the page where it is.
     private var timestampedTranscript: some View {
-        LazyVStack(alignment: .leading, spacing: 0) {
-            ForEach(segments) { segment in
-                Button {
-                    handleSegment(segment)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(segment.locatorLabel)
-                            .font(.footnote.monospacedDigit())
-                            .foregroundStyle(segment.startMs == nil ? Theme.textSecondary : Theme.accent)
-                        Text(segment.text)
-                            .readingText()
-                            .multilineTextAlignment(.leading)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(RowButtonStyle())
-                .accessibilityHint(segment.startMs == nil ? "" : "Plays from this moment")
-                .id(segment.id)
+        TimedTranscript(player: player, segments: segments, onSelect: handleSegment)
+    }
+
+    /// Timed lines when the audio has them, the mockup's transcript, until someone picks.
+    private var transcriptViewMode: TranscriptViewMode {
+        if let transcriptModeChoice { return transcriptModeChoice }
+        return hasTimedSegments ? .timestamps : .readable
+    }
+
+    private var hasTimedSegments: Bool {
+        segments.contains { $0.startMs != nil }
+    }
+
+    /// Back to the line now playing, from anywhere in a long transcript.
+    private var locateActiveSegment: (() -> Void)? {
+        guard isAudioItem, hasTimedSegments else { return nil }
+        return {
+            tabChoice = .transcript
+            transcriptModeChoice = .timestamps
+            if let index = segments.activeSegmentIndex(at: player.currentTime) {
+                scrollTarget = segments[index].id
             }
         }
     }
@@ -830,7 +899,7 @@ struct ItemDetailView: View {
                 ? "Cleaned punctuation and paragraphs with every spoken word preserved."
                 : "Every spoken word from this recording."
         case .timestamps:
-            "Tap a timestamp to play that moment."
+            "Tap a line to play that moment."
         case .original:
             "Untouched speech-to-text from the transcription service."
         }
@@ -907,9 +976,11 @@ struct ItemDetailView: View {
         transcript?.transcriptText ?? audio?.readableTranscriptText ?? pdf?.textContent ?? nil
     }
 
+    /// What copying and exporting hand over. Stamped lines only when someone chose
+    /// them: a plain export stays plain even though timed lines show by default.
     private var visibleTranscriptText: String? {
         guard let audio else { return contentText }
-        switch transcriptViewMode {
+        switch transcriptModeChoice ?? .readable {
         case .readable:
             return audio.readableTranscriptText
         case .original:
@@ -1061,7 +1132,7 @@ struct ItemDetailView: View {
                     }
                 }
             }
-            .ledgerListBackground()
+            .themedListBackground()
             .navigationTitle("Rename Recording")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1162,7 +1233,7 @@ struct ItemDetailView: View {
         defer { isFormattingTranscript = false }
         do {
             applyAudio(try await service.formatAudioTranscript(itemId))
-            transcriptViewMode = .readable
+            transcriptModeChoice = .readable
             Haptics.light()
             startDetailPolling()
         } catch {
@@ -1246,6 +1317,8 @@ struct ItemDetailView: View {
             return
         }
 
+        // A page reference or an untimed passage lives in the text tab.
+        tabChoice = .transcript
         scrollTarget = citation.segmentId
         showChat = false
     }
@@ -1295,6 +1368,64 @@ struct ItemDetailView: View {
     }
 }
 
+// MARK: - Timed transcript
+
+/// Each line can be tapped to play it, and the one playing is highlighted. This is a
+/// view of its own so that playback ticks redraw it alone, not the whole detail page.
+private struct TimedTranscript: View {
+    let player: AudioPlayerService
+    let segments: [MediaSegment]
+    let onSelect: (MediaSegment) -> Void
+
+    var body: some View {
+        // Before anything has played there is nothing to follow.
+        let active = player.hasPlaybackPosition ? segments.activeSegmentIndex(at: player.currentTime) : nil
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in
+                TimedTranscriptLine(segment: segment, isActive: index == active) {
+                    onSelect(segment)
+                }
+                .id(segment.id)
+            }
+        }
+        .padding(.horizontal, -8)
+    }
+}
+
+private struct TimedTranscriptLine: View, Equatable {
+    let segment: MediaSegment
+    let isActive: Bool
+    let action: () -> Void
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.segment.id == rhs.segment.id && lhs.isActive == rhs.isActive
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(segment.locatorLabel)
+                    .font(.number)
+                    .foregroundStyle(segment.startMs == nil ? Theme.textSecondary : Theme.accentText)
+                Text(segment.text)
+                    .readingText()
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .background(
+                isActive ? Theme.surface2 : .clear,
+                in: RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowButtonStyle())
+        .accessibilityHint(segment.startMs == nil ? "" : "Plays from this moment")
+        .accessibilityValue(isActive ? "Now playing" : "")
+    }
+}
+
 // MARK: - Evidence Links
 
 struct CitationChips: View {
@@ -1311,7 +1442,7 @@ struct CitationChips: View {
                         Label(citation.locatorLabel, systemImage: citation.pageNumber == nil ? "play.fill" : "doc.text")
                             .font(.footnote.monospacedDigit())
                             .labelStyle(.titleAndIcon)
-                            .foregroundStyle(Theme.accent)
+                            .foregroundStyle(Theme.accentText)
                             .frame(minHeight: 44)
                             .contentShape(Rectangle())
                     }
@@ -1392,7 +1523,7 @@ struct ExportSheet: View {
                     }
                 }
             }
-            .ledgerListBackground()
+            .themedListBackground()
             .navigationTitle("Export As")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

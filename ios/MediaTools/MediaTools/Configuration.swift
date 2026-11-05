@@ -31,6 +31,7 @@ enum Configuration {
     static let termsURL = URL(string: "\(webAppURL)/terms")!
     static let supportURL = URL(string: "\(webAppURL)/support")!
     static let accountDeletionURL = URL(string: "\(webAppURL)/delete-account")!
+    static let developerURL = URL(string: "\(webAppURL)/app/settings/developer")!
 
     private static func configuredValue(_ key: String) -> String? {
         guard let value = Bundle.main.infoDictionary?[key] as? String else { return nil }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The tokens and type scale are in MediaToolsShared/LedgerTheme.swift, because the
+// The tokens and type scale are in MediaToolsShared/AppTheme.swift, because the
 // extensions need them too. This file holds the app's reusable controls.
 
 // MARK: - Motion
@@ -16,8 +16,8 @@ func withMotion<Result>(_ animation: Animation = Theme.settle, _ body: () throws
 
 // MARK: - Buttons
 
-/// The filled action on a screen. Pills sit at the thumb, as the Record control does;
-/// rounded rectangles sit in forms.
+/// The filled action on a screen. Every one is a pill, at the height of the thumb
+/// target; `pill` is the larger size used beside the Record control.
 struct PrimaryButtonStyle: ButtonStyle {
     enum Shape {
         case pill
@@ -48,12 +48,7 @@ struct PrimaryButtonStyle: ButtonStyle {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, minHeight: shape == .pill ? 56 : 52)
-                .background {
-                    switch shape {
-                    case .pill: Capsule().fill(fill)
-                    case .rounded: RoundedRectangle(cornerRadius: 14, style: .continuous).fill(fill)
-                    }
-                }
+                .background(fill, in: Capsule())
                 .contentShape(Rectangle())
                 .opacity(isEnabled ? (configuration.isPressed ? 0.88 : 1) : 0.45)
                 .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
@@ -64,7 +59,7 @@ struct PrimaryButtonStyle: ButtonStyle {
 
 /// A text action in the accent color, with a full-size target around it.
 struct QuietButtonStyle: ButtonStyle {
-    var color: Color = Theme.accent
+    var color: Color = Theme.accentText
 
     func makeBody(configuration: ButtonStyleConfiguration) -> some View {
         QuietButtonBody(configuration: configuration, color: color)
@@ -92,7 +87,7 @@ struct RowButtonStyle: ButtonStyle {
     func makeBody(configuration: ButtonStyleConfiguration) -> some View {
         configuration.label
             .contentShape(Rectangle())
-            .background(configuration.isPressed ? Theme.fill : .clear)
+            .background(configuration.isPressed ? Theme.surface2 : .clear)
     }
 }
 
@@ -120,14 +115,14 @@ struct PressFeedbackButtonStyle: ButtonStyle {
 
 // MARK: - Text
 
-/// New York at a comfortable measure and line height, for summaries and transcripts.
+/// The system font at a comfortable measure and line height, for summaries and transcripts.
 struct ReadingTextModifier: ViewModifier {
     /// About half an extra line, for the mockup's 1.5 line height at Body.
     @ScaledMetric(relativeTo: .body) private var lineSpacing: CGFloat = 6
 
     func body(content: Content) -> some View {
         content
-            .font(.ledgerReading)
+            .font(.reading)
             .lineSpacing(lineSpacing)
             .foregroundStyle(Theme.text)
     }
@@ -154,7 +149,7 @@ private struct ReadingMeasureModifier: ViewModifier {
     }
 }
 
-/// An error stays in ink with an icon. Red means a recording is running.
+/// An error is plain text with an icon. Red is kept for destructive actions.
 struct InlineError: View {
     let message: String
     var identifier: String?
@@ -242,8 +237,8 @@ struct ProgressNote: View {
 // MARK: - Fields
 
 extension View {
-    /// A form field on the paper background.
-    func ledgerField() -> some View {
+    /// A form field on the page background.
+    func themedField() -> some View {
         self
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -258,22 +253,52 @@ extension View {
 
     /// The standard page margin: 20 points on the largest iPhones, 16 elsewhere, the
     /// same as the system's large titles and search field.
-    func ledgerPageMargin() -> some View {
+    func pageMargin() -> some View {
         modifier(PageMarginModifier())
     }
 
-    /// A bar over scrolling content: the system material, warmed to match the paper.
-    func ledgerBarBackground() -> some View {
+    /// A bar over scrolling content: the system material, warmed to match the page.
+    func barBackground() -> some View {
         self
-            .background(Theme.bg.opacity(0.82))
+            .background(Theme.background.opacity(0.82))
             .background(.ultraThinMaterial)
     }
 
-    /// A grouped native list on the paper background.
-    func ledgerListBackground() -> some View {
+    /// A grouped native list on the page background.
+    func themedListBackground() -> some View {
         self
             .scrollContentBackground(.hidden)
-            .background(Theme.bg)
+            .background(Theme.background)
+    }
+}
+
+extension View {
+    /// A tab's title lives in its page, so there is no bar to stop content scrolling
+    /// under the clock. This paints the status bar's area in the page color instead.
+    func statusBarBackdrop() -> some View {
+        safeAreaInset(edge: .top, spacing: 0) {
+            Color.clear
+                .frame(height: 0)
+                .background(Theme.background)
+        }
+    }
+
+    /// Keeps a list or scroll view at a deliberate width on iPad, with the scroll
+    /// indicator still at the screen's edge. Phones are narrower than the limit.
+    func readableContentWidth(_ limit: CGFloat = Theme.readableWidth, minimumMargin: CGFloat = 0) -> some View {
+        modifier(ReadableContentWidthModifier(limit: limit, minimumMargin: minimumMargin))
+    }
+}
+
+private struct ReadableContentWidthModifier: ViewModifier {
+    let limit: CGFloat
+    let minimumMargin: CGFloat
+    @State private var width: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .contentMargins(.horizontal, max(minimumMargin, (width - limit) / 2), for: .scrollContent)
+            .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
     }
 }
 
@@ -300,6 +325,9 @@ struct Hairline: View {
 }
 
 extension Theme {
+    /// The widest a list runs on iPad, about where a row's excerpt stays readable.
+    static let readableWidth: CGFloat = 720
+
     static func pageMargin(forWidth width: CGFloat) -> CGFloat {
         width >= 414 ? 20 : 16
     }
@@ -307,20 +335,43 @@ extension Theme {
 
 // MARK: - Durations
 
-enum LedgerFormat {
-    /// "0:31" for short recordings and "42 min" once seconds stop mattering.
+enum MediaFormat {
+    /// "0:31", "42:10", and "1:29:12": the digits a person sees on any audio player.
     static func duration(_ seconds: Double) -> String? {
         guard seconds.isFinite, seconds > 0 else { return nil }
         let total = Int(seconds.rounded(.down))
-        if total < 600 {
-            return "\(total / 60):\(String(format: "%02d", total % 60))"
+        let hours = total / 3_600
+        let minutes = (total % 3_600) / 60
+        let remainder = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, remainder)
         }
-        let minutes = total / 60
-        if minutes < 60 {
-            return "\(minutes) min"
+        return String(format: "%d:%02d", minutes, remainder)
+    }
+
+    /// The date a row shows: the time today, then "Yesterday", then "Oct 19".
+    static func rowDate(_ date: Date?, now: Date = Date(), calendar: Calendar = .current) -> String? {
+        guard let date else { return nil }
+        if calendar.isDate(date, inSameDayAs: now) {
+            var style = Date.FormatStyle(date: .omitted, time: .shortened)
+            style.timeZone = calendar.timeZone
+            return date.formatted(style)
         }
-        let hours = minutes / 60
-        let remainder = minutes % 60
-        return remainder == 0 ? "\(hours) hr" : "\(hours) hr \(remainder) min"
+        return dayTitle(for: date, now: now, calendar: calendar)
+    }
+
+    /// The day alone: "Today", "Yesterday", then "Oct 19", with the year once it differs.
+    static func dayTitle(for date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+        if calendar.isDate(date, inSameDayAs: now) { return "Today" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+           calendar.isDate(date, inSameDayAs: yesterday) {
+            return "Yesterday"
+        }
+        var format = Date.FormatStyle(date: .omitted, time: .omitted).month(.abbreviated).day()
+        format.timeZone = calendar.timeZone
+        if calendar.component(.year, from: date) != calendar.component(.year, from: now) {
+            format = format.year()
+        }
+        return date.formatted(format)
     }
 }

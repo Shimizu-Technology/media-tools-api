@@ -38,25 +38,25 @@ private struct QuickRecordWidget: Widget {
         StaticConfiguration(kind: kind, provider: QuickRecordProvider()) { _ in
             VStack(alignment: .leading, spacing: 6) {
                 Text("Media Tools")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.onHero)
 
                 Spacer(minLength: 0)
 
                 Button(intent: QuickRecordIntent()) {
-                    Label("Record", systemImage: "mic")
-                        .font(.headline)
-                        .foregroundStyle(Theme.onAccent)
+                    Label("Record", systemImage: "mic.fill")
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .foregroundStyle(Theme.heroIcon)
                         .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Theme.accentFill, in: Capsule())
+                        .background(Theme.onHero, in: Capsule())
                 }
                 .buttonStyle(.plain)
 
                 Text("Tap again to stop.")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(Theme.onHero)
             }
-            .containerBackground(Theme.bg, for: .widget)
+            .containerBackground(for: .widget) { Theme.heroGradient }
         }
         .configurationDisplayName("Quick Record")
         .description("Open Media Tools to start recording, then stop from the Live Activity.")
@@ -74,7 +74,7 @@ private struct QuickRecordControl: ControlWidget {
             ControlWidgetButton(action: QuickRecordIntent()) {
                 Label("Quick Record", systemImage: "mic.fill")
             }
-            .tint(Theme.accentFill)
+            .tint(Theme.heroIcon)
         }
         .displayName("Quick Record")
         .description("Start or stop a private Media Tools recording.")
@@ -89,21 +89,19 @@ private struct RecordingLiveActivity: Widget {
             HStack(spacing: 14) {
                 Image(systemName: activityIcon(for: context.state))
                     .font(.headline)
-                    .foregroundStyle(activityColor(for: context.state))
+                    .foregroundStyle(Theme.onHero)
                     .frame(width: 24)
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(activityTitle(for: context.state))
-                        .font(.system(.headline, design: .serif, weight: .semibold))
-                        .foregroundStyle(Theme.text)
+                        .font(.system(.headline, design: .rounded, weight: .bold))
                     Text(context.attributes.contentTypeLabel)
                         .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
                     RecordingTimer(state: context.state)
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(Theme.textSecondary)
                 }
+                .foregroundStyle(Theme.onHero)
 
                 Spacer()
 
@@ -113,9 +111,9 @@ private struct RecordingLiveActivity: Widget {
                             Button(intent: ResumeRecordingIntent()) {
                                 Image(systemName: "play.fill")
                                     .font(.headline)
-                                    .foregroundStyle(Theme.text)
+                                    .foregroundStyle(Theme.onHero)
                                     .frame(width: 44, height: 44)
-                                    .background(Theme.fill, in: Circle())
+                                    .background(Theme.onHero.opacity(0.22), in: Circle())
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Resume recording")
@@ -123,9 +121,9 @@ private struct RecordingLiveActivity: Widget {
                             Button(intent: PauseRecordingIntent()) {
                                 Image(systemName: "pause.fill")
                                     .font(.headline)
-                                    .foregroundStyle(Theme.text)
+                                    .foregroundStyle(Theme.onHero)
                                     .frame(width: 44, height: 44)
-                                    .background(Theme.fill, in: Circle())
+                                    .background(Theme.onHero.opacity(0.22), in: Circle())
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Pause recording")
@@ -135,17 +133,18 @@ private struct RecordingLiveActivity: Widget {
                     Button(intent: StopRecordingIntent()) {
                         Image(systemName: "stop.fill")
                             .font(.headline)
-                            .foregroundStyle(Theme.onRecord)
+                            .foregroundStyle(Theme.heroIcon)
                             .frame(width: 44, height: 44)
-                            .background(Theme.record, in: Circle())
+                            .background(Theme.onHero, in: Circle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Stop and save recording")
                 }
             }
             .padding(16)
-            .activityBackgroundTint(Theme.bg)
-            .activitySystemActionForegroundColor(Theme.text)
+            .background(Theme.heroGradient)
+            .activityBackgroundTint(Theme.heroIcon)
+            .activitySystemActionForegroundColor(Theme.onHero)
             .widgetURL(URL(string: "mediatools://record"))
         } dynamicIsland: { context in
             DynamicIsland {
@@ -171,14 +170,14 @@ private struct RecordingLiveActivity: Widget {
                                         .font(.caption.weight(.semibold))
                                 }
                                 .buttonStyle(.bordered)
-                                .tint(Theme.text)
+                                .tint(.white)
                             } else {
                                 Button(intent: PauseRecordingIntent()) {
                                     Label("Pause", systemImage: "pause.fill")
                                         .font(.caption.weight(.semibold))
                                 }
                                 .buttonStyle(.bordered)
-                                .tint(Theme.text)
+                                .tint(.white)
                             }
                         }
                         Button(intent: StopRecordingIntent()) {
@@ -186,7 +185,7 @@ private struct RecordingLiveActivity: Widget {
                                 .font(.caption.weight(.semibold))
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(Theme.record)
+                        .tint(Theme.heroIcon)
                     }
                 }
             } compactLeading: {
@@ -201,9 +200,12 @@ private struct RecordingLiveActivity: Widget {
                     .foregroundStyle(activityColor(for: context.state))
             }
             .widgetURL(URL(string: "mediatools://record"))
-            .keylineTint(Theme.record)
+            .keylineTint(Theme.heroIcon)
         }
     }
+
+    /// Readable on the Dynamic Island's black background in every appearance.
+    private static let islandRecording = Color(red: 0xFF / 255, green: 0x8F / 255, blue: 0x5E / 255)
 
     private func activityTitle(for state: RecordingActivityAttributes.ContentState) -> String {
         if state.isInterrupted { return "Recording interrupted" }
@@ -218,8 +220,9 @@ private struct RecordingLiveActivity: Widget {
     }
 
     private func activityColor(for state: RecordingActivityAttributes.ContentState) -> Color {
-        // Red only while audio is actually being captured.
-        state.isInterrupted || state.isPaused ? Theme.text : Theme.record
+        // The Dynamic Island is always dark: warm only while audio is being captured,
+        // and color is not the only signal, because the icon changes too.
+        state.isInterrupted || state.isPaused ? .white : Self.islandRecording
     }
 }
 

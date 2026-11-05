@@ -55,6 +55,31 @@ struct LibraryQuery: Hashable {
     let sort: LibrarySortOrder
     let search: String
     var archivedOnly = false
+    var favoriteOnly = false
+}
+
+/// The Library's one row of filters. Status, sort, and collection sit in its filter
+/// menu, because most people never need them.
+enum LibraryChip: String, CaseIterable, Hashable, Identifiable {
+    case all
+    case recordings
+    case links
+    case pdfs
+    case starred
+    case archived
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .recordings: "Recordings"
+        case .links: "Links"
+        case .pdfs: "PDFs"
+        case .starred: "Starred"
+        case .archived: "Archived"
+        }
+    }
 }
 
 /// Owns the Library snapshot independently from its navigation destination.
@@ -71,6 +96,7 @@ final class LibraryViewModel {
     var sortOrder: LibrarySortOrder = .newest
     var searchText = ""
     var showsArchived = false
+    var showsFavoritesOnly = false
     var visibleReference: LibraryReference?
     /// Collections are a filter over the Library. The server's list endpoint has no
     /// collection parameter, so a chosen collection shows its own item list.
@@ -122,8 +148,33 @@ final class LibraryViewModel {
             status: selectedStatus,
             sort: sortOrder,
             search: searchText.trimmingCharacters(in: .whitespacesAndNewlines),
-            archivedOnly: showsArchived
+            archivedOnly: showsArchived,
+            favoriteOnly: showsFavoritesOnly
         )
+    }
+
+    var selectedChip: LibraryChip {
+        get {
+            if showsArchived { return .archived }
+            if showsFavoritesOnly { return .starred }
+            switch selectedType {
+            case .all: return .all
+            case .audio: return .recordings
+            case .youtube: return .links
+            case .pdf: return .pdfs
+            }
+        }
+        set {
+            selectedCollection = nil
+            showsArchived = newValue == .archived
+            showsFavoritesOnly = newValue == .starred
+            switch newValue {
+            case .all, .starred, .archived: selectedType = .all
+            case .recordings: selectedType = .audio
+            case .links: selectedType = .youtube
+            case .pdfs: selectedType = .pdf
+            }
+        }
     }
 
     var hasMore: Bool {
@@ -351,7 +402,8 @@ final class LibraryViewModel {
             status: requestedQuery.status.queryValue,
             search: requestedQuery.search,
             sortDirection: requestedQuery.sort.direction,
-            archivedOnly: requestedQuery.archivedOnly
+            archivedOnly: requestedQuery.archivedOnly,
+            favoriteOnly: requestedQuery.favoriteOnly
         )
     }
 
@@ -365,6 +417,9 @@ final class LibraryViewModel {
         for requestedQuery: LibraryQuery
     ) -> [LibraryListItem] {
         var result = source.filter { $0.archived == requestedQuery.archivedOnly }
+        if requestedQuery.favoriteOnly {
+            result = result.filter(\.favorite)
+        }
         if let type = requestedQuery.type.queryValue {
             result = result.filter { $0.itemType == type }
         }
@@ -393,7 +448,8 @@ final class LibraryViewModel {
               requestedQuery.status == .all,
               requestedQuery.sort == .newest,
               requestedQuery.search.isEmpty,
-              !requestedQuery.archivedOnly
+              !requestedQuery.archivedOnly,
+              !requestedQuery.favoriteOnly
         else { return }
 
         SpotlightService.indexLibraryItems(recentItems)

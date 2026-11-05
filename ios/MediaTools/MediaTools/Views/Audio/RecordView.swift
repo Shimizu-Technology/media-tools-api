@@ -20,73 +20,58 @@ struct RecordingContentType: Identifiable, Hashable {
     ]
 }
 
+/// The whole recorder. While audio is being captured it is the full gradient screen;
+/// before and after, it is a plain page with the result and anything still saved here.
 struct RecordView: View {
+    /// The in-app default. Most recordings never need another type.
+    static let defaultContentType = "general"
+
     @Environment(RecordingCoordinator.self) private var recorder
     @Environment(RecordingUploadCoordinator.self) private var uploader
     @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var contentType = "general"
+    @State private var contentType = RecordView.defaultContentType
     @State private var isUploading = false
     @State private var uploadResult: AudioTranscription?
     @State private var pollingTask: Task<Void, Never>?
     @State private var error: String?
     @State private var recordingToDiscard: LocalRecording?
-    @State private var showFilePicker: Bool
+    @State private var showFilePicker = false
     @State private var sharedItemToRemove: ShareInboxStore.Item?
     @State private var startedAt: Date?
     /// Sized from a text style so the clock grows with Dynamic Type, and the line
     /// shrinks it back down rather than wrapping once it runs out of room.
     @ScaledMetric(relativeTo: .largeTitle) private var timerSize: CGFloat = 76
+    private let onClose: (() -> Void)?
+    private let onOpenItem: ((LibraryReference) -> Void)?
 
     private let service = MediaToolsService.shared
 
-    init(opensImporterOnAppear: Bool = false) {
-        _showFilePicker = State(initialValue: opensImporterOnAppear)
+    init(onClose: (() -> Void)? = nil, onOpenItem: ((LibraryReference) -> Void)? = nil) {
+        self.onClose = onClose
+        self.onOpenItem = onOpenItem
+    }
+
+    /// Starting counts, so a press lands on the gradient straight away, even while
+    /// the microphone comes up or iOS asks for permission.
+    private var showsActiveCapture: Bool {
+        recorder.isRecording || recorder.isStarting
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            ScrollViewReader { scrollProxy in
-                ScrollView {
-                    VStack(spacing: 0) {
-                        if recorder.isRecording {
-                            activeCapture
-                                .frame(minHeight: geometry.size.height)
-                        } else {
-                            idleCapture
-                            workBelowCapture
-                        }
-                    }
-                    .frame(maxWidth: 560)
-                    .frame(maxWidth: .infinity)
-                }
-                .scrollBounceBehavior(.basedOnSize)
-                .onChange(of: uploader.latestItemSignature) { _, _ in
-                    withMotion {
-                        uploadResult = uploader.latestItem
-                    }
-                    guard uploader.latestItem != nil else { return }
-                    Task { @MainActor in
-                        // Let SwiftUI commit the result before resolving its scroll
-                        // target. This avoids an occasional no-op when the upload
-                        // state and its insertion arrive in one update.
-                        await Task.yield()
-                        try? await Task.sleep(for: .milliseconds(100))
-                        withMotion {
-                            scrollProxy.scrollTo("upload-result", anchor: .center)
-                        }
-                    }
-                }
+        Group {
+            if showsActiveCapture {
+                activeCapture
+            } else {
+                idleCapture
             }
         }
-        .background(Theme.bg)
-        .navigationTitle("Record")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            // Named for Back and VoiceOver. The screen itself carries no title bar text.
-            ToolbarItem(placement: .principal) {
-                Text(verbatim: "")
-                    .accessibilityHidden(true)
+        // White text and status bar on the gradient, in light mode too.
+        .preferredColorScheme(showsActiveCapture ? .dark : nil)
+        .toolbar(.hidden, for: .navigationBar)
+        .onChange(of: uploader.latestItemSignature) { _, _ in
+            withMotion {
+                uploadResult = uploader.latestItem
             }
         }
         .fileImporter(
@@ -188,115 +173,123 @@ struct RecordView: View {
     // MARK: - While recording
 
     private var activeCapture: some View {
-        VStack(spacing: 0) {
-            statusLine
-                .padding(.top, 20)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 0) {
+                    activeTopRow
 
-            timer
-                .padding(.top, 32)
+                    timer
+                        .padding(.top, 20)
 
-            Text("New recording")
-                .font(.ledgerTitle3)
-                .foregroundStyle(Theme.text)
-                .multilineTextAlignment(.center)
-                .padding(.top, 28)
+                    Text("New recording")
+                        .font(.displayTitle3)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 12)
 
-            if let startedAtText {
-                Text(startedAtText)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 4)
+                    if let startedAtText {
+                        Text(startedAtText)
+                            .font(.subheadline.weight(.medium))
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 2)
+                    }
+
+                    LiveLevelBars(levels: recorder.levelMeter.levels)
+                        .frame(height: 112)
+                        .frame(maxWidth: 420)
+                        .padding(.top, 28)
+                        .opacity(recorder.captureState == .recording ? 1 : 0.55)
+
+                    Spacer(minLength: 28)
+
+                    captureControls
+                        .opacity(recorder.isRecording ? 1 : 0)
+                        .allowsHitTesting(recorder.isRecording)
+                        .accessibilityHidden(!recorder.isRecording)
+
+                    Text(captureHint)
+                        .font(.footnote.weight(.medium))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 18)
+                        .padding(.bottom, 12)
+                }
+                .foregroundStyle(Theme.onHero)
+                .padding(.horizontal, 24)
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: geometry.size.height)
             }
-
-            signalMeter
-                .padding(.top, 32)
-
-            Spacer(minLength: 32)
-
-            captureControls
-
-            Text(captureHint)
-                .font(.footnote)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 20)
-                .padding(.bottom, 12)
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .padding(.horizontal, 24)
+        .background(Theme.heroGradient.ignoresSafeArea())
+    }
+
+    /// The status, centered, with a way back to reading on the left.
+    private var activeTopRow: some View {
+        ZStack {
+            statusLine
+            HStack {
+                if let onClose {
+                    Button(action: onClose) {
+                        Image(systemName: "chevron.down")
+                            .font(.body.weight(.semibold))
+                            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressFeedbackButtonStyle())
+                    .accessibilityLabel("Keep recording and go back")
+                    .accessibilityIdentifier("recording.minimize")
+                }
+                Spacer()
+            }
+            .padding(.leading, -12)
+        }
+        .frame(minHeight: 44)
+        .padding(.top, 4)
     }
 
     private var statusLine: some View {
         HStack(spacing: 8) {
             switch recorder.captureState {
             case .recording:
-                Circle()
-                    .fill(Theme.record)
-                    .frame(width: 12, height: 12)
-                    .accessibilityHidden(true)
+                RecordingPulseDot(size: 10)
                 Text("Recording")
-                    .foregroundStyle(Theme.record)
             case .paused:
                 Image(systemName: "pause.fill")
-                    .foregroundStyle(Theme.textSecondary)
                     .accessibilityHidden(true)
                 Text("Paused")
-                    .foregroundStyle(Theme.textSecondary)
-            default:
+            case .interrupted:
                 Image(systemName: "exclamationmark.circle")
-                    .foregroundStyle(Theme.text)
                     .accessibilityHidden(true)
                 Text("Interrupted")
-                    .foregroundStyle(Theme.text)
+            case .idle:
+                ProgressView()
+                    .tint(Theme.onHero)
+                Text("Preparing microphone")
             }
         }
-        .font(.body.weight(.semibold))
+        .font(.subheadline.weight(.semibold))
     }
 
     private var timer: some View {
         Text(recorder.formattedDuration)
-            .font(.system(size: timerSize, weight: .regular, design: .serif))
+            .font(.system(size: timerSize, weight: .heavy, design: .rounded))
             .monospacedDigit()
-            .foregroundStyle(recorder.isRecording ? Theme.text : Theme.textSecondary)
             .lineLimit(1)
             .minimumScaleFactor(0.4)
             .accessibilityIdentifier("recording.timer")
     }
 
     private var startedAtText: String? {
-        guard let startedAt else { return nil }
-        let day = startedAt.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
-        return "\(day) · \(startedAt.formatted(date: .omitted, time: .shortened))"
+        let start = startedAt ?? (recorder.isStarting ? Date() : nil)
+        guard let start else { return nil }
+        let day = start.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+        return "\(day), \(start.formatted(date: .omitted, time: .shortened))"
     }
-
-    /// The level meter moves only with the microphone, and steps without
-    /// interpolating when Reduce Motion is on.
-    private var signalMeter: some View {
-        HStack(spacing: 3) {
-            ForEach(Array(Self.meterShape.enumerated()), id: \.offset) { _, scale in
-                Capsule()
-                    .fill(Theme.textSecondary.opacity(0.75))
-                    .frame(
-                        width: 3,
-                        height: recorder.captureState == .recording
-                            ? 3 + 27 * recorder.audioLevel * scale
-                            : 3
-                    )
-            }
-        }
-        .frame(height: 32)
-        .animation(reduceMotion ? nil : .linear(duration: 0.1), value: recorder.audioLevel)
-        .accessibilityHidden(true)
-    }
-
-    private static let meterShape: [CGFloat] = [
-        0.8, 0.27, 1, 0.2, 0.1, 0.17, 0.47, 0.17, 0.8, 0.3, 0.1, 0.47, 0.4, 0.1, 0.17, 1, 1, 0.17, 0.4,
-        0.17, 0.47, 1, 0.1, 0.3, 0.17, 0.4, 0.2, 0.2, 0.3, 0.1, 0.3, 0.3, 1, 0.1, 0.4, 0.1, 0.47, 0.27,
-    ]
 
     private var captureControls: some View {
-        HStack(alignment: .top, spacing: 56) {
+        HStack(alignment: .center, spacing: 36) {
             if !recorder.isInterrupted {
                 Button {
                     if recorder.isPaused {
@@ -306,13 +299,14 @@ struct RecordView: View {
                         Haptics.medium()
                     }
                 } label: {
-                    captureControlLabel(
-                        title: recorder.isPaused ? "Resume" : "Pause",
-                        systemImage: recorder.isPaused ? "play.fill" : "pause.fill",
-                        background: Theme.surface,
-                        foreground: Theme.text,
-                        hasHairline: true
-                    )
+                    Image(systemName: recorder.isPaused ? "play.fill" : "pause.fill")
+                        .font(.title2)
+                        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                        .foregroundStyle(Theme.onHero)
+                        .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                        .frame(width: 76, height: 76)
+                        .background(Theme.onHero.opacity(0.22), in: Circle())
+                        .contentShape(Circle())
                 }
                 .buttonStyle(PressFeedbackButtonStyle())
                 .accessibilityLabel(recorder.isPaused ? "Resume recording" : "Pause recording")
@@ -327,13 +321,13 @@ struct RecordView: View {
                 recorder.stop()
                 Haptics.medium()
             } label: {
-                captureControlLabel(
-                    title: "Stop",
-                    systemImage: "stop.fill",
-                    background: Theme.record,
-                    foreground: Theme.onRecord,
-                    hasHairline: false
-                )
+                Image(systemName: "stop.fill")
+                    .font(.largeTitle)
+                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    .foregroundStyle(Theme.heroIcon)
+                    .frame(width: 92, height: 92)
+                    .background(Theme.onHero, in: Circle())
+                    .contentShape(Circle())
             }
             .buttonStyle(PressFeedbackButtonStyle())
             .accessibilityLabel("Stop and save recording")
@@ -341,69 +335,68 @@ struct RecordView: View {
         }
     }
 
-    private func captureControlLabel(
-        title: String,
-        systemImage: String,
-        background: Color,
-        foreground: Color,
-        hasHairline: Bool
-    ) -> some View {
-        VStack(spacing: 10) {
-            Image(systemName: systemImage)
-                .font(.title2)
-                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-                .foregroundStyle(foreground)
-                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
-                .frame(width: 76, height: 76)
-                .background(background, in: Circle())
-                .overlay {
-                    if hasHairline {
-                        Circle().stroke(Theme.separator, lineWidth: 0.5)
-                    }
-                }
-            Text(title)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Theme.textSecondary)
-        }
-        .frame(minWidth: 88)
-        .contentShape(Rectangle())
-    }
-
     private var captureHint: String {
+        if recorder.isStarting { return "Your recording starts as soon as the microphone is ready." }
         if recorder.isInterrupted {
             return "Another audio source paused capture. It will resume when iOS allows, or you can stop and save now."
         }
         if recorder.isPaused { return "No audio is being added. Resume when you’re ready, or stop and save." }
-        return "Press the Action Button again to stop."
+        return UIDevice.current.userInterfaceIdiom == .phone
+            ? "Press the Action Button again to stop."
+            : "Tap stop to save."
     }
 
     // MARK: - Ready
 
     private var idleCapture: some View {
-        VStack(spacing: 0) {
-            timer
-                .padding(.top, 24)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if let onClose {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.body.weight(.semibold))
+                            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                            .foregroundStyle(Theme.accentText)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressFeedbackButtonStyle())
+                    .padding(.leading, -12)
+                    .accessibilityLabel("Close")
+                    .accessibilityIdentifier("record.close")
+                }
 
-            Text(captureTitle)
-                .font(.ledgerTitle3)
-                .foregroundStyle(Theme.text)
-                .multilineTextAlignment(.center)
-                .padding(.top, 16)
+                uploadResultSection
+                    .padding(.bottom, uploadResult == nil ? 0 : 20)
 
-            Text(captureDetail)
-                .font(.footnote)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 6)
+                Text(captureTitle)
+                    .font(.displayTitle)
+                    .tracking(-0.3)
+                    .foregroundStyle(Theme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
 
-            captureActionButton
-                .padding(.top, 24)
+                Text(captureDetail)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
 
-            secondaryCaptureOptions
-                .padding(.top, 6)
+                captureActionButton
+                    .padding(.top, 18)
+
+                secondaryCaptureOptions
+                    .padding(.top, 6)
+
+                workBelowCapture
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 8)
+            .frame(maxWidth: 560)
+            .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 24)
+        .scrollBounceBehavior(.basedOnSize)
+        .background(Theme.background)
     }
 
     private var captureActionButton: some View {
@@ -412,23 +405,16 @@ struct RecordView: View {
             recorder.start(contentType: contentType)
             Haptics.medium()
         } label: {
-            if recorder.isStarting {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .tint(Theme.onAccent)
-                    Text("Preparing microphone")
-                }
-            } else {
-                Label("Record", systemImage: "mic")
-            }
+            Label("Record", systemImage: "mic.fill")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Theme.onHero)
+                .frame(maxWidth: .infinity, minHeight: 56)
+                .background(Theme.heroGradient, in: Capsule())
+                .contentShape(Capsule())
         }
-        .buttonStyle(PrimaryButtonStyle(shape: .pill))
+        .buttonStyle(PressFeedbackButtonStyle(pressedScale: 0.97))
         .disabled(isUploading || recorder.isStarting)
-        .accessibilityLabel(
-            recorder.isStarting
-                ? "Preparing microphone"
-                : "Start recording"
-        )
+        .accessibilityLabel("Start recording")
         .accessibilityHint("Begins recording from the microphone")
         .accessibilityValue("Not recording")
     }
@@ -440,7 +426,7 @@ struct RecordView: View {
                 contentTypeMenu
                 uploadButton
             }
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 contentTypeMenu
                 uploadButton
             }
@@ -462,7 +448,7 @@ struct RecordView: View {
                     .accessibilityHidden(true)
             }
             .font(.subheadline.weight(.medium))
-            .foregroundStyle(Theme.accent)
+            .foregroundStyle(Theme.accentText)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
@@ -494,13 +480,11 @@ struct RecordView: View {
                        let settingsURL = URL(string: UIApplication.openSettingsURLString) {
                         Link("Open Settings", destination: settingsURL)
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Theme.accent)
+                            .foregroundStyle(Theme.accentText)
                             .frame(minHeight: 44)
                     }
                 }
             }
-
-            uploadResultSection
 
             // Device-local recovery queue. These files remain available
             // across relaunches until the server has accepted them.
@@ -529,14 +513,13 @@ struct RecordView: View {
                 }
             }
         }
-        .padding(.horizontal, 24)
         .padding(.top, 20)
         .padding(.bottom, 32)
     }
 
     private func savedSectionLabel(_ title: String) -> some View {
         Text(title)
-            .font(.ledgerSectionLabel)
+            .font(.sectionLabel)
             .foregroundStyle(Theme.textSecondary)
             .padding(.bottom, 6)
             .accessibilityAddTraits(.isHeader)
@@ -549,7 +532,7 @@ struct RecordView: View {
             VStack(alignment: .leading, spacing: 8) {
                 if result.status == "completed" {
                     Text("Transcription complete!")
-                        .font(.ledgerHeadline)
+                        .font(.displayHeadline)
                         .foregroundStyle(Theme.text)
 
                     if result.wordCount ?? 0 > 0 {
@@ -607,20 +590,20 @@ struct RecordView: View {
                     }
                 }
             }
+            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .id("upload-result")
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusLarge, style: .continuous))
         }
     }
 
+    @ViewBuilder
     private func viewDetailsLink(for result: AudioTranscription) -> some View {
-        NavigationLink(value: AppRoute.item(LibraryReference(itemType: "audio", itemId: result.id))) {
-            Text("View Details")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.accent)
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+        if let onOpenItem {
+            Button("View Details") {
+                onOpenItem(LibraryReference(itemType: "audio", itemId: result.id))
+            }
+            .buttonStyle(QuietButtonStyle())
         }
-        .buttonStyle(.plain)
     }
 
     private var recordAnotherButton: some View {
@@ -635,7 +618,7 @@ struct RecordView: View {
     private func sharedItemRow(_ item: ShareInboxStore.Item) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(item.originalName)
-                .font(.ledgerRowTitle)
+                .font(.rowTitle)
                 .foregroundStyle(Theme.text)
                 .lineLimit(2)
             Text(uploader.shareStatusMessage(for: item))
@@ -659,7 +642,7 @@ struct RecordView: View {
                     ShareLink(item: fileURL) {
                         Image(systemName: "square.and.arrow.up")
                             .font(.subheadline)
-                            .foregroundStyle(Theme.accent)
+                            .foregroundStyle(Theme.accentText)
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
@@ -680,7 +663,7 @@ struct RecordView: View {
         if recorder.isStarting { return "Setting up a secure on-device audio session." }
         if recorder.storageIsLow { return "Free at least 100 MB before starting a new recording." }
         if recorder.statusMessage != nil {
-            return "The previous recording is saved. The clock is reset and ready when you are."
+            return "The previous recording is saved."
         }
         return aiProcessingConsent.isAutoTranscribeEnabled
             ? "Record only with required permission. Audio is saved on this iPhone first, then transcribed automatically."
@@ -690,7 +673,7 @@ struct RecordView: View {
     private func localRecordingRow(_ recording: LocalRecording) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(recording.displayTitle)
-                .font(.ledgerRowTitle)
+                .font(.rowTitle)
                 .foregroundStyle(Theme.text)
                 .fixedSize(horizontal: false, vertical: true)
             Text("\(recording.formattedDuration)  ·  \(recording.recoveryDescription)")
@@ -724,7 +707,7 @@ struct RecordView: View {
                     ShareLink(item: fileURL) {
                         Label("Export for Recovery", systemImage: "square.and.arrow.up")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Theme.accent)
+                            .foregroundStyle(Theme.accentText)
                             .frame(minHeight: 44)
                             .contentShape(Rectangle())
                     }

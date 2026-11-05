@@ -23,7 +23,7 @@ struct AIContentReportSheet: View {
                         Text("Shimizu Technology can review this output and use the report to improve safeguards.")
                     } actions: {
                         Button("Done") { dismiss() }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(QuietButtonStyle())
                     }
                 } else {
                     Form {
@@ -74,7 +74,7 @@ struct AIContentReportSheet: View {
                         }
                     }
                     .scrollDismissesKeyboard(.interactively)
-                    .ledgerListBackground()
+                    .themedListBackground()
                 }
             }
             .navigationTitle("Report AI output")

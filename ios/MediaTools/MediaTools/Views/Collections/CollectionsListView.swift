@@ -5,14 +5,43 @@ struct CollectionsListView: View {
     @State private var showCreateSheet = false
     @State private var newName = ""
     @State private var newDescription = ""
+    @State private var listWidth: CGFloat = 0
+    @State private var hasLoaded = false
+
+    private var rowInsets: EdgeInsets {
+        let margin = Theme.pageMargin(forWidth: min(listWidth, Theme.readableWidth))
+        return EdgeInsets(top: 0, leading: margin, bottom: 0, trailing: margin)
+    }
 
     var body: some View {
         List {
-            if service.collections.isEmpty && !service.isLoading {
-                ContentUnavailableView(
-                    "No Collections",
+            VStack(alignment: .leading, spacing: 2) {
+                ScreenHeader("Collections") {
+                    Button {
+                        showCreateSheet = true
+                    } label: {
+                        HeaderIconLabel(systemImage: "plus")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("New Collection")
+                    .accessibilityIdentifier("collections.add")
+                }
+                .padding(.trailing, -8)
+                Text("Group recordings, then ask questions across everything in the group.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 8)
+            }
+            .listRowInsets(rowInsets)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
+            if service.collections.isEmpty && hasLoaded {
+                QuietPlaceholder(
                     systemImage: "folder",
-                    description: Text("Create a collection to group related transcripts, audio, and PDFs together.")
+                    title: "No Collections",
+                    message: "Create a collection to group related recordings, links, and PDFs together."
                 )
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
@@ -22,6 +51,7 @@ struct CollectionsListView: View {
                 NavigationLink(value: AppRoute.collection(collection.id)) {
                     CollectionRow(collection: collection)
                 }
+                .listRowInsets(rowInsets)
                 .listRowBackground(Color.clear)
                 .listRowSeparatorTint(Theme.separator)
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -41,20 +71,12 @@ struct CollectionsListView: View {
             }
         }
         .listStyle(.plain)
-        .ledgerListBackground()
+        .themedListBackground()
+        .readableContentWidth()
+        .onGeometryChange(for: CGFloat.self, of: \.size.width) { listWidth = $0 }
         .navigationTitle("Collections")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showCreateSheet = true
-                } label: {
-                    Image(systemName: "plus")
-                        .frame(minWidth: 44, minHeight: 44)
-                }
-                .accessibilityLabel("New Collection")
-            }
-        }
+        .toolbar(.hidden, for: .navigationBar)
+        .statusBarBackdrop()
         .sheet(isPresented: $showCreateSheet) {
             NavigationStack {
                 Form {
@@ -67,7 +89,7 @@ struct CollectionsListView: View {
                             .listRowBackground(Theme.surface)
                     }
                 }
-                .ledgerListBackground()
+                .themedListBackground()
                 .navigationTitle("New Collection")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -89,6 +111,7 @@ struct CollectionsListView: View {
         }
         .task {
             await service.loadCollections()
+            hasLoaded = true
         }
     }
 
@@ -119,26 +142,41 @@ struct CollectionsListView: View {
 
 struct CollectionRow: View {
     let collection: Collection
+    @ScaledMetric(relativeTo: .body) private var tileSize: CGFloat = 46
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(collection.name)
-                .font(.ledgerRowTitle)
-                .foregroundStyle(Theme.text)
+        HStack(spacing: 12) {
+            Image(systemName: "folder")
+                .font(.title3.weight(.medium))
+                .foregroundStyle(.white)
+                .frame(width: tileSize, height: tileSize)
+                .background(
+                    CollectionColor(key: collection.color).color,
+                    in: RoundedRectangle(cornerRadius: Theme.radiusMedium, style: .continuous)
+                )
+                .accessibilityHidden(true)
 
-            HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(collection.name)
+                    .font(.rowTitle)
+                    .foregroundStyle(Theme.text)
+                    .multilineTextAlignment(.leading)
+
                 if let count = collection.itemCount {
                     Text("\(count) item\(count == 1 ? "" : "s")")
+                        .font(.number)
+                        .foregroundStyle(Theme.textSecondary)
                 }
                 if let desc = collection.description, !desc.isEmpty {
                     Text(desc)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
                 }
             }
-            .font(.footnote)
-            .foregroundStyle(Theme.textSecondary)
         }
         .frame(minHeight: 44, alignment: .leading)
+        .padding(.vertical, 4)
     }
 }
 
@@ -163,7 +201,7 @@ struct CollectionDetailView: View {
                             )) {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(item.itemTitle ?? item.itemId)
-                                        .font(.ledgerRowTitle)
+                                        .font(.rowTitle)
                                         .foregroundStyle(Theme.text)
                                         .lineLimit(2)
                                         .multilineTextAlignment(.leading)
@@ -188,7 +226,8 @@ struct CollectionDetailView: View {
                     }
                 }
                 .listStyle(.plain)
-                .ledgerListBackground()
+                .themedListBackground()
+                .readableContentWidth()
                 .navigationTitle(collection.name)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -196,7 +235,7 @@ struct CollectionDetailView: View {
                         Button {
                             showChat = true
                         } label: {
-                            Image(systemName: "bubble.left")
+                            Image(systemName: "sparkles")
                                 .frame(minWidth: 44, minHeight: 44)
                         }
                         .accessibilityLabel("Ask about this collection")
@@ -221,14 +260,14 @@ struct CollectionDetailView: View {
                     Text(error)
                 } actions: {
                     Button("Try Again") { Task { await load() } }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(QuietButtonStyle())
                 }
             } else {
                 ProgressView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.bg)
+        .background(Theme.background)
         .task { await load() }
     }
 

@@ -41,7 +41,7 @@ final class ShareViewController: UIViewController {
         view.backgroundColor = .clear
 
         let card = UIView()
-        card.backgroundColor = UIColor.ledger("surface")
+        card.backgroundColor = UIColor.theme("surface")
         card.layer.cornerRadius = 24
         card.layer.cornerCurve = .continuous
         card.layer.shadowColor = UIColor.black.cgColor
@@ -102,14 +102,13 @@ final class ShareViewController: UIViewController {
         appMark.isAccessibilityElement = false
 
         appName.text = "Media Tools"
-        appName.font = UIFontMetrics(forTextStyle: .headline)
-            .scaledFont(for: .systemFont(ofSize: 17, weight: .semibold))
+        appName.font = UIFont.displayRounded(.headline, weight: .bold)
         appName.adjustsFontForContentSizeCategory = true
-        appName.textColor = UIColor.ledger("text")
+        appName.textColor = UIColor.theme("text")
         appName.numberOfLines = 0
 
         closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
-        closeButton.tintColor = UIColor.ledger("text-secondary")
+        closeButton.tintColor = UIColor.theme("text-secondary")
         closeButton.addTarget(self, action: #selector(done), for: .touchUpInside)
         closeButton.accessibilityLabel = "Done"
         closeButton.isHidden = true
@@ -140,19 +139,19 @@ final class ShareViewController: UIViewController {
         statusBackground.addSubview(statusMark)
 
         activity.startAnimating()
-        activity.color = UIColor.ledger("text-secondary")
+        activity.color = UIColor.theme("text-secondary")
         activity.translatesAutoresizingMaskIntoConstraints = false
         statusBackground.addSubview(activity)
 
         titleLabel.text = "Saving to Media Tools…"
-        titleLabel.font = UIFont.ledgerSerif(.title3, weight: .semibold)
+        titleLabel.font = UIFont.displayRounded(.title3, weight: .heavy)
         titleLabel.adjustsFontForContentSizeCategory = true
-        titleLabel.textColor = UIColor.ledger("text")
+        titleLabel.textColor = UIColor.theme("text")
         titleLabel.numberOfLines = 0
 
         noteLabel.font = .preferredFont(forTextStyle: .subheadline)
         noteLabel.adjustsFontForContentSizeCategory = true
-        noteLabel.textColor = UIColor.ledger("text-secondary")
+        noteLabel.textColor = UIColor.theme("text-secondary")
         noteLabel.numberOfLines = 0
         noteLabel.isHidden = true
 
@@ -179,13 +178,13 @@ final class ShareViewController: UIViewController {
 
     /// A thin line that empties as the card closes itself.
     private func makeCountdown() -> UIView {
-        countdownTrack.backgroundColor = UIColor.ledger("separator")
+        countdownTrack.backgroundColor = UIColor.theme("separator")
         countdownTrack.layer.cornerRadius = 1.5
         countdownTrack.clipsToBounds = true
         countdownTrack.isHidden = true
         countdownTrack.isAccessibilityElement = false
 
-        countdownFill.backgroundColor = UIColor.ledger("accent")
+        countdownFill.backgroundColor = UIColor.theme("accent-fill")
         countdownFill.translatesAutoresizingMaskIntoConstraints = false
         countdownTrack.addSubview(countdownFill)
 
@@ -357,7 +356,7 @@ final class ShareViewController: UIViewController {
     }
 
     private func finishSuccessfully(uploadStarted: Bool) {
-        showStatus(systemImage: "checkmark", tint: UIColor.ledger("on-accent"), background: UIColor.ledger("accent-fill"))
+        showStatus(systemImage: "checkmark", tint: UIColor.theme("on-accent"), background: UIColor.theme("accent-fill"))
         titleLabel.text = "Saved to your library"
         noteLabel.text = uploadStarted
             ? "Uploading in the background."
@@ -372,12 +371,12 @@ final class ShareViewController: UIViewController {
     }
 
     /// A failure stays on screen until dismissed because nothing was saved and
-    /// the person needs to know that. It stays in ink: red means recording here too.
+    /// the person needs to know that. It stays plain: red is kept for destructive actions.
     private func finish(failure message: String, title: String = "Not saved") {
-        showStatus(systemImage: "exclamationmark", tint: UIColor.ledger("text"), background: UIColor.ledger("fill"))
+        showStatus(systemImage: "exclamationmark", tint: UIColor.theme("warning"), background: UIColor.theme("warning-surface"))
         titleLabel.text = title
         noteLabel.text = message
-        noteLabel.textColor = UIColor.ledger("text")
+        noteLabel.textColor = UIColor.theme("text")
         noteLabel.isHidden = false
         closeButton.isHidden = false
         UIAccessibility.post(notification: .announcement, argument: "\(title) \(message)")

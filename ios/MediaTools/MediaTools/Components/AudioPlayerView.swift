@@ -1,65 +1,73 @@
 import SwiftUI
 import AVFoundation
 
-/// In-app audio playback for recorded/uploaded audio. Quiet until it is used: one
-/// line under the title, with skip and speed appearing once playback has started.
+/// In-app audio playback for recorded and uploaded audio: real bars you can tap or
+/// drag, with skip and speed appearing once playback has started.
 struct AudioPlayerView: View {
     let player: AudioPlayerService
     let audioId: String
     let knownDuration: TimeInterval?
+    /// Peaks from the server, or nil for a plain track. Never invented on this side.
+    let waveform: [Int]?
     @Binding private var seekTime: TimeInterval?
     @State private var isLoading = true
     @State private var error: String?
     @State private var playbackNotice: String?
     @State private var hasStarted = false
     @Environment(RecordingCoordinator.self) private var recorder
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
         player: AudioPlayerService,
         audioId: String,
         knownDuration: TimeInterval? = nil,
+        waveform: [Int]? = nil,
         seekTime: Binding<TimeInterval?> = .constant(nil)
     ) {
         self.player = player
         self.audioId = audioId
         self.knownDuration = knownDuration
+        self.waveform = waveform
         self._seekTime = seekTime
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if isLoading {
-                ProgressNote(text: "Loading audio…")
-                    .frame(minHeight: 44)
-            } else if let error {
-                NoticeRow(systemImage: "exclamationmark.circle", title: error)
-                    .frame(minHeight: 44)
+        VStack(alignment: .leading, spacing: 6) {
+            if let waveform, WaveformDisplay.hasData(waveform) {
+                WaveformScrubber(player: player, peaks: waveform)
             } else {
-                HStack(spacing: 10) {
-                    playButton
-                    PlaybackTrack(player: player)
-                    if !dynamicTypeSize.isAccessibilitySize {
-                        timeLabel
-                    }
-                }
-                if dynamicTypeSize.isAccessibilitySize {
-                    timeLabel
-                }
+                PlaybackTrack(player: player)
+            }
 
-                if hasStarted {
-                    secondaryControls
-                        .transition(.opacity)
-                }
+            HStack {
+                Text(player.formattedCurrentTime)
+                    .foregroundStyle(Theme.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                playButton
+                Text(player.formattedDuration)
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .font(.number)
+            .lineLimit(1)
 
-                if let playbackNotice {
-                    Text(playbackNotice)
-                        .font(.footnote)
-                        .foregroundStyle(Theme.textSecondary)
-                }
+            if hasStarted {
+                secondaryControls
+                    .transition(.opacity)
+            }
+
+            if let error {
+                NoticeRow(systemImage: "exclamationmark.circle", title: error)
+            }
+
+            if let playbackNotice {
+                Text(playbackNotice)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
             }
         }
+        .padding(12)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusLarge, style: .continuous))
         .animation(reduceMotion ? nil : Theme.quick, value: hasStarted)
         .task {
             await loadAudio()
@@ -84,15 +92,6 @@ struct AudioPlayerView: View {
         "\(player.formattedCurrentTime) of \(player.formattedDuration)"
     }
 
-    private var timeLabel: some View {
-        Text(timeText)
-            .font(.footnote.monospacedDigit())
-            .foregroundStyle(Theme.textSecondary)
-            .lineLimit(1)
-            .fixedSize()
-            .accessibilityHidden(true)
-    }
-
     private var playButton: some View {
         Button {
             if player.isPlaying {
@@ -101,19 +100,27 @@ struct AudioPlayerView: View {
                 startPlayback()
             }
         } label: {
-            // The glyph has a fixed circle to stay inside. Its label is what scales.
-            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                .font(.subheadline)
-                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-                .foregroundStyle(Theme.onAccent)
-                .frame(width: 36, height: 36)
-                .background(Theme.accentFill, in: Circle())
-                .frame(width: 44, height: 44)
-                .contentShape(Circle())
+            Group {
+                if isLoading {
+                    ProgressView()
+                        .tint(Theme.onAccent)
+                } else {
+                    // The glyph has a fixed circle to stay inside. Its label is what scales.
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.title3)
+                        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                }
+            }
+            .foregroundStyle(Theme.onAccent)
+            .frame(width: 50, height: 50)
+            .background(Theme.accentFill, in: Circle())
+            .contentShape(Circle())
         }
         .buttonStyle(PressFeedbackButtonStyle())
+        .disabled(isLoading || error != nil)
         .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
         .accessibilityValue(timeText)
+        .accessibilityIdentifier("player.play")
     }
 
     private var secondaryControls: some View {
@@ -163,7 +170,7 @@ struct AudioPlayerView: View {
             .accessibilityLabel("Playback speed")
             .accessibilityValue(speedLabel)
         }
-        .foregroundStyle(Theme.accent)
+        .foregroundStyle(Theme.accentText)
     }
 
     private var speedLabel: String {
@@ -208,7 +215,54 @@ struct AudioPlayerView: View {
     }
 }
 
-/// A thin line with a thumb. The strip around it is a full 44 points tall.
+/// The recording's real peaks, played in color and unplayed in a quiet tone. A tap
+/// jumps there and a sideways drag scrubs. A drag that starts mostly up or down belongs
+/// to the page around it, so reading past the player never moves the audio.
+private struct WaveformScrubber: View {
+    let player: AudioPlayerService
+    let peaks: [Int]
+    @State private var scrubFraction: CGFloat?
+    @State private var isHorizontalDrag: Bool?
+    @GestureState private var isDragging = false
+
+    var body: some View {
+        GeometryReader { geometry in
+            WaveformBars(peaks: peaks, progress: scrubFraction ?? player.progress)
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 8)
+                        .updating($isDragging) { _, state, _ in state = true }
+                        .onChanged { value in
+                            if isHorizontalDrag == nil {
+                                isHorizontalDrag = abs(value.translation.width) > abs(value.translation.height)
+                            }
+                            guard isHorizontalDrag == true else { return }
+                            let fraction = WaveformDisplay.fraction(atX: value.location.x, width: geometry.size.width)
+                            scrubFraction = fraction
+                            player.seek(to: fraction)
+                        }
+                )
+                .simultaneousGesture(
+                    SpatialTapGesture().onEnded { value in
+                        player.seek(to: WaveformDisplay.fraction(atX: value.location.x, width: geometry.size.width))
+                    }
+                )
+        }
+        .frame(height: 64)
+        .allowsHitTesting(player.duration > 0)
+        // Runs however the drag ends, including when the page takes it over.
+        .onChange(of: isDragging) { _, dragging in
+            guard !dragging else { return }
+            isHorizontalDrag = nil
+            scrubFraction = nil
+        }
+        .playbackAdjustable(player: player)
+        .accessibilityIdentifier("player.waveform")
+    }
+}
+
+/// A thin line with a thumb, for audio with no peaks yet. The strip around it is a
+/// full 44 points tall.
 private struct PlaybackTrack: View {
     let player: AudioPlayerService
 
@@ -216,13 +270,13 @@ private struct PlaybackTrack: View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Theme.separator)
+                    .fill(Theme.waveformUnplayed)
                     .frame(height: 3)
                 Capsule()
-                    .fill(Theme.accent)
+                    .fill(Theme.accentText)
                     .frame(width: geometry.size.width * player.progress, height: 3)
                 Circle()
-                    .fill(Theme.accent)
+                    .fill(Theme.accentText)
                     .frame(width: 11, height: 11)
                     .offset(x: geometry.size.width * player.progress - 5.5)
             }
@@ -231,24 +285,30 @@ private struct PlaybackTrack: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        guard geometry.size.width > 0 else { return }
-                        let fraction = value.location.x / geometry.size.width
-                        player.seek(to: max(0, min(1, fraction)))
+                        player.seek(to: WaveformDisplay.fraction(atX: value.location.x, width: geometry.size.width))
                     }
             )
         }
         .frame(height: 44)
         .allowsHitTesting(player.duration > 0)
-        .accessibilityElement()
-        .accessibilityLabel("Playback position")
-        .accessibilityValue("\(player.formattedCurrentTime) of \(player.formattedDuration)")
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: player.skip(seconds: 15)
-            case .decrement: player.skip(seconds: -15)
-            @unknown default: break
+        .playbackAdjustable(player: player)
+    }
+}
+
+private extension View {
+    /// VoiceOver moves through the audio 15 seconds at a swipe.
+    func playbackAdjustable(player: AudioPlayerService) -> some View {
+        self
+            .accessibilityElement()
+            .accessibilityLabel("Playback position")
+            .accessibilityValue("\(player.formattedCurrentTime) of \(player.formattedDuration)")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: player.skip(seconds: 15)
+                case .decrement: player.skip(seconds: -15)
+                @unknown default: break
+                }
             }
-        }
     }
 }
 
@@ -256,16 +316,18 @@ private struct PlaybackTrack: View {
 /// tapped deep in the transcript can still be paused from where you are reading.
 struct AudioMiniBar: View {
     let player: AudioPlayerService
+    /// Scrolls the transcript to the line now playing, when it has timed lines.
+    var onLocate: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 6) {
             Button {
                 player.pause()
             } label: {
                 Image(systemName: "pause.fill")
                     .font(.subheadline)
                     .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.accentText)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
@@ -273,10 +335,22 @@ struct AudioMiniBar: View {
             .accessibilityLabel("Pause")
             PlaybackTrack(player: player)
             Text(player.formattedCurrentTime)
-                .font(.footnote.monospacedDigit())
+                .font(.number)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize()
                 .accessibilityHidden(true)
+            if let onLocate {
+                Button(action: onLocate) {
+                    Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                        .font(.subheadline)
+                        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                        .foregroundStyle(Theme.accentText)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Go to the line now playing")
+            }
         }
     }
 }
@@ -306,6 +380,11 @@ class AudioPlayerService {
 
     var formattedDuration: String {
         formatTime(duration)
+    }
+
+    /// Whether there is a moment to point at, for following along in the transcript.
+    var hasPlaybackPosition: Bool {
+        isPlaying || currentTime > 0
     }
 
     func load(url: URL, knownDuration: TimeInterval? = nil) {
@@ -383,20 +462,23 @@ class AudioPlayerService {
 
     func seek(to fraction: CGFloat) {
         guard duration > 0 else { return }
-        let time = CMTime(seconds: Double(fraction) * duration, preferredTimescale: 600)
-        avPlayer?.seek(to: time)
+        seek(seconds: Double(fraction) * duration)
     }
 
     func seek(seconds: TimeInterval) {
         let target = duration > 0 ? min(duration, max(0, seconds)) : max(0, seconds)
+        // Shown at once, because the time observer reports only after the seek lands.
+        currentTime = target
+        if duration > 0 {
+            progress = min(1, max(0, CGFloat(target / duration)))
+        }
         avPlayer?.seek(to: CMTime(seconds: target, preferredTimescale: 600))
     }
 
     func skip(seconds: Double) {
         guard let player = avPlayer else { return }
         let current = player.currentTime().seconds
-        let target = max(0, min(duration, current + seconds))
-        player.seek(to: CMTime(seconds: target, preferredTimescale: 600))
+        seek(seconds: max(0, min(duration, current + seconds)))
     }
 
     func setSpeed(_ speed: Float) {
@@ -407,10 +489,7 @@ class AudioPlayerService {
     }
 
     private func formatTime(_ time: TimeInterval) -> String {
-        guard time.isFinite else { return "0:00" }
-        let mins = Int(time) / 60
-        let secs = Int(time) % 60
-        return "\(mins):\(String(format: "%02d", secs))"
+        MediaFormat.duration(time) ?? "0:00"
     }
 
     private static func validDuration(_ value: TimeInterval?) -> TimeInterval? {

@@ -32,7 +32,7 @@ struct PDFUploadView: View {
                 if let result {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(result.displayTitle)
-                            .font(.ledgerRowTitle)
+                            .font(.rowTitle)
                             .foregroundStyle(Theme.text)
                         if let pages = result.pageCount {
                             Text("\(pages) pages")
@@ -44,7 +44,7 @@ struct PDFUploadView: View {
                         } label: {
                             Text("Open")
                                 .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Theme.accent)
+                                .foregroundStyle(Theme.accentText)
                                 .frame(minHeight: 44)
                                 .contentShape(Rectangle())
                         }
@@ -59,7 +59,7 @@ struct PDFUploadView: View {
             .readingMeasure()
             .padding(16)
         }
-        .background(Theme.bg)
+        .background(Theme.background)
         .navigationTitle("Upload a PDF")
         .navigationBarTitleDisplayMode(.inline)
         .fileImporter(

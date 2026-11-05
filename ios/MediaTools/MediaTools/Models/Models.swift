@@ -63,6 +63,9 @@ struct AudioTranscription: Identifiable, Codable {
     let summaryStatus: String?
     let summaryEvidence: SummaryEvidence?
     let summaryErrorMessage: String?
+    /// Exactly 200 peaks from 0 to 100 for the player, computed by the server from the
+    /// stored audio. Absent until the server has them, and then the player has no bars.
+    var waveform: [Int]? = nil
 
     var displayTitle: String {
         title ?? originalName ?? filename ?? "(Untitled Recording)"
@@ -180,6 +183,14 @@ struct LibraryListItem: Identifiable, Codable, Hashable {
     let archived: Bool
     let tags: [String]
     let createdAt: Date?
+    // Additive API fields. A server that has not deployed them yet omits all three,
+    // and a backfill may not have reached this item, so every one is optional.
+    /// Plain text from the summary or the start of the transcript, 200 characters at most.
+    var excerpt: String? = nil
+    /// Exactly 32 peaks from 0 to 100. Audio only.
+    var waveform: [Int]? = nil
+    /// The item's collections, oldest first. Rows show the first one.
+    var collections: [LibraryItemCollection]? = nil
 
     var reference: LibraryReference {
         LibraryReference(itemType: itemType, itemId: id)
@@ -228,6 +239,53 @@ struct LibraryListItem: Identifiable, Codable, Hashable {
                 .minute()
         )
     }
+
+    /// Empty text collapses the line rather than leaving a gap.
+    var displayExcerpt: String? {
+        let value = excerpt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
+    }
+
+    var primaryCollection: LibraryItemCollection? {
+        collections?.first
+    }
+
+    /// What the row shows on its right: "8:36" or "18p".
+    var trailingDetail: String? {
+        switch itemType {
+        case "pdf":
+            return pageCount > 0 ? "\(pageCount)p" : nil
+        default:
+            return MediaFormat.duration(duration)
+        }
+    }
+
+    /// A word count for items with no duration or page count, which keeps every row
+    /// saying how much there is.
+    var wordCountLabel: String? {
+        guard trailingDetail == nil, wordCount > 0 else { return nil }
+        if wordCount >= 1_000 {
+            let thousands = Double(wordCount) / 1_000
+            let precision = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(1))
+            return "\(thousands.formatted(precision))K words"
+        }
+        return "\(wordCount) word\(wordCount == 1 ? "" : "s")"
+    }
+
+    /// Where a link or PDF came from. A recording needs no label.
+    var sourceLabel: String? {
+        switch itemType {
+        case "pdf": return "PDF"
+        case "youtube", "transcript": return displaySubtitle ?? "Video"
+        default: return displaySubtitle
+        }
+    }
+}
+
+struct LibraryItemCollection: Codable, Hashable, Identifiable {
+    let id: String
+    let name: String
+    var color: String? = nil
 }
 
 struct LibraryListResponse: Codable {
@@ -280,6 +338,8 @@ struct Collection: Identifiable, Codable {
     let itemCount: Int?
     let items: [CollectionItem]?
     let createdAt: Date?
+    /// One of the named keys in `CollectionColor`. Absent until the server deploys it.
+    var color: String? = nil
 }
 
 struct CollectionItem: Identifiable, Codable {
