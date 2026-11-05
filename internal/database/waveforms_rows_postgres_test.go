@@ -283,3 +283,31 @@ func TestLibraryMixedMediaAdditions(t *testing.T) {
 		}
 	}
 }
+
+// A person pressing Summarize must not wait in the backfill's one-at-a-time line.
+func TestQueueAudioSummaryPromotesQueuedBackfillJob(t *testing.T) {
+	db := openPostgresIntegrationDB(t)
+	ctx := context.Background()
+	userID := createPasswordTestUser(t, db)
+	audio := &models.AudioTranscription{ID: uuid.NewString(), ContentType: "voice_memo", SummaryStatus: "pending"}
+	if _, err := db.ExecContext(ctx, `INSERT INTO audio_transcriptions(id,filename,original_name,status,user_id,transcript_text) VALUES($1,'a.m4a','a.m4a','completed',$2,'Some speech')`, audio.ID, userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		db.ExecContext(context.Background(), `DELETE FROM background_jobs WHERE resource_id=$1`, audio.ID)
+		db.ExecContext(context.Background(), `DELETE FROM audio_transcriptions WHERE id=$1`, audio.ID)
+	})
+	if _, err := db.ExecContext(ctx, `INSERT INTO background_jobs(job_type,resource_id,payload,priority) VALUES('audio_summary',$1,'{"backfill":true}'::jsonb,10)`, audio.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueueAudioSummary(ctx, audio, []byte(`{"audio_id":"person"}`)); err != nil {
+		t.Fatal(err)
+	}
+	var priority int
+	if err := db.GetContext(ctx, &priority, `SELECT priority FROM background_jobs WHERE job_type='audio_summary' AND resource_id=$1`, audio.ID); err != nil {
+		t.Fatal(err)
+	}
+	if priority != 0 {
+		t.Fatalf("priority = %d, want 0", priority)
+	}
+}

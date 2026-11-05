@@ -2614,6 +2614,10 @@ func (p *Pool) finishAudioFailure(ctx context.Context, audioID, message string) 
 func recordingNameBase(name string) string {
 	name = strings.TrimSpace(name)
 	ext := filepath.Ext(name)
+	// "Voice Memo 3.Opus" is a title. Real suffixes are all lowercase or all caps.
+	if ext != strings.ToLower(ext) && ext != strings.ToUpper(ext) {
+		return name
+	}
 	switch strings.ToLower(ext) {
 	case ".m4a", ".caf", ".mp3", ".wav", ".webm", ".mp4", ".mov", ".qta", ".ogg", ".aac", ".flac", ".opus", ".aif", ".aiff", ".m4b", ".mpeg", ".mpga", ".3gp":
 		name = strings.TrimSuffix(name, ext)
@@ -2621,8 +2625,8 @@ func recordingNameBase(name string) string {
 	return strings.TrimSpace(name)
 }
 
-var generatedRecordingName = regexp.MustCompile(`(?i)^(recording|recording-\d{4}-\d{2}-\d{2}([-_ t]\d+)*|new recording( \d+)?|voice memo( \d+)?|audio( \d+)?|untitled|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{4}-\d{2}-\d{2}[ t_\d:.-]*)$`)
-var legacyPlaceholderName = regexp.MustCompile(`(?i)^(recording|recording-\d{4}-\d{2}-\d{2}([-_ t]\d+)*|new recording( \d+)?|voice memo( \d+)?|untitled|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$`)
+var generatedRecordingName = regexp.MustCompile(`(?i)^(recording|recording-\d{4}-\d{2}-\d{2}([-_ t]\d+)*|recording \d{4}-\d{2}-\d{2} \d{2}\.\d{2}(\.\d{2})?|new recording( \d+)?|voice memo( \d+)?|audio( \d+)?|untitled|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{4}-\d{2}-\d{2}[ t_\d:.-]*)$`)
+var legacyPlaceholderName = regexp.MustCompile(`(?i)^(recording|recording-\d{4}-\d{2}-\d{2}([-_ t]\d+)*|recording \d{4}-\d{2}-\d{2} \d{2}\.\d{2}(\.\d{2})?|new recording( \d+)?|voice memo( \d+)?|untitled|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$`)
 var datedRecordingName = regexp.MustCompile(`(?i)^recording — (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([1-9]|[12][0-9]|3[01]), ([0-9]{4}) at ([0-9]{1,2}):([0-5][0-9])(?:[ \x{00A0}\x{202F}](AM|PM))?$`)
 
 func isDatedRecordingName(base string) bool {
@@ -2654,5 +2658,21 @@ func isLegacyPlaceholderName(name string) bool {
 }
 func isGeneratedRecordingName(name string) bool {
 	base := recordingNameBase(name)
-	return generatedRecordingName.MatchString(base) || isDatedRecordingName(base)
+	return generatedRecordingName.MatchString(base) || isDatedRecordingName(base) || isLocalizedRecordingName(base)
+}
+
+var (
+	localizedRecordingName = regexp.MustCompile(`(?i)^recording — (.*\d{4}.*\d{1,2}[:.]\d{2}(?:[ \x{00A0}\x{202F}]?\p{L}+)?)$`)
+	recordingNameWord      = regexp.MustCompile(`\p{L}+`)
+)
+
+// iOS writes the date in the phone's locale: "26 Aug 2026 at 20:35" in Britain,
+// "2026/08/26 20:35" in Japan. Accept a year and a closing time with at most a
+// month, a connector, and AM or PM between them, so this never needs a locale
+// table. It only applies to new recordings, because migration 055's flag on old
+// rows needs the stricter isLegacyPlaceholderName. "Recording — Mayor interview
+// 2026 at 10:35 AM" has four words and stays a person's name.
+func isLocalizedRecordingName(base string) bool {
+	parts := localizedRecordingName.FindStringSubmatch(base)
+	return parts != nil && len(recordingNameWord.FindAllString(parts[1], -1)) <= 3
 }

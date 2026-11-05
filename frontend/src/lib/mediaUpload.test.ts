@@ -18,8 +18,7 @@ describe('adding files', () => {
     const at = new Date(2026, 10, 5, 9, 12, 30).getTime();
     expect(recordingFileName('audio/mp4;codecs=mp4a.40.2', at)).toBe('Recording 2026-11-05 09.12.m4a');
     expect(recordingFileName('audio/webm;codecs=opus', at)).toBe('Recording 2026-11-05 09.12.webm');
-    // internal/services/worker: generatedRecordingName = ^(recording( .*\d{4}.*)?|...)$ on the name without its extension.
-    expect(/^(recording( .*\d{4}.*)?)$/i.test(recordingFileName('audio/mp4', at).replace(/\.[^.]+$/, ''))).toBe(true);
+    // The server's TestGeneratedNamesCoverEveryClientAndLocale pins this exact format.
   });
 
   it('accepts web links only', () => {

@@ -135,7 +135,7 @@ func (db *DB) QueueAudioSummary(
 		VALUES ('audio_summary', $1, $2::jsonb)
 		ON CONFLICT (job_type, resource_id)
 			WHERE status IN ('queued', 'running')
-		DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+		DO UPDATE SET payload = EXCLUDED.payload, priority = 0, updated_at = NOW()
 		WHERE background_jobs.status = 'queued'`,
 		audio.ID, string(payload),
 	)

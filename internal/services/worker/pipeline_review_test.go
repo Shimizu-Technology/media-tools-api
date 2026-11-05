@@ -93,3 +93,40 @@ func TestRecordingTitleSafetyRegression(t *testing.T) {
 		}
 	}
 }
+
+// Names copied from what each client really writes, so the rule cannot drift from them.
+func TestGeneratedNamesCoverEveryClientAndLocale(t *testing.T) {
+	for _, name := range []string{
+		"Recording 2026-11-05 09.12.webm",
+		"Recording 2026-11-05 09.12.m4a",
+		"Recording — Aug 26, 2026 at 10:35\u202fAM.caf",
+		"Recording — 26 Aug 2026 at 20:35.caf",
+		"Recording — 26 Aug 2026 at 8:35\u202fpm.caf",
+		"Recording — 2026/08/26 20:35.caf",
+		"recording-2026-02-03-14-22-01.webm",
+		"NEW RECORDING 5.M4A",
+	} {
+		if !isGeneratedRecordingName(name) {
+			t.Errorf("%q should count as generated", name)
+		}
+	}
+	for _, name := range []string{
+		"Recording 2026",
+		"Recording of the 2024 budget meeting.m4a",
+		"Recording — Mayor interview 2026 at 10:35 AM",
+		"Recording — Budget talk at 10:35 AM",
+		"Voice Memo 3.Opus",
+		"New Recording 12.Mov",
+		"Recording.Wav",
+	} {
+		if isGeneratedRecordingName(name) {
+			t.Errorf("%q is a name a person chose", name)
+		}
+	}
+	if isLegacyPlaceholderName("Recording — 26 Aug 2026 at 20:35") {
+		t.Error("old flagged rows keep the strict rule")
+	}
+	if !isLegacyPlaceholderName("Recording 2026-11-05 09.12.webm") {
+		t.Error("an old web recording is a placeholder")
+	}
+}
