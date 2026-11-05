@@ -142,12 +142,14 @@ struct CollectionsListView: View {
 
 struct CollectionRow: View {
     let collection: Collection
-    @ScaledMetric(relativeTo: .body) private var tileSize: CGFloat = 46
+    /// Fixed, because at the largest text the name needs the room instead.
+    private let tileSize: CGFloat = 46
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "folder")
                 .font(.title3.weight(.medium))
+                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
                 .foregroundStyle(.white)
                 .frame(width: tileSize, height: tileSize)
                 .background(

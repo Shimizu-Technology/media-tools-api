@@ -61,6 +61,17 @@ struct MediaToolsApp: App {
         WindowGroup {
             rootView
                 .tint(Theme.accentText)
+                #if DEBUG
+                // The system's launch argument doesn't reach SwiftUI's environment, and
+                // these screens are what the largest size has to be proved on.
+                .transformEnvironment(\.dynamicTypeSize) { size in
+                    if ProcessInfo.processInfo.arguments.contains("-ui-test-largest-text") {
+                        size = .accessibility5
+                    }
+                }
+                // Dark screenshots from the test runner, which cannot change the appearance.
+                .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-ui-test-dark") ? .dark : nil)
+                #endif
                 .environment(recordingCoordinator)
                 .environment(uploadCoordinator)
                 .environment(aiProcessingConsent)

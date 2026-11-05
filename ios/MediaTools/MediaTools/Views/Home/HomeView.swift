@@ -278,7 +278,9 @@ struct RecordCard: View {
     let onRecord: (String) -> Void
     let onReturn: () -> Void
     @Environment(RecordingCoordinator.self) private var recorder
-    @ScaledMetric(relativeTo: .title) private var micSize: CGFloat = 64
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// A fixed circle, because at the largest text the words need the room instead.
+    private let micSize: CGFloat = 64
 
     /// iPads have no Action Button to mention.
     private var subtitle: String {
@@ -319,9 +321,12 @@ struct RecordCard: View {
     }
 
     private func cardLayout(symbol: String, title: String, detail: String) -> some View {
-        HStack(spacing: 14) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 14))
+        return layout {
             Image(systemName: symbol)
-                .font(.system(size: micSize * 0.44, weight: .medium))
+                .font(.system(size: 28, weight: .medium))
                 .foregroundStyle(Theme.heroIcon)
                 .frame(width: micSize, height: micSize)
                 .background(Theme.onHero, in: Circle())
@@ -337,7 +342,6 @@ struct RecordCard: View {
             }
             .foregroundStyle(Theme.onHero)
             .multilineTextAlignment(.leading)
-            Spacer(minLength: 0)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

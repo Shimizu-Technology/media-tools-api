@@ -30,6 +30,7 @@ struct RecordView: View {
     @Environment(RecordingUploadCoordinator.self) private var uploader
     @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var contentType = RecordView.defaultContentType
     @State private var isUploading = false
     @State private var uploadResult: AudioTranscription?
@@ -172,56 +173,77 @@ struct RecordView: View {
 
     // MARK: - While recording
 
+    /// Pause and Stop are pinned to the bottom, so they are always one press away, at
+    /// any text size, on the smallest phone. Everything above them can scroll.
     private var activeCapture: some View {
-        GeometryReader { geometry in
-            ScrollView {
-                VStack(spacing: 0) {
-                    activeTopRow
+        ScrollView {
+            VStack(spacing: 0) {
+                activeTopRow
 
-                    timer
-                        .padding(.top, 20)
+                timer
+                    .padding(.top, 20)
 
-                    Text("New recording")
-                        .font(.displayTitle3)
+                Text("New recording")
+                    .font(.displayTitle3)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 12)
+
+                if let startedAtText {
+                    Text(startedAtText)
+                        .font(.subheadline.weight(.medium))
                         .multilineTextAlignment(.center)
-                        .padding(.top, 12)
+                        .padding(.top, 2)
+                }
 
-                    if let startedAtText {
-                        Text(startedAtText)
-                            .font(.subheadline.weight(.medium))
-                            .multilineTextAlignment(.center)
-                            .padding(.top, 2)
-                    }
+                LiveLevelBars(levels: recorder.levelMeter.levels)
+                    .frame(height: 112)
+                    .frame(maxWidth: 420)
+                    .padding(.top, 28)
+                    .opacity(recorder.captureState == .recording ? 1 : 0.55)
 
-                    LiveLevelBars(levels: recorder.levelMeter.levels)
-                        .frame(height: 112)
-                        .frame(maxWidth: 420)
-                        .padding(.top, 28)
-                        .opacity(recorder.captureState == .recording ? 1 : 0.55)
-
-                    Spacer(minLength: 28)
-
-                    captureControls
-                        .opacity(recorder.isRecording ? 1 : 0)
-                        .allowsHitTesting(recorder.isRecording)
-                        .accessibilityHidden(!recorder.isRecording)
-
-                    Text(captureHint)
-                        .font(.footnote.weight(.medium))
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
+                if dynamicTypeSize.isAccessibilitySize {
+                    captureHintText
                         .padding(.top, 18)
                         .padding(.bottom, 12)
                 }
-                .foregroundStyle(Theme.onHero)
-                .padding(.horizontal, 24)
-                .frame(maxWidth: 560)
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: geometry.size.height)
             }
-            .scrollBounceBehavior(.basedOnSize)
+            .foregroundStyle(Theme.onHero)
+            .padding(.horizontal, 24)
+            .frame(maxWidth: 560)
+            .frame(maxWidth: .infinity)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                captureControls
+                    .opacity(recorder.isRecording ? 1 : 0)
+                    .allowsHitTesting(recorder.isRecording)
+                    .accessibilityHidden(!recorder.isRecording)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    captureHintText
+                        .padding(.top, 18)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 12)
+            .padding(.bottom, 12)
+            .frame(maxWidth: .infinity)
+            .background {
+                // Text passes behind these only when it is too large to fit above them.
+                if dynamicTypeSize.isAccessibilitySize {
+                    Theme.heroGradient.ignoresSafeArea()
+                }
+            }
         }
         .background(Theme.heroGradient.ignoresSafeArea())
+    }
+
+    private var captureHintText: some View {
+        Text(captureHint)
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(Theme.onHero)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// The status, centered, with a way back to reading on the left.

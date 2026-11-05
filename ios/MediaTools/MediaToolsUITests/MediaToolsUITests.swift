@@ -464,16 +464,13 @@ final class MediaToolsUITests: XCTestCase {
             "-ui-test-quick-capture",
             "-ui-test-simulated-recording",
             "-ui-test-reset-recordings",
-            "-UIPreferredContentSizeCategoryName",
-            "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
+            "-ui-test-largest-text",
         ]
         app.launch()
 
+        // On screen with no scrolling: this is what stops the recording.
         let stop = app.buttons["Stop and save recording"]
         XCTAssertTrue(stop.waitForExistence(timeout: 10))
-        if !stop.isHittable {
-            app.swipeUp()
-        }
         XCTAssertTrue(stop.isHittable)
         XCTAssertGreaterThanOrEqual(stop.frame.height.rounded(), 44)
         XCTAssertTrue(app.buttons["Pause recording"].isHittable)
@@ -1374,27 +1371,15 @@ final class MediaToolsUITests: XCTestCase {
     /// Not a check: walks every screen in the current appearance and keeps a screenshot
     /// of each in the result bundle, for design review on whichever device runs it.
     func testScreenshotTour() {
-        for appearance in [XCUIDevice.Appearance.light, .dark] {
-            XCUIDevice.shared.appearance = appearance
-            let suffix = appearance == .dark ? "dark" : "light"
-            tour(suffix: suffix)
-        }
-        XCUIDevice.shared.appearance = .light
+        tour(suffix: "light")
+        tour(suffix: "dark", extraArguments: ["-ui-test-dark"])
     }
 
     func testScreenshotTourAtTheLargestTextSize() {
-        XCUIDevice.shared.appearance = .light
-        tour(
-            suffix: "ax5",
-            extraArguments: [
-                "-UIPreferredContentSizeCategoryName",
-                "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
-            ]
-        )
+        tour(suffix: "ax5", extraArguments: ["-ui-test-largest-text"])
     }
 
     func testScreenshotTourEmptyStates() {
-        XCUIDevice.shared.appearance = .light
         let app = XCUIApplication()
         app.launchArguments = signedInFixture + ["-ui-test-reset-recordings"]
         app.launch()

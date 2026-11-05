@@ -241,7 +241,7 @@ struct DeviceItemOptionsSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text("Saved on this iPhone")
+                    Text("Saved on this \(UIDevice.current.localizedModel)")
                         .font(.sectionLabel)
                         .foregroundStyle(Theme.textSecondary)
                     Spacer(minLength: 8)
@@ -295,7 +295,7 @@ struct DeviceItemOptionsSheet: View {
             Button("Delete", role: .destructive, action: deleteConfirmed)
             Button("Keep", role: .cancel) {}
         } message: {
-            Text("This removes the copy on this iPhone and cannot be undone.")
+            Text("This removes the copy on this \(UIDevice.current.localizedModel) and cannot be undone.")
         }
     }
 
@@ -318,7 +318,7 @@ struct DeviceItemOptionsSheet: View {
             let status = uploader.shareStatusMessage(for: share)
             return status.isEmpty ? "This share has not been sent yet." : status
         }
-        return "This item is gone from this iPhone."
+        return "This item is gone from this \(UIDevice.current.localizedModel)."
     }
 
     private var deleteTitle: String {

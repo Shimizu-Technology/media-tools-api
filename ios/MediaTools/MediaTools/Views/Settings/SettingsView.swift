@@ -71,9 +71,9 @@ struct SettingsView: View {
                 }
 
                 Button(action: handleNotificationAction) {
-                    HStack {
+                    SettingsValueLayout {
                         SettingsRowLabel("Completion alerts", systemImage: "bell")
-                        Spacer(minLength: 8)
+                    } value: {
                         Text(notificationTrailing)
                             .font(.subheadline)
                             .foregroundStyle(Theme.textSecondary)
@@ -271,15 +271,18 @@ private struct SettingsLinkRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            SettingsRowLabel(title, systemImage: systemImage)
-            Spacer(minLength: 8)
-            if let trailing {
-                Text(trailing)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.textSecondary)
+            SettingsValueLayout {
+                SettingsRowLabel(title, systemImage: systemImage)
+            } value: {
+                if let trailing {
+                    Text(trailing)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                }
             }
             Image(systemName: "chevron.right")
                 .font(.footnote.weight(.semibold))
+                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
                 .foregroundStyle(Theme.textSecondary)
                 .accessibilityHidden(true)
         }
@@ -288,12 +291,36 @@ private struct SettingsLinkRow: View {
     }
 }
 
+/// A name with its current value on the right, or under it once text is too large.
+private struct SettingsValueLayout<Label: View, Value: View>: View {
+    @ViewBuilder var label: Label
+    @ViewBuilder var value: Value
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 2) {
+                label
+                value
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(spacing: 8) {
+                label
+                Spacer(minLength: 8)
+                value
+            }
+        }
+    }
+}
+
 /// A settings row: a small tinted tile, then its name.
 struct SettingsRowLabel: View {
     let title: String
     let systemImage: String
     var detail: String?
-    @ScaledMetric(relativeTo: .body) private var tileSize: CGFloat = 30
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private let tileSize: CGFloat = 30
 
     init(_ title: String, systemImage: String, detail: String? = nil) {
         self.title = title
@@ -303,12 +330,15 @@ struct SettingsRowLabel: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Theme.accentText)
-                .frame(width: tileSize, height: tileSize)
-                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous))
-                .accessibilityHidden(true)
+            // At the largest text the words need the row more than the tile does.
+            if !dynamicTypeSize.isAccessibilitySize {
+                Image(systemName: systemImage)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.accentText)
+                    .frame(width: tileSize, height: tileSize)
+                    .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous))
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.body.weight(.medium))

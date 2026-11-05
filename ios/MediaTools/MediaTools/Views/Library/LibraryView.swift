@@ -159,6 +159,7 @@ struct LibraryView: View {
     private var deviceRows: some View {
         if hasDeviceRows {
             Section {
+                sectionLabelRow("On this \(UIDevice.current.localizedModel)")
                 ForEach(deviceRecordings) { recording in
                     DeviceRecordingRow(
                         recording: recording,
@@ -184,8 +185,6 @@ struct LibraryView: View {
                     )
                     .libraryRowStyle(insets: rowInsets)
                 }
-            } header: {
-                sectionHeader("On this iPhone")
             }
         }
     }
@@ -220,6 +219,7 @@ struct LibraryView: View {
                 }
             } else {
                 Section {
+                    if hasDeviceRows { sectionLabelRow("In your library") }
                     ForEach(model.items, id: \.reference) { item in
                         libraryRow(item)
                             .id(item.reference)
@@ -228,8 +228,6 @@ struct LibraryView: View {
                             }
                             .libraryRowStyle(insets: rowInsets)
                     }
-                } header: {
-                    if hasDeviceRows { sectionHeader("In your library") }
                 }
 
                 if model.hasMore && (model.isLoadingMore || model.loadError != nil) {
@@ -257,13 +255,14 @@ struct LibraryView: View {
         return EdgeInsets(top: 0, leading: margin, bottom: 0, trailing: margin)
     }
 
-    private func sectionHeader(_ title: String) -> some View {
-        SectionLabel(title)
-            .textCase(nil)
-            .padding(.top, 12)
-            .padding(.bottom, 2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .listRowInsets(rowInsets)
+    /// A row rather than a section header, which would stick while scrolling and
+    /// ignore the width limit on iPad.
+    private func sectionLabelRow(_ title: String) -> some View {
+        chromeRow {
+            SectionLabel(title)
+                .padding(.top, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func chromeRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -296,6 +295,7 @@ struct LibraryView: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.subheadline)
+                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
                     .foregroundStyle(Theme.textSecondary)
                     .accessibilityHidden(true)
                 TextField(
@@ -360,6 +360,7 @@ struct LibraryView: View {
                 }
             }
             .font(.subheadline.weight(.semibold))
+            .lineLimit(1)
             .foregroundStyle(isSelected ? Theme.onAccent : Theme.textSecondary)
             .padding(.horizontal, 13)
             .frame(minHeight: 34)
@@ -875,7 +876,10 @@ private struct DeviceRecordingRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack(spacing: 10) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+            : AnyLayout(HStackLayout(spacing: 10))
+        layout {
             Button(action: onTap) {
                 HStack(spacing: 12) {
                     if !dynamicTypeSize.isAccessibilitySize {
@@ -933,7 +937,10 @@ private struct DeviceShareRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack(spacing: 10) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+            : AnyLayout(HStackLayout(spacing: 10))
+        layout {
             Button(action: onTap) {
                 HStack(spacing: 12) {
                     if !dynamicTypeSize.isAccessibilitySize {

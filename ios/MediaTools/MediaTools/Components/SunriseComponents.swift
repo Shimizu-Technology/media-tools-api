@@ -194,6 +194,9 @@ struct ScreenHeader<Actions: View>: View {
                 .font(.displayLargeTitle)
                 .tracking(-0.4)
                 .foregroundStyle(Theme.text)
+                // One word, so shrinking reads better than breaking it across lines.
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("screen.title")
                 .frame(maxWidth: .infinity, alignment: .leading)
