@@ -2,7 +2,7 @@ import SwiftUI
 
 struct LibraryView: View {
     @State private var model: LibraryViewModel
-    @Binding private var path: [AppRoute]
+    let isActive: Bool
     @State private var operationError: String?
     @State private var isSelecting = false
     @State private var selectedReferences: Set<LibraryReference> = []
@@ -10,11 +10,14 @@ struct LibraryView: View {
     @State private var showDeleteConfirmation = false
     @State private var isDeleting = false
     @State private var collectionTarget: LibraryReference?
+    @State private var optionsTarget: DeviceItemTarget?
     @State private var isVisible = false
-    @State private var isSearchPresented = false
     @State private var listWidth: CGFloat = 0
+    @FocusState private var isSearchFocused: Bool
+    @Environment(AppNavigator.self) private var navigator
     @Environment(RecordingCoordinator.self) private var recorder
     @Environment(RecordingUploadCoordinator.self) private var uploader
+    @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @Environment(\.scenePhase) private var scenePhase
 
     private let service = MediaToolsService.shared
@@ -24,32 +27,28 @@ struct LibraryView: View {
     /// the visible Library checks on them at this pace and stops once they settle.
     private static let activeItemRefreshInterval: Duration = .seconds(15)
 
-    /// The in-app default, matching the recorder's own.
-    private static let defaultContentType = "general"
-
     init(
         model: LibraryViewModel,
         previewItems: [LibraryListItem]? = nil,
-        path: Binding<[AppRoute]>
+        isActive: Bool = true
     ) {
         self.previewItems = previewItems
+        self.isActive = isActive
         _model = State(initialValue: model)
-        _path = path
     }
 
     var body: some View {
         libraryList
-            .ledgerListBackground()
+            .themedListBackground()
+            .readableContentWidth()
             .onGeometryChange(for: CGFloat.self, of: \.size.width) { listWidth = $0 }
             .navigationTitle("Library")
-            .searchable(
-                text: $model.searchText,
-                isPresented: $isSearchPresented,
-                placement: .navigationBarDrawer(displayMode: .always),
-                prompt: "Search"
-            )
-            .toolbar { libraryToolbar }
-            .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
+            .toolbar(.hidden, for: .navigationBar)
+            .statusBarBackdrop()
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if isSelecting { selectionBar }
+            }
+            .deviceItemActions(target: $optionsTarget)
             .sheet(item: $collectionTarget) { reference in
                 AddToCollectionSheet(
                     itemType: reference.collectionItemType,
@@ -94,8 +93,19 @@ struct LibraryView: View {
                 Task { await service.loadCollections() }
             }
             .onDisappear { isVisible = false }
+            .onChange(of: isActive) { _, active in
+                // Tabs stay alive underneath, so coming back here is not an onAppear.
+                if active {
+                    Task { await model.refreshIfStale() }
+                } else {
+                    leaveSelectionMode()
+                }
+            }
+            .onChange(of: isSelecting) { _, selecting in
+                navigator.isTabBarSuppressed = selecting
+            }
             .onChange(of: scenePhase) { _, phase in
-                guard phase == .active else { return }
+                guard phase == .active, isActive else { return }
                 Task { await model.refreshIfStale() }
             }
             .onChange(of: recorder.uploadStateSignature) { _, _ in
@@ -104,8 +114,8 @@ struct LibraryView: View {
             .onChange(of: uploader.sharedDocumentImports) { _, _ in
                 Task { await model.refresh() }
             }
-            .task(id: isVisible && scenePhase == .active && model.hasActiveItems) {
-                guard isVisible, scenePhase == .active, model.hasActiveItems else { return }
+            .task(id: isVisible && isActive && scenePhase == .active && model.hasActiveItems) {
+                guard isVisible, isActive, scenePhase == .active, model.hasActiveItems else { return }
                 while !Task.isCancelled {
                     do {
                         try await Task.sleep(for: Self.activeItemRefreshInterval)
@@ -120,75 +130,88 @@ struct LibraryView: View {
     // MARK: - Device uploads
 
     /// Audio still on this iPhone has no server row yet. Showing it here means
-    /// a new recording is visible in the Library from the moment it is saved.
-    private var deviceRecordings: [LocalRecording] {
-        guard model.selectedCollection == nil,
-              model.selectedType == .all || model.selectedType == .audio,
-              model.selectedStatus == .all || model.selectedStatus == .active,
-              model.query.search.isEmpty,
-              !model.showsArchived
-        else { return [] }
+    /// a new recording is visible in the Library from the moment it is saved. Filters
+    /// can narrow this, but work only a person can move forward never just vanishes.
+    private var deviceWork: LibraryDeviceWork {
         let serverIDs = Set(model.items.map(\.reference))
-        return recorder.availableRecordings.filter { recording in
-            guard let remoteID = recording.remoteTranscriptionID else { return true }
-            return !serverIDs.contains(LibraryReference(itemType: "audio", itemId: remoteID))
-        }
+        return LibraryDeviceWork(
+            recordings: recorder.availableRecordings.filter { recording in
+                guard let remoteID = recording.remoteTranscriptionID else { return true }
+                return !serverIDs.contains(LibraryReference(itemType: "audio", itemId: remoteID))
+            },
+            shares: uploader.sharesNeedingAttention,
+            filters: model.deviceWorkFilters,
+            autoTranscribeWillSend: aiProcessingConsent.isAutoTranscribeEnabled
+                && aiProcessingConsent.hasAutomaticConsent
+        )
     }
 
-    /// Shares that failed, or that wait for a tap, stay visible until dealt with.
-    private var sharesNeedingAttention: [ShareInboxStore.Item] {
-        model.selectedCollection == nil ? uploader.sharesNeedingAttention : []
-    }
+    private var deviceRecordings: [LocalRecording] { deviceWork.visibleRecordings }
+
+    private var sharesNeedingAttention: [ShareInboxStore.Item] { deviceWork.visibleShares }
 
     private var hasDeviceRows: Bool {
         !deviceRecordings.isEmpty || !sharesNeedingAttention.isEmpty
+    }
+
+    /// Filters hid something waiting on a person. It stays in view on Home too, but
+    /// someone looking here shouldn't have to know that.
+    @ViewBuilder
+    private var hiddenDeviceWorkRow: some View {
+        let hidden = deviceWork.hiddenNeedingAction
+        if hidden > 0 {
+            chromeRow {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.circle")
+                        .foregroundStyle(Theme.warning)
+                        .accessibilityHidden(true)
+                    Text("\(hidden) \(hidden == 1 ? "item" : "items") on this \(UIDevice.current.localizedModel) \(hidden == 1 ? "needs" : "need") you")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.text)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("library.hidden-device-work")
+                    Button("Show") {
+                        withMotion(Theme.quick) { model.clearFiltersForDeviceWork() }
+                    }
+                    .buttonStyle(QuietButtonStyle())
+                    .accessibilityLabel("Show items on this \(UIDevice.current.localizedModel)")
+                    .accessibilityIdentifier("library.show-device-work")
+                }
+            }
+        }
     }
 
     @ViewBuilder
     private var deviceRows: some View {
         if hasDeviceRows {
             Section {
+                sectionLabelRow("On this \(UIDevice.current.localizedModel)")
                 ForEach(deviceRecordings) { recording in
-                    Button {
-                        if let remoteID = recording.remoteTranscriptionID {
-                            open(LibraryReference(itemType: "audio", itemId: remoteID))
-                        } else {
-                            path.append(.record)
-                        }
-                    } label: {
-                        DeviceRecordingRow(recording: recording)
-                    }
-                    .buttonStyle(RowButtonStyle())
-                    .accessibilityIdentifier("library-device-\(recording.id.uuidString)")
+                    DeviceRecordingRow(
+                        recording: recording,
+                        onTap: {
+                            if let remoteID = recording.remoteTranscriptionID {
+                                open(LibraryReference(itemType: "audio", itemId: remoteID))
+                            } else {
+                                optionsTarget = .recording(recording.id)
+                            }
+                        },
+                        onTranscribe: {
+                            Task { await uploader.transcribe(recording) }
+                        },
+                        onOptions: { optionsTarget = .recording(recording.id) }
+                    )
                     .libraryRowStyle(insets: rowInsets)
                 }
                 ForEach(sharesNeedingAttention) { item in
-                    Button {
-                        path.append(.record)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.originalName)
-                                .font(.ledgerRowTitle)
-                                .foregroundStyle(Theme.text)
-                                .lineLimit(2)
-                            Label {
-                                Text(uploader.shareStatusMessage(for: item))
-                                    .lineLimit(3)
-                            } icon: {
-                                Image(systemName: "exclamationmark.circle")
-                            }
-                            .font(.footnote)
-                            .foregroundStyle(Theme.text)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .padding(.vertical, 10)
-                    }
-                    .buttonStyle(RowButtonStyle())
-                    .accessibilityIdentifier("library-share-\(item.id)")
+                    DeviceShareRow(
+                        item: item,
+                        onTap: { optionsTarget = .share(item.id) },
+                        onAction: { Task { await uploader.retrySharedItem(item) } }
+                    )
                     .libraryRowStyle(insets: rowInsets)
                 }
-            } header: {
-                dayHeader("On this iPhone")
             }
         }
     }
@@ -197,11 +220,19 @@ struct LibraryView: View {
 
     private var libraryList: some View {
         List {
-            filterRow
+            headerRow
+            searchRow
+            chipRow
 
             if let operationError {
                 dismissibleErrorRow(operationError)
             }
+
+            if showsFilterSummary {
+                filterSummaryRow
+            }
+
+            hiddenDeviceWorkRow
 
             deviceRows
 
@@ -216,25 +247,15 @@ struct LibraryView: View {
                     emptyRow
                 }
             } else {
-                if model.selectedStatus != .all
-                    || model.sortOrder != .newest
-                    || !model.query.search.isEmpty
-                    || model.showsArchived {
-                    filterSummaryRow
-                }
-
-                ForEach(LibraryDaySection.group(model.items)) { section in
-                    Section {
-                        ForEach(section.items, id: \.reference) { item in
-                            libraryRow(item)
-                                .id(item.reference)
-                                .task(id: item.reference) {
-                                    await model.prefetchIfNeeded(after: item.reference)
-                                }
-                                .libraryRowStyle(insets: rowInsets)
-                        }
-                    } header: {
-                        dayHeader(section.title)
+                Section {
+                    if hasDeviceRows { sectionLabelRow("In your library") }
+                    ForEach(model.items, id: \.reference) { item in
+                        libraryRow(item)
+                            .id(item.reference)
+                            .task(id: item.reference) {
+                                await model.prefetchIfNeeded(after: item.reference)
+                            }
+                            .libraryRowStyle(insets: rowInsets)
                     }
                 }
 
@@ -247,6 +268,8 @@ struct LibraryView: View {
         .listSectionSpacing(0)
         .environment(\.defaultMinListHeaderHeight, 0)
         .scrollPosition(id: $model.visibleReference)
+        .scrollDismissesKeyboard(.immediately)
+        .contentMargins(.bottom, 24, for: .scrollContent)
         .refreshable {
             await model.refresh()
             if model.selectedCollection != nil {
@@ -255,183 +278,217 @@ struct LibraryView: View {
         }
     }
 
-    /// Lines rows up with the large title and search field above them.
+    /// Lines rows up with the title and search field above them.
     private var rowInsets: EdgeInsets {
-        let margin = Theme.pageMargin(forWidth: listWidth)
+        let margin = Theme.pageMargin(forWidth: min(listWidth, Theme.readableWidth))
         return EdgeInsets(top: 0, leading: margin, bottom: 0, trailing: margin)
     }
 
-    private func dayHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.ledgerSectionLabel)
-            .foregroundStyle(Theme.textSecondary)
-            .textCase(nil)
-            .padding(.top, 12)
-            .padding(.bottom, 2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .listRowInsets(rowInsets)
-            .accessibilityAddTraits(.isHeader)
+    /// A row rather than a section header, which would stick while scrolling and
+    /// ignore the width limit on iPad.
+    private func sectionLabelRow(_ title: String) -> some View {
+        chromeRow {
+            SectionLabel(title)
+                .padding(.top, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
-    // MARK: - Filter row
+    private func chromeRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .listRowInsets(EdgeInsets(top: 0, leading: rowInsets.leading, bottom: 0, trailing: rowInsets.trailing))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+    }
 
-    private var filterRow: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
-                collectionMenu
-                Spacer(minLength: 8)
-                countLabel
-                filterMenu
-            }
-            // Large text gets the whole line for the collection's name.
-            VStack(alignment: .leading, spacing: 0) {
-                collectionMenu
-                HStack(spacing: 12) {
-                    countLabel
-                    Spacer(minLength: 8)
+    // MARK: - Title, search, chips
+
+    private var headerRow: some View {
+        chromeRow {
+            ScreenHeader("Library") {
+                if isSelecting {
+                    Button("Done") { leaveSelectionMode() }
+                        .buttonStyle(QuietButtonStyle())
+                        .accessibilityIdentifier("library.done")
+                } else {
                     filterMenu
+                    addMenu
                 }
             }
+            .padding(.trailing, -8)
         }
-        .frame(minHeight: 44)
-        .listRowInsets(EdgeInsets(top: 0, leading: rowInsets.leading, bottom: 0, trailing: rowInsets.trailing - 8))
+    }
+
+    private var searchRow: some View {
+        chromeRow {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.subheadline)
+                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    .foregroundStyle(Theme.textSecondary)
+                    .accessibilityHidden(true)
+                TextField(
+                    "Search",
+                    text: $model.searchText,
+                    prompt: Text("Search transcripts and summaries").foregroundStyle(Theme.textSecondary)
+                )
+                .font(.body)
+                .foregroundStyle(Theme.text)
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+                .focused($isSearchFocused)
+                .accessibilityLabel("Search transcripts and summaries")
+                .accessibilityIdentifier("library.search")
+                if !model.searchText.isEmpty {
+                    Button {
+                        model.searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(Theme.textSecondary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.leading, 12)
+            .frame(minHeight: 44)
+            .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.radiusMedium, style: .continuous))
+            .padding(.top, 4)
+        }
+    }
+
+    private var chipRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(LibraryChip.allCases) { chip in
+                    chipButton(chip)
+                }
+            }
+            .padding(.horizontal, rowInsets.leading)
+        }
+        .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
 
-    @ViewBuilder
-    private var countLabel: some View {
-        if let countText {
-            Text(countText)
-                .font(.subheadline)
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(1)
-                .fixedSize()
-        }
-    }
-
-    private var collectionMenu: some View {
-        Menu {
-            Button {
-                model.selectedCollection = nil
+    private func chipButton(_ chip: LibraryChip) -> some View {
+        let isSelected = model.selectedCollection == nil && model.selectedChip == chip
+        return Button {
+            withMotion(Theme.quick) {
+                model.selectedChip = chip
                 leaveSelectionMode()
-            } label: {
-                checkedLabel("All collections", isSelected: model.selectedCollection == nil)
-            }
-            Section {
-                ForEach(service.collections) { collection in
-                    Button {
-                        model.selectedCollection = LibraryCollectionFilter(
-                            id: collection.id,
-                            name: collection.name
-                        )
-                        leaveSelectionMode()
-                    } label: {
-                        checkedLabel(collection.name, isSelected: model.selectedCollection?.id == collection.id)
-                    }
-                }
-            }
-            Section {
-                Button {
-                    path.append(.collections)
-                } label: {
-                    Label("Manage Collections", systemImage: "folder")
-                }
             }
         } label: {
-            HStack(spacing: 3) {
-                Text(model.selectedCollection?.name ?? "All collections")
-                    .fixedSize()
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.semibold))
-                    .accessibilityHidden(true)
+            HStack(spacing: 5) {
+                Text(chip.title)
+                if isSelected, model.totalItems > 0 {
+                    Text(verbatim: "\(model.totalItems)")
+                        .monospacedDigit()
+                }
             }
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(Theme.accent)
+            .font(.subheadline.weight(.semibold))
+            .lineLimit(1)
+            .foregroundStyle(isSelected ? Theme.onAccent : Theme.textSecondary)
+            .padding(.horizontal, 13)
+            .frame(minHeight: 34)
+            .background(isSelected ? Theme.accentFill : Theme.surface2, in: Capsule())
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
-        .accessibilityLabel("Filter by collection")
-        .accessibilityValue(model.selectedCollection?.name ?? "All collections")
-        .accessibilityIdentifier("library.collections")
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("library.chip.\(chip.rawValue)")
     }
 
+    /// The rarer ways to narrow the list, and the way into selecting.
     private var filterMenu: some View {
         Menu {
-            if let filter = model.selectedCollection {
-                Section {
+            Section("Status") {
+                ForEach(LibraryStatusFilter.allCases, id: \.self) { filter in
                     Button {
-                        path.append(.collection(filter.id))
-                    } label: {
-                        Label("Open Collection", systemImage: "folder")
-                    }
-                }
-            } else {
-                Section("Show") {
-                    ForEach(LibraryMediaFilter.allCases, id: \.self) { filter in
-                        Button {
-                            withMotion(Theme.quick) {
-                                model.selectedType = filter
-                                leaveSelectionMode()
-                            }
-                        } label: {
-                            checkedLabel(filter.title, isSelected: model.selectedType == filter)
-                        }
-                    }
-                }
-
-                Section("Status") {
-                    ForEach(LibraryStatusFilter.allCases, id: \.self) { filter in
-                        Button {
-                            model.selectedStatus = filter
-                            leaveSelectionMode()
-                        } label: {
-                            checkedLabel(filter.title, isSelected: model.selectedStatus == filter)
-                        }
-                    }
-                }
-
-                Section("Sort") {
-                    ForEach(LibrarySortOrder.allCases, id: \.self) { order in
-                        Button {
-                            model.sortOrder = order
-                            leaveSelectionMode()
-                        } label: {
-                            checkedLabel(order.title, isSelected: model.sortOrder == order)
-                        }
-                    }
-                }
-
-                Section {
-                    Button {
-                        model.showsArchived.toggle()
+                        model.selectedStatus = filter
                         leaveSelectionMode()
                     } label: {
-                        Label(
-                            model.showsArchived ? "Hide Archived" : "Show Archived",
-                            systemImage: model.showsArchived ? "tray.full" : "archivebox"
-                        )
+                        checkedLabel(filter.title, isSelected: model.selectedStatus == filter)
                     }
-                }
-
-                Section {
-                    Button {
-                        isSelecting = true
-                    } label: {
-                        Label("Select Items", systemImage: "checkmark.circle")
-                    }
-                    .disabled(model.items.isEmpty || isSelecting)
                 }
             }
+
+            Section("Sort") {
+                ForEach(LibrarySortOrder.allCases, id: \.self) { order in
+                    Button {
+                        model.sortOrder = order
+                        leaveSelectionMode()
+                    } label: {
+                        checkedLabel(order.title, isSelected: model.sortOrder == order)
+                    }
+                }
+            }
+
+            Section {
+                Menu {
+                    Button {
+                        model.selectedCollection = nil
+                        leaveSelectionMode()
+                    } label: {
+                        checkedLabel("All collections", isSelected: model.selectedCollection == nil)
+                    }
+                    ForEach(service.collections) { collection in
+                        Button {
+                            model.selectedCollection = LibraryCollectionFilter(
+                                id: collection.id,
+                                name: collection.name
+                            )
+                            leaveSelectionMode()
+                        } label: {
+                            checkedLabel(collection.name, isSelected: model.selectedCollection?.id == collection.id)
+                        }
+                    }
+                } label: {
+                    Label("Collection", systemImage: "folder")
+                }
+                .accessibilityIdentifier("library.collections")
+            }
+
+            Section {
+                Button {
+                    isSelecting = true
+                } label: {
+                    Label("Select Items", systemImage: "checkmark.circle")
+                }
+                .disabled(model.items.isEmpty || model.selectedCollection != nil || isSelecting)
+            }
         } label: {
-            Image(systemName: "line.3.horizontal.decrease.circle")
-                .font(.body)
-                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-                .foregroundStyle(Theme.accent)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+            HeaderIconLabel(systemImage: "line.3.horizontal.decrease")
         }
         .accessibilityLabel("Library actions")
+        .accessibilityIdentifier("library.filter")
+    }
+
+    private var addMenu: some View {
+        Menu {
+            Button {
+                navigator.isImporterPresented = true
+            } label: {
+                Label("Import Audio", systemImage: "waveform")
+            }
+            Button {
+                navigator.push(.addLink)
+            } label: {
+                Label("Add a Link", systemImage: "link")
+            }
+            Button {
+                navigator.push(.addPDF)
+            } label: {
+                Label("Upload a PDF", systemImage: "doc")
+            }
+        } label: {
+            HeaderIconLabel(systemImage: "plus")
+        }
+        .accessibilityLabel("Add")
+        .accessibilityIdentifier("library.add")
     }
 
     @ViewBuilder
@@ -440,63 +497,6 @@ struct LibraryView: View {
             Label(title, systemImage: "checkmark")
         } else {
             Text(title)
-        }
-    }
-
-    private var countText: String? {
-        if model.selectedCollection != nil {
-            let count = model.collectionItems.count
-            return count > 0 ? "\(count) item\(count == 1 ? "" : "s")" : nil
-        }
-        guard model.totalItems > 0 else { return nil }
-        let noun = model.selectedType == .audio ? "recording" : "item"
-        return "\(model.totalItems) \(noun)\(model.totalItems == 1 ? "" : "s")"
-    }
-
-    // MARK: - Toolbar
-
-    @ToolbarContentBuilder
-    private var libraryToolbar: some ToolbarContent {
-        if isSelecting {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("Done") { leaveSelectionMode() }
-            }
-        }
-
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Button {
-                    path.append(.addLink)
-                } label: {
-                    Label("Add a Link", systemImage: "link")
-                }
-                Button {
-                    path.append(.addPDF)
-                } label: {
-                    Label("Upload a PDF", systemImage: "doc")
-                }
-                Button {
-                    path.append(.importAudio)
-                } label: {
-                    Label("Import Audio", systemImage: "waveform")
-                }
-            } label: {
-                Image(systemName: "plus")
-                    .frame(minWidth: 44, minHeight: 44)
-            }
-            .accessibilityLabel("Add")
-            .accessibilityIdentifier("library.add")
-        }
-
-        ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                path.append(.settings)
-            } label: {
-                Image(systemName: "gearshape")
-                    .frame(minWidth: 44, minHeight: 44)
-            }
-            .accessibilityLabel("Settings")
-            .accessibilityIdentifier("library.settings")
         }
     }
 
@@ -538,13 +538,13 @@ struct LibraryView: View {
                 } label: {
                     Label("Collect", systemImage: "folder.badge.plus")
                 }
-                .tint(Theme.accentFill)
+                .tint(Theme.heroIcon)
             }
         }
     }
 
     private func open(_ reference: LibraryReference) {
-        path.append(.item(reference))
+        navigator.push(.item(reference))
     }
 
     @ViewBuilder
@@ -552,32 +552,28 @@ struct LibraryView: View {
         if model.isLoadingCollection && model.collectionItems.isEmpty {
             loadingRow
         } else if let error = model.collectionError {
-            ContentUnavailableView {
-                Label("Couldn’t Open Collection", systemImage: "folder")
-            } description: {
-                Text(error)
-            } actions: {
-                Button("Try Again") {
-                    Task { await model.loadSelectedCollection() }
+            chromeRow {
+                QuietPlaceholder(
+                    systemImage: "folder",
+                    title: "Couldn’t Open Collection",
+                    message: error
+                ) {
+                    Button("Try Again") {
+                        Task { await model.loadSelectedCollection() }
+                    }
+                    .buttonStyle(QuietButtonStyle())
                 }
-                .buttonStyle(.borderedProminent)
             }
-            .frame(maxWidth: .infinity, minHeight: 300)
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
         } else if visibleCollectionItems.isEmpty {
-            ContentUnavailableView(
-                model.query.search.isEmpty ? "Empty Collection" : "No Results",
-                systemImage: model.query.search.isEmpty ? "tray" : "magnifyingglass",
-                description: Text(
-                    model.query.search.isEmpty
+            chromeRow {
+                QuietPlaceholder(
+                    systemImage: model.query.search.isEmpty ? "tray" : "magnifyingglass",
+                    title: model.query.search.isEmpty ? "Empty Collection" : "No Results",
+                    message: model.query.search.isEmpty
                         ? "Swipe right on anything in your Library to add it."
                         : "Try a different title."
                 )
-            )
-            .frame(maxWidth: .infinity, minHeight: 300)
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
+            }
         } else {
             ForEach(visibleCollectionItems) { item in
                 Button {
@@ -585,7 +581,7 @@ struct LibraryView: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.itemTitle ?? item.itemId)
-                            .font(.ledgerRowTitle)
+                            .font(.rowTitle)
                             .foregroundStyle(Theme.text)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
@@ -612,49 +608,48 @@ struct LibraryView: View {
     }
 
     private var loadingRow: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-            Text("Loading your library…")
-                .font(.subheadline)
-                .foregroundStyle(Theme.textSecondary)
+        chromeRow {
+            VStack(spacing: 12) {
+                ProgressView()
+                Text("Loading your library…")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 240)
+            .accessibilityElement(children: .combine)
         }
-        .frame(maxWidth: .infinity, minHeight: 240)
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
-        .accessibilityElement(children: .combine)
     }
 
     private func errorRow(_ message: String) -> some View {
-        ContentUnavailableView {
-            Label("Couldn’t Load Library", systemImage: "wifi.exclamationmark")
-        } description: {
-            Text(message)
-        } actions: {
-            Button("Try Again") {
-                Task { await model.retryInitialLoad() }
+        chromeRow {
+            QuietPlaceholder(
+                systemImage: "wifi.exclamationmark",
+                title: "Couldn’t Load Library",
+                message: message
+            ) {
+                Button("Try Again") {
+                    Task { await model.retryInitialLoad() }
+                }
+                .buttonStyle(QuietButtonStyle())
             }
-            .buttonStyle(.borderedProminent)
         }
-        .frame(maxWidth: .infinity, minHeight: 300)
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     private var emptyRow: some View {
-        ContentUnavailableView {
-            Label(emptyTitle, systemImage: model.query.search.isEmpty ? "tray" : "magnifyingglass")
-        } description: {
-            Text(emptyDescription)
+        chromeRow {
+            QuietPlaceholder(
+                systemImage: model.query.search.isEmpty ? "tray" : "magnifyingglass",
+                title: emptyTitle,
+                message: emptyDescription
+            )
         }
-        .frame(maxWidth: .infinity, minHeight: 300)
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     private var emptyTitle: String {
         if !model.query.search.isEmpty { return "No Results" }
         if model.showsArchived { return "No Archived Items" }
-        if model.selectedStatus != .all { return "No Matching Items" }
+        if model.showsFavoritesOnly { return "No Starred Items" }
+        if model.selectedStatus != .all || model.selectedType != .all { return "No Matching Items" }
         return "Your Library Is Ready"
     }
 
@@ -665,159 +660,91 @@ struct LibraryView: View {
         if model.showsArchived {
             return "Items you archive stay here until you unarchive them."
         }
-        if model.selectedStatus != .all {
-            return "Change the status filter to see more of your library."
+        if model.showsFavoritesOnly {
+            return "Star a recording from its menu to find it here."
+        }
+        if model.selectedStatus != .all || model.selectedType != .all {
+            return "Change the filter to see more of your library."
         }
         return "Tap Record below, or use the Add button for a link or a PDF."
     }
 
+    private var showsFilterSummary: Bool {
+        model.selectedStatus != .all
+            || model.sortOrder != .newest
+            || !model.query.search.isEmpty
+            || model.selectedCollection != nil
+    }
+
     private var filterSummaryRow: some View {
-        HStack(spacing: 8) {
-            Text(filterSummary)
-                .font(.footnote)
-                .foregroundStyle(Theme.textSecondary)
-            Spacer()
-            if model.selectedStatus != .all || model.sortOrder != .newest || model.showsArchived {
-                Button("Reset") {
-                    model.selectedStatus = .all
-                    model.sortOrder = .newest
-                    model.showsArchived = false
+        chromeRow {
+            HStack(spacing: 8) {
+                Text(filterSummary)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
+                Spacer()
+                if model.selectedStatus != .all || model.sortOrder != .newest || model.selectedCollection != nil {
+                    Button("Reset") {
+                        model.selectedStatus = .all
+                        model.sortOrder = .newest
+                        model.selectedCollection = nil
+                    }
+                    .buttonStyle(QuietButtonStyle())
                 }
-                .buttonStyle(QuietButtonStyle())
             }
         }
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     private var filterSummary: String {
         var parts: [String] = []
         if !model.query.search.isEmpty { parts.append("Results for “\(model.query.search)”") }
-        if model.showsArchived { parts.append("Archived") }
+        if let collection = model.selectedCollection { parts.append(collection.name) }
         if model.selectedStatus != .all { parts.append(model.selectedStatus.title) }
         if model.sortOrder != .newest { parts.append(model.sortOrder.title) }
         return parts.joined(separator: " · ")
     }
 
     private func dismissibleErrorRow(_ message: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            InlineError(message)
-            Button {
-                operationError = nil
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+        chromeRow {
+            HStack(alignment: .top, spacing: 10) {
+                InlineError(message)
+                Button {
+                    operationError = nil
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss error")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Dismiss error")
         }
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     private var loadMoreRow: some View {
-        HStack {
-            Spacer()
-            if model.isLoadingMore {
-                ProgressView()
-                    .accessibilityLabel("Loading more library items")
-            } else if model.loadError != nil {
-                Button("Load More") {
-                    Task { await model.retryNextPage() }
-                }
-                .buttonStyle(QuietButtonStyle())
-            }
-            Spacer()
-        }
-        .frame(minHeight: 44)
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
-    }
-
-    // MARK: - Bottom bar
-
-    /// Record, unmissable at the thumb. Hidden while searching so it does not ride
-    /// up on the keyboard, and replaced by the delete action while selecting.
-    @ViewBuilder
-    private var bottomBar: some View {
-        if isSelecting {
-            selectionBar
-        } else if !isSearchPresented {
-            VStack(spacing: 0) {
-                Hairline()
-                recordControl
-                    .ledgerPageMargin()
-                    .padding(.vertical, 10)
-            }
-            .ledgerBarBackground()
-        }
-    }
-
-    @ViewBuilder
-    private var recordControl: some View {
-        if recorder.isRecording {
-            Button {
-                path.append(.record)
-            } label: {
-                HStack(spacing: 8) {
-                    if recorder.captureState == .recording {
-                        Circle()
-                            .fill(Theme.onRecord)
-                            .frame(width: 10, height: 10)
-                            .accessibilityHidden(true)
-                    } else {
-                        Image(systemName: "pause.fill")
-                            .accessibilityHidden(true)
+        chromeRow {
+            HStack {
+                Spacer()
+                if model.isLoadingMore {
+                    ProgressView()
+                        .accessibilityLabel("Loading more library items")
+                } else if model.loadError != nil {
+                    Button("Load More") {
+                        Task { await model.retryNextPage() }
                     }
-                    Text(recorder.captureState == .recording ? "Recording" : "Paused")
-                    Text(recorder.formattedDuration)
-                        .monospacedDigit()
+                    .buttonStyle(QuietButtonStyle())
                 }
+                Spacer()
             }
-            .buttonStyle(
-                recorder.captureState == .recording
-                    ? PrimaryButtonStyle(shape: .pill, fill: Theme.record, foreground: Theme.onRecord)
-                    : PrimaryButtonStyle(shape: .pill)
-            )
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Return to recording")
-            .accessibilityValue(recorder.formattedDuration)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityIdentifier("library.recording")
-        } else {
-            Button {
-                startRecording(contentType: Self.defaultContentType)
-            } label: {
-                Label("Record", systemImage: "mic")
-            }
-            .buttonStyle(PrimaryButtonStyle(shape: .pill))
-            .disabled(recorder.isStarting)
-            .accessibilityHint("Starts recording from the microphone")
-            .accessibilityIdentifier("library.record")
-            // Optional and out of the way: most recordings never need a type.
-            .contextMenu {
-                Section("Record as") {
-                    ForEach(RecordingContentType.all) { type in
-                        Button {
-                            startRecording(contentType: type.value)
-                        } label: {
-                            Label(type.title, systemImage: type.systemImage)
-                        }
-                    }
-                }
-            }
+            .frame(minHeight: 44)
         }
     }
 
-    private func startRecording(contentType: String) {
-        recorder.start(contentType: contentType)
-        Haptics.medium()
-        path.append(.record)
-    }
+    // MARK: - Selecting
 
+    /// Takes the tab bar's place while selecting.
     private var selectionBar: some View {
         VStack(spacing: 0) {
             Hairline()
@@ -838,10 +765,10 @@ struct LibraryView: View {
                 .buttonStyle(QuietButtonStyle(color: Theme.danger))
                 .disabled(selectedReferences.isEmpty || isDeleting)
             }
-            .ledgerPageMargin()
+            .pageMargin()
             .padding(.vertical, 6)
         }
-        .ledgerBarBackground()
+        .barBackground()
     }
 
     private var deletionTitle: String {
@@ -904,7 +831,6 @@ struct LibraryView: View {
         if failed.isEmpty {
             leaveSelectionMode()
             Haptics.success()
-            await model.refresh()
         } else {
             isSelecting = true
             operationError = "\(failed.count) item\(failed.count == 1 ? "" : "s") couldn’t be deleted. The failed selection was kept so you can try again."
@@ -914,7 +840,7 @@ struct LibraryView: View {
 }
 
 private extension View {
-    /// Plain rows on the paper with a hairline between them, not cards.
+    /// Plain rows on the page with a hairline between them, not cards.
     func libraryRowStyle(insets: EdgeInsets) -> some View {
         self
             .listRowInsets(insets)
@@ -957,6 +883,7 @@ struct AttentionLabel: View {
                     .accessibilityHidden(true)
             } else {
                 Image(systemName: "exclamationmark.circle")
+                    .foregroundStyle(Theme.warning)
                     .accessibilityHidden(true)
             }
             Text(attention.text)
@@ -966,160 +893,229 @@ struct AttentionLabel: View {
     }
 }
 
-/// Mirrors `LibrarySummaryRow` for a recording the server does not list yet.
+/// Mirrors `LibrarySummaryRow` for a recording the server does not list yet, with
+/// what it needs right on the row.
 private struct DeviceRecordingRow: View {
     let recording: LocalRecording
+    let onTap: () -> Void
+    let onTranscribe: () -> Void
+    let onOptions: () -> Void
+    @Environment(RecordingCoordinator.self) private var recorder
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(recording.displayTitle)
-                    .font(.ledgerRowTitle)
-                    .foregroundStyle(Theme.text)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Spacer(minLength: 8)
-                Text(recording.formattedDuration)
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(Theme.textSecondary)
-            }
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                if isFailed {
-                    Image(systemName: "exclamationmark.circle")
-                        .accessibilityHidden(true)
-                } else if recording.isUploadInProgress {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(Theme.textSecondary)
-                        .accessibilityHidden(true)
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+            : AnyLayout(HStackLayout(spacing: 10))
+        layout {
+            Button(action: onTap) {
+                HStack(spacing: 12) {
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        TypeTile(itemType: "audio")
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(recording.needsYouTitle)
+                            .font(.rowTitle)
+                            .foregroundStyle(Theme.text)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                            .multilineTextAlignment(.leading)
+                        if recording.isUploadInProgress {
+                            DeviceProgressLabel(recording: recording)
+                        } else {
+                            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                                Image(systemName: "exclamationmark.circle")
+                                    .foregroundStyle(Theme.warning)
+                                    .accessibilityHidden(true)
+                                Text(recording.needsYouDetail)
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            .font(.footnote)
+                        }
+                    }
+                    Spacer(minLength: 0)
                 }
-                Text(recording.recoveryDescription)
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
+                .frame(minHeight: 44)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
             }
-            .font(.footnote)
-            .foregroundStyle(isFailed ? Theme.text : Theme.textSecondary)
-            if recording.state == .uploading {
-                ProgressView(value: recording.uploadProgress ?? 0)
-                    .padding(.top, 2)
+            .buttonStyle(RowButtonStyle())
+            .accessibilityIdentifier("library-device-\(recording.id.uuidString)")
+
+            if !recording.isUploadInProgress {
+                if recording.canUpload {
+                    NeedsYouPill(title: "Transcribe", isPrimary: true, action: onTranscribe)
+                        .disabled(recorder.isRecording || recorder.isStarting)
+                        .accessibilityIdentifier("recording.transcribe.\(recording.id.uuidString)")
+                } else {
+                    NeedsYouPill(title: "Options", isPrimary: false, action: onOptions)
+                        .accessibilityIdentifier("recording.options.\(recording.id.uuidString)")
+                }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .padding(.vertical, 10)
-    }
-
-    private var isFailed: Bool {
-        [.invalid, .uploadFailed].contains(recording.state)
     }
 }
 
+/// A share that failed or that waits for a tap, with that tap on the row.
+private struct DeviceShareRow: View {
+    let item: ShareInboxStore.Item
+    let onTap: () -> Void
+    let onAction: () -> Void
+    @Environment(RecordingUploadCoordinator.self) private var uploader
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var tileType: String {
+        switch item.resolvedKind {
+        case .audio: "audio"
+        case .pdf: "pdf"
+        case .link: "youtube"
+        }
+    }
+
+    var body: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+            : AnyLayout(HStackLayout(spacing: 10))
+        layout {
+            Button(action: onTap) {
+                HStack(spacing: 12) {
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        TypeTile(itemType: tileType)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.originalName)
+                            .font(.rowTitle)
+                            .foregroundStyle(Theme.text)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        Label {
+                            Text(uploader.shareStatusMessage(for: item))
+                                .lineLimit(3)
+                                .multilineTextAlignment(.leading)
+                        } icon: {
+                            Image(systemName: "exclamationmark.circle")
+                                .foregroundStyle(Theme.warning)
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(Theme.textSecondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(minHeight: 44)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(RowButtonStyle())
+            .accessibilityIdentifier("library-share-\(item.id)")
+
+            NeedsYouPill(title: uploader.shareActionTitle(for: item), isPrimary: true, action: onAction)
+        }
+    }
+}
+
+/// A Studio row: real peaks or a type icon, the title with its length, what it says,
+/// and where it lives. Anything missing collapses without leaving a gap.
 struct LibrarySummaryRow: View {
     let item: LibraryListItem
     let selectionState: Bool?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 12) {
             if let selectionState {
                 Image(systemName: selectionState ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
-                    .foregroundStyle(selectionState ? Theme.accent : Theme.textSecondary)
+                    .foregroundStyle(selectionState ? Theme.accentText : Theme.textSecondary)
+                    .frame(minHeight: 44)
+            }
+
+            if !dynamicTypeSize.isAccessibilitySize {
+                RowLeadingVisual(item: item)
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                // At accessibility sizes a time beside the title would leave it one
-                // word a line, so the time drops underneath and the title runs in full.
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                // At accessibility sizes the length drops into the meta line, so the
+                // title runs in full rather than one word a line.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(item.displayTitle)
-                        .font(.ledgerRowTitle)
+                        .font(.rowTitle)
                         .foregroundStyle(Theme.text)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                         .multilineTextAlignment(.leading)
-                    Spacer(minLength: 0)
-                    if item.favorite {
-                        Image(systemName: "star.fill")
-                            .font(.caption2)
-                            .foregroundStyle(Theme.textSecondary)
-                            .accessibilityLabel("Favorite")
-                    }
-                    if !dynamicTypeSize.isAccessibilitySize, let timeText {
-                        Text(timeText)
-                            .font(.subheadline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !dynamicTypeSize.isAccessibilitySize, let detail = item.trailingDetail {
+                        Text(detail)
+                            .font(.number)
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize()
                     }
                 }
 
-                if dynamicTypeSize.isAccessibilitySize, let timeText {
-                    Text(timeText)
+                if let excerpt = item.displayExcerpt {
+                    Text(excerpt)
                         .font(.subheadline)
                         .foregroundStyle(Theme.textSecondary)
-                }
-
-                if let displaySubtitle = item.displaySubtitle {
-                    Text(displaySubtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.textSecondary)
-                        .lineLimit(2)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2)
                         .multilineTextAlignment(.leading)
                 }
 
-                if detailText != nil || attention != nil {
-                    metaLine
-                        .padding(.top, 2)
-                }
+                RowMetaLine(item: item, showsDate: true)
+                    .padding(.top, 2)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
+    }
+}
+
+/// "Baby · Oct 19", with the collection's dot. An unfinished item says that instead.
+struct RowMetaLine: View {
+    let item: LibraryListItem
+    let showsDate: Bool
+    /// Home's cards have no column for the length, so it joins this line.
+    var showsLength = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var parts: [String] {
+        var parts: [String] = []
+        if let collection = item.primaryCollection?.name { parts.append(collection) }
+        if let source = item.sourceLabel { parts.append(source) }
+        if showsLength || dynamicTypeSize.isAccessibilitySize, let detail = item.trailingDetail { parts.append(detail) }
+        if let words = item.wordCountLabel { parts.append(words) }
+        if showsDate, let date = MediaFormat.rowDate(item.createdAt) { parts.append(date) }
+        return parts
     }
 
-    @ViewBuilder
-    private var metaLine: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-            : AnyLayout(HStackLayout(spacing: 6))
-        layout {
-            if let detailText {
-                Text(detailText)
-                    .font(.footnote.monospacedDigit())
-                    .foregroundStyle(Theme.textSecondary)
-            }
-            if detailText != nil, attention != nil, !dynamicTypeSize.isAccessibilitySize {
-                Text(verbatim: "·")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.textSecondary)
-                    .accessibilityHidden(true)
-            }
-            if let attention {
+    var body: some View {
+        HStack(spacing: 5) {
+            if let attention = ItemAttention(status: item.status) {
                 AttentionLabel(attention: attention)
+            } else if let collection = item.primaryCollection {
+                CollectionDot(colorKey: collection.color)
             }
-        }
-    }
-
-    private var attention: ItemAttention? {
-        ItemAttention(status: item.status)
-    }
-
-    private var timeText: String? {
-        item.createdAt?.formatted(date: .omitted, time: .shortened)
-    }
-
-    private var detailText: String? {
-        switch item.itemType {
-        case "audio" where item.duration > 0:
-            return LedgerFormat.duration(item.duration)
-        case "pdf" where item.pageCount > 0:
-            return "\(item.pageCount) page\(item.pageCount == 1 ? "" : "s")"
-        case _ where item.wordCount > 0:
-            if item.wordCount >= 1_000 {
-                let thousands = Double(item.wordCount) / 1_000
-                let precision = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(1))
-                return "\(thousands.formatted(precision))K words"
+            if item.favorite {
+                Image(systemName: "star.fill")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+                    .accessibilityLabel("Favorite")
             }
-            return "\(item.wordCount) words"
-        default:
-            return nil
+            // An unfinished row's title line has no room for its length at these sizes.
+            if ItemAttention(status: item.status) != nil,
+               showsLength || dynamicTypeSize.isAccessibilitySize,
+               let detail = item.trailingDetail {
+                Text(detail)
+                    .font(.footnote)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            if !parts.isEmpty, ItemAttention(status: item.status) == nil {
+                Text(parts.joined(separator: " · "))
+                    .font(.footnote)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    .multilineTextAlignment(.leading)
+            }
         }
     }
 }
@@ -1130,8 +1126,11 @@ struct LibraryDetailLoader: View {
     @State private var item: LibraryItem?
     @State private var errorMessage: String?
     @State private var isLoading = false
+    @State private var rowLookup = BoundedLookup()
 
     private let service = MediaToolsService.shared
+    /// How long an open may wait for the collection name, from when it began.
+    private static let rowLookupWait: Duration = .seconds(1)
 
     var body: some View {
         Group {
@@ -1152,7 +1151,7 @@ struct LibraryDetailLoader: View {
                     Text(errorMessage)
                 } actions: {
                     Button("Try Again") { Task { await load() } }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(QuietButtonStyle())
                 }
             } else {
                 VStack(spacing: 12) {
@@ -1164,11 +1163,12 @@ struct LibraryDetailLoader: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.bg)
+        .background(Theme.background)
         .task(id: reference) {
             guard previewTitle == nil else { return }
             await load()
         }
+        .onDisappear { rowLookup.cancel() }
     }
 
     private func load() async {
@@ -1177,7 +1177,18 @@ struct LibraryDetailLoader: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            item = try await service.getLibraryItem(reference)
+            // Opened from a notification, nothing has listed this item yet, and its
+            // collections come only from the list. A new item is on the newest page, so
+            // this asks for that alongside the item, and gives it a moment to land so the
+            // header needn't shift afterward. It never holds the screen past that moment.
+            let deadline = ContinuousClock.now + Self.rowLookupWait
+            if service.libraryRow(for: reference) == nil {
+                let service = service
+                rowLookup.start { _ = try? await service.listLibraryItems() }
+            }
+            let loaded = try await service.getLibraryItem(reference)
+            await rowLookup.wait(until: deadline)
+            item = loaded
         } catch {
             guard !Task.isCancelled else { return }
             errorMessage = error.localizedDescription

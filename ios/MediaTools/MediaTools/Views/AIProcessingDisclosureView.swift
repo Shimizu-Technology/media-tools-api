@@ -10,7 +10,7 @@ struct AIProcessingDisclosureView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Allow third-party AI processing?")
-                            .font(.ledgerTitle)
+                            .font(.displayTitle)
                             .foregroundStyle(Theme.text)
                         Text("With automatic transcription on, new recordings and shared audio go to OpenAI when they are saved, as do shared video links that have no subtitles, and their transcripts go to OpenRouter. Everything else is sent only when you use an AI feature. You can turn automatic transcription off in Settings. This permission applies to this account on this iPhone.")
                             .font(.subheadline)
@@ -60,7 +60,7 @@ struct AIProcessingDisclosureView: View {
                 .readingMeasure()
                 .padding(20)
             }
-            .background(Theme.bg)
+            .background(Theme.background)
             .navigationTitle("AI processing")
             .navigationBarTitleDisplayMode(.inline)
         }

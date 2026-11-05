@@ -143,8 +143,8 @@ MediaTools/
 │   └── Info.plist                   # Activation rules
 │
 ├── MediaToolsShared/                # Compiled into the app and its extensions
-│   ├── LedgerTheme.swift            # Color tokens, type scale, and motion curves
-│   ├── Ledger.xcassets              # Light, dark, and Increase Contrast color values
+│   ├── AppTheme.swift               # Color tokens, type scale, and motion curves
+│   ├── Theme.xcassets               # Light, dark, and Increase Contrast color values
 │   ├── QuickCaptureIntents.swift    # Action Button/Siri/Shortcuts recording actions
 │   └── RecordingActivityAttributes.swift
 │
@@ -155,22 +155,27 @@ MediaTools/
 
 ## Design system
 
-The app uses Ledger, "paper and ink": warm paper in light mode, warm graphite in
-dark mode, and one ink blue accent. The color names (`bg`, `surface`, `text`,
-`text-secondary`, `separator`, `accent`, `accent-fill`, `on-accent`, `record`,
-`on-record`, `danger`, `on-danger`) match the web tokens in
-`frontend/src/index.css`, so change the two together.
+The app uses Sunrise Home and Studio Library, from `docs/plans/v1-design-plan.md`:
+warm surfaces, an amber to coral accent, and a hero gradient for recording. The
+token names (`background`, `surface`, `surface-2`, `text`, `text-secondary`,
+`separator`, `accent-fill`, `on-accent`, `accent-text`, `tab-bar`, `warning`,
+`warning-surface`, the `waveform-*` colors, `danger`, `on-danger`) match the web
+tokens in `frontend/src/index.css`, so change the two together.
 
-- Red means a recording is running. Errors stay in ink with an icon, and
-  destructive actions use `danger`.
-- New York carries titles, summaries, and transcripts through the `Font.ledger*`
-  styles. SF carries controls and metadata through the plain system text styles.
-  Everything follows Dynamic Type. The one explicit size is the recording timer,
-  which scales with a `@ScaledMetric` and shrinks to fit.
+- Destructive actions use `danger`, a distinct red. White text on the hero gradient
+  is always at full opacity. Collection colors carry white icons, not small text.
+- Waveforms are real audio data from the server. An item with no peaks shows a type
+  icon, and the recording screen's bars come from the recorder's own meter. Nothing
+  in a release build draws an invented shape.
+- SF Rounded carries titles through the `Font.display*` styles, the system font
+  carries reading and controls, and durations, timers, and counts use monospaced
+  digits. Everything follows Dynamic Type. The one explicit size is the recording
+  timer, which scales with a `@ScaledMetric` and shrinks to fit.
 - Status appears only when something needs attention. A finished item shows none.
 - Use `withMotion` rather than `withAnimation`, so Reduce Motion is honored.
-- The app icon comes from `ios/scripts/generate-icon.swift`. Verify it with
-  `sips -g hasAlpha`: App Store Connect rejects an icon with an alpha channel.
+- The app icon comes from `ios/scripts/generate-icon.swift`, which draws the geometry
+  in `ios/design/app-icon.svg`. Verify it with `sips -g hasAlpha`: App Store Connect
+  rejects an icon with an alpha channel.
 
 ## Features
 

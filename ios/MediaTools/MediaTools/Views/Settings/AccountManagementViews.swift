@@ -25,7 +25,7 @@ struct PasswordManagementSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(configured ? "Change password" : "Create a password")
-                        .font(.ledgerTitle2)
+                        .font(.displayTitle2)
                         .foregroundStyle(Theme.text)
                     if needsEmailProof {
                         proofStep
@@ -36,7 +36,7 @@ struct PasswordManagementSheet: View {
                 .padding(20)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.bg)
+            .background(Theme.background)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { onCancel() }.disabled(isBusy)
@@ -214,7 +214,7 @@ struct ChangeEmailSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Change email")
-                        .font(.ledgerTitle2)
+                        .font(.displayTitle2)
                         .foregroundStyle(Theme.text)
                     if isAwaitingCode {
                         Text(AuthCopy.emailReceipt + ". Enter the code sent to \(trimmedEmail).")
@@ -266,7 +266,7 @@ struct ChangeEmailSheet: View {
                 .padding(20)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.bg)
+            .background(Theme.background)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { onCancel() }.disabled(isBusy)
@@ -329,16 +329,16 @@ struct UsageSummaryView: View {
                     .accessibilityIdentifier("usage.exempt")
             }
             meter(
-                title: "Transcription",
+                title: "This month",
                 detail: usage.exempt
-                    ? "\(minutes(usage.transcriptionSeconds)) minutes this month"
-                    : "\(minutes(usage.transcriptionSeconds)) of \(minutes(usage.transcriptionLimitSeconds)) minutes",
+                    ? "\(minutes(usage.transcriptionSeconds)) min"
+                    : "\(minutes(usage.transcriptionSeconds)) of \(minutes(usage.transcriptionLimitSeconds)) min",
                 fraction: usage.exempt ? nil : fraction(usage.transcriptionSeconds, of: usage.transcriptionLimitSeconds)
             )
             meter(
                 title: "Summaries and chat",
                 detail: usage.exempt
-                    ? "\(usage.aiRequests) requests this month"
+                    ? "\(usage.aiRequests) requests"
                     : "\(usage.aiRequests) of \(usage.aiRequestLimit) requests",
                 fraction: usage.exempt ? nil : fraction(usage.aiRequests, of: usage.aiRequestLimit)
             )
@@ -359,12 +359,24 @@ struct UsageSummaryView: View {
                     .foregroundStyle(Theme.text)
                 Spacer()
                 Text(detail)
-                    .font(.footnote)
+                    .font(.number)
                     .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.trailing)
             }
             if let fraction {
-                ProgressView(value: fraction)
-                    .tint(Theme.accent)
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Theme.surface2)
+                        // Nothing used draws nothing, not a sliver of used quota.
+                        if fraction > 0 {
+                            Capsule()
+                                .fill(Theme.heroGradient)
+                                .frame(width: max(6, geometry.size.width * fraction))
+                        }
+                    }
+                }
+                .frame(height: 6)
+                .accessibilityHidden(true)
             }
         }
         .accessibilityElement(children: .combine)
@@ -430,7 +442,7 @@ struct DevicesListView: View {
                     .listRowBackground(Color.clear)
             }
         }
-        .ledgerListBackground()
+        .themedListBackground()
         .navigationTitle("Devices")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }

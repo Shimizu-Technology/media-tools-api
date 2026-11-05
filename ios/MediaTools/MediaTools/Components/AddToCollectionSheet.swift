@@ -42,7 +42,7 @@ struct AddToCollectionSheet: View {
                                 Spacer()
                                 if addedTo == collection.id {
                                     Image(systemName: "checkmark")
-                                        .foregroundStyle(Theme.accent)
+                                        .foregroundStyle(Theme.accentText)
                                         .accessibilityLabel("Added")
                                 }
                             }
@@ -77,14 +77,14 @@ struct AddToCollectionSheet: View {
                             showCreateNew = true
                         } label: {
                             Label("New Collection", systemImage: "plus")
-                                .foregroundStyle(Theme.accent)
+                                .foregroundStyle(Theme.accentText)
                                 .frame(minHeight: 44)
                         }
                         .listRowBackground(Theme.surface)
                     }
                 }
             }
-            .ledgerListBackground()
+            .themedListBackground()
             .navigationTitle("Add to Collection")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

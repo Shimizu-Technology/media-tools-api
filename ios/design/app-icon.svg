@@ -1,0 +1,17 @@
+<!-- The Media Tools icon: white sound bars rising over a horizon, on the sunrise gradient.
+     This is the editable source. scripts/generate-icon.swift draws the same geometry
+     into the opaque PNGs that ship, because App Store Connect rejects an alpha channel. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="sunrise" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F59A3C"/>
+      <stop offset=".55" stop-color="#DC4F22"/>
+      <stop offset="1" stop-color="#AE2733"/>
+    </linearGradient>
+  </defs>
+  <rect width="100" height="100" fill="url(#sunrise)"/>
+  <g stroke="#fff" stroke-width="7.5" stroke-linecap="round">
+    <path d="M22 66v-8M36 66V44M50 66V30M64 66V44M78 66v-8"/>
+  </g>
+  <path d="M14 78h72" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
+</svg>

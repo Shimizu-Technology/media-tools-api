@@ -181,6 +181,17 @@ final class RecordingUploadCoordinator: BackgroundUploadEventReceiving {
         process(recordingID: recording.id)
     }
 
+    /// The Transcribe button, wherever it appears: asks for permission if it has to,
+    /// then sends the recording with no further steps.
+    func transcribe(_ recording: LocalRecording) async {
+        guard await aiProcessingConsent.requestPermission(),
+              let current = recorder.recording(withID: recording.id),
+              !current.isUploadInProgress
+        else { return }
+        queue(current)
+        Haptics.light()
+    }
+
     /// Sends every finished recording that was saved with automatic transcription
     /// on. Safe to call repeatedly, because queueing moves a recording out of the
     /// eligible states. Without consent the audio simply stays on this iPhone.

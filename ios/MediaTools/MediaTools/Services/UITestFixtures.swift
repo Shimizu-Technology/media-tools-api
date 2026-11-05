@@ -119,6 +119,30 @@ private actor UITestPendingBootstrapTransport: DeviceSessionTransport {
     }
 }
 
+extension Notification.Name {
+    static let uiTestActionButton = Notification.Name("UITestActionButton")
+    static let uiTestRecordLink = Notification.Name("UITestRecordLink")
+}
+
+/// Lets a UI test trigger a route in the running app. `XCUIApplication.open` relaunches
+/// it, which would clear any sheet for the wrong reason. Darwin notifications cross
+/// from the test runner to the app without touching the app's state.
+enum UITestRouteSignals {
+    static func listen() {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let forward: CFNotificationCallback = { _, _, name, _, _ in
+            guard let raw = name?.rawValue as String? else { return }
+            let target: Notification.Name = raw.hasSuffix("action-button") ? .uiTestActionButton : .uiTestRecordLink
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: target, object: nil)
+            }
+        }
+        for name in ["com.shimizutechnology.mediatools.ui-test.action-button", "com.shimizutechnology.mediatools.ui-test.record-link"] {
+            CFNotificationCenterAddObserver(center, nil, forward, name as CFString, nil, .deliverImmediately)
+        }
+    }
+}
+
 /// Puts a share in the real inbox before launch finishes, as the extension would.
 enum UITestShareFixture {
     static let linkTitle = "Fixture shared video"
@@ -151,6 +175,23 @@ final class UITestAPIProtocol: URLProtocol {
     static let legacyProviderID = "user_uiTestLegacy"
     private static let lock = NSLock()
     private nonisolated(unsafe) static var acceptedAudioTitle: String?
+    /// What this run has changed, so a test can watch every screen catch up.
+    private nonisolated(unsafe) static var edits = RichEdits()
+
+    private struct RichEdits {
+        var deleted: Set<String> = []
+        var titles: [String: String] = [:]
+        var favorite: [String: Bool] = [:]
+        var archived: [String: Bool] = [:]
+        var statuses: [String: String] = [:]
+        var addedCollections: [String: [[String: String]]] = [:]
+    }
+
+    private static func withEdits<T>(_ body: (inout RichEdits) -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body(&edits)
+    }
     private nonisolated(unsafe) static var accountProfileRequests = 0
 
     /// The first request fails, as if offline, so a test can watch the app recover.
@@ -177,30 +218,142 @@ final class UITestAPIProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func stopLoading() {}
 
+    /// The body of a request, however URLSession handed it over.
+    private var requestBody: [String: Any] {
+        var data = request.httpBody
+        if data == nil, let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var collected = Data()
+            let size = 4_096
+            let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: size)
+            defer { buffer.deallocate() }
+            while stream.hasBytesAvailable {
+                let count = stream.read(buffer, maxLength: size)
+                guard count > 0 else { break }
+                collected.append(buffer, count: count)
+            }
+            data = collected
+        }
+        return data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+    }
+
+    /// Mutations against the rich fixture. Returns true when it answered the request.
+    private func handleRichMutation(_ url: URL) -> Bool {
+        let path = url.path
+        let method = request.httpMethod ?? "GET"
+        let parts = url.pathComponents
+        let itemID = parts.count >= 2 ? parts[parts.count - 2] : ""
+        if method == "DELETE",
+           path.contains("/audio/transcriptions/") || path.contains("/transcripts/") || path.contains("/pdf/extractions/") {
+            let id = url.lastPathComponent
+            Self.withEdits { _ = $0.deleted.insert(id) }
+            respondEmpty()
+            return true
+        }
+        if method == "PATCH", path.hasSuffix("/preferences") {
+            let body = requestBody
+            Self.withEdits { edits in
+                if let favorite = body["favorite"] as? Bool { edits.favorite[itemID] = favorite }
+                if let archived = body["archived"] as? Bool { edits.archived[itemID] = archived }
+            }
+            respond(Self.preferences(for: itemID))
+            return true
+        }
+        if method == "PATCH", path.contains("/audio/transcriptions/"), let name = requestBody["name"] as? String {
+            let id = url.lastPathComponent
+            Self.withEdits { $0.titles[id] = name }
+            respond(["id": id, "title": name, "status": "completed"])
+            return true
+        }
+        if method == "POST", path.hasSuffix("/retry") {
+            Self.withEdits { $0.statuses[itemID] = "processing" }
+            respond(["id": itemID, "title": "Retried", "status": "processing"])
+            return true
+        }
+        if method == "POST", path.hasSuffix("/items"), path.contains("/collections/rich-") {
+            let added = (requestBody["items"] as? [[String: Any]]) ?? []
+            let collection = Self.richCollections.first { $0["id"] as? String == itemID }
+            Self.withEdits { edits in
+                for entry in added {
+                    guard let id = entry["item_id"] as? String else { continue }
+                    edits.addedCollections[id, default: []].append([
+                        "id": itemID,
+                        "name": collection?["name"] as? String ?? "",
+                        "color": collection?["color"] as? String ?? "coral",
+                    ])
+                }
+            }
+            respondEmpty()
+            return true
+        }
+        return false
+    }
+
+    private static func preferences(for id: String) -> [String: Any] {
+        let item = richLibraryItems.first { $0["id"] as? String == id }
+        return [
+            "favorite": item?["favorite"] as? Bool ?? false,
+            "archived": item?["archived"] as? Bool ?? false,
+            "tags": [],
+        ]
+    }
+
+    private func respondEmpty() {
+        guard let url = request.url,
+              let response = HTTPURLResponse(url: url, statusCode: 204, httpVersion: nil, headerFields: nil)
+        else { return fail() }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
     override func startLoading() {
         guard let url = request.url else { return fail() }
         let path = url.path
+        if Self.isRichContent, handleRichMutation(url) { return }
         if path.hasSuffix("/auth/signup") || path.hasSuffix("/auth/password/forgot") {
             respond(["message": "If this request is eligible, an email will arrive shortly"])
         } else if path.hasSuffix("/auth/me") {
-            guard Self.nextAccountProfileRequest() > 1 else { return fail() }
+            guard Self.isRichContent || Self.nextAccountProfileRequest() > 1 else { return fail() }
             respond([
                 "id": UITestDeviceSessionFixture.ownerID,
                 "email": "owner@example.com",
                 "name": "Owner",
                 "clerk_id": Self.legacyProviderID,
             ])
+        } else if Self.isRichContent, path.hasSuffix("/auth/usage") {
+            respond([
+                "month": "2026-11-01T00:00:00Z",
+                "transcription_seconds": 2_160,
+                "transcription_limit_seconds": 18_000,
+                "ai_requests": 48,
+                "ai_request_limit": 500,
+                "exempt": false,
+            ])
+        } else if Self.isRichContent, path.hasSuffix("/auth/passkeys") {
+            respond(["count": 1])
+        } else if Self.isRichContent, path.hasSuffix("/auth/recovery") {
+            respond(["remaining": 7])
+        } else if Self.isRichContent, path.hasSuffix("/auth/password") {
+            respond(["configured": true])
+        } else if Self.isRichContent, path.hasSuffix("/health") {
+            respond(["status": "ok", "version": "test", "database": "ok", "workers": 2, "password_auth_enabled": true])
         } else if path.hasSuffix("/library/items") {
-            respond(libraryList())
+            // Never answers, as a stalled connection wouldn't. `stopLoading` ends it.
+            if ProcessInfo.processInfo.arguments.contains("-ui-test-stalled-list") { return }
+            respond(libraryList(url: url))
         } else if path.hasSuffix("/preferences") {
-            respond(["favorite": false, "archived": false, "tags": []])
+            respond(Self.isRichContent
+                ? Self.preferences(for: url.pathComponents[url.pathComponents.count - 2])
+                : ["favorite": false, "archived": false, "tags": []])
         } else if path.hasSuffix("/segments") {
             respond(Self.isRichContent ? Self.richSegments : [])
         } else if Self.isRichContent, path.hasSuffix("/audio/transcriptions/\(Self.audioID)") {
             respond(Self.richAudio)
         } else if Self.isRichContent, path.hasSuffix("/audio/transcriptions/\(Self.audioID)/audio") {
-            // Nothing plays, but the player reaches its loaded state for layout review.
-            respond(["url": "https://example.invalid/fixture.m4a"])
+            // Nothing plays by default, but the player reaches its loaded state for layout
+            // review. `-ui-test-playable-audio` serves real silence, for following along.
+            respond(["url": Self.playableAudioURL?.absoluteString ?? "https://example.invalid/fixture.m4a"])
         } else if path.hasSuffix("/audio/transcriptions/\(Self.audioID)") {
             respond([
                 "id": Self.audioID,
@@ -209,6 +362,24 @@ final class UITestAPIProtocol: URLProtocol {
                 "transcript_text": "Transcript from the UI test fixture.",
                 "word_count": 6,
             ])
+        } else if Self.isRichContent, path.hasSuffix("/collections") {
+            respond(Self.richCollections)
+        } else if Self.isRichContent, path.hasSuffix("/transcripts/rich-link") {
+            respond(["id": "rich-link", "title": "How to read a contract", "status": "completed", "transcript_text": "Fixture text."])
+        } else if Self.isRichContent, path.hasSuffix("/pdf/extractions/rich-pdf") {
+            respond(["id": "rich-pdf", "original_name": "Lease agreement.pdf", "status": "completed", "text_content": "Fixture text."])
+        } else if Self.isRichContent, path.contains("/audio/transcriptions/rich-") {
+            let id = url.lastPathComponent
+            let row = Self.richLibraryItems.first { $0["id"] as? String == id }
+            respond([
+                "id": id,
+                "title": row?["title"] as? String ?? id,
+                "status": row?["status"] as? String ?? "completed",
+                "transcript_text": "Fixture transcript.",
+                "created_at": row?["created_at"] as? String ?? "2026-11-04T00:00:00Z",
+            ])
+        } else if Self.isRichContent, path.contains("/collections/rich-") {
+            respond(Self.richCollection(id: url.lastPathComponent))
         } else if path.hasSuffix("/collections") {
             respond([
                 ["id": "ui-test-collection", "name": "Fixture collection", "item_count": 1],
@@ -247,35 +418,125 @@ final class UITestAPIProtocol: URLProtocol {
 
     private static func richLibraryItem(
         id: String,
+        type: String = "audio",
         title: String,
         subtitle: String = "",
         status: String = "completed",
-        duration: Double,
+        duration: Double = 0,
+        pageCount: Int = 0,
         hoursAgo: Double,
-        favorite: Bool = false
+        favorite: Bool = false,
+        archived: Bool = false,
+        excerpt: String? = nil,
+        hasWaveform: Bool = true,
+        peakScale: Double = 1,
+        collection: [String: String]? = nil
     ) -> [String: Any] {
         let created = Date().addingTimeInterval(-hoursAgo * 3_600)
-        return [
+        var item: [String: Any] = [
             "id": id,
-            "item_type": "audio",
+            "item_type": type,
             "title": title,
             "subtitle": subtitle,
             "status": status,
             "word_count": Int(duration * 2),
             "duration": duration,
-            "page_count": 0,
+            "page_count": pageCount,
             "summary_status": "",
             "favorite": favorite,
-            "archived": false,
+            "archived": archived,
             "tags": [],
             "created_at": ISO8601DateFormatter().string(from: created),
+            "collections": collection.map { [$0] } ?? [],
+        ]
+        if let excerpt { item["excerpt"] = excerpt }
+        if type == "audio", hasWaveform, status == "completed" {
+            item["waveform"] = fixturePeaks(count: 32, seed: id.utf8.reduce(0) { $0 + Double($1) }, scale: peakScale)
+        }
+        return item
+    }
+
+    /// A believable speech shape for design review. Debug fixtures only: real rows use
+    /// the server's peaks, and nothing in a release build can draw these.
+    private static func fixturePeaks(count: Int, seed: Double, scale: Double = 1) -> [Int] {
+        (0..<count).map { index in
+            let position = Double(index)
+            let shape = abs(sin(seed * 1.7 + position * 0.9) * cos(seed + position * 0.37))
+            return Int((12 + shape * 88) * scale)
+        }
+    }
+
+    private static let babyCollection = ["id": "rich-baby", "name": "Baby", "color": "coral"]
+    private static let workCollection = ["id": "rich-work", "name": "Work", "color": "teal"]
+    private static let ideasCollection = ["id": "rich-ideas", "name": "Ideas", "color": "violet"]
+    private static let callsCollection = ["id": "rich-calls", "name": "Calls", "color": "amber"]
+
+    private static var richCollections: [[String: Any]] {
+        [
+            ["id": "rich-baby", "name": "Baby", "color": "coral", "item_count": 12],
+            ["id": "rich-work", "name": "Work", "color": "teal", "item_count": 48],
+            ["id": "rich-ideas", "name": "Ideas", "color": "violet", "item_count": 31],
+            ["id": "rich-calls", "name": "Calls", "color": "amber", "item_count": 27],
+            // No color yet, as before the server deploys: falls back to coral.
+            ["id": "rich-long", "name": "Everything from the second quarter planning offsite in Hagåtña", "item_count": 1],
         ]
     }
 
+    private static func richCollection(id: String) -> [String: Any] {
+        let collection = richCollections.first { $0["id"] as? String == id } ?? [:]
+        let members = richLibraryItems.filter { item in
+            (item["collections"] as? [[String: String]])?.first?["id"] == id
+        }
+        var result = collection
+        result["items"] = members.map { item in
+            [
+                "id": "member-\(item["id"] as? String ?? "")",
+                "item_type": item["item_type"] as? String ?? "audio",
+                "item_id": item["id"] as? String ?? "",
+                "item_title": item["title"] as? String ?? "",
+                "item_status": item["status"] as? String ?? "completed",
+            ]
+        }
+        return result
+    }
+
     private static var richLibraryItems: [[String: Any]] {
+        let edits = withEdits { $0 }
+        let many = ProcessInfo.processInfo.arguments.contains("-ui-test-many-failures") ? manyFailures : []
+        return (baseRichLibraryItems + many).compactMap { original in
+            guard let id = original["id"] as? String, !edits.deleted.contains(id) else { return nil }
+            var item = original
+            if let title = edits.titles[id] { item["title"] = title }
+            if let favorite = edits.favorite[id] { item["favorite"] = favorite }
+            if let archived = edits.archived[id] { item["archived"] = archived }
+            if let status = edits.statuses[id] { item["status"] = status }
+            if let added = edits.addedCollections[id] {
+                item["collections"] = (item["collections"] as? [[String: String]] ?? []) + added
+            }
+            return item
+        }
+    }
+
+    /// More failures in a week than one page of the failed list holds.
+    private static var manyFailures: [[String: Any]] {
+        (1...21).map { index in
+            richLibraryItem(id: "many-\(index)", title: "Failed recording \(index)", status: "failed", duration: 60, hoursAgo: Double(index))
+        }
+    }
+
+    private static var baseRichLibraryItems: [[String: Any]] {
         [
-            richLibraryItem(id: audioID, title: "Monday planning call", duration: 2_530, hoursAgo: 0.2, favorite: true),
+            richLibraryItem(
+                id: audioID, title: "Monday planning call", duration: 2_530, hoursAgo: 0.2, favorite: true,
+                excerpt: "Launch moves to the 18th so QA can run a full week. Split QA between two people.",
+                collection: workCollection
+            ),
             richLibraryItem(id: "rich-2", title: "Parking lot idea", status: "processing", duration: 108, hoursAgo: 0.5),
+            richLibraryItem(
+                id: "rich-hafa", title: "Hafa Baby updates", duration: 516, hoursAgo: 14,
+                excerpt: "What changed this week, what is still open, and what to test before the next round.",
+                collection: babyCollection
+            ),
             richLibraryItem(
                 id: "rich-3",
                 title: "Call with the bank about the account and the second signer they need before Friday",
@@ -284,11 +545,51 @@ final class UITestAPIProtocol: URLProtocol {
                 hoursAgo: 26
             ),
             richLibraryItem(id: "rich-4", title: "Grocery and pharmacy run", duration: 31, hoursAgo: 28),
-            richLibraryItem(id: "rich-5", title: "Sunday sermon notes", subtitle: "Weekly teaching series", duration: 1_388, hoursAgo: 72),
-            richLibraryItem(id: "rich-6", title: "Dentist follow-up", duration: 252, hoursAgo: 96),
-            richLibraryItem(id: "rich-7", title: "Budget review with Sam", duration: 3_900, hoursAgo: 120),
+            richLibraryItem(
+                id: "rich-link", type: "youtube", title: "How to read a contract", subtitle: "YouTube",
+                duration: 842, hoursAgo: 50,
+                excerpt: "The clauses to read first, and the ones people usually skip.",
+                collection: ideasCollection
+            ),
+            richLibraryItem(
+                id: "rich-pdf", type: "pdf", title: "Lease agreement.pdf", pageCount: 18, hoursAgo: 60,
+                excerpt: "Term, renewal dates and who pays for repairs.",
+                collection: workCollection
+            ),
+            richLibraryItem(
+                id: "rich-5", title: "Sunday sermon notes", subtitle: "Weekly teaching series",
+                duration: 1_388, hoursAgo: 72,
+                excerpt: "Three points on patience, with the reading for next week and a note about the youth group retreat that the pastor asked everyone to pray over before it leaves on Friday morning.",
+                collection: callsCollection
+            ),
+            richLibraryItem(id: "rich-6", title: "Dentist follow-up", duration: 252, hoursAgo: 96, peakScale: 0.06),
+            richLibraryItem(
+                id: "rich-7", title: "Budget review with Aleksandra Wiśniewska-Kowalczyk and bartholomew.fitzgerald@northwind-industries-holdings.example.com",
+                duration: 45_296, hoursAgo: 120,
+                excerpt: "Eleven hours across two sessions.",
+                collection: ["id": "rich-long", "name": "Everything from the second quarter planning offsite in Hagåtña"]
+            ),
+            richLibraryItem(id: "rich-8", title: "ハファ・アダイ 会議のメモ", duration: 600, hoursAgo: 150, favorite: true, hasWaveform: false),
+            richLibraryItem(id: "rich-old-failure", title: "An old failure that stays in the Library", status: "failed", duration: 60, hoursAgo: 240),
+            richLibraryItem(id: "rich-archived", title: "Archived hallway recording", duration: 90, hoursAgo: 300, archived: true),
         ]
     }
+
+    /// Real silence, so a real player advances and the transcript can follow it.
+    private static let playableAudioURL: URL? = {
+        guard ProcessInfo.processInfo.arguments.contains("-ui-test-playable-audio") else { return nil }
+        let sampleRate = 8_000
+        let seconds = 180
+        let dataSize = UInt32(sampleRate * seconds * 2)
+        func le32(_ value: UInt32) -> Data { withUnsafeBytes(of: value.littleEndian) { Data($0) } }
+        func le16(_ value: UInt16) -> Data { withUnsafeBytes(of: value.littleEndian) { Data($0) } }
+        var wav = Data("RIFF".utf8) + le32(36 + dataSize) + Data("WAVEfmt ".utf8) + le32(16)
+        wav += le16(1) + le16(1) + le32(UInt32(sampleRate)) + le32(UInt32(sampleRate * 2)) + le16(2) + le16(16)
+        wav += Data("data".utf8) + le32(dataSize) + Data(count: Int(dataSize))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("ui-test-silence.wav")
+        guard (try? wav.write(to: url)) != nil else { return nil }
+        return url
+    }()
 
     private static let richTranscript = """
         Okay so the main thing I wanted to talk through is the date. I don’t think the eleventh gives us enough room for the retry work.
@@ -314,6 +615,7 @@ final class UITestAPIProtocol: URLProtocol {
             "duration": 2_530,
             "word_count": 6_120,
             "created_at": ISO8601DateFormatter().string(from: Date().addingTimeInterval(-720)),
+            "waveform": fixturePeaks(count: 200, seed: 4),
             "summary_status": "completed",
             "summary_text": "Planning call about the launch. The date moves from the 11th to the 18th so QA can run a full week on the audio retry path. We split QA: I take iOS and the share extension, the other side takes the web upload and the agent endpoints.",
             "key_points": [
@@ -330,6 +632,7 @@ final class UITestAPIProtocol: URLProtocol {
 
     private static var richSegments: [[String: Any]] {
         let lines = richTranscript.components(separatedBy: "\n\n")
+        let segmentLength = playableAudioURL == nil ? 42_000 : 4_000
         // Enough to scroll the player well out of view.
         return (0..<24).map { index in
             [
@@ -337,8 +640,8 @@ final class UITestAPIProtocol: URLProtocol {
                 "item_type": "audio",
                 "item_id": audioID,
                 "ordinal": index,
-                "start_ms": index * 42_000,
-                "end_ms": (index + 1) * 42_000,
+                "start_ms": index * segmentLength,
+                "end_ms": (index + 1) * segmentLength,
                 "text": lines[index % lines.count],
             ]
         }
@@ -353,7 +656,9 @@ final class UITestAPIProtocol: URLProtocol {
         ]
     }
 
-    private func libraryList() -> [String: Any] {
+    /// Applies the query the way the server does, so chips and Home's short lists can
+    /// be exercised for real.
+    private func libraryList(url: URL) -> [String: Any] {
         var items: [[String: Any]] = Self.isRichContent ? Self.richLibraryItems : []
         if let title = Self.currentAudioTitle {
             items.append([
@@ -372,12 +677,34 @@ final class UITestAPIProtocol: URLProtocol {
                 "created_at": "2026-11-04T00:00:00Z",
             ])
         }
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let value: (String) -> String? = { name in query.first { $0.name == name }?.value }
+        let archivedOnly = value("archive") == "only"
+        items = items.filter { (($0["archived"] as? Bool) ?? false) == archivedOnly }
+        if let type = value("type") {
+            items = items.filter { $0["item_type"] as? String == type }
+        }
+        if let status = value("status") {
+            let statuses = status == "active" ? ["pending", "processing"] : [status]
+            items = items.filter { statuses.contains($0["status"] as? String ?? "") }
+        }
+        if value("favorite") == "true" {
+            items = items.filter { ($0["favorite"] as? Bool) == true }
+        }
+        if let search = value("search")?.lowercased() {
+            items = items.filter { ($0["title"] as? String ?? "").lowercased().contains(search) }
+        }
+        if value("sort_dir") == "asc" {
+            items.reverse()
+        }
+        let total = items.count
+        let perPage = value("per_page").flatMap(Int.init) ?? 20
         return [
-            "data": items,
+            "data": Array(items.prefix(perPage)),
             "page": 1,
-            "per_page": 20,
-            "total_items": items.count,
-            "total_pages": items.isEmpty ? 0 : 1,
+            "per_page": perPage,
+            "total_items": total,
+            "total_pages": total == 0 ? 0 : 1,
         ]
     }
 

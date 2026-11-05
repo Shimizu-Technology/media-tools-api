@@ -39,6 +39,7 @@ struct MediaToolsApp: App {
             AIProcessingConsentManager.shared.resetForUITesting()
         }
         UITestShareFixture.prepare(arguments: arguments)
+        UITestRouteSignals.listen()
         #endif
         // A stored session owns anything captured from here on, including a
         // cold Action Button press and work finishing in a background launch
@@ -60,7 +61,21 @@ struct MediaToolsApp: App {
     var body: some Scene {
         WindowGroup {
             rootView
-                .tint(Theme.accent)
+                .tint(Theme.accentText)
+                #if DEBUG
+                // The system's launch argument doesn't reach SwiftUI's environment, and
+                // these screens are what the largest size has to be proved on.
+                .transformEnvironment(\.dynamicTypeSize) { size in
+                    if ProcessInfo.processInfo.arguments.contains("-ui-test-largest-text") {
+                        size = .accessibility5
+                    }
+                }
+                // Screenshots from the test runner, which cannot change the appearance.
+                .preferredColorScheme(
+                    ProcessInfo.processInfo.arguments.contains("-ui-test-dark") ? .dark
+                        : ProcessInfo.processInfo.arguments.contains("-ui-test-light") ? .light : nil
+                )
+                #endif
                 .environment(recordingCoordinator)
                 .environment(uploadCoordinator)
                 .environment(aiProcessingConsent)
@@ -101,14 +116,11 @@ struct MediaToolsApp: App {
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-main") {
             MainView()
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-library") {
-            MainView(previewItems: LibraryListItem.uiTestSamples)
+            MainView(previewItems: LibraryListItem.uiTestSamples, initialTab: .library)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-library-pagination") {
-            MainView(previewItems: LibraryListItem.uiTestPaginationSamples)
+            MainView(previewItems: LibraryListItem.uiTestPaginationSamples, initialTab: .library)
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-record") {
-            NavigationStack {
-                RecordView()
-                    .navigationDestination(for: AppRoute.self) { AppRouteDestination(route: $0) }
-            }
+            RecordView()
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-recovery-codes-sheet") {
             RecoveryCodesOneTimePreviewHost()
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-recovery-sign-in-sheet") {
@@ -116,13 +128,10 @@ struct MediaToolsApp: App {
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-security-status-error") {
             SignInSecurityStatusFailurePreviewHost()
         } else if ProcessInfo.processInfo.arguments.contains("-ui-test-quick-capture") {
-            NavigationStack {
-                RecordView()
-                    .navigationDestination(for: AppRoute.self) { AppRouteDestination(route: $0) }
-            }
-            .task {
-                _ = await recordingCoordinator.toggleFromSystem()
-            }
+            RecordView()
+                .task {
+                    _ = await recordingCoordinator.toggleFromSystem()
+                }
         } else {
             standardRoot
         }
@@ -140,27 +149,27 @@ struct MediaToolsApp: App {
         }
     }
 
-    /// Bars follow the system appearance. Large titles are New York; the proxies only
+    /// Bars follow the system appearance. Large titles are SF Rounded; the proxies only
     /// take a font, so the title metrics are what keep them following Dynamic Type.
     private func configureAppearance() {
         let navAppearance = UINavigationBarAppearance()
         if #available(iOS 26.0, *) {
             // iOS 26 draws titles behind an opaque bar background, which leaves
             // them in the accessibility tree but blank on screen. Every screen
-            // already paints the paper background behind a transparent bar.
+            // already paints the page background behind a transparent bar.
             navAppearance.configureWithTransparentBackground()
         } else {
             navAppearance.configureWithOpaqueBackground()
-            navAppearance.backgroundColor = UIColor.ledger("bg")
+            navAppearance.backgroundColor = UIColor.theme("background")
             navAppearance.shadowColor = .clear
         }
         navAppearance.titleTextAttributes = [
-            .foregroundColor: UIColor.ledger("text"),
-            .font: UIFont.ledgerSerif(.headline, weight: .semibold),
+            .foregroundColor: UIColor.theme("text"),
+            .font: UIFont.displayRounded(.headline, weight: .bold),
         ]
         navAppearance.largeTitleTextAttributes = [
-            .foregroundColor: UIColor.ledger("text"),
-            .font: UIFont.ledgerSerif(.largeTitle, weight: .bold),
+            .foregroundColor: UIColor.theme("text"),
+            .font: UIFont.displayRounded(.largeTitle, weight: .heavy),
         ]
         UINavigationBar.appearance().standardAppearance = navAppearance
         UINavigationBar.appearance().scrollEdgeAppearance = navAppearance

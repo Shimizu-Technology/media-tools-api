@@ -22,7 +22,7 @@ struct LibrarySwipeActions: ViewModifier {
                 } label: {
                     Label("Collect", systemImage: "folder.badge.plus")
                 }
-                .tint(Theme.accentFill)
+                .tint(Theme.heroIcon)
             }
             .sheet(isPresented: $showAddToCollection) {
                 AddToCollectionSheet(

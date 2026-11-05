@@ -1,10 +1,11 @@
 #!/usr/bin/env swift
-// Generates the Media Tools app icon: Ledger's two quote marks on ink blue.
+// Generates the Media Tools app icon from the geometry in ios/design/app-icon.svg:
+// white sound bars rising over a horizon, on the amber to coral to red gradient.
 // Run from the repository root: swift ios/scripts/generate-icon.swift
 //
 // Writes:
 //   ios/MediaTools/MediaTools/Assets.xcassets/AppIcon.appiconset/icon_1024.png
-//   ios/MediaTools/MediaToolsShared/Ledger.xcassets/AppMark.imageset/app-mark.png
+//   ios/MediaTools/MediaToolsShared/Theme.xcassets/AppMark.imageset/app-mark.png
 //
 // App Store Connect rejects an icon with an alpha channel, so this draws into an
 // opaque bitmap (`noneSkipLast`). Check with:
@@ -12,60 +13,59 @@
 
 import AppKit
 
-let size = 1024
-let inkBlue = CGColor(srgbRed: 0x1F / 255, green: 0x4F / 255, blue: 0x9E / 255, alpha: 1)
-let paper = CGColor(srgbRed: 0xF7 / 255, green: 0xF5 / 255, blue: 0xF0 / 255, alpha: 1)
-
-/// One quote mark: a round bowl with a tail sweeping up and to the right. The
-/// geometry comes from the Ledger mockup, in its y-down coordinates.
-func quoteMark(centerX bx: CGFloat, centerY by: CGFloat, radius r: CGFloat) -> CGPath {
-    let path = CGMutablePath()
-    path.addEllipse(in: CGRect(x: bx - r, y: by - r, width: r * 2, height: r * 2))
-    path.move(to: CGPoint(x: bx - r, y: by))
-    path.addCurve(
-        to: CGPoint(x: bx + 0.62 * r, y: by - 2.25 * r),
-        control1: CGPoint(x: bx - r, y: by - 1.15 * r),
-        control2: CGPoint(x: bx - 0.15 * r, y: by - 2.05 * r)
+func color(_ hex: UInt32) -> CGColor {
+    CGColor(
+        srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
+        green: CGFloat((hex >> 8) & 0xFF) / 255,
+        blue: CGFloat(hex & 0xFF) / 255,
+        alpha: 1
     )
-    path.addLine(to: CGPoint(x: bx + 0.8 * r, y: by - 1.92 * r))
-    path.addCurve(
-        to: CGPoint(x: bx + 0.12 * r, y: by - 0.55 * r),
-        control1: CGPoint(x: bx + 0.25 * r, y: by - 1.62 * r),
-        control2: CGPoint(x: bx + 0.02 * r, y: by - 1.05 * r)
-    )
-    path.closeSubpath()
-    return path
 }
 
 func drawIcon(pixels: Int) -> CGImage {
+    let space = CGColorSpace(name: CGColorSpace.sRGB)!
     guard let context = CGContext(
         data: nil,
         width: pixels,
         height: pixels,
         bitsPerComponent: 8,
         bytesPerRow: 0,
-        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+        space: space,
         bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
     ) else { fatalError("Could not create the bitmap") }
 
     context.setShouldAntialias(true)
     context.interpolationQuality = .high
-    // Draw in the mockup's 1024-unit, y-down space.
-    let scale = CGFloat(pixels) / CGFloat(size)
+    // Draw in the SVG's 100-unit, y-down space.
+    let scale = CGFloat(pixels) / 100
     context.translateBy(x: 0, y: CGFloat(pixels))
     context.scaleBy(x: scale, y: -scale)
 
-    context.setFillColor(inkBlue)
-    context.fill(CGRect(x: 0, y: 0, width: size, height: size))
+    guard let gradient = CGGradient(
+        colorsSpace: space,
+        colors: [color(0xF59A3C), color(0xDC4F22), color(0xAE2733)] as CFArray,
+        locations: [0, 0.55, 1]
+    ) else { fatalError("Could not create the gradient") }
+    context.drawLinearGradient(
+        gradient,
+        start: CGPoint(x: 0, y: 0),
+        end: CGPoint(x: 100, y: 100),
+        options: [.drawsBeforeStartLocation, .drawsAfterEndLocation]
+    )
 
-    context.setFillColor(paper)
-    for mark in [
-        quoteMark(centerX: 352, centerY: 593, radius: 130),
-        quoteMark(centerX: 672, centerY: 593, radius: 130),
-    ] {
-        context.addPath(mark)
-        context.fillPath()
+    context.setStrokeColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+    context.setLineCap(.round)
+    context.setLineWidth(7.5)
+    for (x, top) in [(22.0, 58.0), (36.0, 44.0), (50.0, 30.0), (64.0, 44.0), (78.0, 58.0)] {
+        context.move(to: CGPoint(x: x, y: 66))
+        context.addLine(to: CGPoint(x: x, y: top))
     }
+    context.strokePath()
+
+    context.setLineWidth(6)
+    context.move(to: CGPoint(x: 14, y: 78))
+    context.addLine(to: CGPoint(x: 86, y: 78))
+    context.strokePath()
 
     guard let image = context.makeImage() else { fatalError("Could not finish the bitmap") }
     return image
@@ -95,5 +95,5 @@ writePNG(
 // The extensions cannot load AppIcon, so sign-in and the share card use this copy.
 writePNG(
     drawIcon(pixels: 256),
-    to: "ios/MediaTools/MediaToolsShared/Ledger.xcassets/AppMark.imageset/app-mark.png"
+    to: "ios/MediaTools/MediaToolsShared/Theme.xcassets/AppMark.imageset/app-mark.png"
 )

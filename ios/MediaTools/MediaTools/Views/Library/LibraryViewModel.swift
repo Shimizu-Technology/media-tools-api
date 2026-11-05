@@ -55,6 +55,88 @@ struct LibraryQuery: Hashable {
     let sort: LibrarySortOrder
     let search: String
     var archivedOnly = false
+    var favoriteOnly = false
+}
+
+/// The Library's one row of filters. Status, sort, and collection sit in its filter
+/// menu, because most people never need them.
+enum LibraryChip: String, CaseIterable, Hashable, Identifiable {
+    case all
+    case recordings
+    case links
+    case pdfs
+    case starred
+    case archived
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .recordings: "Recordings"
+        case .links: "Links"
+        case .pdfs: "PDFs"
+        case .starred: "Starred"
+        case .archived: "Archived"
+        }
+    }
+}
+
+/// What the Library shows of the work still on this device under its filters, and how
+/// much that needs a person those filters have put out of view. Home always lists it.
+struct LibraryDeviceWork {
+    struct Filters: Equatable {
+        var type: LibraryMediaFilter = .all
+        var status: LibraryStatusFilter = .all
+        var isSearching = false
+        var isCollection = false
+        var isArchived = false
+        var isStarred = false
+
+        /// None of these has on-device work in it: search reads the server's text, and
+        /// nothing on this device is in a collection, starred, or archived yet.
+        var excludesAllDeviceWork: Bool {
+            isSearching || isCollection || isArchived || isStarred
+        }
+    }
+
+    let visibleRecordings: [LocalRecording]
+    let visibleShares: [ShareInboxStore.Item]
+    let hiddenNeedingAction: Int
+
+    init(
+        recordings: [LocalRecording],
+        shares: [ShareInboxStore.Item],
+        filters: Filters,
+        autoTranscribeWillSend: Bool
+    ) {
+        func typeMatches(_ kind: ShareInboxStore.Kind) -> Bool {
+            switch filters.type {
+            case .all: true
+            case .audio: kind == .audio
+            case .youtube: kind == .link
+            case .pdf: kind == .pdf
+            }
+        }
+        func shows(_ recording: LocalRecording) -> Bool {
+            guard !filters.excludesAllDeviceWork, typeMatches(.audio) else { return false }
+            switch filters.status {
+            case .all, .active: return true
+            // "Needs attention" is exactly this work, and nothing still on its way.
+            case .failed: return recording.needsPerson(autoTranscribeWillSend: autoTranscribeWillSend)
+            case .completed: return false
+            }
+        }
+        // Every share here needs attention by definition, so only "Completed" rules it out.
+        func shows(_ share: ShareInboxStore.Item) -> Bool {
+            !filters.excludesAllDeviceWork && typeMatches(share.resolvedKind) && filters.status != .completed
+        }
+        visibleRecordings = recordings.filter(shows)
+        visibleShares = shares.filter(shows)
+        hiddenNeedingAction = recordings.filter {
+            $0.needsPerson(autoTranscribeWillSend: autoTranscribeWillSend) && !shows($0)
+        }.count + shares.filter { !shows($0) }.count
+    }
 }
 
 /// Owns the Library snapshot independently from its navigation destination.
@@ -71,6 +153,7 @@ final class LibraryViewModel {
     var sortOrder: LibrarySortOrder = .newest
     var searchText = ""
     var showsArchived = false
+    var showsFavoritesOnly = false
     var visibleReference: LibraryReference?
     /// Collections are a filter over the Library. The server's list endpoint has no
     /// collection parameter, so a chosen collection shows its own item list.
@@ -88,6 +171,8 @@ final class LibraryViewModel {
     private let service: MediaToolsService
     private let previewItems: [LibraryListItem]?
     private let pageSize: Int
+    private let loadPage: ((Int, LibraryQuery) async throws -> LibraryListResponse)?
+    private var deletedReferences: Set<LibraryReference> = []
     private var loadedQuery: LibraryQuery?
     /// Changes whenever a reload supersedes in-flight work. Main-actor code is
     /// re-entrant across `await`, so the query alone cannot identify a stale
@@ -108,9 +193,11 @@ final class LibraryViewModel {
         service: MediaToolsService = .shared,
         previewItems: [LibraryListItem]? = nil,
         pageSize: Int = 20,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        loadPage: ((Int, LibraryQuery) async throws -> LibraryListResponse)? = nil
     ) {
         self.now = now
+        self.loadPage = loadPage
         self.service = service
         self.previewItems = previewItems
         self.pageSize = max(1, pageSize)
@@ -122,8 +209,33 @@ final class LibraryViewModel {
             status: selectedStatus,
             sort: sortOrder,
             search: searchText.trimmingCharacters(in: .whitespacesAndNewlines),
-            archivedOnly: showsArchived
+            archivedOnly: showsArchived,
+            favoriteOnly: showsFavoritesOnly
         )
+    }
+
+    var selectedChip: LibraryChip {
+        get {
+            if showsArchived { return .archived }
+            if showsFavoritesOnly { return .starred }
+            switch selectedType {
+            case .all: return .all
+            case .audio: return .recordings
+            case .youtube: return .links
+            case .pdf: return .pdfs
+            }
+        }
+        set {
+            selectedCollection = nil
+            showsArchived = newValue == .archived
+            showsFavoritesOnly = newValue == .starred
+            switch newValue {
+            case .all, .starred, .archived: selectedType = .all
+            case .recordings: selectedType = .audio
+            case .links: selectedType = .youtube
+            case .pdfs: selectedType = .pdf
+            }
+        }
     }
 
     var hasMore: Bool {
@@ -183,7 +295,7 @@ final class LibraryViewModel {
         do {
             let collection = try await service.getCollection(filter.id)
             guard selectedCollection == filter, !Task.isCancelled else { return }
-            collectionItems = collection.items ?? []
+            collectionItems = withoutDeleted(collection.items ?? [])
         } catch {
             guard selectedCollection == filter, !Task.isCancelled else { return }
             collectionItems = []
@@ -191,12 +303,55 @@ final class LibraryViewModel {
         }
     }
 
+    /// A known change: the next automatic refresh runs whatever the throttle says, and a
+    /// response already on the wire describes the library from before it, so it can't land.
+    func invalidate() {
+        lastLoadedAt = nil
+        reloadGeneration += 1
+        paginationGeneration += 1
+        isLoading = false
+        isLoadingMore = false
+    }
+
+    var deviceWorkFilters: LibraryDeviceWork.Filters {
+        LibraryDeviceWork.Filters(
+            type: selectedType,
+            status: selectedStatus,
+            isSearching: !query.search.isEmpty,
+            isCollection: selectedCollection != nil,
+            isArchived: showsArchived,
+            isStarred: showsFavoritesOnly
+        )
+    }
+
+    /// Clears whatever is hiding on-device work, and nothing else: the sort stays.
+    func clearFiltersForDeviceWork() {
+        selectedChip = .all
+        selectedStatus = .all
+        searchText = ""
+    }
+
+    /// Deleted items stay gone from every later response too, however late it arrives.
     func remove(_ references: Set<LibraryReference>) {
         guard !references.isEmpty else { return }
-        items.removeAll { references.contains($0.reference) }
-        totalItems = max(0, totalItems - references.count)
-        if let visibleReference, references.contains(visibleReference) {
+        deletedReferences.formUnion(references.map(\.normalized))
+        // Safe to repeat: the count falls only for rows that were actually here.
+        let before = items.count
+        items = withoutDeleted(items)
+        totalItems = max(0, totalItems - (before - items.count))
+        collectionItems = withoutDeleted(collectionItems)
+        if let visibleReference, deletedReferences.contains(visibleReference.normalized) {
             self.visibleReference = items.first?.reference
+        }
+    }
+
+    private func withoutDeleted(_ source: [LibraryListItem]) -> [LibraryListItem] {
+        source.filter { !deletedReferences.contains($0.reference.normalized) }
+    }
+
+    private func withoutDeleted(_ source: [CollectionItem]) -> [CollectionItem] {
+        source.filter {
+            !deletedReferences.contains(LibraryReference(itemType: $0.itemType, itemId: $0.itemId).normalized)
         }
     }
 
@@ -344,27 +499,32 @@ final class LibraryViewModel {
     }
 
     private func listItems(page: Int, for requestedQuery: LibraryQuery) async throws -> LibraryListResponse {
-        try await service.listLibraryItems(
+        if let loadPage { return try await loadPage(page, requestedQuery) }
+        return try await service.listLibraryItems(
             page: page,
             perPage: pageSize,
             itemType: requestedQuery.type.queryValue,
             status: requestedQuery.status.queryValue,
             search: requestedQuery.search,
             sortDirection: requestedQuery.sort.direction,
-            archivedOnly: requestedQuery.archivedOnly
+            archivedOnly: requestedQuery.archivedOnly,
+            favoriteOnly: requestedQuery.favoriteOnly
         )
     }
 
     private func deduplicated(_ source: [LibraryListItem]) -> [LibraryListItem] {
         var seen: Set<LibraryReference> = []
-        return source.filter { seen.insert($0.reference).inserted }
+        return withoutDeleted(source).filter { seen.insert($0.reference).inserted }
     }
 
     private func filteredPreviewItems(
         _ source: [LibraryListItem],
         for requestedQuery: LibraryQuery
     ) -> [LibraryListItem] {
-        var result = source.filter { $0.archived == requestedQuery.archivedOnly }
+        var result = withoutDeleted(source).filter { $0.archived == requestedQuery.archivedOnly }
+        if requestedQuery.favoriteOnly {
+            result = result.filter(\.favorite)
+        }
         if let type = requestedQuery.type.queryValue {
             result = result.filter { $0.itemType == type }
         }
@@ -393,7 +553,8 @@ final class LibraryViewModel {
               requestedQuery.status == .all,
               requestedQuery.sort == .newest,
               requestedQuery.search.isEmpty,
-              !requestedQuery.archivedOnly
+              !requestedQuery.archivedOnly,
+              !requestedQuery.favoriteOnly
         else { return }
 
         SpotlightService.indexLibraryItems(recentItems)

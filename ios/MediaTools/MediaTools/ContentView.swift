@@ -53,11 +53,11 @@ struct ContentView: View {
                 .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .foregroundStyle(Theme.text)
-                .background(Theme.bg)
+                .background(Theme.background)
             } else if isReconcilingDeletion || isBlockedOnAccountResolution {
                 ProgressView("Restoring your workspace…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Theme.bg)
+                    .background(Theme.background)
             } else if deviceSession.isSessionStoreUnavailable,
                       activeUserID == nil,
                       !forceSignedOutForUITesting {
@@ -70,7 +70,7 @@ struct ContentView: View {
                 .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .foregroundStyle(Theme.text)
-                .background(Theme.bg)
+                .background(Theme.background)
             } else if deviceSession.isAwaitingSessionRecovery,
                       activeUserID == nil,
                       !forceSignedOutForUITesting {
@@ -85,7 +85,7 @@ struct ContentView: View {
                 .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .foregroundStyle(Theme.text)
-                .background(Theme.bg)
+                .background(Theme.background)
             } else if migrationFailed {
                 VStack(spacing: 16) {
                     Text("Your local recordings could not be connected to this account.")
@@ -96,7 +96,7 @@ struct ContentView: View {
                 .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .foregroundStyle(Theme.text)
-                .background(Theme.bg)
+                .background(Theme.background)
             } else if activeUserID != nil {
                 MainView()
                     // A different account gets a fresh stack and library state. A
@@ -424,7 +424,7 @@ struct WelcomeView: View {
                     .padding(.bottom, 24)
 
                 Text("Sign in")
-                    .font(.ledgerLargeTitle)
+                    .font(.displayLargeTitle)
                     .foregroundStyle(Theme.text)
                     .accessibilityAddTraits(.isHeader)
                     .padding(.bottom, 12)
@@ -454,7 +454,7 @@ struct WelcomeView: View {
             .padding(.bottom, 32)
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(Theme.bg)
+        .background(Theme.background)
         .sheet(item: $activeSheet) { sheet in
             sheetContent(sheet)
                 .presentationDetents(sheet == .recoveryCode ? [.medium, .large] : [.large])
@@ -472,7 +472,7 @@ struct WelcomeView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14.3, style: .continuous))
                 .accessibilityHidden(true)
             Text("Media Tools")
-                .font(.ledgerTitle3)
+                .font(.displayTitle3)
                 .foregroundStyle(Theme.text)
         }
     }
@@ -528,7 +528,7 @@ struct WelcomeView: View {
             .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: Theme.radiusMedium, style: .continuous)
-                    .stroke(Theme.separator, lineWidth: 0.5)
+                    .stroke(Theme.fieldBorder, lineWidth: 1)
             }
 
             if availability.passwordReset != false {
@@ -653,7 +653,7 @@ struct WelcomeView: View {
     private var savedOnThisPhone: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Saved on this iPhone")
-                .font(.ledgerSectionLabel)
+                .font(.sectionLabel)
                 .foregroundStyle(Theme.textSecondary)
                 .accessibilityAddTraits(.isHeader)
             Text("These are saved here. Sign in to review and transcribe them.")
@@ -697,7 +697,7 @@ struct WelcomeView: View {
     private func savedRowLabel(_ title: String) -> some View {
         Label(title, systemImage: "square.and.arrow.up")
             .font(.subheadline)
-            .foregroundStyle(Theme.accent)
+            .foregroundStyle(Theme.accentText)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
     }
@@ -741,7 +741,7 @@ private struct RecoveryCodeSignInSheet: View {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Use recovery code")
-                            .font(.ledgerTitle2)
+                            .font(.displayTitle2)
                             .foregroundStyle(Theme.text)
                         Text("Enter one saved code to restore access on this iPhone. Each code works once.")
                             .font(.subheadline)
@@ -753,7 +753,7 @@ private struct RecoveryCodeSignInSheet: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .font(.system(.body, design: .monospaced))
-                        .ledgerField()
+                        .themedField()
                         .accessibilityIdentifier("recovery-code.sign-in-field")
 
                     if let errorMessage {
@@ -774,7 +774,7 @@ private struct RecoveryCodeSignInSheet: View {
                 }
                 .padding(20)
             }
-            .background(Theme.bg)
+            .background(Theme.background)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { onCancel() }
@@ -790,7 +790,7 @@ struct RecoveryCodeSignInPreviewHost: View {
     @State private var isPresented = true
 
     var body: some View {
-        Theme.bg
+        Theme.background
             .ignoresSafeArea()
             .sheet(isPresented: $isPresented) {
                 RecoveryCodeSignInSheet(
