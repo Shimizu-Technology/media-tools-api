@@ -62,7 +62,7 @@ a Clerk development instance, and App Review rejected build 9.
 | H | Design system and redesign, iOS and web | A, E, F | Merged (#107, #111) |
 | I | Server Clerk removal and cleanup | E, F, G, production verification | Merged (#110) |
 | J | Release: TestFlight build and QA | everything above | Build 14 uploaded; production test passed after #113 and #114; reached Leon's iPhone 2026-11-05; superseded by K |
-| K | Redesign: Sunrise Home, Studio Library | J | In progress |
+| K | Redesign: Sunrise Home, Studio Library | J | Merged (#116 to #121); build 15 is the TestFlight release for Leon's device test |
 
 ### A. iOS capture and results flow
 
@@ -294,6 +294,15 @@ build 14's processing could be checked. Device-only flows remain for Leon.
 
 Leon tested build 14 and chose a new design: `docs/plans/v1-design-plan.md`. It
 replaces the design in workstream H and ends with build 15 on TestFlight.
+
+Production backfill, run once on 2026-11-05: waveforms for all 117 recordings with stored
+audio, 0 failed; summaries and titles for the owner's account, 106 eligible, including 32
+placeholder titles read before the run. 4 long recordings failed citation validation and
+all 4 passed on a second run, which led to #121.
+
+Device-only checks left for Leon: installing over build 14 with a real signed session,
+real Action Button launches including locked, real microphone levels, the 1:29:12 upload,
+and Voice Memos shares.
 
 ## Production configuration, in order
 

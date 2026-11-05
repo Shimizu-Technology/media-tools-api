@@ -1011,7 +1011,7 @@ final class MediaToolsUITests: XCTestCase {
         app.launch()
 
         let savedQueueLabel = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS[c] 'saved on this iPhone'")
+            NSPredicate(format: "label CONTAINS[c] 'saved on this'")
         ).firstMatch
         XCTAssertTrue(savedQueueLabel.waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Transcribe'")).firstMatch.exists)
@@ -1593,8 +1593,9 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Sign out of Media Tools?"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Sign Out"].exists)
 
-        // iOS 26 shows this as a popover whose cancel action is tapping away.
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+        // iOS 26 shows this as a popover whose cancel action is tapping away. The point
+        // sits below the popover on both phone and iPad, and above the bottom bar.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).tap()
         XCTAssertTrue(app.staticTexts["Sign out of Media Tools?"].waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.navigationBars["Account"].exists, "Dismissing must not sign out")
     }
@@ -1682,7 +1683,10 @@ final class MediaToolsUITests: XCTestCase {
 
         XCTAssertTrue(app.textFields["library.search"].waitForExistence(timeout: 10))
         let target = app.buttons["library-row-audio:audio-25"]
-        for _ in 0..<12 where !target.isHittable {
+        // A row can count as hittable while its center sits behind the bottom bar, so
+        // keep scrolling until the whole row clears it.
+        let bar = app.buttons["tab.home"]
+        for _ in 0..<14 where !target.isHittable || target.frame.maxY > bar.frame.minY {
             app.swipeUp()
         }
         XCTAssertTrue(target.waitForExistence(timeout: 5))
@@ -1871,7 +1875,7 @@ final class MediaToolsUITests: XCTestCase {
         line: UInt = #line
     ) {
         let savedQueue = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS[c] 'saved on this iPhone'")
+            NSPredicate(format: "label CONTAINS[c] 'saved on this'")
         ).firstMatch
         if !savedQueue.waitForExistence(timeout: 2) {
             app.swipeUp()

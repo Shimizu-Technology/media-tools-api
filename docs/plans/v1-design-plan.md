@@ -42,14 +42,14 @@ Both clients use these semantic names. Use system appearance for light and dark.
 | separator | `#F0E2D5` | `#2F2620` |
 | accent-fill | `#C9441E` | `#FF8F5E` |
 | on-accent | `#FFFFFF` | `#2A1209` |
-| accent-text | `#C2401B` | `#FF9B6E` |
+| accent-text | `#BB3B18` | `#FF9B6E` |
 | tab-bar | `#FFFBF7` | `#1B1613` |
-| warning | `#B85F00` | `#FFB65C` |
+| warning | `#A35300` | `#FFB65C` |
 | warning-surface | `#FFEBD0` | `#38280F` |
 | waveform-start | `#E8892B` | `#FFB347` |
 | waveform-end | `#C2401B` | `#FF6B4A` |
 | waveform-unplayed | `#E5D5C7` | `#4A3D33` |
-| hero gradient, 135 degrees | `#D2501F` to `#AE2733` | `#D2501F` to `#9E2230` |
+| hero gradient, 135 degrees | `#CB4B1C` to `#AE2733` | `#CB4B1C` to `#9E2230` |
 
 White text on the hero gradient is fixed in both modes, always at full opacity: the
 mockup's dimmed date and hint lines fall below 4.5:1, so do not copy them. Destructive actions keep a
@@ -57,7 +57,7 @@ distinct red, and must not be confused with accent-fill.
 
 Collection color keys are stored by name, and clients map them: `coral #D9542E`,
 `teal #0A7C86`, `violet #8A5AB5`, `amber #B8780A`, `blue #2F6DB5`, `rose #C2416C`.
-White icon and text on all of them.
+White icons on all of them. White small text fails AA on coral and amber, so tiles show icons only.
 
 Type: display text uses the rounded system design (SF Rounded on Apple; on web
 `ui-rounded` with a system fallback), heavy weight, slight negative tracking. Body
