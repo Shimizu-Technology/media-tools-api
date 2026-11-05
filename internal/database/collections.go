@@ -12,20 +12,39 @@ import (
 
 // CreateCollection inserts a new collection.
 func (db *DB) CreateCollection(ctx context.Context, c *models.Collection) error {
-	query := `
-		INSERT INTO collections (name, description, user_id, api_key_id)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, created_at, updated_at`
-
-	return db.QueryRowContext(ctx, query,
-		c.Name, c.Description, c.UserID, c.APIKeyID,
-	).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
+	// Serialize color allocation within an account, including concurrent creates.
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	owner := ""
+	if c.UserID != nil {
+		owner = *c.UserID
+	} else if c.APIKeyID != nil {
+		owner = *c.APIKeyID
+	}
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 60))`, owner); err != nil {
+		return err
+	}
+	err = tx.QueryRowContext(ctx, `
+ INSERT INTO collections(name,description,user_id,api_key_id,color)
+ SELECT $1,$2,$3::uuid,$4::uuid,palette.color
+ FROM unnest(ARRAY['coral','teal','violet','amber','blue','rose']) WITH ORDINALITY palette(color,n)
+ LEFT JOIN collections c ON c.color=palette.color AND
+   (($3::uuid IS NOT NULL AND c.user_id=$3::uuid) OR ($4::uuid IS NOT NULL AND c.api_key_id=$4::uuid))
+ GROUP BY palette.color,palette.n ORDER BY count(c.id),palette.n LIMIT 1
+ RETURNING id,created_at,updated_at,color`, c.Name, c.Description, c.UserID, c.APIKeyID).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt, &c.Color)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ListCollections returns all collections for a user or API key.
 func (db *DB) ListCollections(ctx context.Context, userID, apiKeyID *string) ([]models.Collection, error) {
 	query := `
-		SELECT c.id, c.name, c.description, c.user_id, c.api_key_id,
+		SELECT c.id, c.name, c.description, c.color, c.user_id, c.api_key_id,
 		       c.created_at, c.updated_at,
 		       COALESCE(ci.cnt, 0) AS item_count
 		FROM collections c
@@ -52,7 +71,7 @@ func (db *DB) ListCollections(ctx context.Context, userID, apiKeyID *string) ([]
 // GetCollection returns a single collection by ID with ownership check.
 func (db *DB) GetCollection(ctx context.Context, id string, userID, apiKeyID *string) (*models.Collection, error) {
 	query := `
-		SELECT c.id, c.name, c.description, c.user_id, c.api_key_id,
+		SELECT c.id, c.name, c.description, c.color, c.user_id, c.api_key_id,
 		       c.created_at, c.updated_at,
 		       COALESCE(ci.cnt, 0) AS item_count
 		FROM collections c
@@ -83,11 +102,11 @@ func (db *DB) UpdateCollection(ctx context.Context, id string, userID, apiKeyID 
 		WHERE id = $1
 		  AND (($2::uuid IS NOT NULL AND user_id = $2)
 		    OR ($3::uuid IS NOT NULL AND api_key_id = $3))
-		RETURNING id, name, description, user_id, api_key_id, created_at, updated_at`
+		RETURNING id, name, description, color, user_id, api_key_id, created_at, updated_at`
 
 	var c models.Collection
 	err := db.QueryRowContext(ctx, query, id, userID, apiKeyID, name, description).Scan(
-		&c.ID, &c.Name, &c.Description, &c.UserID, &c.APIKeyID, &c.CreatedAt, &c.UpdatedAt,
+		&c.ID, &c.Name, &c.Description, &c.Color, &c.UserID, &c.APIKeyID, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update collection: %w", err)

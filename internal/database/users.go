@@ -129,10 +129,9 @@ func (db *DB) GetWorkspaceTranscripts(ctx context.Context, userID string) ([]mod
 func (db *DB) GetWorkspaceAudio(ctx context.Context, userID string) ([]models.AudioTranscription, error) {
 	var audio []models.AudioTranscription
 	err := db.SelectContext(ctx, &audio,
-		`SELECT a.* FROM audio_transcriptions a
-		 JOIN workspace_items wi ON wi.item_id = a.id AND wi.item_type = 'audio'
-		 WHERE wi.user_id = $1 AND a.user_id = wi.user_id
-		 ORDER BY wi.created_at DESC LIMIT 50`, userID)
+		`SELECT `+audioTranscriptionSelectColumns+` FROM audio_transcriptions
+ JOIN (SELECT item_id,created_at AS saved_at FROM workspace_items WHERE user_id=$1 AND item_type='audio') wi
+ ON wi.item_id=audio_transcriptions.id WHERE user_id=$1 ORDER BY wi.saved_at DESC LIMIT 50`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workspace audio: %w", err)
 	}

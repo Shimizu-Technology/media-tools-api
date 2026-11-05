@@ -202,7 +202,7 @@ func (db *DB) RequestAccountDeletionWithReceipt(
 		`DELETE FROM background_jobs WHERE
 			(job_type = 'transcript_extraction' AND resource_id IN (SELECT id FROM delete_transcripts))
 			OR (job_type = 'summary_generation' AND resource_id IN (SELECT id FROM delete_summaries))
-			OR (job_type IN ('audio_transcription', 'audio_summary', 'audio_transcript_formatting')
+			OR (job_type IN ('audio_transcription', 'audio_summary', 'audio_transcript_formatting', 'audio_waveform')
 				AND resource_id IN (SELECT id FROM delete_audio))`,
 		`DELETE FROM collection_items WHERE
 			(item_type = 'transcript' AND item_id IN (SELECT id FROM delete_transcripts))

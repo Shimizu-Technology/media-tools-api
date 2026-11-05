@@ -277,6 +277,8 @@ var ValidContentTypes = map[AudioContentType]bool{
 }
 
 type AudioTranscription struct {
+	Waveform            json.RawMessage  `json:"waveform,omitempty" db:"waveform"`
+	WaveformStatus      string           `json:"-" db:"waveform_status"`
 	ID                  string           `json:"id" db:"id"`
 	Filename            string           `json:"filename" db:"filename"`
 	OriginalName        string           `json:"original_name" db:"original_name"`
@@ -317,6 +319,7 @@ type AudioTranscription struct {
 
 // BackgroundJob is the durable queue record claimed by worker processes.
 type BackgroundJob struct {
+	Priority       int             `json:"priority" db:"priority"`
 	ID             string          `json:"id" db:"id"`
 	JobType        string          `json:"job_type" db:"job_type"`
 	ResourceID     string          `json:"resource_id" db:"resource_id"`
@@ -524,19 +527,23 @@ type WorkspaceResponse struct {
 // LibraryItem is the common metadata shape used by the unified library. The
 // full transcript/text remains available from the item-specific detail route.
 type LibraryItem struct {
-	ID            string          `json:"id" db:"id"`
-	ItemType      string          `json:"item_type" db:"item_type"`
-	Title         string          `json:"title" db:"title"`
-	Subtitle      string          `json:"subtitle" db:"subtitle"`
-	Status        string          `json:"status" db:"status"`
-	WordCount     int             `json:"word_count" db:"word_count"`
-	Duration      float64         `json:"duration" db:"duration"`
-	PageCount     int             `json:"page_count" db:"page_count"`
-	SummaryStatus string          `json:"summary_status" db:"summary_status"`
-	Favorite      bool            `json:"favorite" db:"favorite"`
-	Archived      bool            `json:"archived" db:"archived"`
-	Tags          json.RawMessage `json:"tags" db:"tags"`
-	CreatedAt     time.Time       `json:"created_at" db:"created_at"`
+	ExcerptFallback string          `json:"-" db:"excerpt_fallback"`
+	Excerpt         string          `json:"excerpt,omitempty" db:"excerpt"`
+	Waveform        json.RawMessage `json:"waveform,omitempty" db:"waveform"`
+	Collections     json.RawMessage `json:"collections" db:"collections"`
+	ID              string          `json:"id" db:"id"`
+	ItemType        string          `json:"item_type" db:"item_type"`
+	Title           string          `json:"title" db:"title"`
+	Subtitle        string          `json:"subtitle" db:"subtitle"`
+	Status          string          `json:"status" db:"status"`
+	WordCount       int             `json:"word_count" db:"word_count"`
+	Duration        float64         `json:"duration" db:"duration"`
+	PageCount       int             `json:"page_count" db:"page_count"`
+	SummaryStatus   string          `json:"summary_status" db:"summary_status"`
+	Favorite        bool            `json:"favorite" db:"favorite"`
+	Archived        bool            `json:"archived" db:"archived"`
+	Tags            json.RawMessage `json:"tags" db:"tags"`
+	CreatedAt       time.Time       `json:"created_at" db:"created_at"`
 }
 
 type LibraryListParams struct {
@@ -585,6 +592,7 @@ type LibraryStats struct {
 
 // Collection represents a user-created group for organizing media items.
 type Collection struct {
+	Color       string    `json:"color" db:"color"`
 	ID          string    `json:"id" db:"id"`
 	Name        string    `json:"name" db:"name"`
 	Description string    `json:"description" db:"description"`

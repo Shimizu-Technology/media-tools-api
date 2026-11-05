@@ -76,6 +76,10 @@ func TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup(t *testing.T) {
 		t.Fatalf("insert AI content report: %v", err)
 	}
 
+	if _, err := db.Exec(`INSERT INTO background_jobs(job_type,resource_id) VALUES('audio_waveform',$1)`, audioID); err != nil {
+		t.Fatal(err)
+	}
+
 	cleanupAfter := time.Now().UTC().Add(time.Hour)
 	request, err := db.RequestAccountDeletion(ctx, userID, &providerID, cleanupAfter)
 	if err != nil {
@@ -85,6 +89,11 @@ func TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup(t *testing.T) {
 		_, _ = db.ExecContext(context.Background(), `DELETE FROM background_jobs WHERE resource_id = $1`, request.ID)
 		_, _ = db.ExecContext(context.Background(), `DELETE FROM account_deletion_requests WHERE id = $1`, request.ID)
 	})
+	var waveformJobs int
+	if err := db.Get(&waveformJobs, `SELECT count(*) FROM background_jobs WHERE resource_id=$1 AND job_type='audio_waveform'`, audioID); err != nil || waveformJobs != 0 {
+		t.Fatalf("waveform jobs survived account purge: %d %v", waveformJobs, err)
+	}
+
 	loadedRequest, err := db.GetAccountDeletionRequest(ctx, request.ID)
 	if err != nil {
 		t.Fatalf("GetAccountDeletionRequest() error = %v", err)

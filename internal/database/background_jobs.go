@@ -13,7 +13,7 @@ import (
 )
 
 const backgroundJobColumns = `
-	id, job_type, resource_id, payload, status, attempts, max_attempts,
+	id, job_type, resource_id, payload, status, attempts, max_attempts, priority,
 	run_at, locked_by, locked_at, lease_expires_at, started_at,
 	completed_at, last_error, created_at, updated_at
 `
@@ -67,6 +67,18 @@ func (db *DB) EnqueueBackgroundJob(ctx context.Context, jobType, resourceID stri
 		return false, fmt.Errorf("enqueue background job: %w", err)
 	}
 	return true, nil
+}
+
+// EnsureBackgroundJob is recovery's insert-only counterpart to submission.
+// A queued/running job already owns its settings; startup must not replace them.
+func (db *DB) EnsureBackgroundJob(ctx context.Context, kind, id string, payload []byte) (bool, error) {
+	result, err := db.ExecContext(ctx, `INSERT INTO background_jobs(job_type,resource_id,payload)
+ VALUES($1::text,$2::uuid,$3::jsonb) ON CONFLICT(job_type,resource_id) WHERE status IN ('queued','running') DO NOTHING`, kind, id, string(payload))
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n > 0, err
 }
 
 // QueueAudioSummary stores the requested model/length payload in the same
@@ -123,7 +135,7 @@ func (db *DB) QueueAudioSummary(
 		VALUES ('audio_summary', $1, $2::jsonb)
 		ON CONFLICT (job_type, resource_id)
 			WHERE status IN ('queued', 'running')
-		DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+		DO UPDATE SET payload = EXCLUDED.payload, priority = 0, updated_at = NOW()
 		WHERE background_jobs.status = 'queued'`,
 		audio.ID, string(payload),
 	)
@@ -272,6 +284,12 @@ func (db *DB) ClaimBackgroundJob(ctx context.Context, workerID string, lease tim
 	}
 	defer tx.Rollback()
 
+	// A short global claim lock makes the single maintenance slot safe across
+	// processes. It is released before any media/provider work starts.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(606060)`); err != nil {
+		return nil, err
+	}
+
 	var exhausted []models.BackgroundJob
 	if err := tx.SelectContext(ctx, &exhausted, `UPDATE background_jobs SET status='failed', completed_at=NOW(), last_error='Worker lease expired too many times', locked_by=NULL, locked_at=NULL, lease_expires_at=NULL WHERE status='running' AND lease_expires_at < NOW() AND attempts >= max_attempts AND job_type <> 'account_deletion' RETURNING `+backgroundJobColumns); err != nil {
 		return nil, err
@@ -286,7 +304,7 @@ func (db *DB) ClaimBackgroundJob(ctx context.Context, workerID string, lease tim
 	err = tx.GetContext(ctx, &job, `
 		SELECT `+backgroundJobColumns+`
 		FROM background_jobs
-		WHERE (
+		WHERE (priority = 0 OR NOT EXISTS (SELECT 1 FROM background_jobs busy WHERE busy.priority > 0 AND busy.status='running' AND busy.lease_expires_at >= NOW())) AND ((
 			status = 'queued'
 			AND run_at <= NOW()
 			AND attempts < max_attempts
@@ -294,8 +312,10 @@ func (db *DB) ClaimBackgroundJob(ctx context.Context, workerID string, lease tim
 			status = 'running'
 			AND lease_expires_at < NOW()
  AND (attempts < max_attempts OR job_type = 'account_deletion')
-		)
-		ORDER BY
+		))
+		ORDER BY CASE WHEN priority=0 THEN 0 ELSE 1 END,
+            CASE WHEN priority>0 AND status='running' THEN 0 ELSE 1 END,
+            priority ASC,
 			CASE WHEN status = 'queued' THEN 0 ELSE 1 END,
 			run_at ASC,
 			created_at ASC
@@ -341,10 +361,12 @@ func (db *DB) NextBackgroundJobWake(ctx context.Context) (*time.Time, error) {
 			SELECT run_at AS wake_at
 			FROM background_jobs
 			WHERE status = 'queued' AND attempts < max_attempts
+ AND (priority=0 OR NOT EXISTS (SELECT 1 FROM background_jobs busy WHERE busy.priority>0 AND busy.status='running' AND busy.lease_expires_at >= NOW()))
 			UNION ALL
 			SELECT lease_expires_at AS wake_at
 			FROM background_jobs
 			WHERE status = 'running' AND lease_expires_at IS NOT NULL
+ AND (priority=0 OR NOT EXISTS (SELECT 1 FROM background_jobs busy WHERE busy.priority>0 AND busy.status='running' AND busy.lease_expires_at>=NOW() AND busy.id<>background_jobs.id))
 		) AS deferred_jobs`)
 	if err != nil {
 		return nil, fmt.Errorf("find next background job wake: %w", err)
@@ -494,6 +516,10 @@ func (db *DB) CountQueuedBackgroundJobs(ctx context.Context) (int, error) {
 func failJobResource(ctx context.Context, tx *sqlx.Tx, kind, id, message string) error {
 	var query string
 	switch kind {
+	case "admin_backfill":
+		query = `UPDATE backfill_runs SET dispatch_status='failed' WHERE id=$1 AND $2::text IS NOT NULL`
+	case "audio_waveform":
+		query = `UPDATE audio_transcriptions SET waveform_status='failed', waveform=NULL WHERE id=$1 AND $2::text IS NOT NULL`
 	case "audio_transcription":
 		query = `UPDATE audio_transcriptions SET status='failed', processing_stage='failed', processing_progress=100, error_message=$2 WHERE id=$1 AND status IN ('pending','processing','failed')`
 	case "transcript_extraction":

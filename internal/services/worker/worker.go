@@ -59,6 +59,7 @@ const (
 	JobTranscriptExtraction  JobType = "transcript_extraction"
 	JobSummaryGeneration     JobType = "summary_generation"
 	JobAudioTranscription    JobType = "audio_transcription"
+	JobAudioWaveform         JobType = "audio_waveform"
 	JobAudioSummary          JobType = "audio_summary"
 	JobAudioTranscriptFormat JobType = "audio_transcript_formatting"
 	JobAccountDeletion       JobType = "account_deletion"
@@ -561,12 +562,15 @@ func (p *Pool) RecoverAudioSummaryJobs(ctx context.Context, limit int) (int, err
 			recoveryErrs = append(recoveryErrs, fmt.Sprintf("marshal %s: %v", at.ID, err))
 			continue
 		}
-		if err := p.SubmitBlocking(ctx, Job{
-			ID: at.ID, Type: JobAudioSummary, Payload: payload, CreatedAt: time.Now(),
-		}); err != nil {
+		created, err := p.db.EnsureBackgroundJob(ctx, string(JobAudioSummary), at.ID, payload)
+		if err != nil {
 			recoveryErrs = append(recoveryErrs, fmt.Sprintf("requeue %s: %v", at.ID, err))
 			continue
 		}
+		if !created {
+			continue
+		}
+		p.Wake()
 		requeued++
 	}
 	if len(recoveryErrs) > 0 {
@@ -817,6 +821,7 @@ func nextClaimRetryDelay(current, maximum time.Duration) time.Duration {
 }
 
 func (p *Pool) runClaimedJob(workerNumber int, claimed *models.BackgroundJob) {
+	defer p.signalWorkers() // release the maintenance slot to sleepers
 	leaseRecovery := p.startLeaseRecoverySignal()
 	job := Job{
 		QueueID:   claimed.ID,
@@ -854,7 +859,7 @@ func (p *Pool) runClaimedJob(workerNumber int, claimed *models.BackgroundJob) {
 	markCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err != nil {
-		if isRetryableError(err) {
+		if isRetryableError(err) || job.Type == JobAudioWaveform {
 			delay := time.Duration(1<<min(claimed.Attempts, 8)) * time.Second
 			var whisperErr *audio.WhisperAPIError
 			if errors.As(err, &whisperErr) && whisperErr.RetryAfter > delay {
@@ -944,6 +949,10 @@ func (p *Pool) dispatchJob(job Job) (err error) {
 		return p.processSummary(job)
 	case JobAudioTranscription:
 		return p.processAudioTranscription(job)
+	case JobType("admin_backfill"):
+		return p.processBackfill(job)
+	case JobAudioWaveform:
+		return p.processAudioWaveform(job)
 	case JobAudioSummary:
 		return p.processAudioSummary(job)
 	case JobAudioTranscriptFormat:
@@ -1151,13 +1160,31 @@ func (p *Pool) processAudioSummary(job Job) error {
 	if err != nil {
 		return fmt.Errorf("audio summary item not found: %w", err)
 	}
-	if !payload.TitleOnly && (at.SummaryStatus == "completed" || (!payload.Automatic && at.SummaryStatus == "failed")) {
+	if !payload.TitleOnly && at.SummaryStatus == "completed" {
+		if payload.Automatic && payload.TitleSource != "" {
+			payload.TitleOnly = true
+		} else {
+			return nil
+		}
+	}
+	if !payload.Automatic && at.SummaryStatus == "failed" {
 		return nil
 	}
 	if at.Status != "completed" || strings.TrimSpace(at.TranscriptText) == "" {
 		return fmt.Errorf("audio transcription is not ready for summarization")
 	}
 	if payload.Automatic {
+		var enabled bool
+		if err := p.db.GetContext(ctx, &enabled, `SELECT COALESCE(p.automatic_summaries,true) FROM audio_transcriptions a LEFT JOIN api_keys k ON k.id=a.api_key_id LEFT JOIN processing_preferences p ON p.user_id=COALESCE(a.user_id,k.user_id) WHERE a.id=$1`, at.ID); err != nil {
+			return err
+		}
+		if !enabled {
+			payload.TitleOnly = true
+			if _, err := p.db.ExecContext(ctx, `UPDATE audio_transcriptions SET summary_status='skipped',summary_error_message='Automatic summaries are disabled' WHERE id=$1 AND summary_status='pending'`, at.ID); err != nil {
+				return err
+			}
+		}
+
 		if p.summarizer == nil {
 			return fmt.Errorf("summary provider is not configured")
 		}
@@ -1178,7 +1205,7 @@ func (p *Pool) processAudioSummary(job Job) error {
 				text = strings.ToValidUTF8(text[:12000], "")
 			}
 			if err := p.reserveAutomaticAI(job, at, "title"); err != nil {
-				if !database.IsUsageCap(err) {
+				if payload.TitleOnly || !database.IsUsageCap(err) {
 					return err
 				}
 			} else {
@@ -1186,6 +1213,9 @@ func (p *Pool) processAudioSummary(job Job) error {
 				// A title is a convenience, so a failed one must not cost the summary.
 				if err != nil {
 					log.Printf("⚠️  Automatic title failed for audio %s: %v", at.ID, err)
+					if payload.TitleOnly {
+						return err
+					}
 					title = ""
 				}
 				title = strings.Trim(strings.TrimSpace(title), "\"")
@@ -1202,7 +1232,9 @@ func (p *Pool) processAudioSummary(job Job) error {
 		}
 	}
 
-	at.ContentType = models.AudioContentType(payload.ContentType)
+	if payload.ContentType != "" {
+		at.ContentType = models.AudioContentType(payload.ContentType)
+	}
 	if at.ContentType == "" {
 		at.ContentType = models.ContentGeneral
 	}
@@ -2576,11 +2608,75 @@ func (p *Pool) finishAudioFailure(ctx context.Context, audioID, message string) 
 	p.NotifyWebhook("audio.failed", at.UserID, at.APIKeyID, at)
 }
 
-// generatedRecordingName matches names no person chose: the app's dated
-// recording titles, device file ids, and bare defaults like "New Recording 5".
-var generatedRecordingName = regexp.MustCompile(`(?i)^(recording( .*\d{4}.*)?|new recording( \d+)?|voice memo( \d+)?|audio( \d+)?|untitled|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{4}-\d{2}-\d{2}[ t_\d:.-]*)$`)
+// Only real media suffixes may be removed. filepath.Ext alone would erase a
+// person's dotted title, turning "New Recording 12. Family interview" into a
+// placeholder and allowing both automatic and backfill titling to overwrite it.
+func recordingNameBase(name string) string {
+	name = strings.TrimSpace(name)
+	ext := filepath.Ext(name)
+	// "Voice Memo 3.Opus" is a title. Real suffixes are all lowercase or all caps.
+	if ext != strings.ToLower(ext) && ext != strings.ToUpper(ext) {
+		return name
+	}
+	switch strings.ToLower(ext) {
+	case ".m4a", ".caf", ".mp3", ".wav", ".webm", ".mp4", ".mov", ".qta", ".ogg", ".aac", ".flac", ".opus", ".aif", ".aiff", ".m4b", ".mpeg", ".mpga", ".3gp":
+		name = strings.TrimSuffix(name, ext)
+	}
+	return strings.TrimSpace(name)
+}
 
+var generatedRecordingName = regexp.MustCompile(`(?i)^(recording|recording-\d{4}-\d{2}-\d{2}([-_ t]\d+)*|recording \d{4}-\d{2}-\d{2} \d{2}\.\d{2}(\.\d{2})?|new recording( \d+)?|voice memo( \d+)?|audio( \d+)?|untitled|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{4}-\d{2}-\d{2}[ t_\d:.-]*)$`)
+var legacyPlaceholderName = regexp.MustCompile(`(?i)^(recording|recording-\d{4}-\d{2}-\d{2}([-_ t]\d+)*|recording \d{4}-\d{2}-\d{2} \d{2}\.\d{2}(\.\d{2})?|new recording( \d+)?|voice memo( \d+)?|untitled|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$`)
+var datedRecordingName = regexp.MustCompile(`(?i)^recording — (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([1-9]|[12][0-9]|3[01]), ([0-9]{4}) at ([0-9]{1,2}):([0-5][0-9])(?:[ \x{00A0}\x{202F}](AM|PM))?$`)
+
+func isDatedRecordingName(base string) bool {
+	parts := datedRecordingName.FindStringSubmatch(base)
+	if parts == nil {
+		return false
+	}
+	month, err := time.Parse("Jan", parts[1])
+	if err != nil {
+		return false
+	}
+	day, _ := strconv.Atoi(parts[2])
+	year, _ := strconv.Atoi(parts[3])
+	hour, _ := strconv.Atoi(parts[4])
+	if year < 1 || (parts[6] != "" && (hour < 1 || hour > 12)) || (parts[6] == "" && hour > 23) {
+		return false
+	}
+	date := time.Date(year, month.Month(), day, 0, 0, 0, 0, time.UTC)
+	return date.Year() == year && date.Month() == month.Month() && date.Day() == day
+}
+
+// For enrichment of whichever user_id the admin selects, migration 055's flag
+// may be overridden only on old rows matching these exact app/default formats.
+// Names typed to exactly match a default are indistinguishable; dry-run
+// title_names is the operator's review surface before this explicit backfill.
+func isLegacyPlaceholderName(name string) bool {
+	base := recordingNameBase(name)
+	return legacyPlaceholderName.MatchString(base) || isDatedRecordingName(base)
+}
 func isGeneratedRecordingName(name string) bool {
-	base := strings.TrimSpace(strings.TrimSuffix(name, filepath.Ext(name)))
-	return generatedRecordingName.MatchString(base)
+	base := recordingNameBase(name)
+	return generatedRecordingName.MatchString(base) || isDatedRecordingName(base) || isLocalizedRecordingName(base)
+}
+
+var (
+	localizedRecordingName = regexp.MustCompile(`(?i)^recording — (.*\d{4}.*\d{1,2}[:.]\d{2}(?:[ \x{00A0}\x{202F}]?\p{L}+)?)$`)
+	recordingNameWord      = regexp.MustCompile(`\p{L}+`)
+)
+
+// iOS writes the date in the phone's locale: "26 Aug 2026 at 20:35" in Britain,
+// "2026/08/26 20:35" in Japan. Accept a year and a closing time with at most a
+// month, a connector, and AM or PM between them, so this never needs a locale
+// table. It only applies to new recordings, because migration 055's flag on old
+// rows needs the stricter isLegacyPlaceholderName. "Recording — Mayor interview
+// 2026 at 10:35 AM" has four words and stays a person's name.
+func isLocalizedRecordingName(base string) bool {
+	// isDatedRecordingName owns the US format, so an impossible date stays a name.
+	if datedRecordingName.MatchString(base) {
+		return false
+	}
+	parts := localizedRecordingName.FindStringSubmatch(base)
+	return parts != nil && len(recordingNameWord.FindAllString(parts[1], -1)) <= 3
 }

@@ -27,19 +27,22 @@ func (h *Handler) GetWorkspace(c *gin.Context) {
 	transcripts, err := h.DB.GetWorkspaceTranscripts(c.Request.Context(), user.ID)
 	if err != nil {
 		log.Printf("Failed to get workspace transcripts: %v", err)
-		transcripts = []models.Transcript{}
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "database_error", Message: "Workspace is unavailable; please try again", Code: http.StatusServiceUnavailable})
+		return
 	}
 
 	audio, err := h.DB.GetWorkspaceAudio(c.Request.Context(), user.ID)
 	if err != nil {
 		log.Printf("Failed to get workspace audio: %v", err)
-		audio = []models.AudioTranscription{}
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "database_error", Message: "Workspace is unavailable; please try again", Code: http.StatusServiceUnavailable})
+		return
 	}
 
 	pdfs, err := h.DB.GetWorkspacePDFs(c.Request.Context(), user.ID)
 	if err != nil {
 		log.Printf("Failed to get workspace PDFs: %v", err)
-		pdfs = []models.PDFExtraction{}
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "database_error", Message: "Workspace is unavailable; please try again", Code: http.StatusServiceUnavailable})
+		return
 	}
 
 	c.JSON(http.StatusOK, models.WorkspaceResponse{

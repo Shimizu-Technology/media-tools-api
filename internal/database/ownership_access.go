@@ -73,9 +73,9 @@ func (db *DB) GetAudioTranscriptionForActor(ctx context.Context, id string, user
 		return nil, fmt.Errorf("actor is required")
 	}
 	var at models.AudioTranscription
-	query := fmt.Sprintf(`SELECT %s FROM audio_transcriptions
+	query := fmt.Sprintf(`SELECT %s FROM audio_transcriptions a
 		WHERE id = $1
-		  AND (($2::uuid IS NOT NULL AND user_id = $2)
+		  AND (($2::uuid IS NOT NULL AND a.user_id = $2)
 		    OR ($3::uuid IS NOT NULL AND api_key_id = $3))`, audioTranscriptionSelectColumns)
 	err := db.GetContext(ctx, &at, query, id, userID, apiKeyID)
 	if err != nil {

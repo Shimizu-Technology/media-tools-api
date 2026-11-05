@@ -240,31 +240,43 @@ func runItems(args []string, stdout, stderr io.Writer) error {
 
 // ── list and search ──
 
+type itemCollection struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
 type libraryItem struct {
-	ID            string          `json:"id"`
-	ItemType      string          `json:"item_type"`
-	Title         string          `json:"title"`
-	Status        string          `json:"status"`
-	SummaryStatus string          `json:"summary_status"`
-	WordCount     int             `json:"word_count"`
-	Favorite      bool            `json:"favorite"`
-	Archived      bool            `json:"archived"`
-	Tags          json.RawMessage `json:"tags"`
-	CreatedAt     string          `json:"created_at"`
+	Excerpt       string           `json:"excerpt,omitempty"`
+	Waveform      []int            `json:"waveform,omitempty"`
+	Collections   []itemCollection `json:"collections"`
+	ID            string           `json:"id"`
+	ItemType      string           `json:"item_type"`
+	Title         string           `json:"title"`
+	Status        string           `json:"status"`
+	SummaryStatus string           `json:"summary_status"`
+	WordCount     int              `json:"word_count"`
+	Favorite      bool             `json:"favorite"`
+	Archived      bool             `json:"archived"`
+	Tags          json.RawMessage  `json:"tags"`
+	CreatedAt     string           `json:"created_at"`
 }
 
 // itemSummary is the stable JSON shape for list and search results.
 type itemSummary struct {
-	Ref       string   `json:"ref"`
-	ID        string   `json:"id"`
-	Type      string   `json:"type"`
-	Title     string   `json:"title"`
-	Status    string   `json:"status"`
-	WordCount int      `json:"word_count"`
-	Favorite  bool     `json:"favorite"`
-	Archived  bool     `json:"archived"`
-	Tags      []string `json:"tags"`
-	CreatedAt string   `json:"created_at"`
+	Excerpt     string           `json:"excerpt,omitempty"`
+	Waveform    []int            `json:"waveform,omitempty"`
+	Collections []itemCollection `json:"collections"`
+	Ref         string           `json:"ref"`
+	ID          string           `json:"id"`
+	Type        string           `json:"type"`
+	Title       string           `json:"title"`
+	Status      string           `json:"status"`
+	WordCount   int              `json:"word_count"`
+	Favorite    bool             `json:"favorite"`
+	Archived    bool             `json:"archived"`
+	Tags        []string         `json:"tags"`
+	CreatedAt   string           `json:"created_at"`
 }
 
 func summarizeLibraryItem(item libraryItem) (itemSummary, bool) {
@@ -272,9 +284,13 @@ func summarizeLibraryItem(item libraryItem) (itemSummary, bool) {
 	if !ok {
 		return itemSummary{}, false
 	}
+	if item.Collections == nil {
+		item.Collections = []itemCollection{}
+	}
 	tags := []string{}
 	_ = json.Unmarshal(item.Tags, &tags)
 	return itemSummary{
+		Excerpt: item.Excerpt, Waveform: item.Waveform, Collections: item.Collections,
 		Ref: kind.name + ":" + item.ID, ID: item.ID, Type: kind.name, Title: item.Title,
 		Status: item.Status, WordCount: item.WordCount, Favorite: item.Favorite,
 		Archived: item.Archived, Tags: tags, CreatedAt: item.CreatedAt,

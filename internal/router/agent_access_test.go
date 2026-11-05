@@ -24,6 +24,7 @@ import (
 // either in the scoped-key allow list or under one of these prefixes; a new
 // route that is neither fails this test until someone classifies it.
 var neverScopedPrefixes = []string{
+	"/api/v1/admin/",
 	"/api/v1/keys",
 	"/api/v1/user/",
 	"/api/v1/auth/",

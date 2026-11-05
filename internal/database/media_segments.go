@@ -250,6 +250,16 @@ func (db *DB) CompleteAudioTranscriptionWithSegments(ctx context.Context, audio 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM audio_chunk_checkpoints WHERE audio_id=$1`, audio.ID); err != nil {
 		return false, err
 	}
+	// Waveforms are local processing, independent of AI preferences or billing.
+	if _, err := tx.ExecContext(ctx, `
+ WITH ready AS (UPDATE audio_transcriptions SET waveform_status='pending'
+ WHERE id=$1 AND status='completed' AND audio_s3_status='uploaded' AND audio_s3_key<>'' AND waveform IS NULL
+ RETURNING id)
+ INSERT INTO background_jobs(job_type,resource_id,priority,max_attempts)
+ SELECT 'audio_waveform',id,5,3 FROM ready
+ ON CONFLICT(job_type,resource_id) WHERE status IN ('queued','running') DO NOTHING`, audio.ID); err != nil {
+		return false, err
+	}
 	if os.Getenv("AUTOMATIC_AUDIO_ENRICHMENT_ENABLED") == "true" {
 
 		// Preserve the old summary through failures, then mark its replacement pending.

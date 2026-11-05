@@ -104,6 +104,8 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	r.GET("/ready", h.ReadinessCheck)
 	r.GET("/api/v1/ready", h.ReadinessCheck)
 	r.POST("/api/v1/keys", h.CreateAPIKey)
+	r.POST("/api/v1/admin/backfills", h.CreateBackfill)
+	r.GET("/api/v1/admin/backfills/:id", h.GetBackfill)
 	if cfg.FirstPartyAuthEnabled && cfg.DB != nil {
 		r.POST("/api/v1/account/deletion-status", rateLimiter.RateLimitUnauthenticated("account-deletion-status", 30), h.AccountDeletionReceiptStatus)
 	}

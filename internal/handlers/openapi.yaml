@@ -34,6 +34,11 @@ security:
 
 components:
   securitySchemes:
+    AdminKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Admin-Key
+      description: Server admin secret; agent and bearer credentials are rejected on backfill routes.
     ApiKeyAuth:
       type: apiKey
       in: header
@@ -45,6 +50,116 @@ components:
       description: Opaque first-party access token.
 
   schemas:
+    CollectionBadge:
+      type: object
+      required: [id, name, color]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        color: {type: string, enum: [coral, teal, violet, amber, blue, rose]}
+    Collection:
+      allOf:
+        - {$ref: "#/components/schemas/CollectionBadge"}
+        - type: object
+          properties:
+            description: {type: string}
+            item_count: {type: integer}
+    LibraryItem:
+      type: object
+      required: [collections]
+      description: Existing library fields are unchanged. Additions are optional except collections, which is always an array. Badges are ordered by collection creation time, oldest first.
+      properties:
+        id: {type: string, format: uuid}
+        item_type: {type: string, enum: [audio, youtube, pdf]}
+        title: {type: string}
+        excerpt: {type: string, maxLength: 200, description: Plain text from the summary or opening source text, ending at a word boundary. Omitted when empty.}
+        waveform:
+          type: array
+          minItems: 32
+          maxItems: 32
+          items: {type: integer, minimum: 0, maximum: 100}
+          description: Real audio peaks only; omitted before computation or after failure.
+        collections:
+          type: array
+          items: {$ref: "#/components/schemas/CollectionBadge"}
+    AudioTranscription:
+      type: object
+      description: Complete audio transcription response. Internal waveform status and title provenance flags are not exposed. Waveform is optional.
+      required: [id, filename, original_name, duration, language, transcript_text, formatted_transcript_text, formatting_status, word_count, status, omitted_ranges, content_type, key_points, action_items, decisions, summary_length, summary_status, summary_evidence, created_at]
+      properties:
+        waveform:
+          type: array
+          minItems: 200
+          maxItems: 200
+          items: {type: integer, minimum: 0, maximum: 100}
+        id: {type: string, format: uuid}
+        filename: {type: string}
+        original_name: {type: string}
+        audio_s3_key: {type: string}
+        audio_s3_status: {type: string}
+        audio_s3_size: {type: integer}
+        processing_stage: {type: string}
+        processing_progress: {type: integer}
+        retry_count: {type: integer}
+        duration: {type: number}
+        language: {type: string}
+        transcript_text: {type: string}
+        formatted_transcript_text: {type: string}
+        formatting_status: {type: string}
+        formatting_model: {type: string}
+        formatting_version: {type: string}
+        formatting_error_message: {type: string}
+        word_count: {type: integer}
+        status: {type: string}
+        error_message: {type: string}
+        quality_warning: {type: string}
+        omitted_ranges:
+          type: array
+          items:
+            type: object
+            properties:
+              start: {type: number}
+              end: {type: number}
+              reason: {type: string}
+        content_type: {type: string}
+        summary_text: {type: string}
+        key_points: {type: array, items: {type: string}}
+        action_items: {type: array, items: {type: string}}
+        decisions: {type: array, items: {type: string}}
+        summary_model: {type: string}
+        summary_length: {type: string}
+        summary_status: {type: string}
+        summary_evidence: {$ref: "#/components/schemas/SummaryEvidence"}
+        summary_error_message: {type: string}
+        user_id: {type: string, format: uuid}
+        api_key_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+    BackfillPreview:
+      type: object
+      required: [kind, dry_run, eligible, summaries, titles, title_names, protected_titles, enqueued]
+      properties:
+        kind: {type: string, enum: [waveforms, enrichment]}
+        dry_run: {type: boolean, enum: [true]}
+        eligible: {type: integer, minimum: 0}
+        summaries: {type: integer, minimum: 0}
+        titles: {type: integer, minimum: 0}
+        title_names:
+          type: array
+          items: {type: string}
+          description: Exact original names selected for retitling, including their original Unicode characters. Admin-only preview.
+        protected_titles: {type: integer, minimum: 0}
+        enqueued: {type: integer, enum: [0]}
+    BackfillProgress:
+      type: object
+      required: [id, kind, dispatch_status, queued, running, completed, failed]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [waveforms, enrichment]}
+        dispatch_status: {type: string, enum: [queued, running, completed, failed]}
+        queued: {type: integer, minimum: 0}
+        running: {type: integer, minimum: 0}
+        completed: {type: integer, minimum: 0}
+        failed: {type: integer, minimum: 0}
     Transcript:
       type: object
       properties:
@@ -382,6 +497,63 @@ components:
           example: true
 
 paths:
+  /admin/backfills:
+    post:
+      tags: [Operations]
+      summary: Preview or start a durable backfill
+      security: [{AdminKeyAuth: []}]
+      description: Admin key only. Rejects X-API-Key and Authorization headers. Dry run performs no writes. A real run returns its id immediately, before durable dispatch. Waveforms span all accounts; enrichment requires the target account and uses automatic summary preferences and usage accounting.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, dry_run]
+              properties:
+                kind: {type: string, enum: [waveforms, enrichment]}
+                user_id: {type: string, format: uuid, description: Required for enrichment; omit for waveforms.}
+                dry_run: {type: boolean}
+      responses:
+        "200":
+          description: Read-only counts and exact title names. No run id is created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BackfillPreview"}
+        "202":
+          description: Durable run created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: string, format: uuid}
+                  kind: {type: string}
+                  dry_run: {type: boolean}
+        "400": {description: Invalid request}
+        "401": {description: Admin key required}
+        "403": {description: Invalid admin key or agent/bearer credential}
+        "404": {description: account_not_found for an unknown enrichment user_id}
+        "503": {description: Queue unavailable}
+  /admin/backfills/{id}:
+    get:
+      tags: [Operations]
+      summary: Get counts for only jobs created by this backfill run
+      security: [{AdminKeyAuth: []}]
+      description: The dispatcher is excluded from the four child-job counts. dispatch_status completed means dispatch finished; the run has finished processing when queued and running are both zero. Fresh jobs, earlier jobs and overlapping runs do not inflate these counts.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Run-specific progress
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BackfillProgress"}
+        "400": {description: Invalid run id}
+        "401": {description: Admin key required}
+        "403": {description: Invalid admin key or agent/bearer credential}
+        "404": {description: Run not found}
+        "503": {description: Database unavailable}
   /auth/sessions:
     get:
       summary: List this account's signed-in devices
@@ -2021,7 +2193,13 @@ paths:
     get:
       tags: [Audio]
       summary: Get an audio transcription
-      responses: {"200": {description: Audio transcription}, "404": {description: Not found}}
+      responses:
+        "200":
+          description: Audio transcription
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AudioTranscription"}
+        "404": {description: Not found}
     patch:
       tags: [Audio]
       summary: Rename an audio transcription
@@ -2099,10 +2277,12 @@ paths:
     get:
       tags: [Collections]
       summary: List collections
+      description: Every collection includes a named color.
       responses: {"200": {description: Collections}}
     post:
       tags: [Collections]
       summary: Create a collection
+      description: Assigns the account's least-used color, with palette order as the tie-breaker.
       responses: {"201": {description: Collection created}}
   /collections/{id}:
     parameters:
@@ -2110,6 +2290,7 @@ paths:
     get:
       tags: [Collections]
       summary: Get a collection and its items
+      description: The collection includes color, one of coral, teal, violet, amber, blue or rose.
       responses: {"200": {description: Collection}}
     patch:
       tags: [Collections]
@@ -2159,7 +2340,17 @@ paths:
           required: false
           description: Filter by status; use active for pending and processing items
           schema: {type: string, enum: [active, pending, processing, completed, failed]}
-      responses: {"200": {description: Paginated library items}}
+      responses:
+        "200":
+          description: Paginated library items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: "#/components/schemas/LibraryItem"}
   /library/stats:
     get:
       tags: [Library]
