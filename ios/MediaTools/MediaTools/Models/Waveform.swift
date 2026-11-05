@@ -62,7 +62,8 @@ struct LiveLevelMeter: Equatable {
 extension Array where Element == MediaSegment {
     /// The segment playing at `time`, for transcript highlighting. Segments arrive in
     /// order, and a long recording has thousands, so this searches rather than scans.
-    /// A segment with no times, such as a PDF page, is never highlighted.
+    /// A segment with no times, such as a PDF page, is never highlighted, and is stepped
+    /// over. Nothing is highlighted in a silent gap after a segment has ended.
     func activeSegmentIndex(at time: TimeInterval) -> Int? {
         guard time.isFinite, time >= 0 else { return nil }
         let milliseconds = Int64(time * 1_000)
@@ -70,8 +71,15 @@ extension Array where Element == MediaSegment {
         var high = count - 1
         var match: Int?
         while low <= high {
-            let middle = (low + high) / 2
-            guard let start = self[middle].startMs else { return nil }
+            // Step left to the nearest timed segment in this range.
+            var middle = (low + high) / 2
+            while middle >= low, self[middle].startMs == nil {
+                middle -= 1
+            }
+            guard middle >= low, let start = self[middle].startMs else {
+                low = (low + high) / 2 + 1
+                continue
+            }
             if start <= milliseconds {
                 match = middle
                 low = middle + 1
@@ -79,6 +87,8 @@ extension Array where Element == MediaSegment {
                 high = middle - 1
             }
         }
+        guard let match else { return nil }
+        if let end = self[match].endMs, milliseconds >= end { return nil }
         return match
     }
 }

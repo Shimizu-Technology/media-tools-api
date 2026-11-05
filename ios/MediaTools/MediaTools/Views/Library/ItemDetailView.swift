@@ -1338,8 +1338,10 @@ struct ItemDetailView: View {
             return
         }
 
-        // A page reference or an untimed passage lives in the text tab.
+        // A page reference or an untimed passage lives in the text tab, and only the
+        // segment list has anything for the scroll to land on.
         tabChoice = .transcript
+        if isAudioItem { transcriptModeChoice = .timestamps }
         scrollTarget = citation.segmentId
         showChat = false
     }
@@ -1415,7 +1417,7 @@ private struct TimedTranscript: View {
         let active = player.hasPlaybackPosition ? segments.activeSegmentIndex(at: player.currentTime) : nil
         LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in
-                TimedTranscriptLine(segment: segment, isActive: index == active) {
+                TimedTranscriptLine(segment: segment, isActive: index == active, isPlaying: player.isPlaying) {
                     onSelect(segment)
                 }
                 .id(segment.id)
@@ -1428,10 +1430,11 @@ private struct TimedTranscript: View {
 private struct TimedTranscriptLine: View, Equatable {
     let segment: MediaSegment
     let isActive: Bool
+    let isPlaying: Bool
     let action: () -> Void
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.segment.id == rhs.segment.id && lhs.isActive == rhs.isActive
+        lhs.segment.id == rhs.segment.id && lhs.isActive == rhs.isActive && lhs.isPlaying == rhs.isPlaying
     }
 
     var body: some View {
@@ -1455,7 +1458,7 @@ private struct TimedTranscriptLine: View, Equatable {
         }
         .buttonStyle(RowButtonStyle())
         .accessibilityHint(segment.startMs == nil ? "" : "Plays from this moment")
-        .accessibilityValue(isActive ? "Now playing" : "")
+        .accessibilityValue(isActive ? (isPlaying ? "Now playing" : "Paused here") : "")
     }
 }
 

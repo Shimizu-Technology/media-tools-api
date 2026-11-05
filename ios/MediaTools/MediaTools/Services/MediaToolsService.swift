@@ -18,6 +18,8 @@ final class MediaToolsService {
     private(set) var libraryRevision = 0
     /// What has been deleted this session. Lists drop these at once, before any refresh.
     private(set) var deletedReferences: Set<LibraryReference> = []
+    @ObservationIgnored private var libraryListSequence = 0
+    @ObservationIgnored private var rowSequences: [LibraryReference: Int] = [:]
     /// A collection made a moment ago may not be in `collections` yet.
     @ObservationIgnored private var knownCollections: [String: Collection] = [:]
     private(set) var isLoading = false
@@ -292,6 +294,8 @@ final class MediaToolsService {
         archivedOnly: Bool = false,
         favoriteOnly: Bool = false
     ) async throws -> LibraryListResponse {
+        libraryListSequence += 1
+        let sequence = libraryListSequence
         let response: LibraryListResponse = try await api.get(Self.libraryItemsPath(
             page: page,
             perPage: perPage,
@@ -302,15 +306,31 @@ final class MediaToolsService {
             archivedOnly: archivedOnly,
             favoriteOnly: favoriteOnly
         ))
-        rememberLibraryRows(response.data)
+        rememberLibraryRows(response.data, sequence: sequence)
         return response
     }
 
     /// The list is the only place an item's collections and short waveform come from,
     /// so the detail screen reads them here instead of waiting on another request.
-    func rememberLibraryRows(_ items: [LibraryListItem]) {
+    /// A list that started earlier can finish later, so a row only ever moves forward.
+    func rememberLibraryRows(_ items: [LibraryListItem], sequence: Int = .max) {
         for item in items {
-            libraryRows[item.reference.normalized] = item
+            let key = item.reference.normalized
+            guard sequence >= (rowSequences[key] ?? 0) else { continue }
+            rowSequences[key] = sequence
+            libraryRows[key] = item
+        }
+    }
+
+    /// A collection's own response says what is in it, which covers an item opened from
+    /// there that no list has shown yet.
+    func rememberMembership(of collection: Collection) {
+        for item in collection.items ?? [] {
+            let key = LibraryReference(itemType: item.itemType, itemId: item.itemId).normalized
+            guard addedCollections[key]?.contains(where: { $0.id == collection.id }) != true else { continue }
+            addedCollections[key, default: []].append(
+                LibraryItemCollection(id: collection.id, name: collection.name, color: collection.color)
+            )
         }
     }
 
@@ -427,7 +447,9 @@ final class MediaToolsService {
     }
 
     func getCollection(_ id: String) async throws -> Collection {
-        try await api.get("/collections/\(id)")
+        let collection: Collection = try await api.get("/collections/\(id)")
+        rememberMembership(of: collection)
+        return collection
     }
 
     func createCollection(name: String, description: String? = nil) async throws -> Collection {

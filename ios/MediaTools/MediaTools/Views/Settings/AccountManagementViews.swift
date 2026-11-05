@@ -367,9 +367,12 @@ struct UsageSummaryView: View {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Theme.surface2)
-                        Capsule()
-                            .fill(Theme.heroGradient)
-                            .frame(width: max(6, geometry.size.width * fraction))
+                        // Nothing used draws nothing, not a sliver of used quota.
+                        if fraction > 0 {
+                            Capsule()
+                                .fill(Theme.heroGradient)
+                                .frame(width: max(6, geometry.size.width * fraction))
+                        }
                     }
                 }
                 .frame(height: 6)

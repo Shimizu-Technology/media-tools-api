@@ -247,7 +247,7 @@ extension View {
             .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: Theme.radiusMedium, style: .continuous)
-                    .stroke(Theme.separator, lineWidth: 0.5)
+                    .stroke(Theme.fieldBorder, lineWidth: 1)
             }
     }
 
@@ -325,6 +325,10 @@ struct Hairline: View {
 }
 
 extension Theme {
+    /// A field's only edge, so it has to clear 3:1 on its own, which the hairline
+    /// `separator` is not meant to.
+    static let fieldBorder = textSecondary.opacity(0.7)
+
     /// The widest a list runs on iPad, about where a row's excerpt stays readable.
     static let readableWidth: CGFloat = 720
 

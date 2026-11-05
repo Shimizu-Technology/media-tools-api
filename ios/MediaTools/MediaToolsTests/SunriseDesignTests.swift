@@ -73,6 +73,36 @@ final class SunriseDesignTests: XCTestCase {
         }
     }
 
+    /// A field's edge against the field, in both appearances, composited as drawn.
+    func testFieldBordersClearThreeToOne() throws {
+        func channels(_ color: UIColor, _ style: UIUserInterfaceStyle) -> (CGFloat, CGFloat, CGFloat) {
+            let resolved = color.resolvedColor(with: UITraitCollection(userInterfaceStyle: style))
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+            return (red, green, blue)
+        }
+        func luminance(_ value: (CGFloat, CGFloat, CGFloat)) -> CGFloat {
+            func linear(_ channel: CGFloat) -> CGFloat {
+                channel <= 0.03928 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linear(value.0) + 0.7152 * linear(value.1) + 0.0722 * linear(value.2)
+        }
+        let border = try XCTUnwrap(UIColor(named: "Sunrise/text-secondary"))
+        let surface = try XCTUnwrap(UIColor(named: "Sunrise/surface"))
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let top = channels(border, style)
+            let back = channels(surface, style)
+            let drawn = (
+                top.0 * 0.7 + back.0 * 0.3,
+                top.1 * 0.7 + back.1 * 0.3,
+                top.2 * 0.7 + back.2 * 0.3
+            )
+            let a = luminance(drawn)
+            let b = luminance(back)
+            XCTAssertGreaterThanOrEqual((max(a, b) + 0.05) / (min(a, b) + 0.05), 3, "\(style.rawValue)")
+        }
+    }
+
     func testDestructiveRedStaysDistinctFromTheAccent() throws {
         let danger = try XCTUnwrap(UIColor(named: "Sunrise/danger"))
         let accent = try XCTUnwrap(UIColor(named: "Sunrise/accent-fill"))
@@ -247,6 +277,28 @@ final class WaveformDisplayTests: XCTestCase {
         XCTAssertNil([segment(0, start: nil)].activeSegmentIndex(at: 5), "PDF pages have no times")
         let late = [segment(0, start: 5_000)]
         XCTAssertNil(late.activeSegmentIndex(at: 1), "Nothing is playing yet")
+    }
+
+    func testUntimedSegmentsAreSteppedOverAndGapsHighlightNothing() {
+        func segment(_ ordinal: Int, start: Int64?, end: Int64? = nil) -> MediaSegment {
+            MediaSegment(
+                id: "s\(ordinal)", itemType: "audio", itemId: "a", ordinal: ordinal,
+                startMs: start, endMs: end, pageNumber: nil, text: "", createdAt: nil
+            )
+        }
+        let mixed = [segment(0, start: 0), segment(1, start: nil), segment(2, start: 10_000)]
+        XCTAssertEqual(mixed.activeSegmentIndex(at: 11), 2, "The untimed midpoint does not stop the search")
+        XCTAssertEqual(mixed.activeSegmentIndex(at: 3), 0)
+        let leading = [segment(0, start: nil), segment(1, start: nil), segment(2, start: 1_000), segment(3, start: 9_000)]
+        XCTAssertEqual(leading.activeSegmentIndex(at: 2), 2)
+        XCTAssertEqual(leading.activeSegmentIndex(at: 10), 3)
+
+        let gap = [segment(0, start: 0, end: 4_000), segment(1, start: 8_000, end: 12_000)]
+        XCTAssertEqual(gap.activeSegmentIndex(at: 3.9), 0)
+        XCTAssertNil(gap.activeSegmentIndex(at: 4), "An end time is exclusive")
+        XCTAssertNil(gap.activeSegmentIndex(at: 6), "Silence between segments")
+        XCTAssertEqual(gap.activeSegmentIndex(at: 8), 1)
+        XCTAssertNil(gap.activeSegmentIndex(at: 13), "After the last one")
     }
 }
 
@@ -649,6 +701,37 @@ final class KnownChangeTests: XCTestCase {
         let list = LibraryReference(itemType: "youtube", itemId: "v")
         let detail = LibraryReference(itemType: "transcript", itemId: "v")
         XCTAssertEqual(list.normalized, detail.normalized)
+    }
+
+    func testAnOlderListCannotOverwriteANewerRow() {
+        let service = MediaToolsService()
+        func row(_ collection: String) -> LibraryListItem {
+            var item = LibraryListItem(
+                id: "order-test", itemType: "audio", title: "T", subtitle: "", status: "completed",
+                wordCount: 0, duration: 0, pageCount: 0, summaryStatus: "", favorite: false,
+                archived: false, tags: [], createdAt: nil
+            )
+            item.collections = [LibraryItemCollection(id: collection, name: collection)]
+            return item
+        }
+        let reference = LibraryReference(itemType: "audio", itemId: "order-test")
+        service.rememberLibraryRows([row("newer")], sequence: 2)
+        service.rememberLibraryRows([row("older")], sequence: 1)
+        XCTAssertEqual(service.collections(for: reference).map(\.name), ["newer"])
+    }
+
+    func testOpeningACollectionTeachesTheHeaderItsMembers() {
+        let service = MediaToolsService()
+        let reference = LibraryReference(itemType: "transcript", itemId: "member-test")
+        let collection = Collection(
+            id: "c", name: "Baby", description: nil, itemCount: 1,
+            items: [CollectionItem(id: "i", itemType: "transcript", itemId: "member-test", itemTitle: "T", itemStatus: "completed")],
+            createdAt: nil, color: "teal"
+        )
+        service.rememberMembership(of: collection)
+        service.rememberMembership(of: collection)
+        XCTAssertEqual(service.collections(for: reference).map(\.name), ["Baby"], "Once, however often it opens")
+        XCTAssertEqual(service.collections(for: reference).first?.color, "teal")
     }
 
     func testTheHeaderKnowsARowsCollections() {

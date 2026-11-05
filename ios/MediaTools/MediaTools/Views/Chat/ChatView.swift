@@ -68,7 +68,7 @@ struct ChatView: View {
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .stroke(Theme.separator, lineWidth: 0.5)
+                            .stroke(Theme.fieldBorder, lineWidth: 1)
                     }
 
                 Button {

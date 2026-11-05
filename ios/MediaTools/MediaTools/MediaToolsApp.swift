@@ -70,8 +70,11 @@ struct MediaToolsApp: App {
                         size = .accessibility5
                     }
                 }
-                // Dark screenshots from the test runner, which cannot change the appearance.
-                .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-ui-test-dark") ? .dark : nil)
+                // Screenshots from the test runner, which cannot change the appearance.
+                .preferredColorScheme(
+                    ProcessInfo.processInfo.arguments.contains("-ui-test-dark") ? .dark
+                        : ProcessInfo.processInfo.arguments.contains("-ui-test-light") ? .light : nil
+                )
                 #endif
                 .environment(recordingCoordinator)
                 .environment(uploadCoordinator)

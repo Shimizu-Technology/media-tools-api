@@ -586,6 +586,20 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertFalse(app.buttons["home-row-audio:rich-4"].exists)
     }
 
+    func testASecurityPageWithNoAccountSaysSoAndCanRetry() {
+        let app = XCUIApplication()
+        // The stub's first account request fails, as if offline.
+        app.launchArguments = signedInFixture + ["-ui-test-reset-recordings"]
+        app.launch()
+
+        openSettings(in: app)
+        app.buttons["settings.security"].tap()
+        let retry = app.buttons["security.account-retry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        retry.tap()
+        XCTAssertTrue(retry.waitForNonExistence(timeout: 10))
+    }
+
     // MARK: - Largest text
 
     func testAskJoinsThePageAtFullSizeAtTheLargestText() {
@@ -1410,7 +1424,7 @@ final class MediaToolsUITests: XCTestCase {
         let more = app.buttons["detail.more"]
         XCTAssertTrue(more.waitForExistence(timeout: 5))
         more.tap()
-        for action in ["Add to Collection", "Rename Recording", "Star", "Tags", "Copy Text", "Summarize Again", "Report Summary", "Archive", "Delete"] {
+        for action in ["Add to Collection", "Rename Recording", "Remove Star", "Tags", "Copy Text", "Summarize Again", "Report Summary", "Archive", "Delete"] {
             XCTAssertTrue(app.buttons[action].waitForExistence(timeout: 5), action)
         }
 
@@ -1474,9 +1488,7 @@ final class MediaToolsUITests: XCTestCase {
     }
 
     func testQuickCaptureLiveActivityCanStopFromTheDynamicIsland() throws {
-        // A phone with a home button has no Dynamic Island to expand.
-        let screen = XCUIScreen.main.screenshot().image.size
-        try XCTSkipIf(screen.height / screen.width < 2, "No Dynamic Island on this device")
+        try XCTSkipUnless(hasDynamicIsland, "No Dynamic Island on this simulator")
         let app = XCUIApplication()
         app.launchArguments = [
             "-ui-test-quick-capture",
@@ -1633,6 +1645,15 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 10), .completed)
     }
 
+    /// iPhone 14 Pro (15,2 and 15,3), every model after it, but not the 16e (17,5).
+    private var hasDynamicIsland: Bool {
+        let model = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? ""
+        guard model.hasPrefix("iPhone"), model != "iPhone17,5" else { return false }
+        let numbers = model.dropFirst("iPhone".count).split(separator: ",").compactMap { Int($0) }
+        guard numbers.count == 2 else { return false }
+        return numbers[0] > 15 || (numbers[0] == 15 && numbers[1] >= 2)
+    }
+
     /// The real launch path through `ContentView`, with a Debug-only session and
     /// API stub in place of Keychain and network.
     private var signedInFixture: [String] { ["-ui-test-signed-in"] }
@@ -1751,12 +1772,12 @@ final class MediaToolsUITests: XCTestCase {
     /// Not a check: walks every screen in the current appearance and keeps a screenshot
     /// of each in the result bundle, for design review on whichever device runs it.
     func testScreenshotTour() {
-        tour(suffix: "light")
+        tour(suffix: "light", extraArguments: ["-ui-test-light"])
         tour(suffix: "dark", extraArguments: ["-ui-test-dark"])
     }
 
     func testScreenshotTourAtTheLargestTextSize() {
-        tour(suffix: "ax5", extraArguments: ["-ui-test-largest-text"])
+        tour(suffix: "ax5", extraArguments: ["-ui-test-largest-text", "-ui-test-light"])
     }
 
     func testScreenshotTourEmptyStates() {

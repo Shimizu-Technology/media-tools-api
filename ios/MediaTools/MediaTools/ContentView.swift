@@ -528,7 +528,7 @@ struct WelcomeView: View {
             .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: Theme.radiusMedium, style: .continuous)
-                    .stroke(Theme.separator, lineWidth: 0.5)
+                    .stroke(Theme.fieldBorder, lineWidth: 1)
             }
 
             if availability.passwordReset != false {

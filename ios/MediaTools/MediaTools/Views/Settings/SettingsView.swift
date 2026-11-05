@@ -718,6 +718,7 @@ private struct SecuritySettingsView: View {
     @State private var showRecoveryCodesSheet = false
     @State private var oneTimeRecoveryCodes: [String] = []
     @State private var accountRetry = 0
+    @State private var accountError: String?
 
     var body: some View {
         List {
@@ -726,7 +727,15 @@ private struct SecuritySettingsView: View {
         .settingsPage("Devices and passkeys")
         .task(id: "\(deviceSession.activeUserID ?? "")|\(accountRetry)") {
             guard deviceSession.activeUserID != nil else { return }
-            deviceAccount = try? await FirstPartyAuthService.shared.accountProfile()
+            do {
+                let account = try await FirstPartyAuthService.shared.accountProfile()
+                guard !Task.isCancelled else { return }
+                deviceAccount = account
+                accountError = nil
+            } catch {
+                guard !Task.isCancelled else { return }
+                accountError = "Could not load your account, which changing a password needs."
+            }
         }
         .task(id: "security|\(deviceSession.activeUserID ?? "")") {
             await loadRecoveryStatus()
@@ -856,6 +865,16 @@ private struct SecuritySettingsView: View {
                 }
                 .listRowBackground(Theme.surface)
                 .accessibilityIdentifier("sign-in-security.devices")
+
+                if let accountError {
+                    VStack(alignment: .leading, spacing: 0) {
+                        InlineError(accountError, identifier: "security.account-error")
+                        Button("Try again") { accountRetry += 1 }
+                            .buttonStyle(QuietButtonStyle())
+                            .accessibilityIdentifier("security.account-retry")
+                    }
+                    .listRowBackground(Theme.surface)
+                }
 
                 if let securityStatusError {
                     SecurityStatusRetryBanner(
@@ -1059,7 +1078,7 @@ private struct DeveloperSettingsView: View {
             Section {
                 settingsLink(title: "Manage developer and agent keys", destination: Configuration.developerURL)
             } footer: {
-                Text("Keys let your agents and tools read and act on your library. They open on the web, signed in to this account.")
+                Text("Keys let your agents and tools read and act on your library. This opens the web app, which uses whichever account your browser is signed in to.")
                     .foregroundStyle(Theme.textSecondary)
             }
 
