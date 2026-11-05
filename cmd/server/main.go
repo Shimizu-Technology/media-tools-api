@@ -204,6 +204,7 @@ func main() {
 			log.Printf("♻️  Requeued %d recoverable summary job(s) on startup", recoveredSummaries)
 		}
 
+		// Insert-only recovery preserves queued Automatic/backfill payloads and quotas.
 		recoveredAudioSummaries, recoveryErr := wp.RecoverAudioSummaryJobs(recoveryCtx, 200)
 		if recoveryErr != nil {
 			if recoveryCtx.Err() == nil {

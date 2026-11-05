@@ -8,17 +8,13 @@ import (
 	"fmt"
 )
 
-// The same audio ownership predicate is used by library rows and backfills.
-// Legacy key-only rows belong to the key's account, unless an explicit item
-// user_id says otherwise. Classic API-key reads still use the exact key.
-const audioAccountOwnership = `(a.user_id=$1::uuid OR (a.user_id IS NULL AND a.api_key_id IN (SELECT id FROM api_keys WHERE user_id=$1::uuid)))`
-
 // Migration 055 ran on 2026-11-04 UTC and flagged every existing recording. Rows
 // newer than this only carry the flag because a person renamed them.
 const legacyTitleFlagCutoff = "2026-11-05T00:00:00Z"
 
 type BackfillCandidate struct {
 	ID                 string `db:"id"`
+	ContentType        string `db:"content_type"`
 	Name               string `db:"original_name"`
 	Manual             bool   `db:"title_manually_set"`
 	NeedsSummary       bool   `db:"needs_summary"`
@@ -30,14 +26,15 @@ type BackfillCandidate struct {
 }
 
 type BackfillResult struct {
-	Kind            string `json:"kind"`
-	ID              string `json:"id,omitempty"`
-	DryRun          bool   `json:"dry_run"`
-	Eligible        int    `json:"eligible"`
-	Summaries       int    `json:"summaries"`
-	Titles          int    `json:"titles"`
-	ProtectedTitles int    `json:"protected_titles"`
-	Enqueued        int    `json:"enqueued"`
+	Kind            string   `json:"kind"`
+	ID              string   `json:"id,omitempty"`
+	DryRun          bool     `json:"dry_run"`
+	Eligible        int      `json:"eligible"`
+	Summaries       int      `json:"summaries"`
+	TitleNames      []string `json:"title_names"`
+	Titles          int      `json:"titles"`
+	ProtectedTitles int      `json:"protected_titles"`
+	Enqueued        int      `json:"enqueued"`
 }
 
 // ListBackfillCandidates reads bounded metadata, never the stored transcript.
@@ -47,18 +44,18 @@ func (db *DB) ListBackfillCandidates(ctx context.Context, kind, userID string) (
 	var args []any
 	switch kind {
 	case "waveforms":
-		query = `SELECT a.id,a.original_name,a.title_manually_set,false AS needs_summary,true AS automatic_summaries,false AS finished_title,false AS legacy_flag
+		query = `SELECT a.id,a.original_name,a.content_type,a.title_manually_set,false AS needs_summary,true AS automatic_summaries,false AS finished_title,false AS legacy_flag
  FROM audio_transcriptions a WHERE a.status='completed' AND a.audio_s3_status='uploaded' AND a.audio_s3_key<>''
- AND a.waveform IS NULL AND a.waveform_status='' AND NOT EXISTS
- (SELECT 1 FROM background_jobs j WHERE j.resource_id=a.id AND j.job_type='audio_waveform') ORDER BY a.created_at,a.id`
+ AND a.waveform IS NULL AND a.waveform_status IN ('','pending') AND NOT EXISTS
+ (SELECT 1 FROM background_jobs j WHERE j.resource_id=a.id AND j.job_type='audio_waveform' AND j.status IN ('queued','running')) ORDER BY a.created_at,a.id`
 	case "enrichment":
-		query = `SELECT a.id,a.original_name,a.title_manually_set,
+		query = `SELECT a.id,a.original_name,a.content_type,a.title_manually_set,
  (btrim(a.summary_text)='' AND a.summary_status NOT IN ('pending','processing')) AS needs_summary,
  COALESCE(p.automatic_summaries,true) AS automatic_summaries,
  (a.created_at < '` + legacyTitleFlagCutoff + `'::timestamptz) AS legacy_flag,
  EXISTS(SELECT 1 FROM background_jobs j WHERE j.resource_id=a.id AND j.job_type='audio_summary' AND j.status='completed' AND j.payload->>'backfill'='true' AND j.payload->>'title_only'='true') AS finished_title
  FROM audio_transcriptions a LEFT JOIN processing_preferences p ON p.user_id=$1::uuid
- WHERE ` + audioAccountOwnership + ` AND a.status='completed' AND btrim(a.transcript_text)<>''
+ WHERE a.user_id=$1::uuid AND a.status='completed' AND btrim(a.transcript_text)<>''
  AND NOT EXISTS(SELECT 1 FROM background_jobs j WHERE j.resource_id=a.id AND j.job_type='audio_summary' AND j.status IN ('queued','running'))
  ORDER BY a.created_at,a.id`
 		args = []any{userID}
@@ -81,10 +78,10 @@ func (db *DB) QueueBackfillCandidate(ctx context.Context, kind, userID string, c
 	}
 	defer tx.Rollback()
 	var ok bool
-	predicate := `status='completed' AND audio_s3_status='uploaded' AND audio_s3_key<>'' AND waveform IS NULL AND waveform_status=''`
+	predicate := `status='completed' AND audio_s3_status='uploaded' AND audio_s3_key<>'' AND waveform IS NULL AND waveform_status IN ('','pending')`
 	args := []any{c.ID}
 	if kind == "enrichment" {
-		predicate = `status='completed' AND btrim(transcript_text)<>'' AND ` + `(a.user_id=$2::uuid OR (a.user_id IS NULL AND a.api_key_id IN (SELECT id FROM api_keys WHERE user_id=$2::uuid)))`
+		predicate = `status='completed' AND btrim(transcript_text)<>'' AND a.user_id=$2::uuid`
 		args = append(args, userID)
 	}
 	err = tx.QueryRowContext(ctx, `SELECT true FROM audio_transcriptions a WHERE id=$1 AND `+predicate+` FOR UPDATE`, args...).Scan(&ok)
@@ -100,7 +97,8 @@ func (db *DB) QueueBackfillCandidate(ctx context.Context, kind, userID string, c
 		jobType = "audio_summary"
 		// Re-evaluate summary presence and preference after acquiring the row lock.
 		var missing, enabled bool
-		if err := tx.QueryRowContext(ctx, `SELECT btrim(summary_text)='',COALESCE((SELECT automatic_summaries FROM processing_preferences WHERE user_id=$2::uuid),true) FROM audio_transcriptions WHERE id=$1`, c.ID, userID).Scan(&missing, &enabled); err != nil {
+		var contentType string
+		if err := tx.QueryRowContext(ctx, `SELECT content_type,btrim(summary_text)='',COALESCE((SELECT automatic_summaries FROM processing_preferences WHERE user_id=$2::uuid),true) FROM audio_transcriptions WHERE id=$1`, c.ID, userID).Scan(&contentType, &missing, &enabled); err != nil {
 			return false, err
 		}
 		needsSummary = needsSummary && missing && enabled
@@ -122,7 +120,7 @@ func (db *DB) QueueBackfillCandidate(ctx context.Context, kind, userID string, c
 		if !needsSummary && titleSource == "" {
 			return false, nil
 		}
-		payload = map[string]any{"backfill": true, "automatic": true, "audio_id": c.ID, "title_source": titleSource, "title_only": !needsSummary, "length": "medium"}
+		payload = map[string]any{"backfill": true, "automatic": true, "audio_id": c.ID, "title_source": titleSource, "title_only": !needsSummary, "length": "medium", "content_type": contentType}
 	}
 	// One logical operation per item/backfill kind. Failed or quota-skipped AI
 	// work can be explicitly resumed; completed work isn't charged again.
@@ -151,13 +149,6 @@ func (db *DB) QueueBackfillCandidate(ctx context.Context, kind, userID string, c
 	}
 	if kind == "waveforms" {
 		_, err = tx.ExecContext(ctx, `UPDATE audio_transcriptions SET waveform_status='pending' WHERE id=$1`, c.ID)
-	} else if needsSummary {
-		_, err = tx.ExecContext(ctx, `UPDATE audio_transcriptions SET summary_status='pending',summary_error_message='' WHERE id=$1`, c.ID)
-		if err == nil {
-			// The legacy pending-state trigger refreshes the recovery payload.
-			// Restore Automatic on exactly the job this transaction just created.
-			_, err = tx.ExecContext(ctx, `UPDATE background_jobs SET payload=$2::jsonb WHERE id=$1`, jobID, string(encoded))
-		}
 	}
 	if err != nil {
 		return false, err

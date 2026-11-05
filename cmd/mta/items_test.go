@@ -507,7 +507,10 @@ func TestLibraryAdditionsSurviveCLIJSON(t *testing.T) {
 		t.Fatalf("JSON additions lost: %s", encoded)
 	}
 	legacy, _ := summarizeLibraryItem(libraryItem{ID: source.ID, ItemType: "audio"})
-	encoded, _ = json.Marshal(legacy)
+	encoded, err = json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !bytes.Contains(encoded, []byte(`"collections":[]`)) || bytes.Contains(encoded, []byte(`"waveform"`)) {
 		t.Fatalf("legacy JSON %s", encoded)
 	}

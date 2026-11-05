@@ -69,6 +69,18 @@ func (db *DB) EnqueueBackgroundJob(ctx context.Context, jobType, resourceID stri
 	return true, nil
 }
 
+// EnsureBackgroundJob is recovery's insert-only counterpart to submission.
+// A queued/running job already owns its settings; startup must not replace them.
+func (db *DB) EnsureBackgroundJob(ctx context.Context, kind, id string, payload []byte) (bool, error) {
+	result, err := db.ExecContext(ctx, `INSERT INTO background_jobs(job_type,resource_id,payload)
+ VALUES($1::text,$2::uuid,$3::jsonb) ON CONFLICT(job_type,resource_id) WHERE status IN ('queued','running') DO NOTHING`, kind, id, string(payload))
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n > 0, err
+}
+
 // QueueAudioSummary stores the requested model/length payload in the same
 // transaction that exposes the pending summary state. The table trigger creates
 // the outbox row; this statement replaces its default recovery payload before
@@ -301,7 +313,9 @@ func (db *DB) ClaimBackgroundJob(ctx context.Context, workerID string, lease tim
 			AND lease_expires_at < NOW()
  AND (attempts < max_attempts OR job_type = 'account_deletion')
 		))
-		ORDER BY priority ASC,
+		ORDER BY CASE WHEN priority=0 THEN 0 ELSE 1 END,
+            CASE WHEN priority>0 AND status='running' THEN 0 ELSE 1 END,
+            priority ASC,
 			CASE WHEN status = 'queued' THEN 0 ELSE 1 END,
 			run_at ASC,
 			created_at ASC
@@ -352,6 +366,7 @@ func (db *DB) NextBackgroundJobWake(ctx context.Context) (*time.Time, error) {
 			SELECT lease_expires_at AS wake_at
 			FROM background_jobs
 			WHERE status = 'running' AND lease_expires_at IS NOT NULL
+ AND (priority=0 OR NOT EXISTS (SELECT 1 FROM background_jobs busy WHERE busy.priority>0 AND busy.status='running' AND busy.lease_expires_at>=NOW() AND busy.id<>background_jobs.id))
 		) AS deferred_jobs`)
 	if err != nil {
 		return nil, fmt.Errorf("find next background job wake: %w", err)

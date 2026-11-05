@@ -150,7 +150,7 @@ func TestLibraryRowFieldsAndLeastUsedCollectionColors(t *testing.T) {
 	}
 }
 
-func TestBackfillKeyOwnershipAndIdempotency(t *testing.T) {
+func TestBackfillStrictOwnershipAndIdempotency(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
 	ctx := context.Background()
 	user := insertAIReportUser(t, db)
@@ -171,12 +171,27 @@ func TestBackfillKeyOwnershipAndIdempotency(t *testing.T) {
 	if _, err := db.Exec(`UPDATE audio_transcriptions SET user_id=$2 WHERE id=$1`, foreign, other); err != nil {
 		t.Fatal(err)
 	}
+	// A key-only row is not account-owned. Classic key reads still see it.
 	candidates, err := db.ListBackfillCandidates(ctx, "enrichment", user)
+	if err != nil || len(candidates) != 0 {
+		t.Fatalf("key-only backfill selected %+v %v", candidates, err)
+	}
+	if _, err := db.GetAudioTranscriptionForActor(ctx, id, &user, nil); err == nil {
+		t.Fatal("account read key-only row")
+	}
+	classic, total, err := db.ListLibraryItems(ctx, models.LibraryListParams{APIKeyID: &key})
+	if err != nil || total != 3 || len(classic) != 3 {
+		t.Fatalf("classic key reads changed: %d %v", total, err)
+	}
+	if _, err := db.Exec(`UPDATE audio_transcriptions SET user_id=$2 WHERE id=$1`, id, user); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err = db.ListBackfillCandidates(ctx, "enrichment", user)
 	if err != nil || len(candidates) != 1 || candidates[0].ID != id {
 		t.Fatalf("owned candidates=%+v %v", candidates, err)
 	}
 	rows, total, err := db.ListLibraryItems(ctx, models.LibraryListParams{UserID: &user})
-	if err != nil || total != 2 || len(rows) != 2 {
+	if err != nil || total != 1 || len(rows) != 1 {
 		t.Fatalf("library ownership=%+v %d %v", rows, total, err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {

@@ -32,7 +32,7 @@ func (db *DB) CreateCollection(ctx context.Context, c *models.Collection) error 
  SELECT $1,$2,$3::uuid,$4::uuid,palette.color
  FROM unnest(ARRAY['coral','teal','violet','amber','blue','rose']) WITH ORDINALITY palette(color,n)
  LEFT JOIN collections c ON c.color=palette.color AND
-   (($3::uuid IS NOT NULL AND (c.user_id=$3::uuid OR (c.user_id IS NULL AND c.api_key_id IN (SELECT id FROM api_keys WHERE user_id=$3::uuid)))) OR ($4::uuid IS NOT NULL AND c.api_key_id=$4::uuid))
+   (($3::uuid IS NOT NULL AND c.user_id=$3::uuid) OR ($4::uuid IS NOT NULL AND c.api_key_id=$4::uuid))
  GROUP BY palette.color,palette.n ORDER BY count(c.id),palette.n LIMIT 1
  RETURNING id,created_at,updated_at,color`, c.Name, c.Description, c.UserID, c.APIKeyID).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt, &c.Color)
 	if err != nil {

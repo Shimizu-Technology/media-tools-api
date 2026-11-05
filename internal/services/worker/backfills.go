@@ -11,7 +11,7 @@ import (
 // RunBackfill reuses AudioSummaryPayload/Automatic and the normal worker path.
 // Dry runs perform only SELECTs, including no job, usage or state writes.
 func (p *Pool) RunBackfill(ctx context.Context, kind, userID string, dryRun bool, runIDs ...string) (database.BackfillResult, error) {
-	result := database.BackfillResult{Kind: kind, DryRun: dryRun}
+	result := database.BackfillResult{Kind: kind, DryRun: dryRun, TitleNames: []string{}}
 	candidates, err := p.db.ListBackfillCandidates(ctx, kind, userID)
 	if err != nil {
 		return result, err
@@ -37,6 +37,9 @@ func (p *Pool) RunBackfill(ctx context.Context, kind, userID string, dryRun bool
 		}
 		if title != "" {
 			result.Titles++
+			if dryRun {
+				result.TitleNames = append(result.TitleNames, title)
+			}
 		}
 		if dryRun {
 			continue
@@ -59,7 +62,7 @@ func (p *Pool) RunBackfill(ctx context.Context, kind, userID string, dryRun bool
 func (p *Pool) processBackfill(job Job) error {
 	var kind, user string
 	if err := p.db.QueryRowContext(p.ctx, `UPDATE backfill_runs SET dispatch_status='running' WHERE id=$1 RETURNING kind,COALESCE(user_id::text,'')`, job.ID).Scan(&kind, &user); err != nil {
-		return err
+		return &retryableJobError{err: err, delay: 5 * time.Second}
 	}
 	if kind == "enrichment" && user == "" {
 		return fmt.Errorf("backfill account no longer exists")

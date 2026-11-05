@@ -63,3 +63,33 @@ func TestLegacyPlaceholderNameOnlyMatchesGeneratedFormats(t *testing.T) {
 		}
 	}
 }
+
+func TestRecordingTitleSafetyRegression(t *testing.T) {
+	for _, name := range []string{
+		"New Recording 12. Mon Mendiola", "Recording. Dad's story about Guam", "Untitled. Call with the bank",
+		"Voice Memo 3.Hafa Baby", "New Recording 7.Baby's first words", "Recording — Mayor interview 2026 at 10:35 AM",
+		"New Recording Mr. Mon Mendiola for UOG and Coffee.m4a", "Recording — Feb 30, 2026 at 10:35 AM",
+		"Recording — Aug 26, 2026 at 25:35", "Recording — Aug 26, 2026 at 0:35 AM",
+	} {
+		for _, test := range []struct {
+			name  string
+			match func(string) bool
+		}{{"automatic", isGeneratedRecordingName}, {"legacy", isLegacyPlaceholderName}} {
+			if test.match(name) {
+				t.Errorf("%s would overwrite chosen name %q", test.name, name)
+			}
+		}
+	}
+	for _, name := range []string{
+		"Recording — Aug 26, 2026 at 10:35 AM.m4a",
+		"Recording — Aug 26, 2026 at 10:35\u00a0AM.m4a",
+		"Recording — Aug 26, 2026 at 10:35 AM.m4a", // literal U+202F from production's format
+		"Recording — Aug 26, 2026 at 22:35.M4A",
+		"Recording — Nov 4, 2026 at 8:28\u202fPM",
+		"New Recording 42.FLAC", "Voice Memo 3.OPUS",
+	} {
+		if !isGeneratedRecordingName(name) || !isLegacyPlaceholderName(name) {
+			t.Errorf("actual placeholder rejected %q", name)
+		}
+	}
+}

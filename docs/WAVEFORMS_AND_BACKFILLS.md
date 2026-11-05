@@ -26,9 +26,13 @@ Production was not accessed for this work.
   columns and commands retain their format.
 
 Library text is read with SQL `left(...,4096)` after pagination, then cleaned in
-Go. Legacy structured summary JSON is unwrapped before markdown, HTML and citation
+Go. Unspaced/CJK text is cut at a rune boundary if no word boundary fits. Literal
+underscores, comparisons and leading four-digit years are preserved; markdown
+fences, labels, rules and table separators are removed. A JSON escape cut by SQL
+drops only its incomplete tail and keeps the summary prefix. A malformed waveform
+is logged and omitted for that row, leaving the rest of the page available. Legacy structured summary JSON is unwrapped before markdown, HTML and citation
 markers are removed. Audio and video prefer summaries; PDFs use extracted text.
-Collection badges are fetched within the page query, not by per-row API/DB calls.
+Collection badges use exactly the same user/key ownership predicate as `GET /collections` and are fetched within the page query, not by per-row API/DB calls.
 The page query was measured with 10,000 generated audio rows and long transcripts:
 13.876 ms execution in simple mode; 14.964 ms in prepared mode (planning 8.641 ms and
 5.114 ms respectively on the shared local Mac). These are local measurements,
@@ -37,7 +41,7 @@ actual query with `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`.
 
 ## Waveform computation and resource budget
 
-A completed transcription with stored S3 audio queues `audio_waveform` in its
+A completed transcription with stored S3 audio (`audio_s3_status=uploaded`) queues `audio_waveform` in its
 completion transaction. No AI provider, consent prompt or usage charge is involved.
 S3 downloads use streaming `io.Copy` to an owned temporary file. This makes MOV/QTA
 containers with trailing metadata seekable without retaining the file in RAM.
@@ -139,35 +143,73 @@ for the usage cap completes without creating a summary, so preview enrichment
 again before declaring every item enriched. Repeating the POST creates a new run that picks up only remaining
 eligible work; it never adopts another run's existing jobs.
 
-Dry runs report `eligible`, `summaries`, `titles`, `protected_titles` and zero
-`enqueued`. They create neither a run nor usage reservations. In-flight eligible
+Dry runs report `eligible`, `summaries`, `titles`, `title_names`, `protected_titles`
+and zero `enqueued`. `title_names` is the exact list of original names selected for
+retitling, in source creation order, preserving extensions and Unicode characters.
+It is returned only through the admin-protected preview. Unknown enrichment
+accounts return `404 account_not_found` on both preview and creation; UUID inputs
+are normalized before use. They create neither a run nor usage reservations. In-flight eligible
 counts can change between preview and execution. Failed recordings are excluded.
-Waveform terminal failures stay absent and aren't reset by repeating a backfill.
+Waveform terminal decode failures stay absent. A pending row with no queued/running
+waveform job is eligible again, including a job failed by an older worker during
+deploy overlap. A running waveform job can compute from the same stored source
+while retranscription is pending/processing, so it does not finish empty and lose
+its queue slot when retranscription completes.
 An AI job that failed or was quota-skipped can be explicitly resumed in a new run.
 
 ## Enrichment ownership and pacing
 
-An audio item belongs to the requested account when `a.user_id` equals that account,
-or when `a.user_id` is null and its API key belongs to that account. The library's
-audio list/stats and audio detail use the same fallback; an explicit different
-item owner always wins. Classic API-key reads remain exact-key scoped. This covers
-older key-only recordings without widening the backfill to another account.
+Enrichment selects completed audio with `audio_transcriptions.user_id` equal to
+whichever account the admin passes. Account reads/writes keep main's strict
+`user_id` rule; classic API-key reads/writes remain scoped to the exact key. The
+lead reported that all 131 production audio rows had a user_id, with no key-only
+rows. Earlier visibility widening has been reverted. Row badges likewise expose
+only collections returned by that actor's `GET /collections`.
 
 Enrichment queues the existing `audio_summary` worker with `Automatic: true`, the
 original title as `TitleSource`, and `TitleOnly` when it already has a summary or
 automatic summaries are disabled. It uses the same provider settings and monthly
-usage reservation path. Preferences are checked at dispatch and again at execution.
+usage reservation path. Preferences are checked at dispatch and again at execution. The payload carries
+the row's real `content_type`, and processing preserves the stored type if an
+older payload omitted it. Dispatch leaves `summary_status` unchanged: a queued
+backfill does not make a completed Library item appear in progress. The worker
+sets processing when it actually runs the summary. Startup recovery inserts only
+missing jobs; it never replaces a queued/running job's payload, priority, attempt
+budget or run attribution. Disabled title-only work clears any stale pending
+summary status. A quota-skipped title-only job fails and remains eligible for an
+explicit later run; it is never counted as a finished title.
 There is no persisted backend AI-consent record in this codebase; consent is
 collected by clients before provider processing. This admin operation reuses the
 existing automatic path and requires the lead's explicit account selection.
 
-Only generated-looking placeholders with `title_manually_set=false` receive a
-`TitleSource`. The worker also checks that the name is still unchanged and
-uses a compare-and-swap update guarded by the manual-title flag. Historical names
-marked protected by migration 055 remain protected, even if they resemble a
-placeholder; `protected_titles` makes that visible in the preview. They cannot be
-safely distinguished from a person's deliberately chosen name. No protection flag
-is cleared by this migration or backfill.
+Titling first removes only a known audio extension, case-insensitively: m4a,
+caf, mp3, wav, webm, mp4, mov, qta, ogg, aac, flac, opus, aif, aiff, m4b, mpeg,
+mpga or 3gp. A dot within a chosen name is retained. Automatic titling recognizes
+bare defaults (`Recording`, `New Recording` plus an optional number, `Voice Memo`
+plus an optional number, `Audio` plus an optional number, `Untitled`), UUID file
+names, numeric ISO-style recording names, and the app's dated em-dash format.
+
+The em-dash format is exactly `Recording — Mon D, YYYY at H:MM AM/PM`, or a
+24-hour `H:MM` without AM/PM. `Mon` is Jan–Dec; the calendar date and clock range
+must be valid. Before AM/PM it accepts plain space, U+00A0 or U+202F. Arbitrary
+text such as `Mayor interview 2026` cannot occupy the date position.
+
+Normally `title_manually_set` must be false. For an explicit enrichment run on
+**any admin-selected user_id**, a row created before `2026-11-05T00:00:00Z` may
+have migration 055's blanket flag cleared only when its name matches the narrower
+legacy set: Recording, New Recording with optional number, Voice Memo with optional
+number, Untitled, UUID, numeric `recording-YYYY-MM-DD` timestamp, or the validated
+em-dash date format. Bare `Audio N` and standalone ISO dates do not qualify for
+this legacy override. Recent manually flagged rows stay protected. The queue
+rechecks the original name under a row lock before clearing the flag. The worker
+checks it again and uses a compare-and-swap guarded by the manual-title flag, so a
+rename after queueing wins.
+
+`protected_titles` counts generated-looking names blocked by that protection.
+`title_names` lets the operator review the exact names that will be eligible.
+A person who deliberately typed exactly a default cannot be distinguished from
+the old default; the lead accepted this ambiguity for the explicit run. No rename
+history is fabricated or inferred for other names.
 
 Old transcripts without timed segments are chunked into persisted, untimed
 citation evidence by the existing path. An integration test runs the actual
@@ -181,7 +223,10 @@ Only one job with positive priority may run across all worker processes, protect
 by a short transaction advisory lock while claiming. With production's three
 workers, two slots remain available to normal work. Fresh jobs are claimed before
 queued maintenance. Sleeping workers ignore blocked maintenance until its lease or
-completion signal, avoiding a busy polling loop. Running jobs aren't preempted.
+completion signal, avoiding a busy polling loop. Running jobs aren't preempted. Expired maintenance leases are reclaimed before
+queued maintenance siblings, while priority-0 work still wins. A blocked expired
+maintenance row is excluded from wake timing until the active maintenance lease
+expires, preventing an idle-worker polling loop.
 
 ## Acceptance and deployment
 
@@ -191,7 +236,7 @@ provider responses contain no production data. Required scenarios: transactional
 queued waveform work; stored S3-to-decoder success; silence/corruption/cancellation;
 independent bounded failure; library/detail peak lengths, excerpt cleaning and
 collection badges; color allocation; dry-run non-mutation; run-specific four-state
-progress; agent denial; legacy key ownership; untimed cited summaries; new-work
+progress; agent denial; strict account/key ownership; untimed cited summaries; new-work
 priority and a single maintenance slot. Tests cover both database query modes.
 
 Migration 060 adds nullable peaks, status, collection colors, queue priority and
@@ -207,23 +252,95 @@ latency, data counts and provider delivery are not verified here. iOS, Android a
 web checks are left to CI and their own slices. The lead owns production dry runs,
 backfill execution, release verification, review and merge.
 
-Local acceptance completed on 2026-11-05 against Go/SQL code commit
-`5d8f45ed76465548575ce38237277c4e95709976`; the following amendment changes only
-this evidence document. The backend gate passed in full, including the race suite
-and prepared statements. The final page-query measurements above ran afterward in
-both modes. OpenAPI YAML parsed successfully.
+The initial acceptance on `5d8f45e` preceded the material independent review.
+The correction evidence below supersedes its ownership, title and recovery claims.
 
-| Required backend scenario | Result |
+## Review correction evidence
+
+The lead's `96beca4` corrected persisted S3 status to `uploaded` and enabled the
+explicit legacy-placeholder override. The follow-up review fixes add regression
+coverage for every reported chosen-name probe, U+202F/U+00A0/24-hour dates,
+content-type preservation, restart payload/AI-cap behavior, safe deletion ordering,
+queued Library status, expired-lease wake timing, capped title retry, text cleanup,
+collection scope parity, account waveform-job purge, orphaned waveform resumption,
+workspace scans and error reporting, account normalization/existence, storage and
+dispatch error propagation, full audio OpenAPI coverage, and retranscription
+concurrent with waveform generation. Tests use only task-owned `mta_test_server`.
+
+The complete dry-run response shape is:
+
+```json
+{
+  "kind": "enrichment",
+  "dry_run": true,
+  "eligible": 1,
+  "summaries": 1,
+  "title_names": ["New Recording 42"],
+  "titles": 1,
+  "protected_titles": 0,
+  "enqueued": 0
+}
+```
+
+For a waveform preview, `kind` is `waveforms`, `eligible` counts eligible audio,
+`title_names` is `[]`, and summary/title/protected/enqueued counts are zero. There
+is no dry-run id and no write. Real runs still return only `id`, `kind`, and
+`dry_run: false` immediately; GET progress counts only their created jobs.
+
+Audio deletion now requires the DB delete to succeed before issuing S3 deletion;
+a failed ownership/row check cannot destroy the source. Storage cleanup after a
+successful row deletion remains best effort, as before. Workspace uses explicit
+audio projections and returns 503 on read failure instead of a false empty list.
+Account deletion includes waveform jobs. No migration lock timeout was added;
+startup must not be stranded by a dirty migration after a timeout.
+
+Review acceptance is agent-executed against synthetic local fixtures. The following
+regressions exercise saved outcomes, including provider/S3 boundaries intercepted
+locally; no production data or configuration was read by this implementation run.
+
+| Finding | Fix and regression |
 | --- | --- |
-| Stored S3 audio → real ffmpeg → durable 200 peaks; library 32 peaks | Passed |
-| Silence, QTA/MOV, corrupt input, cancellation; independent bounded failure | Passed |
-| Excerpts, omitted empty fields and collection arrays across audio/video/PDF | Passed |
-| Six-color allocation and collection ordering | Passed |
-| Dry run writes neither state, jobs, runs nor usage | Passed |
-| Immediate durable run id, restart/overlap, four counts isolated from fresh work | Passed |
-| Both admin routes reject agent keys; route-scope table stays fail-closed | Passed |
-| Legacy key ownership, failed-item exclusion, title protection and opt-out | Passed |
-| Legacy untimed transcript produces a completed summary with valid citation | Passed |
-| Fresh work ahead of queued backfill and during one running maintenance job | Passed |
-| Two-hour bounded-memory decode and 10,000-row query measurement | Passed locally |
-| Production, real provider delivery and client/device UI journeys | Not run in this slice |
+| 1–2: chosen titles and Unicode dates | `TestRecordingTitleSafetyRegression` and `TestEnrichmentBackfillRetitlesOnlyOldExactPlaceholders`: all listed chosen names stay unchanged; valid calendar dates, extension allowlist, U+00A0/U+202F and 24-hour names qualify; exact preview names preserved. |
+| 3: content type | `TestBackfillDryRunDispatchAndLegacyCitedSummary`: voice_memo remains voice_memo after actual cited-summary processing. Missing payload types retain the stored type. |
+| 4: restart payload loss | `TestReviewRecoveryPreservesBackfillAndCappedTitleRetry`: startup leaves Automatic/TitleSource/TitleOnly/content_type/backfill payload and priority intact; the cap prevents provider calls, then a later run can title after quota is restored. |
+| 5: ownership and destructive deletion | `TestBackfillStrictOwnershipAndIdempotency` and `TestReviewDeleteNeverRemovesAudioBeforeOwnedRow`: account cannot read/delete key-only audio; classic key access remains; simulated failed DB deletion makes zero storage calls; successful deletion proves the row is gone before storage removal. |
+| 6: queued Library status | `TestBackfillDryRunDispatchAndLegacyCitedSummary`: after dispatch the completed Library item remains completed. |
+| 7: expired maintenance | `TestReviewExpiredMaintenanceReclaimedBeforeSiblings`: reclaim beats queued siblings; the single maintenance slot and future wake prevent idle polling even with another expired row. |
+| 8: capped title retry | `TestReviewRecoveryPreservesBackfillAndCappedTitleRetry`: capped job fails, preview selects it again, and retry succeeds after restoring quota. |
+| 9: excerpt cleanup and truncated escapes | `TestExcerptReviewRegressions`: CJK length, snake_case, comparisons, year prefix, rules, tables, fences and partial JSON escapes retain usable text. |
+| 10: collection visibility | `TestReviewWorkspaceBadWaveformAndCollectionScopes`: badges/list use the same strict actor scope; key-only collections stay visible to the classic key. |
+| 11: inaccurate operator rules | This document and code comments specify the exact old-row override for any admin-selected account, with the accepted identical-default ambiguity. |
+| 12: account purge | `TestRequestAccountDeletionPurgesOwnedDataAndQueuesCleanup`: waveform jobs are removed with the account's audio jobs. |
+| 13: orphaned pending waveform | `TestReviewOrphanedWaveformPendingIsResumable`: a pending row with an old failed job gets one new live job, without duplicates. |
+| 14: workspace scan/error | `TestReviewWorkspaceBadWaveformAndCollectionScopes` and `TestReviewWorkspaceReadFailureReturns503`: manual flag/new peaks no longer break scans; read failure is 503. Source search found no remaining audio SELECT-star projection. |
+| Malformed waveform | `TestReviewWorkspaceBadWaveformAndCollectionScopes`: bad stored values are logged and omitted while the page still succeeds. |
+| Account UUID/existence | `TestBackfillAdminHTTPAndRunSpecificCounts`: URN UUID normalizes; missing accounts return account_not_found on dry and real paths; dry count snapshots check their errors. |
+| Dispatch/download errors | `TestReviewDispatcherStartAndDownloadErrorsRetainRetryCause`: initial DB failure is retryable and the original storage cause survives wrapping. 503 paths log their underlying cause. |
+| Disabled title-only status | `TestReviewDisabledTitleOnlyDoesNotRemainPending`: stale pending becomes skipped. |
+| Test/schema completeness | `TestReduceMaxPoolsOverlappingRanges`, checked fixture/marshal errors, and `TestAudioDetailSchemaCoversResponseFields` cover deterministic pooling and every public audio model field. |
+| Retranscription overlap | `TestStoredAudioWaveformDurableJob`: retranscription completes while an existing waveform job is downloading; the same job then stores 200 real peaks and no queue slot is lost. |
+
+The migration intentionally has no lock timeout. No rename-history reconstruction
+was added: old identical default names have no recoverable provenance, and the
+explicit admin preview is the accepted control. The earlier key-only ownership
+expansion was reverted instead of extending all mutations to a new access rule.
+
+Review validation result (2026-11-05, based on lead commit `96beca4`): all focused
+regressions and the complete backend gate passed in both query modes. Executed:
+
+```sh
+./scripts/scan-secrets.sh
+test -z "$(gofmt -l $(rg --files cmd internal -g '*.go'))"
+go vet ./...
+TEST_DATABASE_URL='postgres:///mta_test_server?host=/tmp&sslmode=disable' \
+  go test -p 1 -race ./...
+TEST_DATABASE_URL='postgres:///mta_test_server?host=/tmp&sslmode=disable&default_query_exec_mode=cache_statement' \
+  go test -p 1 ./internal/...
+```
+
+The two-hour memory test was rerun on the unchanged streaming reducer: 1.506 s
+for decode/reduction, 34,552 bytes total Go allocation, 200 peaks, and 26.03 MiB
+sampled combined Go/ffmpeg RSS at 20 ms sampling (including fixture generation).
+The test's 8 MiB total-allocation bound passed. OpenAPI YAML parsed and the public
+audio field coverage test passed. Native builds/UI and production/provider delivery
+remain outside this backend-only run; providers and S3 were intercepted locally.

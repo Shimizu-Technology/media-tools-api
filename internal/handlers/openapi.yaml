@@ -84,14 +84,71 @@ components:
           items: {$ref: "#/components/schemas/CollectionBadge"}
     AudioTranscription:
       type: object
-      description: Existing audio fields are unchanged. Waveform is optional and contains real audio data only.
+      description: Complete audio transcription response. Internal waveform status and title provenance flags are not exposed. Waveform is optional.
+      required: [id, filename, original_name, duration, language, transcript_text, formatted_transcript_text, formatting_status, word_count, status, omitted_ranges, content_type, key_points, action_items, decisions, summary_length, summary_status, summary_evidence, created_at]
       properties:
-        id: {type: string, format: uuid}
         waveform:
           type: array
           minItems: 200
           maxItems: 200
           items: {type: integer, minimum: 0, maximum: 100}
+        id: {type: string, format: uuid}
+        filename: {type: string}
+        original_name: {type: string}
+        audio_s3_key: {type: string}
+        audio_s3_status: {type: string}
+        audio_s3_size: {type: integer}
+        processing_stage: {type: string}
+        processing_progress: {type: integer}
+        retry_count: {type: integer}
+        duration: {type: number}
+        language: {type: string}
+        transcript_text: {type: string}
+        formatted_transcript_text: {type: string}
+        formatting_status: {type: string}
+        formatting_model: {type: string}
+        formatting_version: {type: string}
+        formatting_error_message: {type: string}
+        word_count: {type: integer}
+        status: {type: string}
+        error_message: {type: string}
+        quality_warning: {type: string}
+        omitted_ranges:
+          type: array
+          items:
+            type: object
+            properties:
+              start: {type: number}
+              end: {type: number}
+              reason: {type: string}
+        content_type: {type: string}
+        summary_text: {type: string}
+        key_points: {type: array, items: {type: string}}
+        action_items: {type: array, items: {type: string}}
+        decisions: {type: array, items: {type: string}}
+        summary_model: {type: string}
+        summary_length: {type: string}
+        summary_status: {type: string}
+        summary_evidence: {$ref: "#/components/schemas/SummaryEvidence"}
+        summary_error_message: {type: string}
+        user_id: {type: string, format: uuid}
+        api_key_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+    BackfillPreview:
+      type: object
+      required: [kind, dry_run, eligible, summaries, titles, title_names, protected_titles, enqueued]
+      properties:
+        kind: {type: string, enum: [waveforms, enrichment]}
+        dry_run: {type: boolean, enum: [true]}
+        eligible: {type: integer, minimum: 0}
+        summaries: {type: integer, minimum: 0}
+        titles: {type: integer, minimum: 0}
+        title_names:
+          type: array
+          items: {type: string}
+          description: Exact original names selected for retitling, including their original Unicode characters. Admin-only preview.
+        protected_titles: {type: integer, minimum: 0}
+        enqueued: {type: integer, enum: [0]}
     BackfillProgress:
       type: object
       required: [id, kind, dispatch_status, queued, running, completed, failed]
@@ -458,7 +515,11 @@ paths:
                 user_id: {type: string, format: uuid, description: Required for enrichment; omit for waveforms.}
                 dry_run: {type: boolean}
       responses:
-        "200": {description: Read-only counts including eligible, summaries, titles, protected_titles, and enqueued (zero). No run id is created.}
+        "200":
+          description: Read-only counts and exact title names. No run id is created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BackfillPreview"}
         "202":
           description: Durable run created
           content:
@@ -472,6 +533,7 @@ paths:
         "400": {description: Invalid request}
         "401": {description: Admin key required}
         "403": {description: Invalid admin key or agent/bearer credential}
+        "404": {description: account_not_found for an unknown enrichment user_id}
         "503": {description: Queue unavailable}
   /admin/backfills/{id}:
     get:

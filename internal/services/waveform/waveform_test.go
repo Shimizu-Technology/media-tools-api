@@ -63,7 +63,9 @@ func TestComputeRealAudioSilenceQTAAndCorruption(t *testing.T) {
 		t.Fatal(len(row))
 	}
 	corrupt := filepath.Join(dir, "corrupt.mov")
-	os.WriteFile(corrupt, []byte("not a media file"), 0600)
+	if err := os.WriteFile(corrupt, []byte("not a media file"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := Compute(ctx, corrupt); err == nil {
 		t.Fatal("corrupt input succeeded")
 	}
@@ -97,4 +99,19 @@ func TestLongStreamingMemory(t *testing.T) {
 		t.Fatalf("waveform allocated %d bytes; expected bounded buffers", allocated)
 	}
 	t.Logf("7200s MOV: elapsed=%s total_go_allocated=%d heap_in_use=%d peak_count=%d", elapsed, allocated, after.HeapInuse, len(peaks))
+}
+
+func TestReduceMaxPoolsOverlappingRanges(t *testing.T) {
+	// Eight bins reduced to three overlap at bin boundaries: [0:3], [2:6], [5:8].
+	peaks := []int{1, 2, 90, 3, 4, 80, 5, 6}
+	want := []int{90, 90, 80}
+	got := Reduce(peaks, 3)
+	if len(got) != len(want) {
+		t.Fatal(got)
+	}
+	for i, v := range got {
+		if v != want[i] {
+			t.Fatalf("Reduce=%v want %v", got, want)
+		}
+	}
 }

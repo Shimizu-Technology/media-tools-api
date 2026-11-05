@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -32,10 +33,12 @@ func (h *Handler) CreateBackfill(c *gin.Context) {
 		return
 	}
 	if req.Kind == "enrichment" {
-		if _, err := uuid.Parse(req.UserID); err != nil {
+		parsed, err := uuid.Parse(req.UserID)
+		if err != nil {
 			reject(400, "enrichment requires a valid user_id")
 			return
 		}
+		req.UserID = parsed.String()
 	}
 	if req.Kind == "waveforms" && req.UserID != "" {
 		reject(400, "waveforms covers all accounts; omit user_id")
@@ -45,13 +48,35 @@ func (h *Handler) CreateBackfill(c *gin.Context) {
 		reject(400, "dry_run must be explicitly true or false")
 		return
 	}
+	if h.DB == nil {
+		log.Printf("Backfill request has no configured database")
+		reject(503, "Backfill database is unavailable")
+		return
+	}
+
+	if req.Kind == "enrichment" {
+		var exists bool
+		err := h.DB.GetContext(c.Request.Context(), &exists, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1::uuid)`, req.UserID)
+		if err != nil {
+			log.Printf("Backfill account lookup failed: %v", err)
+			reject(503, "Backfill account lookup is unavailable")
+			return
+		}
+		if !exists {
+			c.JSON(404, models.ErrorResponse{Error: "account_not_found", Message: "Backfill account not found", Code: 404})
+			return
+		}
+	}
+
 	if h.Worker == nil {
+		log.Printf("Backfill request has no configured worker")
 		reject(503, "Background worker is unavailable")
 		return
 	}
 	if !*req.DryRun {
 		id, err := h.DB.CreateBackfillRun(c.Request.Context(), req.Kind, req.UserID)
 		if err != nil {
+			log.Printf("Create backfill run failed: %v", err)
 			reject(503, "Backfill could not be queued")
 			return
 		}
@@ -61,6 +86,7 @@ func (h *Handler) CreateBackfill(c *gin.Context) {
 	}
 	result, err := h.Worker.RunBackfill(c.Request.Context(), req.Kind, req.UserID, *req.DryRun)
 	if err != nil {
+		log.Printf("Backfill preview failed: %v", err)
 		reject(503, "Backfill could not be queued; retry the same request safely")
 		return
 	}
@@ -80,12 +106,19 @@ func (h *Handler) GetBackfill(c *gin.Context) {
 		c.JSON(400, models.ErrorResponse{Error: "invalid_id", Message: "Invalid backfill id", Code: 400})
 		return
 	}
+	if h.DB == nil {
+		log.Printf("Backfill progress has no configured database")
+		c.JSON(503, models.ErrorResponse{Error: "unavailable", Message: "Backfill progress is unavailable", Code: 503})
+		return
+	}
+
 	progress, err := h.DB.GetBackfillProgress(c.Request.Context(), id.String())
 	if errors.Is(err, sql.ErrNoRows) {
 		c.JSON(404, models.ErrorResponse{Error: "not_found", Message: "Backfill run not found", Code: 404})
 		return
 	}
 	if err != nil {
+		log.Printf("Backfill progress lookup failed: %v", err)
 		c.JSON(503, models.ErrorResponse{Error: "unavailable", Message: "Backfill progress is unavailable", Code: 503})
 		return
 	}

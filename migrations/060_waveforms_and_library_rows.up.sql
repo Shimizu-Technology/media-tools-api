@@ -1,4 +1,5 @@
--- Additive: deployed servers use explicit audio/collection select lists.
+-- Additive columns. Upgraded audio reads use explicit projections, including
+-- workspace queries, so internal title flags and future columns cannot break scans.
 ALTER TABLE audio_transcriptions
  ADD COLUMN waveform jsonb,
  ADD COLUMN waveform_status text NOT NULL DEFAULT '',

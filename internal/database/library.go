@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/waveform"
+	"log"
 	"strings"
 
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
@@ -56,7 +57,7 @@ const libraryItemsCTE = `
 		FROM audio_transcriptions a
 		LEFT JOIN media_item_preferences mip ON mip.item_type = 'audio' AND mip.item_id = a.id
 			AND (($1::uuid IS NOT NULL AND mip.user_id = $1) OR ($2::uuid IS NOT NULL AND mip.api_key_id = $2))
-		WHERE (($1::uuid IS NOT NULL AND ` + audioAccountOwnership + `) OR ($2::uuid IS NOT NULL AND a.api_key_id = $2))
+		WHERE (($1::uuid IS NOT NULL AND a.user_id = $1) OR ($2::uuid IS NOT NULL AND a.api_key_id = $2))
 
 		UNION ALL
 
@@ -143,7 +144,9 @@ func (db *DB) ListLibraryItems(ctx context.Context, params models.LibraryListPar
 		if len(items[i].Waveform) > 0 {
 			var peaks []int
 			if err := json.Unmarshal(items[i].Waveform, &peaks); err != nil {
-				return nil, 0, fmt.Errorf("decode stored waveform: %w", err)
+				log.Printf("Invalid stored waveform for library item %s: %v", items[i].ID, err)
+				items[i].Waveform = nil
+				continue
 			}
 			if len(peaks) == waveform.DetailPeaks {
 				items[i].Waveform, _ = json.Marshal(waveform.Reduce(peaks, 32))
@@ -174,7 +177,7 @@ func libraryPageQuery(sortDir string) string {
  COALESCE((SELECT jsonb_agg(jsonb_build_object('id',c.id,'name',c.name,'color',c.color) ORDER BY c.created_at,c.id)
  FROM collection_items ci JOIN collections c ON c.id=ci.collection_id
  WHERE ci.item_id=page.id AND ci.item_type=CASE WHEN page.item_type='youtube' THEN 'transcript' ELSE page.item_type END
- AND (($1::uuid IS NOT NULL AND (c.user_id=$1 OR (c.user_id IS NULL AND c.api_key_id IN (SELECT id FROM api_keys WHERE user_id=$1)))) OR ($2::uuid IS NOT NULL AND c.api_key_id=$2))),'[]'::jsonb) AS collections
+ AND (($1::uuid IS NOT NULL AND c.user_id=$1) OR ($2::uuid IS NOT NULL AND c.api_key_id=$2))),'[]'::jsonb) AS collections
  FROM paged page ORDER BY page.created_at ` + sortDir + `,page.id ` + sortDir
 
 }

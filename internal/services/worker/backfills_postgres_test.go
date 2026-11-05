@@ -46,7 +46,7 @@ func TestBackfillDryRunDispatchAndLegacyCitedSummary(t *testing.T) {
 	}
 	defer db.Exec(`DELETE FROM users WHERE id=$1`, user)
 	// No timed segments: this verifies the actual legacy cited-summary path.
-	if _, err := db.Exec(`INSERT INTO audio_transcriptions(id,filename,original_name,user_id,status,transcript_text) VALUES($1,'legacy.m4a','New Recording 5.m4a',$2,'completed','Please call tomorrow morning.')`, id, user); err != nil {
+	if _, err := db.Exec(`INSERT INTO audio_transcriptions(id,filename,original_name,user_id,status,transcript_text,content_type) VALUES($1,'legacy.m4a','New Recording 5.m4a',$2,'completed','Please call tomorrow morning.','voice_memo')`, id, user); err != nil {
 		t.Fatal(err)
 	}
 	defer db.Exec(`DELETE FROM audio_transcriptions WHERE id=$1`, id)
@@ -58,7 +58,7 @@ func TestBackfillDryRunDispatchAndLegacyCitedSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := pool.RunBackfill(ctx, "enrichment", user, true)
-	if err != nil || result.Eligible != 1 || result.Summaries != 1 || result.Titles != 1 || result.Enqueued != 0 {
+	if err != nil || result.Eligible != 1 || result.Summaries != 1 || result.Titles != 1 || result.Enqueued != 0 || len(result.TitleNames) != 1 || result.TitleNames[0] != "New Recording 5.m4a" {
 		t.Fatalf("dry run=%+v %v", result, err)
 	}
 	var after string
@@ -80,6 +80,11 @@ func TestBackfillDryRunDispatchAndLegacyCitedSummary(t *testing.T) {
 	if err := pool.processBackfill(Job{ID: run}); err != nil {
 		t.Fatal(err)
 	}
+	rows, _, err := db.ListLibraryItems(ctx, models.LibraryListParams{UserID: &user})
+	if err != nil || len(rows) != 1 || rows[0].Status != "completed" {
+		t.Fatalf("queued backfill changed library status %+v %v", rows, err)
+	}
+
 	progress, err := db.GetBackfillProgress(ctx, run)
 	if err != nil || progress.Queued != 1 || progress.DispatchStatus != "completed" {
 		t.Fatalf("progress %+v %v", progress, err)
@@ -130,7 +135,7 @@ func TestBackfillDryRunDispatchAndLegacyCitedSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	item, err := db.GetAudioTranscription(ctx, id)
-	if err != nil || item.SummaryStatus != "completed" || item.OriginalName != "Tomorrow Morning Call" || calls != 2 {
+	if err != nil || item.SummaryStatus != "completed" || item.OriginalName != "Tomorrow Morning Call" || calls != 2 || item.ContentType != models.ContentVoiceMemo {
 		t.Fatalf("item=%+v calls=%d err=%v", item, calls, err)
 	}
 	var evidence models.SummaryEvidence
@@ -197,9 +202,10 @@ func TestWaveformFailureRetriesStayIndependent(t *testing.T) {
 }
 
 func TestStoredAudioWaveformDurableJob(t *testing.T) {
+	t.Setenv("AUTOMATIC_AUDIO_ENRICHMENT_ENABLED", "false")
 	db := backfillDB(t)
 	id := uuid.NewString()
-	if _, err := db.Exec(`INSERT INTO audio_transcriptions(id,filename,original_name,status,transcript_text,summary_status,waveform_status,audio_s3_key,audio_s3_status) VALUES($1,'source.qta','Chosen title','completed','Existing speech','completed','pending','test/source','uploaded')`, id); err != nil {
+	if _, err := db.Exec(`INSERT INTO audio_transcriptions(id,filename,original_name,status,transcript_text,summary_status,waveform_status,audio_s3_key,audio_s3_status) VALUES($1,'source.qta','Chosen title','pending','Existing speech','completed','pending','test/source','uploaded')`, id); err != nil {
 		t.Fatal(err)
 	}
 	defer db.Exec(`DELETE FROM audio_transcriptions WHERE id=$1`, id)
@@ -216,6 +222,14 @@ func TestStoredAudioWaveformDurableJob(t *testing.T) {
 		if r.Method != "GET" || !strings.Contains(r.URL.Host, "s3") {
 			return nil, fmt.Errorf("unexpected waveform network request")
 		}
+		active, err := db.GetAudioTranscription(context.Background(), id)
+		if err != nil {
+			return nil, err
+		}
+		active.Status = "completed"
+		if saved, err := db.CompleteAudioTranscriptionWithSegments(context.Background(), active, nil); err != nil || !saved {
+			return nil, fmt.Errorf("retranscription completion saved=%v: %w", saved, err)
+		}
 		file, err := os.Open(path)
 		if err != nil {
 			return nil, err
@@ -227,7 +241,7 @@ func TestStoredAudioWaveformDurableJob(t *testing.T) {
 	defer pool.cancel()
 	pool.SetAudioStorage(storage.NewS3("synthetic-access", "synthetic-secret", "", "test-region", "test-bucket", "", 1))
 	var job models.BackgroundJob
-	if err := db.Get(&job, `UPDATE background_jobs SET status='running',attempts=1,locked_by=$2,lease_expires_at=NOW()+INTERVAL '1 minute' WHERE resource_id=$1 RETURNING *`, id, pool.instanceID); err != nil {
+	if err := db.Get(&job, `UPDATE background_jobs SET status='running',attempts=1,locked_by=$2,lease_expires_at=NOW()+INTERVAL '1 minute' WHERE resource_id=$1 AND job_type='audio_waveform' RETURNING *`, id, pool.instanceID); err != nil {
 		t.Fatal(err)
 	}
 	pool.runClaimedJob(0, &job)
@@ -303,6 +317,13 @@ func TestEnrichmentBackfillRetitlesOnlyOldExactPlaceholders(t *testing.T) {
 		{"Recording of the 2024 budget meeting.m4a", old},
 		{"New Recording Mr. Mon Mendiola for UOG.m4a", old},
 		{"New Recording 7.m4a", recent},
+		{"Recording — Aug 26, 2026 at 10:35 AM.m4a", old},
+		{"New Recording 12. Mon Mendiola", old},
+		{"Recording. Dad's story about Guam", old},
+		{"Untitled. Call with the bank", old},
+		{"Voice Memo 3.Hafa Baby", old},
+		{"New Recording 7.Baby's first words", old},
+		{"Recording — Mayor interview 2026 at 10:35 AM", old},
 	} {
 		id := uuid.NewString()
 		ids[tc.name] = id
@@ -315,7 +336,7 @@ func TestEnrichmentBackfillRetitlesOnlyOldExactPlaceholders(t *testing.T) {
 	pool := NewPool(3, 10, db, nil, nil)
 	defer pool.cancel()
 	dry, err := pool.RunBackfill(context.Background(), "enrichment", user, true)
-	if err != nil || dry.Titles != 1 || dry.Enqueued != 0 {
+	if err != nil || dry.Titles != 2 || len(dry.TitleNames) != 2 || dry.Enqueued != 0 {
 		t.Fatalf("dry run %+v %v", dry, err)
 	}
 	var flagged bool
@@ -323,7 +344,7 @@ func TestEnrichmentBackfillRetitlesOnlyOldExactPlaceholders(t *testing.T) {
 		t.Fatalf("dry run changed the flag: %v %v", flagged, err)
 	}
 	result, err := pool.RunBackfill(context.Background(), "enrichment", user, false)
-	if err != nil || result.Enqueued != 1 {
+	if err != nil || result.Enqueued != 2 {
 		t.Fatalf("real run %+v %v", result, err)
 	}
 	for name, id := range ids {
@@ -335,7 +356,7 @@ func TestEnrichmentBackfillRetitlesOnlyOldExactPlaceholders(t *testing.T) {
 		if err := db.Get(&jobs, `SELECT count(*) FROM background_jobs WHERE resource_id=$1`, id); err != nil {
 			t.Fatal(err)
 		}
-		placeholder := name == "recording-2026-02-03-14-22-01.webm"
+		placeholder := name == "recording-2026-02-03-14-22-01.webm" || name == "Recording — Aug 26, 2026 at 10:35 AM.m4a"
 		if manual == placeholder || (jobs == 1) != placeholder {
 			t.Errorf("%q: manual=%v jobs=%d", name, manual, jobs)
 		}

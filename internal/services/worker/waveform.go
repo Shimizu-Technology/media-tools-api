@@ -20,7 +20,9 @@ func (p *Pool) processAudioWaveform(job Job) error {
 	if err != nil {
 		return fmt.Errorf("read waveform source: %w", err)
 	}
-	if status != "completed" || exists {
+	// Waveform generation depends on stored audio, not transcript readiness.
+	// Retranscription keeps the same source and may overlap an existing job.
+	if status == "failed" || exists {
 		return nil
 	}
 	if key == "" || stored != "uploaded" {
@@ -41,7 +43,7 @@ func (p *Pool) processAudioWaveform(job Job) error {
 	}
 	// DownloadFile uses io.Copy, preserving constant memory and seekability.
 	if err = p.audioStorage.DownloadFile(ctx, key, path); err != nil {
-		return fmt.Errorf("download waveform source failed")
+		return fmt.Errorf("download waveform source: %w", err)
 	}
 	peaks, err := waveform.Compute(ctx, path)
 	if err != nil {
@@ -51,6 +53,6 @@ func (p *Pool) processAudioWaveform(job Job) error {
 	if err != nil {
 		return err
 	}
-	_, err = p.db.ExecContext(ctx, `UPDATE audio_transcriptions SET waveform=$2::jsonb,waveform_status='completed' WHERE id=$1 AND status='completed' AND audio_s3_key=$3`, job.ID, string(encoded), key)
+	_, err = p.db.ExecContext(ctx, `UPDATE audio_transcriptions SET waveform=$2::jsonb,waveform_status='completed' WHERE id=$1 AND status IN ('pending','processing','completed') AND audio_s3_key=$3`, job.ID, string(encoded), key)
 	return err
 }

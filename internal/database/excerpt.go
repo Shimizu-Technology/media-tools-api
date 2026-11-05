@@ -9,12 +9,19 @@ import (
 )
 
 var (
+	excerptFence      = regexp.MustCompile("(?m)^\\s*(?:`{3,}|~{3,}).*$")
+	excerptRule       = regexp.MustCompile(`(?m)^\s*(?:-{3,}|\*{3,}|_{3,})\s*$`)
+	excerptTableRule  = regexp.MustCompile(`(?m)^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$`)
+	excerptStrong     = regexp.MustCompile(`\*{1,2}([^*\n]+)\*{1,2}`)
+	excerptUnderscore = regexp.MustCompile(`(^|[^\pL\pN_])_{1,2}([^_\n]+)_{1,2}($|[^\pL\pN_])`)
+	excerptCode       = regexp.MustCompile("`+([^`\\n]+)`+")
+
 	excerptCitationLink     = regexp.MustCompile(`\[\d+\]\([^)]*\)`)
 	excerptCitation         = regexp.MustCompile(`(?i)\[\[?\^?\d+(?:[, -]+\d+)*\]?\]|\[\^[^\]]+\]|\[(?:S\d+|source[^\]]*|segment[^\]]*|[0-9a-f]{8}-[0-9a-f-]{27,})\]|【[^】]*】|<cite\b[^>]*>.*?</cite>|\[citation[^\]]*\]`)
 	excerptLink             = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
-	excerptHTML             = regexp.MustCompile(`<[^>]*>`)
+	excerptHTML             = regexp.MustCompile(`</?[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[^<>]*)?/?>`)
 	excerptPunctuationSpace = regexp.MustCompile(`\s+([.,;:!?])`)
-	excerptLinePrefix       = regexp.MustCompile(`(?m)^\s*(?:#{1,6}\s+|>\s*|[-+*]\s+|\d+[.)]\s+)`)
+	excerptLinePrefix       = regexp.MustCompile(`(?m)^\s*(?:#{1,6}\s+|>\s*|[-+*]\s+|\d{1,3}[.)]\s+)`)
 	excerptJSONField        = regexp.MustCompile(`"(?:summary|summary_text|text)"\s*:\s*"`)
 )
 
@@ -37,23 +44,37 @@ func plainExcerpt(source string) string {
 			if decoder.Decode(&text) == nil {
 				source = text
 			} else {
-				// A long JSON string can be cut inside an escape; trim its incomplete
-				// tail until it can be decoded. The bounded input caps this work.
-				source = strings.TrimSuffix(source, `\`)
-				if json.Unmarshal([]byte(source+`"`), &text) == nil {
-					source = text
-				} else {
+				// SQL can stop inside a JSON escape (including \uXXXX). Remove
+				// only the incomplete tail; retain the usable summary instead of
+				// discarding it in favor of the transcript. UTF-8/escape tails fit
+				// within twelve bytes; do not repeatedly decode the entire prefix.
+				decoded := false
+				for trim := 0; trim <= 12 && len(source)-trim >= 1; trim++ {
+					if json.Unmarshal([]byte(source[:len(source)-trim]+`"`), &text) == nil {
+						source = text
+						decoded = true
+						break
+					}
+				}
+				if !decoded {
 					return ""
 				}
 			}
 		}
 	}
+	source = excerptFence.ReplaceAllString(source, " ")
+	source = excerptRule.ReplaceAllString(source, " ")
+	source = excerptTableRule.ReplaceAllString(source, " ")
 	source = excerptCitationLink.ReplaceAllString(source, "")
 	source = excerptLink.ReplaceAllString(source, "$1")
 	source = excerptCitation.ReplaceAllString(source, "")
 	source = excerptHTML.ReplaceAllString(source, " ")
 	source = excerptLinePrefix.ReplaceAllString(source, "")
-	source = strings.NewReplacer("*", "", "_", "", "`", "", "~~", "").Replace(source)
+	source = excerptStrong.ReplaceAllString(source, "$1")
+	source = excerptUnderscore.ReplaceAllString(source, "$1$2$3")
+	source = excerptCode.ReplaceAllString(source, "$1")
+	source = strings.ReplaceAll(source, "~~", "")
+	source = strings.ReplaceAll(source, "|", " ")
 	source = strings.Join(strings.Fields(html.UnescapeString(source)), " ")
 	source = excerptPunctuationSpace.ReplaceAllString(source, "$1")
 	runes := []rune(source)
@@ -65,8 +86,8 @@ func plainExcerpt(source string) string {
 		end--
 	}
 	if end == 0 {
-		return ""
-	} // no complete word fits (for example a giant URL)
+		end = 200 // CJK and other unspaced text still get a rune-safe excerpt.
+	}
 	return strings.TrimSpace(string(runes[:end]))
 }
 

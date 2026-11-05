@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -67,16 +68,54 @@ func TestBackfillAdminHTTPAndRunSpecificCounts(t *testing.T) {
 			t.Fatalf("invalid %s=%d", body, out.Code)
 		}
 	}
+	user := uuid.NewString()
+	if _, err := db.Exec(`INSERT INTO users(id,email,password_hash) VALUES($1,$2,'unused')`, user, user+"@example.invalid"); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Exec(`DELETE FROM users WHERE id=$1`, user)
+	for _, dry := range []bool{true, false} {
+		missing := request("POST", "/api/v1/admin/backfills", `{"kind":"enrichment","user_id":"`+uuid.NewString()+`","dry_run":`+fmt.Sprint(dry)+`}`, h.AdminAPIKey, "")
+		if missing.Code != 404 || !strings.Contains(missing.Body.String(), `"error":"account_not_found"`) {
+			t.Fatalf("unknown account %d %s", missing.Code, missing.Body)
+		}
+		canonical := request("POST", "/api/v1/admin/backfills", `{"kind":"enrichment","user_id":"urn:uuid:`+user+`","dry_run":`+fmt.Sprint(dry)+`}`, h.AdminAPIKey, "")
+		want := 202
+		if dry {
+			want = 200
+		}
+		if canonical.Code != want {
+			t.Fatalf("UUID normalization %d %s", canonical.Code, canonical.Body)
+		}
+		if !dry {
+			var run struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal(canonical.Body.Bytes(), &run); err != nil {
+				t.Fatal(err)
+			}
+			defer db.Exec(`DELETE FROM backfill_runs WHERE id=$1`, run.ID)
+			defer db.Exec(`DELETE FROM background_jobs WHERE resource_id=$1`, run.ID)
+		}
+	}
+
 	var beforeJobs, beforeRuns int
-	db.Get(&beforeJobs, `SELECT count(*) FROM background_jobs`)
-	db.Get(&beforeRuns, `SELECT count(*) FROM backfill_runs`)
+	if err := db.Get(&beforeJobs, `SELECT count(*) FROM background_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&beforeRuns, `SELECT count(*) FROM backfill_runs`); err != nil {
+		t.Fatal(err)
+	}
 	out := request("POST", "/api/v1/admin/backfills", `{"kind":"waveforms","dry_run":true}`, h.AdminAPIKey, "")
 	if out.Code != 200 {
 		t.Fatalf("dry run: %d %s", out.Code, out.Body)
 	}
 	var jobs, runs int
-	db.Get(&jobs, `SELECT count(*) FROM background_jobs`)
-	db.Get(&runs, `SELECT count(*) FROM backfill_runs`)
+	if err := db.Get(&jobs, `SELECT count(*) FROM background_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&runs, `SELECT count(*) FROM backfill_runs`); err != nil {
+		t.Fatal(err)
+	}
 	if jobs != beforeJobs || runs != beforeRuns {
 		t.Fatal("dry run wrote queue or run")
 	}

@@ -1305,14 +1305,6 @@ func (h *Handler) DeleteAudioTranscription(c *gin.Context) {
 		return
 	}
 
-	if h.AudioStorage != nil && h.AudioStorage.IsConfigured() && at.AudioS3Key != "" {
-		if err := h.AudioStorage.DeleteObject(c.Request.Context(), at.AudioS3Key); err != nil {
-			log.Printf("Warning: failed to delete S3 audio object %s: %v", at.AudioS3Key, err)
-		} else {
-			log.Printf("Deleted S3 audio object: %s", at.AudioS3Key)
-		}
-	}
-
 	if err := h.DB.DeleteAudioTranscriptionForActor(c.Request.Context(), id, actor.UserID, actor.APIKeyID); err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
@@ -1320,6 +1312,14 @@ func (h *Handler) DeleteAudioTranscription(c *gin.Context) {
 			Code:    http.StatusNotFound,
 		})
 		return
+	}
+
+	if h.AudioStorage != nil && h.AudioStorage.IsConfigured() && at.AudioS3Key != "" {
+		if err := h.AudioStorage.DeleteObject(c.Request.Context(), at.AudioS3Key); err != nil {
+			log.Printf("Warning: failed to delete S3 audio object %s: %v", at.AudioS3Key, err)
+		} else {
+			log.Printf("Deleted S3 audio object: %s", at.AudioS3Key)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Audio transcription deleted"})
