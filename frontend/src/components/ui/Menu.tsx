@@ -11,11 +11,13 @@ export type MenuItem =
  * list lives in the browser's top layer (popover API) at a fixed position, so
  * no list row, card or scroll box can clip it or paint over it.
  */
-export function Menu({ label, trigger, items, align = 'end', triggerClassName = '' }: {
+export function Menu({ label, trigger, items, align = 'end', side = 'bottom', triggerClassName = '' }: {
   label: string;
   trigger: ReactNode;
   items: MenuItem[];
   align?: 'start' | 'end';
+  /** `top` for a trigger at the bottom of the window. */
+  side?: 'top' | 'bottom';
   triggerClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -66,9 +68,10 @@ export function Menu({ label, trigger, items, align = 'end', triggerClassName = 
   const toggle = () => {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!open && rect) {
+      const vertical = side === 'top' ? { bottom: window.innerHeight - rect.top + 4, top: 'auto' } : { top: rect.bottom + 4, bottom: 'auto' };
       setPosition(align === 'end'
-        ? { top: rect.bottom + 4, right: Math.max(8, window.innerWidth - rect.right), left: 'auto' }
-        : { top: rect.bottom + 4, left: Math.max(8, rect.left), right: 'auto' });
+        ? { ...vertical, right: Math.max(8, window.innerWidth - rect.right), left: 'auto' }
+        : { ...vertical, left: Math.max(8, rect.left), right: 'auto' });
     }
     setOpen((value) => !value);
   };
@@ -91,7 +94,7 @@ export function Menu({ label, trigger, items, align = 'end', triggerClassName = 
         aria-expanded={open}
         aria-controls={open ? id : undefined}
         onClick={toggle}
-        className={triggerClassName || 'pressable inline-flex h-11 w-11 items-center justify-center rounded-full text-accent hover:bg-fill'}
+        className={triggerClassName || 'pressable inline-flex h-11 w-11 items-center justify-center rounded-full text-accent-text hover:bg-fill'}
       >
         {trigger}
       </button>
@@ -107,7 +110,7 @@ export function Menu({ label, trigger, items, align = 'end', triggerClassName = 
             animate={{ opacity: 1, transform: 'scale(1)' }}
             exit={{ opacity: 0, transform: 'scale(0.97)', transition: { duration: 0.1 } }}
             transition={{ duration: 0.15, ease: [0.23, 1, 0.32, 1] }}
-            style={{ ...position, position: 'fixed', bottom: 'auto', margin: 0, transformOrigin: align === 'end' ? 'top right' : 'top left' }}
+            style={{ ...position, position: 'fixed', margin: 0, transformOrigin: `${side === 'top' ? 'bottom' : 'top'} ${align === 'end' ? 'right' : 'left'}` }}
             onKeyDown={(event) => {
               if (event.key === 'ArrowDown') { event.preventDefault(); moveFocus(1); }
               if (event.key === 'ArrowUp') { event.preventDefault(); moveFocus(-1); }

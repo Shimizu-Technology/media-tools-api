@@ -71,7 +71,7 @@ export function RecoveryCodeSignIn({ className = '', onSuccess }: { className?: 
             ) : (
               <form onSubmit={(event) => void submit(event)} className="mt-6">
                 <label htmlFor="recovery-code" className="text-sm font-semibold">Recovery code</label>
-                <input ref={inputRef} id="recovery-code" name="recovery-code" value={code} onChange={(event) => { setCode(event.target.value); if (error) setError(''); }} autoComplete="off" autoCapitalize="characters" spellCheck={false} placeholder="MTR-XXXX-XXXX-…" className="mt-2 min-h-12 w-full rounded-md border bg-transparent px-4 font-mono text-sm uppercase outline-none focus:ring-2 focus:ring-[var(--color-accent)]" style={{ borderColor: 'var(--color-separator)' }} />
+                <input ref={inputRef} id="recovery-code" name="recovery-code" value={code} onChange={(event) => { setCode(event.target.value); if (error) setError(''); }} autoComplete="off" autoCapitalize="characters" spellCheck={false} placeholder="MTR-XXXX-XXXX-…" className="mt-2 min-h-12 w-full rounded-md border bg-transparent px-4 font-mono text-sm uppercase outline-none focus:ring-2 focus:ring-[var(--color-accent-text)]" style={{ borderColor: 'var(--color-separator)' }} />
                 {error && <p className="mt-3 text-sm" role="alert" style={{ color: 'var(--color-danger)' }}>{error}</p>}
                 <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                   <button type="button" onClick={close} disabled={submitting} className="min-h-11 rounded-md border px-5 text-sm font-semibold disabled:opacity-50" style={{ borderColor: 'var(--color-separator)' }}>Cancel</button>

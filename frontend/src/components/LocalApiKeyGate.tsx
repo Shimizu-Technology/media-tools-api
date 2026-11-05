@@ -7,7 +7,7 @@ import { ApiKeySetup } from './ApiKeySetup';
  */
 export default function LocalApiKeyGate({ onKeySet }: { onKeySet: () => void }) {
   return (
-    <main className="min-h-screen px-4 py-10 flex items-center justify-center" style={{ backgroundColor: 'var(--color-bg)' }}>
+    <main className="min-h-screen px-4 py-10 flex items-center justify-center" style={{ backgroundColor: 'var(--color-background)' }}>
       <section className="w-full max-w-xl rounded-xl border p-6 sm:p-8" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }}>
         <div className="mb-5 flex items-start gap-4">
           <div>

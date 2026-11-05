@@ -70,7 +70,7 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
             className="w-10 h-10 rounded-md flex items-center justify-center"
             style={{ backgroundColor: 'var(--color-accent-tint)' }}
           >
-            <Key className="w-5 h-5" style={{ color: 'var(--color-accent)' }} />
+            <Key className="w-5 h-5" style={{ color: 'var(--color-accent-text)' }} />
           </div>
           <div>
             <h3 className="text-base font-semibold" style={{ color: 'var(--color-text)' }}>
@@ -83,7 +83,7 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
         </div>
 
         {/* Tab selector */}
-        <div className="flex gap-1 p-1 rounded-sm mb-4" style={{ backgroundColor: 'var(--color-bg)' }}>
+        <div className="flex gap-1 p-1 rounded-sm mb-4" style={{ backgroundColor: 'var(--color-background)' }}>
           {(['create', 'existing'] as const).map((tab) => (
             <button
               key={tab}
@@ -109,7 +109,7 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
                     placeholder="Admin key (production only)"
                     className="w-full px-4 py-3 rounded-md border text-sm outline-none transition-colors duration-200"
                     style={{
-                      backgroundColor: 'var(--color-bg)',
+                      backgroundColor: 'var(--color-background)',
                       borderColor: 'var(--color-separator)',
                       color: 'var(--color-text)',
                       minHeight: '44px',
@@ -122,7 +122,7 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
                     placeholder="Key name (e.g., my-app)"
                     className="w-full mt-2 px-4 py-3 rounded-md border text-sm outline-none transition-colors duration-200"
                     style={{
-                      backgroundColor: 'var(--color-bg)',
+                      backgroundColor: 'var(--color-background)',
                       borderColor: 'var(--color-separator)',
                       color: 'var(--color-text)',
                       minHeight: '44px',
@@ -143,20 +143,20 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
               ) : (
                 <div>
                   <div className="flex items-center gap-2 mb-2">
-                    <Check className="w-4 h-4 text-accent" />
-                    <span className="text-sm font-medium text-accent">Key created! Save it now.</span>
+                    <Check className="w-4 h-4 text-accent-text" />
+                    <span className="text-sm font-medium text-accent-text">Key created! Save it now.</span>
                   </div>
                   <div
                     className="flex items-center gap-2 p-3 rounded-sm text-xs font-mono break-all"
                     style={{
-                      backgroundColor: 'var(--color-bg)',
+                      backgroundColor: 'var(--color-background)',
                       border: '1px solid var(--color-separator)',
                       color: 'var(--color-text)',
                     }}
                   >
                     <span className="flex-1">{createdKey}</span>
                     <button onClick={handleCopy} className="shrink-0 p-1.5 rounded-sm hover:opacity-80">
-                      {copied ? <Check className="w-4 h-4 text-accent" /> : <Copy className="w-4 h-4" style={{ color: 'var(--color-text-secondary)' }} />}
+                      {copied ? <Check className="w-4 h-4 text-accent-text" /> : <Copy className="w-4 h-4" style={{ color: 'var(--color-text-secondary)' }} />}
                     </button>
                   </div>
                   <div className="flex items-center gap-1.5 mt-2">
@@ -177,7 +177,7 @@ export function ApiKeySetup({ onKeySet, hasKey }: ApiKeySetupProps) {
                 placeholder="mta_abc123..."
                 className="w-full px-4 py-3 rounded-md border text-sm font-mono outline-none transition-colors duration-200"
                 style={{
-                  backgroundColor: 'var(--color-bg)',
+                  backgroundColor: 'var(--color-background)',
                   borderColor: 'var(--color-separator)',
                   color: 'var(--color-text)',
                   minHeight: '44px',

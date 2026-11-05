@@ -13,6 +13,9 @@ import { clearPasskeySignInJournal, recoverPendingPasskeySignIn } from './lib/pa
 import { isJoinSetupPath } from './lib/onboarding'
 import { PublicFooter, PublicHeader } from './components/PublicChrome'
 
+const HomePage = lazy(() => import('./pages/HomePage').then((module) => ({ default: module.HomePage })))
+const CollectionsPage = lazy(() => import('./pages/CollectionsPage').then((module) => ({ default: module.CollectionsPage })))
+const CollectionDetailPage = lazy(() => import('./pages/CollectionDetailPage').then((module) => ({ default: module.CollectionDetailPage })))
 const LibraryPage = lazy(() => import('./pages/LibraryPage').then((module) => ({ default: module.LibraryPage })))
 const CapturePage = lazy(() => import('./pages/CapturePage').then((module) => ({ default: module.CapturePage })))
 const ItemDetailPage = lazy(() => import('./pages/ItemDetailPage').then((module) => ({ default: module.ItemDetailPage })))
@@ -62,7 +65,10 @@ const appRoutes: RouteObject[] = [{
       path: '/app',
       element: <ProtectedRoute><AppShell /></ProtectedRoute>,
       children: [
-        { index: true, element: <LibraryPage /> },
+        { index: true, element: <HomeOrLibraryLink /> },
+        { path: 'library', element: <LibraryPage /> },
+        { path: 'collections', element: <CollectionsPage /> },
+        { path: 'collections/:collectionId', element: <CollectionDetailPage /> },
         { path: 'new', element: <CapturePage /> },
         { path: 'items/:itemType/:itemId', element: <ItemDetailPage /> },
         { path: 'settings', element: <SettingsPage /> },
@@ -93,12 +99,19 @@ function RootOutlet() {
 }
 
 function RouteLoading() {
-  return <div className="flex min-h-[45dvh] items-center justify-center" role="status"><div className="h-6 w-6 animate-spin rounded-full border-2 border-separator border-t-accent" /><span className="sr-only">Loading page</span></div>
+  return <div className="flex min-h-[45dvh] items-center justify-center" role="status"><div className="h-6 w-6 animate-spin rounded-full border-2 border-separator border-t-accent-text" /><span className="sr-only">Loading page</span></div>
 }
 
 function LegacyRedirect() {
   const location = useLocation()
   return <Navigate to={legacyRedirect(location.pathname, location.search) ?? '/app'} replace />
+}
+
+/** `/app` is Home; with a query it is a link from when `/app` was the Library. */
+function HomeOrLibraryLink() {
+  const location = useLocation()
+  const target = legacyRedirect(location.pathname, location.search)
+  return target ? <Navigate to={target} replace /> : <HomePage />
 }
 
 /** Old shared links were `/?id=<transcript>`. */
@@ -110,7 +123,7 @@ function LandingOrSharedLink() {
 
 function PublicLayout() {
   return (
-    <div className="flex min-h-dvh flex-col bg-bg text-text">
+    <div className="flex min-h-dvh flex-col bg-background text-text">
       <PublicHeader />
       <div className="flex-1"><Outlet /></div>
       <PublicFooter />

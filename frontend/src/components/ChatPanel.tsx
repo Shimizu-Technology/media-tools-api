@@ -97,7 +97,7 @@ export function ChatPanel({ itemId, itemType, placeholder, onCitationClick, auto
               </li>
             ) : (
               <li key={message.id}>
-                <div className="font-serif text-[1.0625rem] leading-7 [&_a]:text-accent [&_a]:underline [&_code]:rounded-sm [&_code]:bg-fill [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.875em] [&_li]:mt-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p+p]:mt-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-fill [&_pre]:p-3 [&_ul]:list-disc [&_ul]:pl-5 [&_strong]:font-semibold">
+                <div className="text-[1.0625rem] leading-7 [&_a]:text-accent-text [&_a]:underline [&_code]:rounded-sm [&_code]:bg-fill [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.875em] [&_li]:mt-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p+p]:mt-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-fill [&_pre]:p-3 [&_ul]:list-disc [&_ul]:pl-5 [&_strong]:font-semibold">
                   <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={{ a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer">{children}</a> }}>{message.content}</ReactMarkdown>
                 </div>
                 <CitationRow citations={message.citations} onClick={openCitation} />
@@ -109,7 +109,7 @@ export function ChatPanel({ itemId, itemType, placeholder, onCitationClick, auto
         )}
       </div>
       {error && <div className="mt-3"><Notice tone="error">{error}</Notice></div>}
-      <form onSubmit={(event) => void send(event)} className="mt-3 flex items-end gap-2 rounded-[24px] border border-separator bg-surface py-0.5 pl-4 pr-0.5">
+      <form onSubmit={(event) => void send(event)} className="mt-3 flex items-end gap-2 rounded-[24px] bg-surface-2 py-0.5 pl-4 pr-0.5">
         <label className="sr-only" htmlFor={`ask-${itemType}-${itemId}`}>{placeholder}</label>
         <textarea
           id={`ask-${itemType}-${itemId}`}

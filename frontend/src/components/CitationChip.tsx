@@ -23,7 +23,7 @@ export function CitationChip({ citation, onClick }: {
       title={citation.item_title ? `Open source: ${citation.item_title}` : 'Open source evidence'}
       className="pressable group -my-2.5 inline-flex min-h-11 items-center"
     >
-      <span className="inline-flex items-center gap-1 rounded-full bg-accent-tint px-2 py-0.5 font-sans text-meta font-semibold text-accent tabular group-hover:bg-fill">
+      <span className="inline-flex items-center gap-1 rounded-full bg-accent-tint px-2 py-0.5 font-sans text-meta font-semibold text-accent-text tabular group-hover:bg-fill">
         <Icon className="h-3 w-3" aria-hidden="true" />
         {label}
       </span>

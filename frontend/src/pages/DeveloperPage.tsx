@@ -150,7 +150,7 @@ export function DeveloperPage() {
       <BackToSettings />
       <h1 className="mt-1 text-large-title">Agent keys</h1>
       <p className="mt-2 text-callout text-text-secondary">
-        Give a script, a CLI, or an agent its own key. An agent key can do only what you check, and you can revoke it at any time. <Link to="/docs" className="font-semibold text-accent">API reference</Link>
+        Give a script, a CLI, or an agent its own key. An agent key can do only what you check, and you can revoke it at any time. <Link to="/docs" className="font-semibold text-accent-text">API reference</Link>
       </p>
 
       {!accountAuthEnabled && !localKeyConfigured && (
@@ -188,7 +188,7 @@ export function DeveloperPage() {
           </form>
           {createdKey && (
             <div className="mt-4 rounded-md bg-fill p-3">
-              <p role="status" className="flex items-center gap-2 text-callout font-semibold"><Check className="h-4 w-4 text-accent" />Copy this key now. It will not be shown again.</p>
+              <p role="status" className="flex items-center gap-2 text-callout font-semibold"><Check className="h-4 w-4 text-accent-text" />Copy this key now. It will not be shown again.</p>
               <div className="mt-2 flex items-center gap-2 rounded-sm bg-surface p-2 pl-3 font-mono text-meta">
                 <span className="min-w-0 flex-1 break-all select-all">{createdKey}</span>
                 <IconButton label="Copy API key" onClick={handleCopy}>{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}</IconButton>
@@ -243,7 +243,7 @@ export function DeveloperPage() {
         </SettingsCard>
       )}
 
-      <SettingsCard title="Webhooks" description="Tell another service when a transcript, recording, PDF or summary is ready." action={<Link to="/app/settings/webhooks" className="inline-flex min-h-11 items-center gap-1 font-semibold text-accent">Set up webhooks <ChevronRight className="h-4 w-4" /></Link>} />
+      <SettingsCard title="Webhooks" description="Tell another service when a transcript, recording, PDF or summary is ready." action={<Link to="/app/settings/webhooks" className="inline-flex min-h-11 items-center gap-1 font-semibold text-accent-text">Set up webhooks <ChevronRight className="h-4 w-4" /></Link>} />
     </div>
   );
 }

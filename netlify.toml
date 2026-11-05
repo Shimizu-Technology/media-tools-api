@@ -24,7 +24,7 @@
 #   silently push large files through the Netlify proxy instead).
 # - frame-src youtube.com: the source-video player on transcript pages.
 # No Clerk origins: the web app no longer loads Clerk.
-# No font origins: type uses the system serif (New York on Apple devices) and system sans.
+# No font origins: type uses the system rounded and system sans fonts.
 [[headers]]
   for = "/*"
   [headers.values]

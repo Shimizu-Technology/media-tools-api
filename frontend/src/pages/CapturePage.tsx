@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { Link, useBlocker, useNavigate, useSearchParams } from 'react-router-dom';
-import { Download, FileUp, Link2, Mic, Play, Trash2, Upload } from 'lucide-react';
+import { Download, FileUp, Link2, Play, Trash2, Upload } from 'lucide-react';
 import { getErrorMessage } from '../lib/api';
 import { downloadBlob } from '../lib/download';
 import { hasUnsavedRecording, holdRecording, releaseRecording, type HeldRecording } from '../lib/heldRecordings';
@@ -12,6 +12,7 @@ import { deleteRecordingDraft, listRecordingDrafts, recoverInterruptedRecordings
 import { recorderSupported, useRecorder } from '../hooks/useRecorder';
 import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
 import { RecorderScreen } from '../components/capture/RecorderScreen';
+import { RecordCard } from '../components/home/RecordCard';
 import { Button } from '../components/ui/Button';
 import { Dialog } from '../components/ui/Dialog';
 import { Input, Notice } from '../components/ui/Field';
@@ -42,6 +43,7 @@ export function CapturePage() {
   });
   const fileRef = useRef<HTMLInputElement>(null);
   const linkRef = useRef<HTMLInputElement>(null);
+  const fileButtonRef = useRef<HTMLButtonElement>(null);
   const busyRef = useRef(false);
   const autoStartRef = useRef(false);
   const [operations] = useState(createOperationSlot);
@@ -70,20 +72,36 @@ export function CapturePage() {
     void recoverInterruptedRecordings().catch(() => 0).then(() => refreshDrafts());
   }, [refreshDrafts]);
 
-  // ?record=1 (the Library's Record button) starts at once: one tap to record.
+  // ?record=1 (every Record button) starts at once: one tap to record. The ref
+  // clears once the parameter is gone, so Record works again from this page.
   useEffect(() => {
-    if (params.get('record') !== '1' || autoStartRef.current) return;
+    if (params.get('record') !== '1') { autoStartRef.current = false; return; }
+    if (autoStartRef.current) return;
     autoStartRef.current = true;
     const next = new URLSearchParams(params);
     next.delete('record');
     setParams(next, { replace: true });
-    void recorder.start();
+    if (!busyRef.current) void recorder.start();
   }, [params, recorder, setParams]);
 
+  // Home's and the Library's shortcuts land on the right control. The tap that
+  // got here usually still counts as a gesture, so the file picker can open too.
   useEffect(() => {
     const source = params.get('source');
     if (source === 'link') linkRef.current?.focus();
+    if (source === 'file' || source === 'pdf') {
+      fileButtonRef.current?.focus();
+      fileRef.current?.click();
+    }
   }, [params]);
+
+  // The recorder takes the whole window: the shell's bars leave the tab order too.
+  const recording = recorder.active;
+  useEffect(() => {
+    if (!recording) return;
+    document.documentElement.dataset.recording = 'true';
+    return () => { delete document.documentElement.dataset.recording; };
+  }, [recording]);
 
   // Hold navigation while recording, uploading, or keeping a recording that
   // exists only on this page. Leaving after confirming stops the microphone and
@@ -278,12 +296,12 @@ export function CapturePage() {
   }
 
   return (
-    <div className="mx-auto max-w-xl pb-10">
-      <h1 className="pt-2 text-large-title">Add</h1>
+    <div className="mx-auto max-w-xl">
+      <h1 className="text-large-title">Add</h1>
 
       {legacyJob && (
         <div className="mt-4">
-          <Notice action={<Link to={itemDetailPath('audio', legacyJob)} onClick={() => { try { localStorage.removeItem(LEGACY_ACTIVE_AUDIO_KEY); } catch { /* ignore */ } }} className="inline-flex min-h-11 items-center px-2 font-semibold text-accent">Open</Link>}>
+          <Notice action={<Link to={itemDetailPath('audio', legacyJob)} onClick={() => { try { localStorage.removeItem(LEGACY_ACTIVE_AUDIO_KEY); } catch { /* ignore */ } }} className="inline-flex min-h-11 items-center px-2 font-semibold text-accent-text">Open</Link>}>
             Your last upload from this browser is in the library.
             <button type="button" className="ml-1 inline-flex min-h-11 items-center text-text-secondary underline" onClick={() => { try { localStorage.removeItem(LEGACY_ACTIVE_AUDIO_KEY); } catch { /* ignore */ } setLegacyJob(null); }}>Dismiss</button>
           </Notice>
@@ -299,17 +317,17 @@ export function CapturePage() {
         </ul>
       )}
 
-      <section className="mt-6" aria-labelledby="record-heading">
+      <section className="mt-4" aria-labelledby="record-heading">
         <h2 id="record-heading" className="sr-only">Record</h2>
         {recorderSupported() ? (
-          <Button variant="primary" size="lg" block onClick={() => void recorder.start()} icon={<Mic className="h-5 w-5" aria-hidden="true" />}>Record</Button>
+          <RecordCard onClick={() => void recorder.start()} hint="Start talking. The transcript and summary follow." />
         ) : (
           <Notice>This browser cannot record. Record with your phone’s voice memo app, then choose the file below.</Notice>
         )}
       </section>
 
       {drafts.filter((draft) => !held.some((entry) => entry.recording.id === draft.id)).length > 0 && (
-        <section className="mt-8" aria-labelledby="drafts-heading">
+        <section className="mt-3 rounded-lg bg-surface p-4" aria-labelledby="drafts-heading">
           <h2 id="drafts-heading" className="text-heading">Not uploaded yet</h2>
           <p className="mt-1 text-callout text-text-secondary">Saved on this device only.</p>
           <ul className="mt-2 divide-y divide-separator">
@@ -318,7 +336,7 @@ export function CapturePage() {
         </section>
       )}
 
-      <section className="mt-8" aria-labelledby="link-heading">
+      <section className="mt-3 rounded-lg bg-surface p-4" aria-labelledby="link-heading">
         <h2 id="link-heading" className="text-heading">Paste a link</h2>
         <p className="mt-1 text-callout text-text-secondary">YouTube, Vimeo, and most video sites with captions or speech.</p>
         <form onSubmit={(event) => void submitLink(event)} className="mt-3 flex gap-2">
@@ -330,18 +348,19 @@ export function CapturePage() {
         </form>
       </section>
 
-      <section className="mt-8" aria-labelledby="file-heading">
+      <section className="mt-3 rounded-lg bg-surface p-4" aria-labelledby="file-heading">
         <h2 id="file-heading" className="text-heading">Choose a file</h2>
         <button
+          ref={fileButtonRef}
           type="button"
           onClick={() => fileRef.current?.click()}
           onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
-          className={`pressable mt-3 flex min-h-28 w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed px-4 py-5 text-center hover:bg-fill ${dragging ? 'border-accent bg-accent-tint' : 'border-separator'}`}
+          className={`pressable mt-3 flex min-h-28 w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed px-4 py-5 text-center hover:bg-fill ${dragging ? 'border-accent-text bg-accent-tint' : 'border-text-secondary/40'}`}
         >
-          <FileUp className="h-6 w-6 text-accent" aria-hidden="true" />
-          <span className="text-body font-semibold text-accent">Choose audio, video or a PDF</span>
+          <FileUp className="h-6 w-6 text-accent-text" aria-hidden="true" />
+          <span className="text-body font-semibold text-accent-text">Choose audio, video or a PDF</span>
           <span className="text-meta text-text-secondary">Or drop it here. Up to 2 GB; PDFs up to 50 MB.</span>
         </button>
         <input ref={fileRef} type="file" hidden accept="audio/*,video/*,.m4a,.mp3,.wav,.caf,.aac,.ogg,.flac,.webm,.mp4,.mov,.qta,.pdf,application/pdf" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void addFile(file); }} />
@@ -374,7 +393,7 @@ function DraftRow({ draft, onUpload, onDelete }: { draft: PendingRecording; onUp
 function HeldCard({ entry, onUpload, onDelete }: { entry: HeldRecording; onUpload: () => void; onDelete: () => void }) {
   const { recording, warning, savedOnDevice } = entry;
   return (
-    <li className="rounded-lg border border-separator bg-surface p-4">
+    <li className="rounded-lg bg-surface p-4">
       <p className="text-subheading">{warning ? 'Check this recording' : 'Not uploaded yet'}</p>
       <p className="mt-0.5 text-meta text-text-secondary tabular">{formatItemDate(new Date(recording.createdAt).toISOString())}{recording.durationSeconds ? ` · ${formatClock(recording.durationSeconds)}` : ''}</p>
       {warning && <p className="mt-1 text-callout text-text-secondary">{warning}</p>}

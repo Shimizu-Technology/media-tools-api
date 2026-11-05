@@ -3,17 +3,24 @@
  * Home Screen shortcuts, shared links, and the native apps' deep links keep
  * working through these redirects.
  *
- * The app has seven screens: Library (home), Add, an item, and Settings with
- * its Developer, Webhooks and Ops pages.
+ * The signed-in app: Home, Library, Collections and a collection, Add, an item,
+ * and Settings with its Developer, Webhooks and Ops pages. `/app` was the Library
+ * until Home took its place, so `/app` with a query is still a Library link.
  */
 export const APP_ROUTES = {
-  library: '/app',
+  home: '/app',
+  library: '/app/library',
+  collections: '/app/collections',
   add: '/app/new',
   settings: '/app/settings',
   developer: '/app/settings/developer',
   webhooks: '/app/settings/webhooks',
   ops: '/app/settings/ops',
 } as const;
+
+export function collectionPath(id: string): string {
+  return `${APP_ROUTES.collections}/${id}`;
+}
 
 /** Paths that only redirect. The router mounts one redirect route for each. */
 export const LEGACY_PATHS = [
@@ -28,10 +35,7 @@ export const LEGACY_PATHS = [
   '/app/video',
   '/app/audio',
   '/app/pdf',
-  '/app/library',
   '/app/processing',
-  '/app/collections',
-  '/app/collections/:collectionId',
   '/app/developer',
   '/app/developer/webhooks',
   '/app/admin/ops',
@@ -65,10 +69,21 @@ function libraryParams(search: URLSearchParams, defaults: Record<string, string>
   return next;
 }
 
-function collectionParams(collectionId: string | undefined): URLSearchParams {
-  const next = new URLSearchParams();
-  if (collectionId && ITEM_ID.test(collectionId)) next.set('collection', collectionId);
-  return next;
+function collectionTarget(collectionId: string | undefined, query = new URLSearchParams()): string {
+  return collectionId && ITEM_ID.test(collectionId) ? withQuery(collectionPath(collectionId), query) : APP_ROUTES.collections;
+}
+
+/**
+ * `/app` is Home. With a query it is an old Library link, which keeps every
+ * parameter; `collection` became a page of its own.
+ */
+function appLinkRedirect(params: URLSearchParams): string | null {
+  if ([...params.keys()].length === 0) return null;
+  const rest = new URLSearchParams(params);
+  const collection = rest.get('collection');
+  if (collection === null) return withQuery(APP_ROUTES.library, rest);
+  rest.delete('collection');
+  return collection ? collectionTarget(collection, rest) : withQuery(APP_ROUTES.library, rest);
 }
 
 /**
@@ -85,8 +100,10 @@ export function legacyRedirect(pathname: string, search: string): string | null 
     return shared;
   }
 
-  const collection = path.match(/^(?:\/app)?\/collections\/([^/]+)$/);
-  if (collection) return withQuery(APP_ROUTES.library, collectionParams(decodeURIComponent(collection[1])));
+  if (path === APP_ROUTES.home) return appLinkRedirect(params);
+
+  const collection = path.match(/^\/collections\/([^/]+)$/);
+  if (collection) return collectionTarget(decodeURIComponent(collection[1]), params);
 
   switch (path) {
     case '/app/video':
@@ -98,7 +115,6 @@ export function legacyRedirect(pathname: string, search: string): string | null 
     case '/app/pdf':
       return itemPath('pdf', id) ?? withQuery(APP_ROUTES.add, new URLSearchParams({ source: 'file' }));
     case '/library':
-    case '/app/library':
       return withQuery(APP_ROUTES.library, libraryParams(params));
     case '/history':
       return withQuery(APP_ROUTES.library, libraryParams(params, { type: 'youtube' }));
@@ -108,8 +124,7 @@ export function legacyRedirect(pathname: string, search: string): string | null 
       return withQuery(APP_ROUTES.library, next);
     }
     case '/collections':
-    case '/app/collections':
-      return APP_ROUTES.library;
+      return APP_ROUTES.collections;
     case '/app/developer':
       return APP_ROUTES.developer;
     case '/webhooks':

@@ -25,7 +25,7 @@ export function ProtectedRoute({ children, requireOwner = false }: ProtectedRout
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--color-bg)' }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--color-background)' }}>
         <div className="flex items-center gap-3 rounded-lg border px-5 py-4" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)', color: 'var(--color-text-secondary)' }}>
           <Loader2 className="w-5 h-5 animate-spin" />
           <span className="text-sm font-medium">Checking your workspace...</span>
@@ -69,7 +69,7 @@ function SessionUnavailable({ onRetry }: { onRetry: () => void }) {
     window.setTimeout(() => setBusy(false), 1200);
   };
   return (
-    <main className="min-h-screen px-4 py-10 flex items-center justify-center" style={{ backgroundColor: 'var(--color-bg)' }}>
+    <main className="min-h-screen px-4 py-10 flex items-center justify-center" style={{ backgroundColor: 'var(--color-background)' }}>
       <section className="w-full max-w-md rounded-xl border p-6 text-center sm:p-8" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-separator)' }} role="alert">
         <h1 className="text-2xl font-semibold tracking-tight" style={{ color: 'var(--color-text)' }}>Can’t reach Media Tools</h1>
         <p className="mt-3 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>

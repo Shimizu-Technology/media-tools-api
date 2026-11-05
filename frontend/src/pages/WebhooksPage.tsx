@@ -143,7 +143,7 @@ export function WebhooksPage() {
             <p className="text-sm font-medium mb-1" style={{ color: 'var(--color-text)' }}>
               Webhook Secret (save this — shown only once):
             </p>
-            <code className="text-xs break-all" style={{ color: 'var(--color-accent)' }}>
+            <code className="text-xs break-all" style={{ color: 'var(--color-accent-text)' }}>
               {createdSecret}
             </code>
             <button
@@ -178,7 +178,7 @@ export function WebhooksPage() {
                 required
                 className="min-h-11 w-full rounded-md border px-4 text-base outline-none sm:text-sm"
                 style={{
-                  backgroundColor: 'var(--color-bg)',
+                  backgroundColor: 'var(--color-background)',
                   borderColor: 'var(--color-separator)',
                   color: 'var(--color-text)',
                 }}
@@ -197,9 +197,9 @@ export function WebhooksPage() {
                     onClick={() => toggleEvent(event)}
                     className="min-h-11 rounded-md border px-3 text-xs font-medium transition-colors"
                     style={{
-                      backgroundColor: selectedEvents.includes(event) ? 'var(--color-accent)' : 'var(--color-bg)',
+                      backgroundColor: selectedEvents.includes(event) ? 'var(--color-accent-text)' : 'var(--color-background)',
                       color: selectedEvents.includes(event) ? 'white' : 'var(--color-text-secondary)',
-                      borderColor: selectedEvents.includes(event) ? 'var(--color-accent)' : 'var(--color-separator)',
+                      borderColor: selectedEvents.includes(event) ? 'var(--color-accent-text)' : 'var(--color-separator)',
                     }}
                   >
                     {event}
@@ -255,7 +255,7 @@ export function WebhooksPage() {
                 <p className="font-mono text-sm truncate" style={{ color: 'var(--color-text)' }}>{wh.url}</p>
                 <div className="flex flex-wrap gap-1 mt-2">
                   {wh.events.map((e) => (
-                    <span key={e} className="px-2 py-0.5 rounded-sm text-xs" style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text-secondary)' }}>
+                    <span key={e} className="px-2 py-0.5 rounded-sm text-xs" style={{ backgroundColor: 'var(--color-background)', color: 'var(--color-text-secondary)' }}>
                       {e}
                     </span>
                   ))}
@@ -265,7 +265,7 @@ export function WebhooksPage() {
                 <button
                   onClick={() => handleToggle(wh.id, wh.active)}
                   className="flex min-h-11 min-w-11 items-center justify-center rounded-sm transition-colors"
-                  style={{ color: wh.active ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}
+                  style={{ color: wh.active ? 'var(--color-accent-text)' : 'var(--color-text-secondary)' }}
                   title={wh.active ? 'Deactivate' : 'Activate'}
                 >
                   {wh.active ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
@@ -298,7 +298,7 @@ export function WebhooksPage() {
                     borderColor: 'var(--color-separator)',
                   }}
                 >
-                  {d.status === 'success' && <CheckCircle className="w-4 h-4 text-accent shrink-0" />}
+                  {d.status === 'success' && <CheckCircle className="w-4 h-4 text-accent-text shrink-0" />}
                   {d.status === 'failed' && <XCircle className="w-4 h-4 text-danger shrink-0" />}
                   {d.status === 'pending' && <Clock className="w-4 h-4 shrink-0" style={{ color: 'var(--color-text-secondary)' }} />}
                   <span className="font-mono text-xs flex-1 truncate" style={{ color: 'var(--color-text)' }}>

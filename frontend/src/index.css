@@ -1,87 +1,119 @@
 @import "tailwindcss";
 
 /*
- * Ledger: paper and ink.
+ * Sunrise Studio.
  *
  * This file is the one token source for the web app. The iOS app implements the
- * same names (bg, surface, text, text-secondary, separator, accent, accent-fill,
- * on-accent, record) in its own asset catalog, so keep the two in step.
+ * same semantic names in its own theme (docs/plans/v1-design-plan.md), so keep
+ * the two in step. Web differences, each a small darkening so small text passes
+ * WCAG AA on every surface it can land on:
+ *   accent-text  #C2401B -> #BB3B18  (4.36:1 on surface-2 became 4.70:1)
+ *   warning      #B85F00 -> #A35300  (3.77:1 on surface-2 became 4.64:1)
+ *   hero start   #D2501F -> #CB4B1C  (white text 4.28:1 became 4.60:1)
  *
- * Contrast, measured against the token each pair is used on:
- *   light  text on bg 15.8:1, secondary on bg 5.4:1 (on surface 5.8:1),
- *          accent on bg 7.2:1, white on accent-fill 7.9:1, record on bg 5.0:1
- *   dark   text on bg 14.7:1, secondary on bg 6.7:1 (on surface 6.0:1),
- *          accent on bg 8.3:1, white on accent-fill 6.3:1, record on bg 5.6:1
- * The white Stop glyph on dark record red is 3.2:1. It is a non-text icon, where
- * 3:1 is the floor; a red dark enough for white text would fail as label text.
+ * Contrast, measured against the surfaces each pair is used on:
+ *   light  text 14.0:1+, text-secondary 5.4:1+, accent-text 4.7:1+,
+ *          on-accent on accent-fill 4.9:1, danger 5.8:1+
+ *   dark   text 12.7:1+, text-secondary 6.2:1+, accent-text 6.9:1+,
+ *          on-accent on accent-fill 7.9:1, danger 6.0:1+
+ * White on the coral and amber collection colors is 4.0:1 and 3.7:1, so those
+ * tiles carry icons only (the 3:1 non-text floor); names sit beside them.
  *
- * Red is for active recording. Destructive confirmations use `danger`, which
- * shares the value but not the meaning; errors stay in ink with an icon.
+ * Accent is for actions. Destructive actions use `danger`, a distinct crimson,
+ * and always keep their label or a trash icon.
  */
-@theme {
+/* `static`: collection colors are only named at runtime, so keep every token. */
+@theme static {
   /* Tailwind's own palette stays out: every color comes from this list. */
   --color-*: initial;
 
-  --color-bg: #f7f5f0;
+  --color-background: #fff7ef;
   --color-surface: #ffffff;
-  --color-text: #1d1b18;
-  --color-text-secondary: #6a645c;
-  --color-separator: #e3dfd7;
-  --color-accent: #1f4f9e;
-  --color-accent-fill: #1f4f9e;
+  --color-surface-2: #f6e9dd;
+  --color-text: #2a1a13;
+  --color-text-secondary: #6e5b50;
+  --color-separator: #f0e2d5;
+  --color-accent-fill: #c9441e;
   --color-on-accent: #ffffff;
-  --color-record: #c2372c;
-  --color-on-record: #ffffff;
-  --color-danger: #c2372c;
+  --color-accent-text: #bb3b18;
+  --color-tab-bar: #fffbf7;
+  --color-warning: #a35300;
+  --color-warning-surface: #ffebd0;
+  --color-waveform-start: #e8892b;
+  --color-waveform-end: #c2401b;
+  --color-waveform-unplayed: #e5d5c7;
+  --color-danger: #b3123a;
   --color-on-danger: #ffffff;
 
+  /* The same in both modes: white on the hero gradient, and the disc on it. */
+  --color-on-hero: #ffffff;
+  --color-hero-glyph: #b5352a;
+
+  /* Collection keys come from the server; lib/collections.ts maps them here. */
+  --color-collection-coral: #d9542e;
+  --color-collection-teal: #0a7c86;
+  --color-collection-violet: #8a5ab5;
+  --color-collection-amber: #b8780a;
+  --color-collection-blue: #2f6db5;
+  --color-collection-rose: #c2416c;
+
   /* Derived from the list above; never a new hue. */
-  --color-fill: rgb(29 27 24 / 0.055);
-  --color-accent-tint: rgb(31 79 158 / 0.1);
-  --color-bar: rgb(247 245 240 / 0.86);
-  --color-scrim: rgb(29 27 24 / 0.38);
+  --color-fill: rgb(42 26 19 / 0.055);
+  --color-accent-tint: rgb(201 68 30 / 0.12);
+  --color-scrim: rgb(42 26 19 / 0.42);
   --color-transparent: transparent;
   --color-current: currentColor;
 
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --font-serif: ui-serif, "New York", "Iowan Old Style", Charter, "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  --font-display: "SF Pro Rounded", ui-rounded, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   /* Four radii. Pills use rounded-full. */
   --radius-*: initial;
   --radius-sm: 8px;
   --radius-md: 12px;
-  --radius-lg: 16px;
+  --radius-lg: 18px;
   --radius-xl: 22px;
 
   --shadow-*: initial;
-  --shadow-raised: 0 1px 3px rgb(29 27 24 / 0.12);
-  --shadow-overlay: 0 12px 32px rgb(29 27 24 / 0.16), 0 2px 6px rgb(29 27 24 / 0.08);
+  --shadow-raised: 0 1px 3px rgb(42 26 19 / 0.12);
+  --shadow-overlay: 0 12px 32px rgb(42 26 19 / 0.16), 0 2px 6px rgb(42 26 19 / 0.08);
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-.dark {
-  --color-bg: #191714;
-  --color-surface: #24211d;
-  --color-text: #ede8df;
-  --color-text-secondary: #a59e92;
-  --color-separator: #36322c;
-  --color-accent: #8eb2ec;
-  --color-accent-fill: #2c5eb3;
-  --color-on-accent: #ffffff;
-  --color-record: #f0625a;
-  --color-on-record: #ffffff;
-  --color-danger: #f0625a;
-  /* White on the dark red is 3.2:1, too low for a button label. */
-  --color-on-danger: #191714;
+:root {
+  --gradient-hero: linear-gradient(135deg, #cb4b1c, #ae2733);
+  /* The desktop sidebar's width; fixed elements line up with it. */
+  --sidebar-width: 15rem;
+}
 
-  --color-fill: rgb(237 232 223 / 0.07);
-  --color-accent-tint: rgb(142 178 236 / 0.14);
-  --color-bar: rgb(25 23 20 / 0.86);
+.dark {
+  --color-background: #15110f;
+  --color-surface: #231c18;
+  --color-surface-2: #30271f;
+  --color-text: #fbf0e7;
+  --color-text-secondary: #b9a99c;
+  --color-separator: #2f2620;
+  --color-accent-fill: #ff8f5e;
+  --color-on-accent: #2a1209;
+  --color-accent-text: #ff9b6e;
+  --color-tab-bar: #1b1613;
+  --color-warning: #ffb65c;
+  --color-warning-surface: #38280f;
+  --color-waveform-start: #ffb347;
+  --color-waveform-end: #ff6b4a;
+  --color-waveform-unplayed: #4a3d33;
+  --color-danger: #ff7d8a;
+  --color-on-danger: #2a0a0e;
+
+  --color-fill: rgb(251 240 231 / 0.07);
+  --color-accent-tint: rgb(255 143 94 / 0.16);
   --color-scrim: rgb(0 0 0 / 0.55);
+
+  --gradient-hero: linear-gradient(135deg, #cb4b1c, #9e2230);
 
   --shadow-raised: 0 1px 3px rgb(0 0 0 / 0.4);
   --shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.3);
@@ -100,44 +132,42 @@
   }
 }
 
-/* Type scale. Serif carries titles and reading; system sans carries controls. */
+/* Type scale. Rounded display carries titles; the system font carries the rest. */
 @utility text-large-title {
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-size: 2.125rem;
-  line-height: 2.5625rem;
-  font-weight: 700;
-  letter-spacing: -0.012em;
+  line-height: 2.5rem;
+  font-weight: 800;
+  letter-spacing: -0.015em;
 }
 @utility text-title {
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-size: 1.75rem;
-  line-height: 2.125rem;
-  font-weight: 700;
+  line-height: 2.0625rem;
+  font-weight: 800;
   letter-spacing: -0.015em;
 }
 @utility text-heading {
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-size: 1.25rem;
   line-height: 1.625rem;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: -0.01em;
 }
 @utility text-subheading {
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-size: 1.0625rem;
   line-height: 1.5rem;
-  font-weight: 600;
-}
-@utility text-row-title {
-  font-family: var(--font-serif);
-  font-size: 1.125rem;
-  line-height: 1.5rem;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: -0.005em;
 }
+@utility text-row-title {
+  font-size: 1.0625rem;
+  line-height: 1.375rem;
+  font-weight: 650;
+}
 @utility text-reading {
-  font-family: var(--font-serif);
-  font-size: 1.125rem;
+  font-size: 1.0625rem;
   line-height: 1.6;
 }
 @utility text-body {
@@ -148,9 +178,26 @@
   font-size: 0.9375rem;
   line-height: 1.375rem;
 }
+@utility text-excerpt {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
 @utility text-meta {
   font-size: 0.8125rem;
   line-height: 1.125rem;
+}
+
+/* The sunrise behind Record and the recording screen. */
+@utility bg-hero {
+  background-image: var(--gradient-hero);
+}
+
+/* Chips and other sideways rows scroll by touch without a visible bar. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* Press feedback for anything tappable: quick, subtle, from the element's center. */
@@ -166,7 +213,7 @@
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
-    background-color: var(--color-bg);
+    background-color: var(--color-background);
   }
 
   body {
@@ -174,7 +221,7 @@
     min-height: 100dvh;
     overflow-x: hidden;
     font-family: var(--font-sans);
-    background-color: var(--color-bg);
+    background-color: var(--color-background);
     color: var(--color-text);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -190,12 +237,12 @@
   }
 
   :where(input, textarea, select) {
-    caret-color: var(--color-accent);
+    caret-color: var(--color-accent-text);
     accent-color: var(--color-accent-fill);
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-accent);
+    outline: 2px solid var(--color-accent-text);
     outline-offset: 2px;
   }
 
@@ -279,7 +326,7 @@ select {
     }
   }
 
-  /* The quiet audio scrubber: a 3px rule of ink with an 11px knob, 44px to touch. */
+  /* The fallback scrubber when a recording has no waveform: 44px to touch. */
   .scrubber {
     appearance: none;
     background: transparent;
@@ -288,7 +335,7 @@ select {
   .scrubber::-webkit-slider-runnable-track {
     height: 3px;
     border-radius: 2px;
-    background: linear-gradient(to right, var(--color-accent) var(--progress, 0%), var(--color-separator) var(--progress, 0%));
+    background: linear-gradient(to right, var(--color-accent-text) var(--progress, 0%), var(--color-separator) var(--progress, 0%));
   }
   .scrubber::-moz-range-track {
     height: 3px;
@@ -298,7 +345,7 @@ select {
   .scrubber::-moz-range-progress {
     height: 3px;
     border-radius: 2px;
-    background: var(--color-accent);
+    background: var(--color-accent-text);
   }
   .scrubber::-webkit-slider-thumb {
     appearance: none;
@@ -307,15 +354,28 @@ select {
     margin-top: -4px;
     border: 0;
     border-radius: 50%;
-    background: var(--color-accent);
+    background: var(--color-accent-text);
   }
   .scrubber::-moz-range-thumb {
     width: 11px;
     height: 11px;
     border: 0;
     border-radius: 50%;
-    background: var(--color-accent);
+    background: var(--color-accent-text);
   }
+}
+
+/*
+ * The bottom bar on phones. It leaves while a text field has the keyboard up,
+ * and during recording, when the whole screen belongs to the recorder.
+ */
+@media (pointer: coarse) {
+  body:has(:is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]), textarea):focus) [data-tab-bar] {
+    display: none;
+  }
+}
+html[data-recording] [data-app-chrome] {
+  display: none;
 }
 
 /* The live dot breathes while recording; under reduced motion it holds still. */

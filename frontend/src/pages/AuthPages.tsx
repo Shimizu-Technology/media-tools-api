@@ -290,7 +290,7 @@ function EmailCodeFlow({ mode }: { mode: 'signup' | 'reset' }) {
           <SecondaryButton type="button" onClick={() => void resend()} disabled={busy || resendIn > 0}>
             <RefreshCw className="h-4 w-4" />{resendIn > 0 ? `Send another in ${resendIn}s` : 'Send another code'}
           </SecondaryButton>
-          <button type="button" onClick={() => { setStep('request'); setCode(''); setPassword(''); setError(''); setResent(false); }} className="min-h-11 px-2 text-sm font-semibold underline-offset-4 hover:underline" style={{ color: 'var(--color-accent)' }}>
+          <button type="button" onClick={() => { setStep('request'); setCode(''); setPassword(''); setError(''); setResent(false); }} className="min-h-11 px-2 text-sm font-semibold underline-offset-4 hover:underline" style={{ color: 'var(--color-accent-text)' }}>
             Use a different email
           </button>
         </div>
