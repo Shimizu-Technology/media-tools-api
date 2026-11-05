@@ -149,7 +149,7 @@ func (db *DB) ListLibraryItems(ctx context.Context, params models.LibraryListPar
 				continue
 			}
 			if len(peaks) == waveform.DetailPeaks {
-				items[i].Waveform, _ = json.Marshal(waveform.Reduce(peaks, 32))
+				items[i].Waveform, _ = json.Marshal(waveform.Stretch(waveform.Reduce(peaks, 32)))
 			} else {
 				items[i].Waveform = nil
 			}

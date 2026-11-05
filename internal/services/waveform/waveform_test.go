@@ -115,3 +115,24 @@ func TestReduceMaxPoolsOverlappingRanges(t *testing.T) {
 		}
 	}
 }
+
+func TestStretchSpreadsSpeechWithoutChangingItsShape(t *testing.T) {
+	got := Stretch([]int{0, 70, 85, 100, 70})
+	want := []int{0, 12, 56, 100, 12}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Stretch=%v want %v", got, want)
+		}
+	}
+	if got := Stretch([]int{150, 150, -5}); got[0] != 100 || got[2] != 0 {
+		t.Fatalf("bad stored values must stay within 0 to 100: %v", got)
+	}
+	for name, peaks := range map[string][]int{"silence": {0, 0, 0}, "level": {50, 50}, "empty": {}} {
+		got := Stretch(peaks)
+		for i := range peaks {
+			if got[i] != peaks[i] {
+				t.Fatalf("%s: Stretch=%v", name, got)
+			}
+		}
+	}
+}
