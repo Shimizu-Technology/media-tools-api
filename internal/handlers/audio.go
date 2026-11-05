@@ -26,6 +26,7 @@ import (
 	"github.com/Shimizu-Technology/media-tools-api/internal/database"
 	"github.com/Shimizu-Technology/media-tools-api/internal/middleware"
 	"github.com/Shimizu-Technology/media-tools-api/internal/models"
+	"github.com/Shimizu-Technology/media-tools-api/internal/services/waveform"
 	"github.com/Shimizu-Technology/media-tools-api/internal/services/worker"
 )
 
@@ -589,6 +590,20 @@ func writeCompletedAudioUploadResponse(c *gin.Context, existing *models.AudioTra
 
 // GetAudioTranscription retrieves a single audio transcription by ID.
 // GET /api/v1/audio/transcriptions/:id
+// displayWaveform shapes stored peaks for drawing. A value that cannot decode is
+// omitted rather than failing the whole response.
+func displayWaveform(stored json.RawMessage) json.RawMessage {
+	var peaks []int
+	if len(stored) == 0 || json.Unmarshal(stored, &peaks) != nil {
+		return nil
+	}
+	shaped, err := json.Marshal(waveform.Stretch(peaks))
+	if err != nil {
+		return nil
+	}
+	return shaped
+}
+
 func (h *Handler) GetAudioTranscription(c *gin.Context) {
 	id := c.Param("id")
 	actor := getActorOwnership(c)
@@ -608,6 +623,7 @@ func (h *Handler) GetAudioTranscription(c *gin.Context) {
 		return
 	}
 
+	at.Waveform = displayWaveform(at.Waveform)
 	c.JSON(http.StatusOK, at)
 }
 

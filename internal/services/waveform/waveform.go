@@ -108,6 +108,39 @@ func spoolPeaks(ctx context.Context, src io.Reader, dst io.Writer) (int64, int, 
 	}
 }
 
+// displayFloor keeps the quietest speech visible once a recording is stretched.
+const displayFloor = 12
+
+// Stretch spreads a recording's own loudness range across 0 to 100 for drawing.
+// Square-root peaks of speech sit near the top, so long recordings otherwise draw
+// as a solid block. It keeps every value's order and leaves silence at zero, so the
+// shape stays true to the audio. Only a recording's relative loudness is meaningful,
+// which was already the case: the stored peaks are normalized to its own maximum.
+func Stretch(peaks []int) []int {
+	if len(peaks) == 0 {
+		return peaks
+	}
+	low, high := 0, 0
+	for _, v := range peaks {
+		if v > 0 && (low == 0 || v < low) {
+			low = v
+		}
+		high = max(high, v)
+	}
+	result := make([]int, len(peaks))
+	if high == low {
+		// Silence or a perfectly level signal has no range to spread.
+		copy(result, peaks)
+		return result
+	}
+	for i, v := range peaks {
+		if v > 0 {
+			result[i] = displayFloor + (v-low)*(100-displayFloor)/(high-low)
+		}
+	}
+	return result
+}
+
 // Reduce max-pools measured detail peaks into equal overlapping time ranges.
 func Reduce(peaks []int, count int) []int {
 	if len(peaks) == 0 || count <= 0 {

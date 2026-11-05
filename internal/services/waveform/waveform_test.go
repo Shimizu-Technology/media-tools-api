@@ -115,3 +115,21 @@ func TestReduceMaxPoolsOverlappingRanges(t *testing.T) {
 		}
 	}
 }
+
+func TestStretchSpreadsSpeechWithoutChangingItsShape(t *testing.T) {
+	got := Stretch([]int{0, 70, 85, 100, 70})
+	want := []int{0, 12, 56, 100, 12}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Stretch=%v want %v", got, want)
+		}
+	}
+	for name, peaks := range map[string][]int{"silence": {0, 0, 0}, "level": {50, 50}, "empty": {}} {
+		got := Stretch(peaks)
+		for i := range peaks {
+			if got[i] != peaks[i] {
+				t.Fatalf("%s: Stretch=%v", name, got)
+			}
+		}
+	}
+}
