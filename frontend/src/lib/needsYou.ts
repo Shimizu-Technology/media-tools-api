@@ -34,6 +34,17 @@ export function selectNeedsYou(failed: LibraryItem[], recordings: PendingRecordi
   return [...onDevice, ...failures];
 }
 
+/**
+ * Browser recordings exist nowhere else, so Home never hides them. Only server
+ * failures, which the Library's failed filter also lists, are cut to fit.
+ */
+export function limitNeedsYou(entries: NeedsYouEntry[], limit: number): { shown: NeedsYouEntry[]; hiddenFailures: number } {
+  const onDevice = entries.filter((entry) => entry.kind === 'recording');
+  const failures = entries.filter((entry) => entry.kind === 'failed');
+  const room = Math.max(0, limit - onDevice.length);
+  return { shown: [...onDevice, ...failures.slice(0, room)], hiddenFailures: Math.max(0, failures.length - room) };
+}
+
 /** Good morning until noon, good afternoon until five, then good evening. */
 export function greeting(hour: number): string {
   if (hour >= 5 && hour < 12) return 'Good morning';

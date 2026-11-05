@@ -24,6 +24,7 @@ describe('legacy redirects', () => {
     ['/app/processing', '?status=completed', '/app/library?status=completed'],
     ['/collections', '', '/app/collections'],
     ['/collections/abc-123', '', '/app/collections/abc-123'],
+    ['/collections/abc-123', '?q=budget&type=audio', '/app/collections/abc-123?q=budget&type=audio'],
     ['/app/developer', '', '/app/settings/developer'],
     ['/app/developer/webhooks', '', '/app/settings/webhooks'],
     ['/webhooks', '', '/app/settings/webhooks'],

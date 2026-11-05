@@ -103,7 +103,7 @@ export function legacyRedirect(pathname: string, search: string): string | null 
   if (path === APP_ROUTES.home) return appLinkRedirect(params);
 
   const collection = path.match(/^\/collections\/([^/]+)$/);
-  if (collection) return collectionTarget(decodeURIComponent(collection[1]));
+  if (collection) return collectionTarget(decodeURIComponent(collection[1]), params);
 
   switch (path) {
     case '/app/video':

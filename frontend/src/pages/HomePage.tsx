@@ -8,7 +8,7 @@ import { formatClock, formatTimeOfDay } from '../lib/format';
 import { displayTitle, itemAttention, itemDetailPath, itemRowView } from '../lib/library';
 import { notifyLibraryActivityChanged } from '../lib/libraryActivityEvents';
 import { isAbortError, recordingFileName, uploadAudio } from '../lib/mediaUpload';
-import { greeting, selectNeedsYou, type NeedsYouEntry } from '../lib/needsYou';
+import { greeting, limitNeedsYou, selectNeedsYou, type NeedsYouEntry } from '../lib/needsYou';
 import { createOperationSlot } from '../lib/operation';
 import { deleteRecordingDraft, listRecordingDrafts, recoverInterruptedRecordings, type PendingRecording } from '../lib/recordingStore';
 import { useAIProcessingConsent } from '../contexts/useAIProcessingConsent';
@@ -118,7 +118,7 @@ export function HomePage() {
   };
 
   const date = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' }).format(now);
-  const shown = needsYou.slice(0, NEEDS_YOU_SHOWN);
+  const { shown, hiddenFailures } = limitNeedsYou(needsYou, NEEDS_YOU_SHOWN);
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -151,7 +151,7 @@ export function HomePage() {
                   <NeedsYouRow key={entry.key} entry={entry} upload={upload} retrying={retrying} onTranscribe={(recording) => void transcribe(recording)} onDelete={(recording) => void removeRecording(recording)} onRetry={(item) => void retry(item)} />
                 ))}
               </ul>
-              {needsYou.length > shown.length && <Link to={`${APP_ROUTES.library}?status=failed`} className="inline-flex min-h-11 items-center text-callout font-semibold text-accent-text">See all {needsYou.length.toLocaleString()}</Link>}
+              {hiddenFailures > 0 && <Link to={`${APP_ROUTES.library}?status=failed`} className="inline-flex min-h-11 items-center text-callout font-semibold text-accent-text">See {hiddenFailures.toLocaleString()} more failed</Link>}
             </section>
           )}
         </div>

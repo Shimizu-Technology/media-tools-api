@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LibraryItem } from './api';
-import { greeting, isRecentFailure, selectNeedsYou } from './needsYou';
+import { greeting, isRecentFailure, limitNeedsYou, selectNeedsYou } from './needsYou';
 import type { PendingRecording } from './recordingStore';
 
 const NOW = Date.parse('2026-11-05T12:00:00Z');
@@ -54,5 +54,21 @@ describe('Needs You', () => {
 describe('greeting', () => {
   it.each([[5, 'Good morning'], [11, 'Good morning'], [12, 'Good afternoon'], [16, 'Good afternoon'], [17, 'Good evening'], [23, 'Good evening'], [0, 'Good evening'], [4, 'Good evening']])('at %i is %s', (hour, text) => {
     expect(greeting(hour)).toBe(text);
+  });
+});
+
+describe('limitNeedsYou', () => {
+  const entry = (kind: 'recording' | 'failed', index: number) => ({ kind, key: `${kind}-${index}` }) as unknown as Parameters<typeof limitNeedsYou>[0][number];
+
+  it('never hides a browser recording, even past the limit', () => {
+    const entries = Array.from({ length: 6 }, (_, index) => entry('recording', index));
+    expect(limitNeedsYou(entries, 5)).toEqual({ shown: entries, hiddenFailures: 0 });
+  });
+
+  it('counts only the server failures it cut', () => {
+    const entries = [entry('recording', 0), ...Array.from({ length: 6 }, (_, index) => entry('failed', index))];
+    const { shown, hiddenFailures } = limitNeedsYou(entries, 3);
+    expect(shown.map((item) => item.key)).toEqual(['recording-0', 'failed-0', 'failed-1']);
+    expect(hiddenFailures).toBe(4);
   });
 });
