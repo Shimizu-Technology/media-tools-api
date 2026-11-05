@@ -242,10 +242,34 @@ final class LibraryViewModel {
         }
     }
 
+    /// A known change: the next automatic refresh runs whatever the throttle says.
+    func invalidate() {
+        lastLoadedAt = nil
+    }
+
+    /// A share still on this device has no server row, so the filters apply here. These
+    /// are the same checks on-device recordings get, and Home lists it either way.
+    func showsShare(ofKind kind: ShareInboxStore.Kind) -> Bool {
+        guard selectedCollection == nil,
+              selectedStatus == .all || selectedStatus == .active,
+              query.search.isEmpty,
+              !showsArchived,
+              !showsFavoritesOnly
+        else { return false }
+        switch selectedType {
+        case .all: return true
+        case .audio: return kind == .audio
+        case .youtube: return kind == .link
+        case .pdf: return kind == .pdf
+        }
+    }
+
     func remove(_ references: Set<LibraryReference>) {
         guard !references.isEmpty else { return }
+        // Safe to repeat: the count falls only for rows that were actually here.
+        let before = items.count
         items.removeAll { references.contains($0.reference) }
-        totalItems = max(0, totalItems - references.count)
+        totalItems = max(0, totalItems - (before - items.count))
         if let visibleReference, references.contains(visibleReference) {
             self.visibleReference = items.first?.reference
         }

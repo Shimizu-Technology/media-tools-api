@@ -319,6 +319,372 @@ final class MediaToolsUITests: XCTestCase {
         waitForExpectations(timeout: 10)
     }
 
+    // MARK: - Capture routing clears everything on screen
+
+    private func assertStopIsReachable(
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let stop = app.buttons["Stop and save recording"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 10), file: file, line: line)
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: stop)
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(app.buttons["Pause recording"].isHittable, file: file, line: line)
+    }
+
+    /// Reaches the running app. `app.open` would relaunch it, and a relaunch clears any
+    /// sheet for the wrong reason, so these tests would pass with no fix at all.
+    private func sendRouteSignal(_ name: String) {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("com.shimizutechnology.mediatools.ui-test.\(name)" as CFString),
+            nil,
+            nil,
+            true
+        )
+    }
+
+    private func pressActionButton(in app: XCUIApplication) {
+        sendRouteSignal("action-button")
+    }
+
+    private var captureFixture: [String] {
+        signedInFixture + [
+            "-ui-test-rich-content",
+            "-ui-test-ai-consent",
+            "-ui-test-simulated-recording",
+            "-ui-test-reset-recordings",
+            "-ui-test-needs-you",
+        ]
+    }
+
+    func testTheActionButtonClearsASheetAndItCanOpenAgainAfterward() {
+        let app = XCUIApplication()
+        app.launchArguments = captureFixture
+        app.launch()
+
+        let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'needs-you.options.'")).firstMatch
+        XCTAssertTrue(options.waitForExistence(timeout: 10))
+        options.tap()
+        XCTAssertTrue(app.buttons["options.delete"].waitForExistence(timeout: 5))
+
+        pressActionButton(in: app)
+        assertStopIsReachable(in: app)
+        XCTAssertFalse(app.buttons["options.delete"].exists, "The sheet is gone, not just covered")
+
+        // Stopping leads back to a Home whose sheet is not stuck in its old state.
+        app.buttons["Stop and save recording"].tap()
+        XCTAssertTrue(app.buttons["record.close"].waitForExistence(timeout: 5))
+        app.buttons["record.close"].tap()
+        XCTAssertTrue(options.waitForExistence(timeout: 5))
+        options.tap()
+        XCTAssertTrue(app.buttons["options.delete"].waitForExistence(timeout: 5), "The same sheet opens again")
+    }
+
+    func testTheActionButtonClearsAnAlertOverASheet() {
+        let app = XCUIApplication()
+        app.launchArguments = captureFixture
+        app.launch()
+
+        let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'needs-you.options.'")).firstMatch
+        XCTAssertTrue(options.waitForExistence(timeout: 10))
+        options.tap()
+        XCTAssertTrue(app.buttons["options.delete"].waitForExistence(timeout: 5))
+        app.buttons["options.delete"].tap()
+        XCTAssertTrue(app.alerts.buttons["Keep"].waitForExistence(timeout: 5))
+
+        pressActionButton(in: app)
+        assertStopIsReachable(in: app)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        // Nothing was confirmed on the way out.
+        app.buttons["Stop and save recording"].tap()
+        XCTAssertTrue(app.buttons["record.close"].waitForExistence(timeout: 5))
+        app.buttons["record.close"].tap()
+        XCTAssertTrue(app.staticTexts["Aug 21 recording"].waitForExistence(timeout: 5))
+    }
+
+    func testTheActionButtonClearsADetailSheetAndItsKeyboard() {
+        let app = XCUIApplication()
+        app.launchArguments = captureFixture + ["-ui-test-notification-route"]
+        app.launch()
+
+        let more = app.buttons["detail.more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        more.tap()
+        app.buttons["Rename Recording"].tap()
+        let field = app.textFields["recording.rename.field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+
+        pressActionButton(in: app)
+        assertStopIsReachable(in: app)
+        XCTAssertFalse(field.exists)
+    }
+
+    func testTheActionButtonClearsAShareSheetOverAnExportSheet() {
+        let app = XCUIApplication()
+        app.launchArguments = captureFixture + ["-ui-test-notification-route"]
+        app.launch()
+
+        let export = app.buttons["Export"]
+        XCTAssertTrue(export.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: export)
+        waitForExpectations(timeout: 10)
+        export.tap()
+        let plainText = app.buttons["Plain Text (.txt)"]
+        XCTAssertTrue(plainText.waitForExistence(timeout: 5))
+        plainText.tap()
+        XCTAssertTrue(
+            app.otherElements["ActivityListView"].waitForExistence(timeout: 10)
+                || app.buttons["Copy"].waitForExistence(timeout: 5)
+        )
+
+        pressActionButton(in: app)
+        assertStopIsReachable(in: app)
+        XCTAssertFalse(plainText.exists)
+    }
+
+    func testTheActionButtonClearsAnOpenMenu() {
+        let app = XCUIApplication()
+        app.launchArguments = captureFixture
+        app.launch()
+
+        openLibrary(in: app)
+        app.buttons["library.add"].tap()
+        XCTAssertTrue(app.buttons["Add a Link"].waitForExistence(timeout: 5))
+
+        pressActionButton(in: app)
+        assertStopIsReachable(in: app)
+        XCTAssertFalse(app.buttons["Add a Link"].exists)
+    }
+
+    func testTheLiveActivityLinkClearsASheetToo() {
+        let app = XCUIApplication()
+        app.launchArguments = captureFixture
+        app.launch()
+
+        openSettings(in: app)
+        app.buttons["settings.account"].tap()
+        XCTAssertTrue(app.buttons["Delete account and data"].waitForExistence(timeout: 5))
+        app.buttons["Delete account and data"].tap()
+        XCTAssertTrue(app.staticTexts["Permanently delete your account?"].waitForExistence(timeout: 5))
+
+        sendRouteSignal("record-link")
+        XCTAssertTrue(app.buttons["Start recording"].waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: app.buttons["Start recording"])
+        waitForExpectations(timeout: 5)
+        XCTAssertFalse(app.staticTexts["Permanently delete your account?"].exists)
+    }
+
+    func testStoppingWithTheActionButtonLeavesAnAIPromptToBeAnswered() {
+        let app = XCUIApplication()
+        // No consent: the stop raises the one prompt that must stay up.
+        app.launchArguments = signedInFixture + [
+            "-ui-test-simulated-recording",
+            "-ui-test-simulated-upload",
+            "-ui-test-reset-recordings",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.buttons["home.record"].waitForExistence(timeout: 10))
+        pressActionButton(in: app)
+        let stop = app.buttons["Stop and save recording"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 10))
+        pressActionButton(in: app)
+
+        let disclosure = app.staticTexts["Allow third-party AI processing?"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
+        // Still there a moment later, once the route to the recorder has landed.
+        XCTAssertFalse(disclosure.waitForNonExistence(timeout: 2))
+    }
+
+    // MARK: - Known changes reach every tab
+
+    func testDeletingFromTheLibraryLeavesHomeWithinItsThrottle() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + ["-ui-test-rich-content", "-ui-test-reset-recordings"]
+        app.launch()
+
+        let homeRow = app.buttons["home-row-audio:rich-hafa"]
+        XCTAssertTrue(homeRow.waitForExistence(timeout: 10))
+
+        openLibrary(in: app)
+        let libraryRow = app.buttons["library-row-audio:rich-hafa"]
+        XCTAssertTrue(libraryRow.waitForExistence(timeout: 5))
+        libraryRow.swipeLeft()
+        app.buttons["Delete"].firstMatch.tap()
+        let confirm = app.buttons["Delete"].firstMatch
+        XCTAssertTrue(app.staticTexts["Delete This Item?"].waitForExistence(timeout: 5))
+        confirm.tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: libraryRow)
+        waitForExpectations(timeout: 5)
+
+        app.buttons["tab.home"].tap()
+        XCTAssertTrue(app.buttons["home.record"].waitForExistence(timeout: 5))
+        XCTAssertFalse(homeRow.exists, "Home must not offer what was just deleted")
+    }
+
+    func testChangesFromADetailOpenedOnHomeReachTheLibrary() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + ["-ui-test-rich-content", "-ui-test-reset-recordings"]
+        app.launch()
+
+        XCTAssertTrue(app.buttons["home-row-audio:rich-hafa"].waitForExistence(timeout: 10))
+        openLibrary(in: app)
+        let libraryRow = app.buttons["library-row-audio:rich-hafa"]
+        XCTAssertTrue(libraryRow.waitForExistence(timeout: 5))
+        app.buttons["tab.home"].tap()
+
+        // Rename, then archive, from the detail screen reached through Home.
+        let homeRow = app.buttons["home-row-audio:rich-hafa"]
+        XCTAssertTrue(homeRow.waitForExistence(timeout: 5))
+        homeRow.tap()
+        let more = app.buttons["detail.more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        more.tap()
+        app.buttons["Rename Recording"].tap()
+        let field = app.textFields["recording.rename.field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.clearAndType("Renamed from detail")
+        app.buttons["recording.rename.save"].tap()
+        XCTAssertTrue(field.waitForNonExistence(timeout: 5))
+
+        // Over in the Library with the detail still open, the new name has already landed.
+        more.tap()
+        app.buttons["Archive"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Archived'")).firstMatch.waitForExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        XCTAssertTrue(app.buttons["home.record"].waitForExistence(timeout: 5))
+        app.buttons["tab.library"].tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: libraryRow)
+        waitForExpectations(timeout: 5)
+    }
+
+    func testAnItemDeletedFromItsDetailLeavesEveryList() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + ["-ui-test-rich-content", "-ui-test-reset-recordings"]
+        app.launch()
+
+        openLibrary(in: app)
+        let libraryRow = app.buttons["library-row-audio:rich-4"]
+        XCTAssertTrue(libraryRow.waitForExistence(timeout: 10))
+        libraryRow.tap()
+        let more = app.buttons["detail.more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        more.tap()
+        app.buttons["Delete"].tap()
+        XCTAssertTrue(app.staticTexts["Delete This Item?"].waitForExistence(timeout: 5))
+        app.buttons["Delete"].firstMatch.tap()
+
+        XCTAssertTrue(app.textFields["library.search"].waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: libraryRow)
+        waitForExpectations(timeout: 5)
+        app.buttons["tab.home"].tap()
+        XCTAssertFalse(app.buttons["home-row-audio:rich-4"].exists)
+    }
+
+    // MARK: - Largest text
+
+    func testAskJoinsThePageAtFullSizeAtTheLargestText() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + [
+            "-ui-test-rich-content",
+            "-ui-test-notification-route",
+            "-ui-test-reset-recordings",
+            "-ui-test-largest-text",
+        ]
+        app.launch()
+
+        let ask = app.buttons["detail.ask"]
+        XCTAssertTrue(ask.waitForExistence(timeout: 10))
+        let startingY = ask.frame.minY
+        app.swipeUp()
+        // It moved with the page, so it is not floating over what it asks about.
+        XCTAssertNotEqual(ask.frame.minY, startingY, accuracy: 1)
+    }
+
+    func testAnUnfinishedRowKeepsItsLengthAtTheLargestText() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + [
+            "-ui-test-rich-content",
+            "-ui-test-reset-recordings",
+            "-ui-test-largest-text",
+        ]
+        app.launch()
+
+        openLibrary(in: app)
+        let row = app.buttons["library-row-audio:rich-2"]
+        for _ in 0..<4 where !row.exists { app.swipeUp() }
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Transcribing"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["1:48"].firstMatch.exists, "Parking lot idea is 1:48 long")
+    }
+
+    // MARK: - Collection metadata
+
+    func testAddingToACollectionUpdatesTheHeaderAtOnce() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + ["-ui-test-rich-content", "-ui-test-reset-recordings"]
+        app.launch()
+
+        openLibrary(in: app)
+        let row = app.buttons["library-row-audio:rich-4"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        let metadata = app.staticTexts["detail.metadata"]
+        XCTAssertTrue(metadata.waitForExistence(timeout: 10))
+        XCTAssertFalse(metadata.label.contains("Baby"))
+
+        app.buttons["detail.more"].tap()
+        app.buttons["Add to Collection"].tap()
+        let baby = app.staticTexts["Baby"]
+        XCTAssertTrue(baby.waitForExistence(timeout: 10))
+        baby.tap()
+        XCTAssertTrue(baby.waitForNonExistence(timeout: 5), "The sheet closes itself")
+        XCTAssertTrue(metadata.label.contains("Baby"), metadata.label)
+    }
+
+    func testAColdNotificationOpenShowsTheCollectionFromTheFirstFrame() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + [
+            "-ui-test-rich-content",
+            "-ui-test-notification-route",
+            "-ui-test-reset-recordings",
+        ]
+        app.launch()
+
+        let metadata = app.staticTexts["detail.metadata"]
+        XCTAssertTrue(metadata.waitForExistence(timeout: 10))
+        XCTAssertTrue(metadata.label.contains("Work"), metadata.label)
+    }
+
+    // MARK: - Needs You stays honest about what it leaves out
+
+    func testManyFailuresShowTheNewestAndLeadToTheRest() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + [
+            "-ui-test-rich-content",
+            "-ui-test-many-failures",
+            "-ui-test-reset-recordings",
+        ]
+        app.launch()
+
+        let seeAll = app.buttons["needs-you.see-all"]
+        XCTAssertTrue(seeAll.waitForExistence(timeout: 10))
+        let views = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'needs-you.view.'"))
+        XCTAssertEqual(views.count, NeedsYouCap.serverFailures)
+        seeAll.tap()
+
+        XCTAssertTrue(app.textFields["library.search"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["tab.library"].isSelected)
+        XCTAssertTrue(app.staticTexts["Needs attention"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["library-row-audio:many-21"].waitForExistence(timeout: 5) || app.buttons["library-row-audio:many-1"].exists)
+        XCTAssertFalse(app.buttons["library-row-audio:rich-hafa"].exists, "Only failures here")
+    }
+
     func testChipsFilterTheLibraryIncludingStarredAndArchived() {
         let app = XCUIApplication()
         app.launchArguments = signedInFixture + ["-ui-test-rich-content", "-ui-test-reset-recordings"]
@@ -494,7 +860,7 @@ final class MediaToolsUITests: XCTestCase {
         let stop = app.buttons["Stop and save recording"]
         XCTAssertTrue(stop.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Recording"].exists)
-        XCTAssertTrue(app.staticTexts["Press the Action Button again to stop."].exists)
+        XCTAssertTrue(app.staticTexts["recording.hint"].exists)
 
         pause.tap()
         XCTAssertTrue(app.staticTexts["Paused"].waitForExistence(timeout: 5))
@@ -806,7 +1172,8 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Transcription complete!"].waitForExistence(timeout: 15))
     }
 
-    func testLiveActivityLinkOpensTheRecorder() {
+    /// `open` relaunches the app, so this is the link from a cold start.
+    func testLiveActivityLinkOpensTheRecorderFromACold() {
         let app = XCUIApplication()
         app.launchArguments = signedInFixture + ["-ui-test-reset-recordings"]
         app.launch()
@@ -1485,5 +1852,19 @@ final class MediaToolsUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+}
+
+/// Home's cap, stated here because UI tests cannot see the app's types.
+private enum NeedsYouCap {
+    static let serverFailures = 3
+}
+
+private extension XCUIElement {
+    /// Replaces a text field's contents.
+    func clearAndType(_ text: String) {
+        let current = value as? String ?? ""
+        typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+        typeText(text)
     }
 }

@@ -10,6 +10,16 @@ final class MediaToolsService {
     private(set) var pdfItems: [PDFExtraction] = []
     private(set) var collections: [Collection] = []
     @ObservationIgnored private var libraryRows: [LibraryReference: LibraryListItem] = [:]
+    /// Collections this device has added an item to. A list row replaces itself on every
+    /// refresh, and may not carry collections until the server deploys them.
+    @ObservationIgnored private var addedCollections: [LibraryReference: [LibraryItemCollection]] = [:]
+    /// Moves on every change this app knows it made to the library, from any screen, so
+    /// that every tab's list can catch up without waiting for its refresh throttle.
+    private(set) var libraryRevision = 0
+    /// What has been deleted this session. Lists drop these at once, before any refresh.
+    private(set) var deletedReferences: Set<LibraryReference> = []
+    /// A collection made a moment ago may not be in `collections` yet.
+    @ObservationIgnored private var knownCollections: [String: Collection] = [:]
     private(set) var isLoading = false
 
     private let api = APIClient.shared
@@ -32,7 +42,9 @@ final class MediaToolsService {
     }
 
     func transcribeURL(_ url: String) async throws -> Transcript {
-        try await api.post("/transcripts", body: TranscribeRequest(url: url))
+        let transcript: Transcript = try await api.post("/transcripts", body: TranscribeRequest(url: url))
+        noteLibraryChanged()
+        return transcript
     }
 
     func importSharedLink(_ link: String, expectedOwnerID: String?) async throws {
@@ -180,6 +192,7 @@ final class MediaToolsService {
             body: EmptyResponse()
         )
         upsertAudioItem(item)
+        noteLibraryChanged()
         return item
     }
 
@@ -198,6 +211,7 @@ final class MediaToolsService {
             body: RenameAudioRequest(name: name)
         )
         upsertAudioItem(item)
+        noteLibraryChanged()
         return item
     }
 
@@ -296,12 +310,28 @@ final class MediaToolsService {
     /// so the detail screen reads them here instead of waiting on another request.
     func rememberLibraryRows(_ items: [LibraryListItem]) {
         for item in items {
-            libraryRows[item.reference] = item
+            libraryRows[item.reference.normalized] = item
         }
     }
 
     func libraryRow(for reference: LibraryReference) -> LibraryListItem? {
-        libraryRows[reference]
+        libraryRows[reference.normalized]
+    }
+
+    /// The item's collections as far as this device knows, oldest first: what the
+    /// server listed, then anything added here since.
+    func collections(for reference: LibraryReference) -> [LibraryItemCollection] {
+        let key = reference.normalized
+        var result = libraryRows[key]?.collections ?? []
+        for added in addedCollections[key] ?? [] where !result.contains(where: { $0.id == added.id }) {
+            result.append(added)
+        }
+        return result
+    }
+
+    /// Call after any successful change to the library that is not one of the calls here.
+    func noteLibraryChanged() {
+        libraryRevision += 1
     }
 
     static func libraryItemsPath(
@@ -364,6 +394,8 @@ final class MediaToolsService {
         default:
             throw APIError.httpError(statusCode: 400, message: "Unknown library item type")
         }
+        deletedReferences.insert(reference)
+        noteLibraryChanged()
     }
 
     func getLibraryPreferences(_ reference: LibraryReference) async throws -> LibraryPreferences {
@@ -376,10 +408,12 @@ final class MediaToolsService {
         _ reference: LibraryReference,
         updates: UpdateLibraryPreferencesRequest
     ) async throws -> LibraryPreferences {
-        try await api.patch(
+        let preferences: LibraryPreferences = try await api.patch(
             "/library/items/\(reference.collectionItemType)/\(reference.itemId)/preferences",
             body: updates
         )
+        noteLibraryChanged()
+        return preferences
     }
 
     // MARK: - Collections
@@ -397,16 +431,43 @@ final class MediaToolsService {
     }
 
     func createCollection(name: String, description: String? = nil) async throws -> Collection {
-        try await api.post("/collections", body: CreateCollectionRequest(name: name, description: description))
+        let collection: Collection = try await api.post(
+            "/collections",
+            body: CreateCollectionRequest(name: name, description: description)
+        )
+        knownCollections[collection.id] = collection
+        noteLibraryChanged()
+        return collection
     }
 
     func addToCollection(_ collectionId: String, itemType: String, itemId: String) async throws {
         let body = AddItemsRequest(items: [AddItemEntry(itemType: itemType, itemId: itemId)])
         try await api.post("/collections/\(collectionId)/items", body: body) as Void
+        let known = collections.first { $0.id == collectionId } ?? knownCollections[collectionId]
+        if let known {
+            let key = LibraryReference(itemType: itemType, itemId: itemId).normalized
+            addedCollections[key, default: []].append(
+                LibraryItemCollection(id: known.id, name: known.name, color: known.color)
+            )
+        }
+        noteLibraryChanged()
     }
 
     func deleteCollection(_ id: String) async throws {
         try await api.delete("/collections/\(id)")
+        forgetCollection(id)
+        noteLibraryChanged()
+    }
+
+    private func forgetCollection(_ id: String) {
+        for key in Array(addedCollections.keys) {
+            addedCollections[key]?.removeAll { $0.id == id }
+        }
+        for (key, row) in libraryRows where row.collections?.contains(where: { $0.id == id }) == true {
+            var updated = row
+            updated.collections?.removeAll { $0.id == id }
+            libraryRows[key] = updated
+        }
     }
 
     // MARK: - Chat

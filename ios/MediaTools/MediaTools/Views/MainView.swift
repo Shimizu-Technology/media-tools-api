@@ -131,8 +131,10 @@ struct MainView: View {
     @Environment(NotificationRouter.self) private var notificationRouter
     @Environment(RecordingCoordinator.self) private var recorder
     @Environment(RecordingUploadCoordinator.self) private var uploader
+    @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let previewItems: [LibraryListItem]?
+    private let service = MediaToolsService.shared
 
     /// `previewItems` swaps in sample rows for the Debug launch modes.
     init(previewItems: [LibraryListItem]? = nil, initialTab: AppTab = .home) {
@@ -188,15 +190,27 @@ struct MainView: View {
         .onOpenURL { url in
             // The Live Activity's deep link.
             guard url.scheme == "mediatools", url.host == "record" else { return }
-            navigator.showRecorder()
+            showRecorderOverEverything()
         }
+        #if DEBUG
+        // What a press does while the app is open, for tests that must not relaunch it.
+        .onReceive(NotificationCenter.default.publisher(for: .uiTestActionButton)) { _ in
+            Task { @MainActor in
+                _ = await recorder.toggleFromSystem()
+                QuickCaptureNavigation.requestRecordTab()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .uiTestRecordLink)) { _ in
+            showRecorderOverEverything()
+        }
+        #endif
         .onAppear {
             // A cold Action Button press lands on the recorder, with nothing under it
             // sliding or fading on the way. So does any capture already running.
             if QuickCaptureNavigation.consumeRecordTabRequest() || recorder.isRecording {
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
-                withTransaction(transaction) { navigator.showRecorder() }
+                withTransaction(transaction) { showRecorderOverEverything() }
             }
             openPendingNotificationRoute()
         }
@@ -207,11 +221,31 @@ struct MainView: View {
             // Consume the persisted fallback as well so a later onAppear does
             // not replay a warm-launch navigation request.
             _ = QuickCaptureNavigation.consumeRecordTabRequest()
-            navigator.showRecorder()
+            showRecorderOverEverything()
         }
         .onChange(of: recorder.isRecording) { wasRecording, isRecording in
             // However a capture began, its screen is what comes up.
-            if isRecording, !wasRecording { navigator.showRecorder() }
+            if isRecording, !wasRecording { showRecorderOverEverything() }
+        }
+        // Known changes reach every list at once, past its refresh throttle: what was
+        // deleted goes straight away, and a short pause gathers a bulk action's changes.
+        .onChange(of: service.libraryRevision) { _, _ in
+            homeModel.invalidate()
+            libraryModel.invalidate()
+            homeModel.remove(service.deletedReferences)
+            libraryModel.remove(service.deletedReferences)
+        }
+        .task(id: service.libraryRevision) {
+            guard service.libraryRevision > 0 else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
+            await refreshLists()
+            if navigator.visitedTabs.contains(.collections) {
+                await service.loadCollections()
+            }
         }
         .onChange(of: navigator.homePath) { previous, current in
             refreshAfterDetail(previous: previous, current: current)
@@ -269,7 +303,12 @@ struct MainView: View {
         let isActive = navigator.selectedTab == tab && !navigator.isRecorderPresented
         switch tab {
         case .home:
-            HomeView(model: homeModel, isActive: isActive, onRecord: startRecording)
+            HomeView(
+                model: homeModel,
+                isActive: isActive,
+                onRecord: startRecording,
+                onSeeAllFailed: showFailedItems
+            )
         case .library:
             LibraryView(model: libraryModel, previewItems: previewItems, isActive: isActive)
         case .collections:
@@ -285,7 +324,35 @@ struct MainView: View {
     private func startRecording(contentType: String) {
         recorder.start(contentType: contentType)
         Haptics.medium()
+        showRecorderOverEverything()
+    }
+
+    /// The Library's own list of every failure, which Home only samples.
+    private func showFailedItems() {
+        libraryModel.selectedChip = .all
+        libraryModel.selectedStatus = .failed
+        libraryModel.searchText = ""
+        navigator.libraryPath = []
+        navigator.select(.library)
+    }
+
+    /// The recorder sits inside this view, so anything already presented would stay on
+    /// top of Pause and Stop. Every route to it clears them first. The capture itself
+    /// has already started or is started separately, so this never holds it up.
+    private func showRecorderOverEverything() {
+        clearPresentations()
         navigator.showRecorder()
+    }
+
+    /// An AI permission prompt is the one thing that outranks an idle recorder: pressing
+    /// the Action Button to stop can raise it, and it must stay up to be answered. It
+    /// gives way only to a capture that is running, as if "Not now" had been chosen.
+    private func clearPresentations() {
+        if aiProcessingConsent.isPresentingDisclosure {
+            guard recorder.isRecording || recorder.isStarting else { return }
+            aiProcessingConsent.decline()
+        }
+        AppPresentations.dismissAll()
     }
 
     private func closeRecorder() {
@@ -330,7 +397,37 @@ struct MainView: View {
 
     private func openPendingNotificationRoute() {
         guard let reference = notificationRouter.consume() else { return }
+        clearPresentations()
         navigator.openFromOutside(reference)
+    }
+}
+
+/// Clears whatever is on screen above the app's main view, however it got there: a
+/// sheet, a sheet over a sheet, an alert, a confirmation, a share sheet, a file picker, a
+/// menu, or the keyboard. Doing this from the top means no screen has to remember to
+/// take part, including any sheet added later.
+@MainActor
+enum AppPresentations {
+    static func dismissAll() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows {
+                dismissMenus(in: window)
+                // Not animated, so the recorder is never underneath something leaving.
+                if window.rootViewController?.presentedViewController != nil {
+                    window.rootViewController?.dismiss(animated: false)
+                }
+            }
+        }
+    }
+
+    private static func dismissMenus(in view: UIView) {
+        for interaction in view.interactions {
+            (interaction as? UIContextMenuInteraction)?.dismissMenu()
+        }
+        for subview in view.subviews {
+            dismissMenus(in: subview)
+        }
     }
 }
 

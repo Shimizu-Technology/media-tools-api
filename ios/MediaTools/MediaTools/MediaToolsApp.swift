@@ -39,6 +39,7 @@ struct MediaToolsApp: App {
             AIProcessingConsentManager.shared.resetForUITesting()
         }
         UITestShareFixture.prepare(arguments: arguments)
+        UITestRouteSignals.listen()
         #endif
         // A stored session owns anything captured from here on, including a
         // cold Action Button press and work finishing in a background launch

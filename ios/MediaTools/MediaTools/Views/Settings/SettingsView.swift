@@ -87,7 +87,11 @@ struct SettingsView: View {
                 SettingsCardDivider()
 
                 NavigationLink(value: AppRoute.settings(.quickRecord)) {
-                    SettingsLinkRow("Quick Record", systemImage: "mic", trailing: "Action Button")
+                    SettingsLinkRow(
+                        "Quick Record",
+                        systemImage: "mic",
+                        trailing: ActionButtonSupport.isAvailable ? "Action Button" : nil
+                    )
                 }
                 .buttonStyle(RowButtonStyle())
                 .accessibilityIdentifier("settings.quick-record")

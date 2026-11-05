@@ -11,21 +11,31 @@ final class HomeViewModel {
     private(set) var hasLoaded = false
     private(set) var loadError: String?
 
-    private let service: MediaToolsService
+    /// How many failed items the server has in all, which may be more than the page.
+    private(set) var failedTotal = 0
+
     private let previewItems: [LibraryListItem]?
+    private let load: () async throws -> LibraryListResponse
+    private let loadFailures: () async throws -> LibraryListResponse
     private let now: () -> Date
     private var lastLoadedAt: Date?
+    /// A refresh can start while an older one is on the wire. Only the newest may land,
+    /// or a list from before a deletion could put the deleted row back.
+    private var generation = 0
 
     static let recentLimit = 6
 
     init(
         service: MediaToolsService = .shared,
         previewItems: [LibraryListItem]? = nil,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        load: (() async throws -> LibraryListResponse)? = nil,
+        loadFailures: (() async throws -> LibraryListResponse)? = nil
     ) {
-        self.service = service
         self.previewItems = previewItems
         self.now = now
+        self.load = load ?? { try await service.listLibraryItems(perPage: Self.recentLimit) }
+        self.loadFailures = loadFailures ?? { try await service.listLibraryItems(perPage: 20, status: "failed") }
     }
 
     var hasActiveItems: Bool {
@@ -42,33 +52,48 @@ final class HomeViewModel {
         await refresh()
     }
 
+    /// A known change: the next automatic refresh runs whatever the throttle says.
+    func invalidate() {
+        lastLoadedAt = nil
+    }
+
+    func remove(_ references: Set<LibraryReference>) {
+        guard !references.isEmpty else { return }
+        recent.removeAll { references.contains($0.reference) }
+        serverFailures.removeAll { references.contains($0.reference) }
+    }
+
     func refresh() async {
         if let previewItems {
             recent = Array(previewItems.prefix(Self.recentLimit))
             serverFailures = previewItems.filter { $0.status == "failed" }
+            failedTotal = serverFailures.count
             hasLoaded = true
             lastLoadedAt = now()
             return
         }
+        generation += 1
+        let current = generation
         isLoading = true
-        defer { isLoading = false }
+        defer { if current == generation { isLoading = false } }
         do {
-            let latest = try await service.listLibraryItems(perPage: Self.recentLimit)
-            guard !Task.isCancelled else { return }
+            let latest = try await load()
+            guard current == generation, !Task.isCancelled else { return }
             recent = latest.data
             loadError = nil
             hasLoaded = true
             lastLoadedAt = now()
         } catch {
-            guard !Task.isCancelled else { return }
+            guard current == generation, !Task.isCancelled else { return }
             loadError = error.localizedDescription
             return
         }
         // Failures are a bonus on top of the list above, so losing this request only
         // leaves the section as it was. The newest page covers the last seven days.
-        if let failed = try? await service.listLibraryItems(perPage: 20, status: "failed") {
-            guard !Task.isCancelled else { return }
+        if let failed = try? await loadFailures() {
+            guard current == generation, !Task.isCancelled else { return }
             serverFailures = failed.data
+            failedTotal = failed.totalItems
         }
     }
 }

@@ -244,6 +244,7 @@ struct RecordView: View {
             .foregroundStyle(Theme.onHero)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("recording.hint")
     }
 
     /// The status, centered, with a way back to reading on the left.
@@ -363,7 +364,7 @@ struct RecordView: View {
             return "Another audio source paused capture. It will resume when iOS allows, or you can stop and save now."
         }
         if recorder.isPaused { return "No audio is being added. Resume when you’re ready, or stop and save." }
-        return UIDevice.current.userInterfaceIdiom == .phone
+        return ActionButtonSupport.isAvailable
             ? "Press the Action Button again to stop."
             : "Tap stop to save."
     }

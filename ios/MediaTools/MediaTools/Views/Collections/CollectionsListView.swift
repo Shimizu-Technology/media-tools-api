@@ -270,7 +270,8 @@ struct CollectionDetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
-        .task { await load() }
+        // Runs again after any known change, such as deleting one of its items.
+        .task(id: service.libraryRevision) { await load() }
     }
 
     private func load() async {

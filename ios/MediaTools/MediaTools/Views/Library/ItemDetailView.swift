@@ -19,7 +19,9 @@ private enum DetailTab: String, Hashable {
 
 struct ItemDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let item: LibraryItem
+    @State private var headerCollections: [LibraryItemCollection]
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
     @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
@@ -85,6 +87,11 @@ struct ItemDetailView: View {
         ("lecture", "Lecture"),
     ]
 
+    init(item: LibraryItem) {
+        self.item = item
+        _headerCollections = State(initialValue: MediaToolsService.shared.collections(for: item.reference))
+    }
+
     private var summaryTypes: [(String, String)] {
         isAudioItem ? Self.audioSummaryTypes : Self.transcriptSummaryTypes
     }
@@ -96,6 +103,12 @@ struct ItemDetailView: View {
                     headerSection
                     audioPlayerSection
                     noticesSection
+                    // Floating, text this large would hide what it asks about, so it
+                    // joins the page instead of shrinking.
+                    if dynamicTypeSize.isAccessibilitySize, canUseContentActions {
+                        askBox
+                            .padding(.top, 14)
+                    }
                     contentTabs
                     switch visibleTab {
                     case .summary: summarySection
@@ -168,6 +181,10 @@ struct ItemDetailView: View {
         }
         .toolbar { detailToolbar }
         .task { await loadDetail() }
+        // After Add to Collection, here or anywhere else.
+        .onChange(of: service.libraryRevision) { _, _ in
+            headerCollections = service.collections(for: itemReference)
+        }
         .onChange(of: audio?.hasDistinctReadableTranscript) { _, hasDistinctOriginal in
             if hasDistinctOriginal != true, transcriptModeChoice == .original {
                 transcriptModeChoice = .readable
@@ -311,7 +328,8 @@ struct ItemDetailView: View {
     @ViewBuilder
     private var bottomBar: some View {
         let showsMiniPlayer = !isPlayerVisible && player.isPlaying
-        if canUseContentActions || showsMiniPlayer {
+        let floatsAsk = canUseContentActions && !dynamicTypeSize.isAccessibilitySize
+        if floatsAsk || showsMiniPlayer {
             VStack(spacing: 8) {
                 if showsMiniPlayer {
                     AudioMiniBar(player: player, onLocate: locateActiveSegment)
@@ -320,7 +338,7 @@ struct ItemDetailView: View {
                         .shadow(color: .black.opacity(0.14), radius: 10, y: 3)
                         .transition(.opacity)
                 }
-                if canUseContentActions {
+                if floatsAsk {
                     askBox
                 }
             }
@@ -340,11 +358,7 @@ struct ItemDetailView: View {
             }
         } label: {
             Label("Ask about this", systemImage: "sparkles")
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
         }
-        // It floats over the page, so past this size it would hide what it asks about.
-        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .buttonStyle(PrimaryButtonStyle(shape: .pill))
         .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
         .accessibilityLabel("Ask about this")
@@ -364,7 +378,7 @@ struct ItemDetailView: View {
 
             if let metadataText {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if let collection = rowMetadata?.primaryCollection {
+                    if let collection = headerCollections.first {
                         CollectionDot(colorKey: collection.color)
                             .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                     }
@@ -372,6 +386,7 @@ struct ItemDetailView: View {
                         .font(.subheadline)
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("detail.metadata")
                 }
             }
 
@@ -391,8 +406,8 @@ struct ItemDetailView: View {
 
     private var metadataText: String? {
         var parts: [String] = []
-        if let collection = rowMetadata?.primaryCollection {
-            parts.append(collection.name)
+        if !headerCollections.isEmpty {
+            parts.append(headerCollections.map(\.name).joined(separator: ", "))
         }
         if let date = createdAt {
             let day = MediaFormat.dayTitle(for: date)
@@ -1366,10 +1381,22 @@ struct ItemDetailView: View {
             withMotion {
                 summary = result
             }
+            // A new summary changes the excerpt the lists show.
+            service.noteLibraryChanged()
             Haptics.success()
         } catch {
             summaryError = error.localizedDescription
             Haptics.error()
+        }
+    }
+}
+
+private extension LibraryItem {
+    var reference: LibraryReference {
+        switch self {
+        case .transcript(let transcript): LibraryReference(itemType: "transcript", itemId: transcript.id)
+        case .audio(let audio): LibraryReference(itemType: "audio", itemId: audio.id)
+        case .pdf(let pdf): LibraryReference(itemType: "pdf", itemId: pdf.id)
         }
     }
 }

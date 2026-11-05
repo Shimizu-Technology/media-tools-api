@@ -25,17 +25,30 @@ enum NeedsYouItem: Identifiable {
     }
 }
 
+/// What Home shows, and whether there is more than it shows.
+struct NeedsYouList {
+    let items: [NeedsYouItem]
+    /// Recent server failures beyond the few shown. The Library lists every one.
+    let hasMoreServerFailures: Bool
+}
+
 enum NeedsYouSelection {
     /// Old failures stay in the Library, so this section can empty out and disappear.
     static let serverFailureWindow: TimeInterval = 7 * 24 * 60 * 60
+    /// Home stays about capture. Past this, a See all row leads to the rest.
+    static let serverFailureLimit = 3
 
+    /// `failedTotal` is the server's count of every failed item, which tells whether
+    /// the page handed in here was cut short. On-device work is never capped: it
+    /// exists nowhere else.
     static func select(
         recordings: [LocalRecording],
         shares: [ShareInboxStore.Item],
         serverFailures: [LibraryListItem],
+        failedTotal: Int? = nil,
         autoTranscribeWillSend: Bool,
         now: Date = Date()
-    ) -> [NeedsYouItem] {
+    ) -> NeedsYouList {
         let actionable = recordings.filter { $0.needsPerson(autoTranscribeWillSend: autoTranscribeWillSend) }
         let localIDs = Set(recordings.compactMap(\.remoteTranscriptionID))
         let recent = serverFailures.filter { item in
@@ -44,9 +57,18 @@ enum NeedsYouSelection {
             // A device copy of the same recording already has a row with more to offer.
             return !(item.itemType == "audio" && localIDs.contains(item.id))
         }
-        return actionable.sorted { $0.createdAt > $1.createdAt }.map(NeedsYouItem.recording)
-            + shares.map(NeedsYouItem.share)
-            + recent.map(NeedsYouItem.serverFailure)
+        let newestFirst = recent.sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
+        let shown = Array(newestFirst.prefix(serverFailureLimit))
+        // A full page, all inside the window, with more on the server: the rest may be too.
+        let pageWasCutShort = (failedTotal ?? 0) > serverFailures.count
+            && recent.count == serverFailures.filter { $0.status == "failed" }.count
+            && !recent.isEmpty
+        return NeedsYouList(
+            items: actionable.sorted { $0.createdAt > $1.createdAt }.map(NeedsYouItem.recording)
+                + shares.map(NeedsYouItem.share)
+                + shown.map(NeedsYouItem.serverFailure),
+            hasMoreServerFailures: recent.count > shown.count || pageWasCutShort
+        )
     }
 }
 

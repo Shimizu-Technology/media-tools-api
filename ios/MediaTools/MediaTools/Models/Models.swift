@@ -307,6 +307,12 @@ struct LibraryReference: Identifiable, Codable, Hashable {
     var collectionItemType: String {
         itemType == "youtube" ? "transcript" : itemType
     }
+
+    /// Lists say `youtube` where the detail and collection endpoints say `transcript`,
+    /// so anything keyed across those screens uses this form.
+    var normalized: LibraryReference {
+        LibraryReference(itemType: collectionItemType, itemId: itemId)
+    }
 }
 
 struct LibraryPreferences: Codable, Equatable {

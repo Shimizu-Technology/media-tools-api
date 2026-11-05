@@ -6,6 +6,7 @@ struct HomeView: View {
     let model: HomeViewModel
     let isActive: Bool
     let onRecord: (String) -> Void
+    let onSeeAllFailed: () -> Void
     @Environment(AppNavigator.self) private var navigator
     @Environment(RecordingCoordinator.self) private var recorder
     @Environment(RecordingUploadCoordinator.self) private var uploader
@@ -161,29 +162,35 @@ struct HomeView: View {
 
     // MARK: - Needs you
 
-    private var needsYouItems: [NeedsYouItem] {
+    private var needsYou: NeedsYouList {
         let willSend = aiProcessingConsent.isAutoTranscribeEnabled && aiProcessingConsent.hasAutomaticConsent
         return NeedsYouSelection.select(
             recordings: recorder.availableRecordings,
             shares: uploader.sharesNeedingAttention,
             serverFailures: model.serverFailures,
+            failedTotal: model.failedTotal,
             autoTranscribeWillSend: willSend
         )
     }
 
     @ViewBuilder
     private var needsYouSection: some View {
-        let items = needsYouItems
-        if !items.isEmpty {
+        let list = needsYou
+        if !list.items.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 SectionLabel("Needs you")
                     .padding(.top, 4)
-                ForEach(items) { item in
+                ForEach(list.items) { item in
                     NeedsYouRow(
                         item: item,
                         onOptions: { optionsTarget = $0 },
                         onOpen: { navigator.push(.item($0)) }
                     )
+                }
+                if list.hasMoreServerFailures {
+                    Button("See all failed items", action: onSeeAllFailed)
+                        .buttonStyle(QuietButtonStyle())
+                        .accessibilityIdentifier("needs-you.see-all")
                 }
             }
         }
@@ -202,7 +209,7 @@ struct HomeView: View {
     }
 
     private var recentItems: [LibraryListItem] {
-        let needing = Set(needsYouItems.map(\.id))
+        let needing = Set(needsYou.items.map(\.id))
         return model.recent.filter { !needing.contains("server:\($0.reference.id)") }
     }
 
@@ -282,9 +289,8 @@ struct RecordCard: View {
     /// A fixed circle, because at the largest text the words need the room instead.
     private let micSize: CGFloat = 64
 
-    /// iPads have no Action Button to mention.
     private var subtitle: String {
-        UIDevice.current.userInterfaceIdiom == .phone
+        ActionButtonSupport.isAvailable
             ? "Tap here or press your Action Button"
             : "Tap here to start"
     }

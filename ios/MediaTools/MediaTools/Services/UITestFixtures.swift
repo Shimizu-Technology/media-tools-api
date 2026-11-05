@@ -119,6 +119,30 @@ private actor UITestPendingBootstrapTransport: DeviceSessionTransport {
     }
 }
 
+extension Notification.Name {
+    static let uiTestActionButton = Notification.Name("UITestActionButton")
+    static let uiTestRecordLink = Notification.Name("UITestRecordLink")
+}
+
+/// Lets a UI test trigger a route in the running app. `XCUIApplication.open` relaunches
+/// it, which would clear any sheet for the wrong reason. Darwin notifications cross
+/// from the test runner to the app without touching the app's state.
+enum UITestRouteSignals {
+    static func listen() {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let forward: CFNotificationCallback = { _, _, name, _, _ in
+            guard let raw = name?.rawValue as String? else { return }
+            let target: Notification.Name = raw.hasSuffix("action-button") ? .uiTestActionButton : .uiTestRecordLink
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: target, object: nil)
+            }
+        }
+        for name in ["com.shimizutechnology.mediatools.ui-test.action-button", "com.shimizutechnology.mediatools.ui-test.record-link"] {
+            CFNotificationCenterAddObserver(center, nil, forward, name as CFString, nil, .deliverImmediately)
+        }
+    }
+}
+
 /// Puts a share in the real inbox before launch finishes, as the extension would.
 enum UITestShareFixture {
     static let linkTitle = "Fixture shared video"
@@ -151,6 +175,23 @@ final class UITestAPIProtocol: URLProtocol {
     static let legacyProviderID = "user_uiTestLegacy"
     private static let lock = NSLock()
     private nonisolated(unsafe) static var acceptedAudioTitle: String?
+    /// What this run has changed, so a test can watch every screen catch up.
+    private nonisolated(unsafe) static var edits = RichEdits()
+
+    private struct RichEdits {
+        var deleted: Set<String> = []
+        var titles: [String: String] = [:]
+        var favorite: [String: Bool] = [:]
+        var archived: [String: Bool] = [:]
+        var statuses: [String: String] = [:]
+        var addedCollections: [String: [[String: String]]] = [:]
+    }
+
+    private static func withEdits<T>(_ body: (inout RichEdits) -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body(&edits)
+    }
     private nonisolated(unsafe) static var accountProfileRequests = 0
 
     /// The first request fails, as if offline, so a test can watch the app recover.
@@ -177,9 +218,99 @@ final class UITestAPIProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func stopLoading() {}
 
+    /// The body of a request, however URLSession handed it over.
+    private var requestBody: [String: Any] {
+        var data = request.httpBody
+        if data == nil, let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var collected = Data()
+            let size = 4_096
+            let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: size)
+            defer { buffer.deallocate() }
+            while stream.hasBytesAvailable {
+                let count = stream.read(buffer, maxLength: size)
+                guard count > 0 else { break }
+                collected.append(buffer, count: count)
+            }
+            data = collected
+        }
+        return data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+    }
+
+    /// Mutations against the rich fixture. Returns true when it answered the request.
+    private func handleRichMutation(_ url: URL) -> Bool {
+        let path = url.path
+        let method = request.httpMethod ?? "GET"
+        let parts = url.pathComponents
+        let itemID = parts.count >= 2 ? parts[parts.count - 2] : ""
+        if method == "DELETE",
+           path.contains("/audio/transcriptions/") || path.contains("/transcripts/") || path.contains("/pdf/extractions/") {
+            let id = url.lastPathComponent
+            Self.withEdits { _ = $0.deleted.insert(id) }
+            respondEmpty()
+            return true
+        }
+        if method == "PATCH", path.hasSuffix("/preferences") {
+            let body = requestBody
+            Self.withEdits { edits in
+                if let favorite = body["favorite"] as? Bool { edits.favorite[itemID] = favorite }
+                if let archived = body["archived"] as? Bool { edits.archived[itemID] = archived }
+            }
+            respond(Self.preferences(for: itemID))
+            return true
+        }
+        if method == "PATCH", path.contains("/audio/transcriptions/"), let name = requestBody["name"] as? String {
+            let id = url.lastPathComponent
+            Self.withEdits { $0.titles[id] = name }
+            respond(["id": id, "title": name, "status": "completed"])
+            return true
+        }
+        if method == "POST", path.hasSuffix("/retry") {
+            Self.withEdits { $0.statuses[itemID] = "processing" }
+            respond(["id": itemID, "title": "Retried", "status": "processing"])
+            return true
+        }
+        if method == "POST", path.hasSuffix("/items"), path.contains("/collections/rich-") {
+            let added = (requestBody["items"] as? [[String: Any]]) ?? []
+            let collection = Self.richCollections.first { $0["id"] as? String == itemID }
+            Self.withEdits { edits in
+                for entry in added {
+                    guard let id = entry["item_id"] as? String else { continue }
+                    edits.addedCollections[id, default: []].append([
+                        "id": itemID,
+                        "name": collection?["name"] as? String ?? "",
+                        "color": collection?["color"] as? String ?? "coral",
+                    ])
+                }
+            }
+            respondEmpty()
+            return true
+        }
+        return false
+    }
+
+    private static func preferences(for id: String) -> [String: Any] {
+        let item = richLibraryItems.first { $0["id"] as? String == id }
+        return [
+            "favorite": item?["favorite"] as? Bool ?? false,
+            "archived": item?["archived"] as? Bool ?? false,
+            "tags": [],
+        ]
+    }
+
+    private func respondEmpty() {
+        guard let url = request.url,
+              let response = HTTPURLResponse(url: url, statusCode: 204, httpVersion: nil, headerFields: nil)
+        else { return fail() }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
     override func startLoading() {
         guard let url = request.url else { return fail() }
         let path = url.path
+        if Self.isRichContent, handleRichMutation(url) { return }
         if path.hasSuffix("/auth/signup") || path.hasSuffix("/auth/password/forgot") {
             respond(["message": "If this request is eligible, an email will arrive shortly"])
         } else if path.hasSuffix("/auth/me") {
@@ -210,7 +341,9 @@ final class UITestAPIProtocol: URLProtocol {
         } else if path.hasSuffix("/library/items") {
             respond(libraryList(url: url))
         } else if path.hasSuffix("/preferences") {
-            respond(["favorite": false, "archived": false, "tags": []])
+            respond(Self.isRichContent
+                ? Self.preferences(for: url.pathComponents[url.pathComponents.count - 2])
+                : ["favorite": false, "archived": false, "tags": []])
         } else if path.hasSuffix("/segments") {
             respond(Self.isRichContent ? Self.richSegments : [])
         } else if Self.isRichContent, path.hasSuffix("/audio/transcriptions/\(Self.audioID)") {
@@ -229,6 +362,20 @@ final class UITestAPIProtocol: URLProtocol {
             ])
         } else if Self.isRichContent, path.hasSuffix("/collections") {
             respond(Self.richCollections)
+        } else if Self.isRichContent, path.hasSuffix("/transcripts/rich-link") {
+            respond(["id": "rich-link", "title": "How to read a contract", "status": "completed", "transcript_text": "Fixture text."])
+        } else if Self.isRichContent, path.hasSuffix("/pdf/extractions/rich-pdf") {
+            respond(["id": "rich-pdf", "original_name": "Lease agreement.pdf", "status": "completed", "text_content": "Fixture text."])
+        } else if Self.isRichContent, path.contains("/audio/transcriptions/rich-") {
+            let id = url.lastPathComponent
+            let row = Self.richLibraryItems.first { $0["id"] as? String == id }
+            respond([
+                "id": id,
+                "title": row?["title"] as? String ?? id,
+                "status": row?["status"] as? String ?? "completed",
+                "transcript_text": "Fixture transcript.",
+                "created_at": row?["created_at"] as? String ?? "2026-11-04T00:00:00Z",
+            ])
         } else if Self.isRichContent, path.contains("/collections/rich-") {
             respond(Self.richCollection(id: url.lastPathComponent))
         } else if path.hasSuffix("/collections") {
@@ -352,6 +499,30 @@ final class UITestAPIProtocol: URLProtocol {
     }
 
     private static var richLibraryItems: [[String: Any]] {
+        let edits = withEdits { $0 }
+        let many = ProcessInfo.processInfo.arguments.contains("-ui-test-many-failures") ? manyFailures : []
+        return (baseRichLibraryItems + many).compactMap { original in
+            guard let id = original["id"] as? String, !edits.deleted.contains(id) else { return nil }
+            var item = original
+            if let title = edits.titles[id] { item["title"] = title }
+            if let favorite = edits.favorite[id] { item["favorite"] = favorite }
+            if let archived = edits.archived[id] { item["archived"] = archived }
+            if let status = edits.statuses[id] { item["status"] = status }
+            if let added = edits.addedCollections[id] {
+                item["collections"] = (item["collections"] as? [[String: String]] ?? []) + added
+            }
+            return item
+        }
+    }
+
+    /// More failures in a week than one page of the failed list holds.
+    private static var manyFailures: [[String: Any]] {
+        (1...21).map { index in
+            richLibraryItem(id: "many-\(index)", title: "Failed recording \(index)", status: "failed", duration: 60, hoursAgo: Double(index))
+        }
+    }
+
+    private static var baseRichLibraryItems: [[String: Any]] {
         [
             richLibraryItem(
                 id: audioID, title: "Monday planning call", duration: 2_530, hoursAgo: 0.2, favorite: true,

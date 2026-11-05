@@ -97,7 +97,9 @@ enum SystemCaptureOutcome: Equatable {
     var dialog: String {
         switch self {
         case .started:
-            "Recording started. Use the Action Button again or tap Stop on the Live Activity to save it."
+            ActionButtonSupport.isAvailable
+                ? "Recording started. Use the Action Button again or tap Stop on the Live Activity to save it."
+                : "Recording started. Tap Stop on the Live Activity to save it."
         case .stopped:
             "Recording stopped and saved securely on this iPhone."
         case .alreadyStopped:

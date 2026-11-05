@@ -285,7 +285,60 @@ final class NeedsYouSelectionTests: XCTestCase {
         NeedsYouSelection.select(
             recordings: recordings, shares: [], serverFailures: failures,
             autoTranscribeWillSend: willSend, now: now
+        ).items
+    }
+
+    /// One more than a page of the failed list, all inside the week: none may be
+    /// dropped without saying so.
+    func testFailuresBeyondTheCapSayThereAreMore() {
+        let page = (1...20).map { row("f\($0)", hoursAgo: Double($0)) }
+        let list = NeedsYouSelection.select(
+            recordings: [], shares: [], serverFailures: page, failedTotal: 21,
+            autoTranscribeWillSend: true, now: now
         )
+        XCTAssertEqual(list.items.map(\.id), ["server:audio:f1", "server:audio:f2", "server:audio:f3"], "Newest few")
+        XCTAssertTrue(list.hasMoreServerFailures)
+    }
+
+    func testAShortListOfFailuresHasNothingMoreToSee() {
+        let few = (1...3).map { row("f\($0)", hoursAgo: Double($0)) }
+        let list = NeedsYouSelection.select(
+            recordings: [], shares: [], serverFailures: few, failedTotal: 3,
+            autoTranscribeWillSend: true, now: now
+        )
+        XCTAssertEqual(list.items.count, 3)
+        XCTAssertFalse(list.hasMoreServerFailures)
+    }
+
+    func testOneFailureOverTheCapSaysSoEvenOnAFullCount() {
+        let four = (1...4).map { row("f\($0)", hoursAgo: Double($0)) }
+        let list = NeedsYouSelection.select(
+            recordings: [], shares: [], serverFailures: four, failedTotal: 4,
+            autoTranscribeWillSend: true, now: now
+        )
+        XCTAssertEqual(list.items.count, 3)
+        XCTAssertTrue(list.hasMoreServerFailures)
+    }
+
+    func testOldFailuresOnTheServerDoNotCountAsMoreToSee() {
+        let list = NeedsYouSelection.select(
+            recordings: [], shares: [],
+            serverFailures: [row("recent", hoursAgo: 1), row("old", hoursAgo: 24 * 30)],
+            failedTotal: 40,
+            autoTranscribeWillSend: true, now: now
+        )
+        XCTAssertEqual(list.items.count, 1)
+        XCTAssertFalse(list.hasMoreServerFailures, "The page already reached past the week")
+    }
+
+    func testOnDeviceWorkIsNeverCapped() {
+        let recordings = (0..<6).map { _ in recording(.invalid) }
+        let list = NeedsYouSelection.select(
+            recordings: recordings, shares: [], serverFailures: [],
+            autoTranscribeWillSend: true, now: now
+        )
+        XCTAssertEqual(list.items.count, 6)
+        XCTAssertFalse(list.hasMoreServerFailures)
     }
 
     /// The two recordings on Leon's phone: never flagged for auto-transcribe, and one
@@ -499,6 +552,173 @@ final class NewLibraryFieldDecodingTests: XCTestCase {
         XCTAssertFalse(MediaToolsService.libraryItemsPath(
             page: 1, perPage: 20, itemType: nil, status: nil, search: nil, sortDirection: "desc"
         ).contains("favorite"))
+    }
+}
+
+@MainActor
+final class KnownChangeTests: XCTestCase {
+    private func response(_ ids: [String]) -> LibraryListResponse {
+        LibraryListResponse(
+            data: ids.map { id in
+                LibraryListItem(
+                    id: id, itemType: "audio", title: id, subtitle: "", status: "completed",
+                    wordCount: 0, duration: 0, pageCount: 0, summaryStatus: "", favorite: false,
+                    archived: false, tags: [], createdAt: nil
+                )
+            },
+            page: 1, perPage: 20, totalItems: ids.count, totalPages: 1
+        )
+    }
+
+    func testAKnownChangeRefreshesHomeInsideItsThrottle() async {
+        var server = ["a", "b"]
+        var requests = 0
+        let model = HomeViewModel(
+            load: {
+                requests += 1
+                return self.response(server)
+            },
+            loadFailures: { self.response([]) }
+        )
+        await model.refresh()
+        XCTAssertEqual(requests, 1)
+
+        // Inside the throttle, an event that proves nothing asks for nothing.
+        server = ["b"]
+        await model.refreshIfStale()
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(model.recent.map(\.id), ["a", "b"])
+
+        model.invalidate()
+        await model.refreshIfStale()
+        XCTAssertEqual(requests, 2)
+        XCTAssertEqual(model.recent.map(\.id), ["b"])
+    }
+
+    func testADeletionLeavesHomeAtOnceWithNoRequest() async {
+        var requests = 0
+        let model = HomeViewModel(
+            load: {
+                requests += 1
+                return self.response(["a", "b"])
+            },
+            loadFailures: { self.response(["a"]) }
+        )
+        await model.refresh()
+        model.remove([LibraryReference(itemType: "audio", itemId: "a")])
+        XCTAssertEqual(model.recent.map(\.id), ["b"])
+        XCTAssertTrue(model.serverFailures.isEmpty)
+        XCTAssertEqual(requests, 1)
+    }
+
+    func testRemovingTwiceCountsOnce() async {
+        let items = ["a", "b", "c"].map { id in
+            LibraryListItem(
+                id: id, itemType: "audio", title: id, subtitle: "", status: "completed",
+                wordCount: 0, duration: 0, pageCount: 0, summaryStatus: "", favorite: false,
+                archived: false, tags: [], createdAt: nil
+            )
+        }
+        let model = LibraryViewModel(previewItems: items)
+        await model.loadIfNeeded(for: model.query)
+        let gone: Set<LibraryReference> = [LibraryReference(itemType: "audio", itemId: "a")]
+        model.remove(gone)
+        model.remove(gone)
+        XCTAssertEqual(model.totalItems, 2)
+    }
+
+    func testAKnownChangeRefreshesTheLibraryInsideItsThrottle() async {
+        var clock = Date(timeIntervalSince1970: 1_000)
+        let item = LibraryListItem(
+            id: "a", itemType: "audio", title: "a", subtitle: "", status: "completed",
+            wordCount: 0, duration: 0, pageCount: 0, summaryStatus: "", favorite: false,
+            archived: false, tags: [], createdAt: nil
+        )
+        let model = LibraryViewModel(previewItems: [item], now: { clock })
+        await model.loadIfNeeded(for: model.query)
+        model.remove([item.reference])
+        clock.addTimeInterval(1)
+        await model.refreshIfStale()
+        XCTAssertTrue(model.items.isEmpty, "Inside the throttle, nothing reloads")
+        model.invalidate()
+        await model.refreshIfStale()
+        XCTAssertEqual(model.items.map(\.id), ["a"], "A known change goes straight through")
+    }
+
+    func testRowsAndDetailShareOneKeyAcrossYoutubeAndTranscript() {
+        let list = LibraryReference(itemType: "youtube", itemId: "v")
+        let detail = LibraryReference(itemType: "transcript", itemId: "v")
+        XCTAssertEqual(list.normalized, detail.normalized)
+    }
+
+    func testTheHeaderKnowsARowsCollections() {
+        let service = MediaToolsService()
+        let reference = LibraryReference(itemType: "youtube", itemId: "header-test")
+        XCTAssertTrue(service.collections(for: reference).isEmpty)
+        var row = LibraryListItem(
+            id: "header-test", itemType: "youtube", title: "T", subtitle: "", status: "completed",
+            wordCount: 0, duration: 0, pageCount: 0, summaryStatus: "", favorite: false,
+            archived: false, tags: [], createdAt: nil
+        )
+        row.collections = [LibraryItemCollection(id: "c", name: "Baby", color: "coral")]
+        service.rememberLibraryRows([row])
+        XCTAssertEqual(
+            service.collections(for: LibraryReference(itemType: "transcript", itemId: "header-test")).map(\.name),
+            ["Baby"],
+            "The detail screen asks by transcript"
+        )
+    }
+}
+
+final class ActionButtonSupportTests: XCTestCase {
+    func testOnlyPhonesWithTheButtonAreToldAboutIt() {
+        for model in ["iPhone16,1", "iPhone16,2", "iPhone17,1", "iPhone17,5", "iPhone18,1", "iPhone30,1"] {
+            XCTAssertTrue(ActionButtonSupport.isAvailable(modelIdentifier: model), model)
+        }
+        // SE 3, iPhone 14, iPhone 15 and 15 Plus, an iPad, and nonsense.
+        for model in ["iPhone14,6", "iPhone14,7", "iPhone15,4", "iPhone15,5", "iPad14,8", "arm64", "iPhone"] {
+            XCTAssertFalse(ActionButtonSupport.isAvailable(modelIdentifier: model), model)
+        }
+    }
+}
+
+@MainActor
+final class LibraryShareFilterTests: XCTestCase {
+    func testASharedItemOnlyShowsUnderItsOwnChip() {
+        let model = LibraryViewModel(previewItems: [])
+        XCTAssertTrue(model.showsShare(ofKind: .pdf))
+        XCTAssertTrue(model.showsShare(ofKind: .link))
+
+        model.selectedChip = .pdfs
+        XCTAssertTrue(model.showsShare(ofKind: .pdf))
+        XCTAssertFalse(model.showsShare(ofKind: .link))
+        XCTAssertFalse(model.showsShare(ofKind: .audio))
+
+        model.selectedChip = .recordings
+        XCTAssertTrue(model.showsShare(ofKind: .audio))
+        XCTAssertFalse(model.showsShare(ofKind: .pdf))
+
+        model.selectedChip = .links
+        XCTAssertTrue(model.showsShare(ofKind: .link))
+
+        for chip in [LibraryChip.starred, .archived] {
+            model.selectedChip = chip
+            XCTAssertFalse(model.showsShare(ofKind: .audio), chip.title)
+        }
+    }
+
+    func testSearchAndStatusHideSharesToo() {
+        let model = LibraryViewModel(previewItems: [])
+        model.searchText = "contract"
+        XCTAssertFalse(model.showsShare(ofKind: .link))
+        model.searchText = ""
+        model.selectedStatus = .completed
+        XCTAssertFalse(model.showsShare(ofKind: .link))
+        model.selectedStatus = .active
+        XCTAssertTrue(model.showsShare(ofKind: .link))
+        model.selectedStatus = .all
+        model.selectedCollection = LibraryCollectionFilter(id: "c", name: "Baby")
+        XCTAssertFalse(model.showsShare(ofKind: .link))
     }
 }
 

@@ -147,8 +147,7 @@ struct LibraryView: View {
 
     /// Shares that failed, or that wait for a tap, stay visible until dealt with.
     private var sharesNeedingAttention: [ShareInboxStore.Item] {
-        guard model.selectedCollection == nil, !model.showsArchived, !model.showsFavoritesOnly else { return [] }
-        return uploader.sharesNeedingAttention
+        uploader.sharesNeedingAttention.filter { model.showsShare(ofKind: $0.resolvedKind) }
     }
 
     private var hasDeviceRows: Bool {
@@ -802,7 +801,6 @@ struct LibraryView: View {
         if failed.isEmpty {
             leaveSelectionMode()
             Haptics.success()
-            await model.refresh()
         } else {
             isSelecting = true
             operationError = "\(failed.count) item\(failed.count == 1 ? "" : "s") couldn’t be deleted. The failed selection was kept so you can try again."
@@ -1063,6 +1061,15 @@ struct RowMetaLine: View {
                     .foregroundStyle(Theme.textSecondary)
                     .accessibilityLabel("Favorite")
             }
+            // An unfinished row's title line has no room for its length at these sizes.
+            if ItemAttention(status: item.status) != nil,
+               showsLength || dynamicTypeSize.isAccessibilitySize,
+               let detail = item.trailingDetail {
+                Text(detail)
+                    .font(.footnote)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textSecondary)
+            }
             if !parts.isEmpty, ItemAttention(status: item.status) == nil {
                 Text(parts.joined(separator: " · "))
                     .font(.footnote)
@@ -1128,7 +1135,22 @@ struct LibraryDetailLoader: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            item = try await service.getLibraryItem(reference)
+            // Opened from a notification, nothing has listed this item yet, and its
+            // collections come only from the list. A new item is on the newest page, and
+            // waiting briefly for that means the header never has to shift afterward.
+            let rowLookup: Task<Void, Never>? = service.libraryRow(for: reference) == nil
+                ? Task { _ = try? await service.listLibraryItems() }
+                : nil
+            let loaded = try await service.getLibraryItem(reference)
+            if let rowLookup {
+                await withTaskGroup(of: Void.self) { group in
+                    group.addTask { await rowLookup.value }
+                    group.addTask { try? await Task.sleep(for: .seconds(1)) }
+                    await group.next()
+                    group.cancelAll()
+                }
+            }
+            item = loaded
         } catch {
             guard !Task.isCancelled else { return }
             errorMessage = error.localizedDescription
