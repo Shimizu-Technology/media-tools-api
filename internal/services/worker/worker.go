@@ -2673,6 +2673,10 @@ var (
 // rows needs the stricter isLegacyPlaceholderName. "Recording — Mayor interview
 // 2026 at 10:35 AM" has four words and stays a person's name.
 func isLocalizedRecordingName(base string) bool {
+	// isDatedRecordingName owns the US format, so an impossible date stays a name.
+	if datedRecordingName.MatchString(base) {
+		return false
+	}
 	parts := localizedRecordingName.FindStringSubmatch(base)
 	return parts != nil && len(recordingNameWord.FindAllString(parts[1], -1)) <= 3
 }

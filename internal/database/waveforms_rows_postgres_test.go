@@ -289,7 +289,10 @@ func TestQueueAudioSummaryPromotesQueuedBackfillJob(t *testing.T) {
 	db := openPostgresIntegrationDB(t)
 	ctx := context.Background()
 	userID := createPasswordTestUser(t, db)
-	audio := &models.AudioTranscription{ID: uuid.NewString(), ContentType: "voice_memo", SummaryStatus: "pending"}
+	audio := &models.AudioTranscription{
+		ID: uuid.NewString(), ContentType: "voice_memo", SummaryStatus: "pending", SummaryLength: "medium",
+		KeyPoints: json.RawMessage(`[]`), ActionItems: json.RawMessage(`[]`), Decisions: json.RawMessage(`[]`),
+	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO audio_transcriptions(id,filename,original_name,status,user_id,transcript_text) VALUES($1,'a.m4a','a.m4a','completed',$2,'Some speech')`, audio.ID, userID); err != nil {
 		t.Fatal(err)
 	}
