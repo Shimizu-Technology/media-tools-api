@@ -414,7 +414,7 @@ final class MediaToolsService {
         default:
             throw APIError.httpError(statusCode: 400, message: "Unknown library item type")
         }
-        deletedReferences.insert(reference)
+        deletedReferences.insert(reference.normalized)
         noteLibraryChanged()
     }
 

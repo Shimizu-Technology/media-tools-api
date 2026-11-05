@@ -17,6 +17,7 @@ struct LibraryView: View {
     @Environment(AppNavigator.self) private var navigator
     @Environment(RecordingCoordinator.self) private var recorder
     @Environment(RecordingUploadCoordinator.self) private var uploader
+    @Environment(AIProcessingConsentManager.self) private var aiProcessingConsent
     @Environment(\.scenePhase) private var scenePhase
 
     private let service = MediaToolsService.shared
@@ -129,29 +130,56 @@ struct LibraryView: View {
     // MARK: - Device uploads
 
     /// Audio still on this iPhone has no server row yet. Showing it here means
-    /// a new recording is visible in the Library from the moment it is saved.
-    private var deviceRecordings: [LocalRecording] {
-        guard model.selectedCollection == nil,
-              model.selectedType == .all || model.selectedType == .audio,
-              model.selectedStatus == .all || model.selectedStatus == .active,
-              model.query.search.isEmpty,
-              !model.showsArchived,
-              !model.showsFavoritesOnly
-        else { return [] }
+    /// a new recording is visible in the Library from the moment it is saved. Filters
+    /// can narrow this, but work only a person can move forward never just vanishes.
+    private var deviceWork: LibraryDeviceWork {
         let serverIDs = Set(model.items.map(\.reference))
-        return recorder.availableRecordings.filter { recording in
-            guard let remoteID = recording.remoteTranscriptionID else { return true }
-            return !serverIDs.contains(LibraryReference(itemType: "audio", itemId: remoteID))
-        }
+        return LibraryDeviceWork(
+            recordings: recorder.availableRecordings.filter { recording in
+                guard let remoteID = recording.remoteTranscriptionID else { return true }
+                return !serverIDs.contains(LibraryReference(itemType: "audio", itemId: remoteID))
+            },
+            shares: uploader.sharesNeedingAttention,
+            filters: model.deviceWorkFilters,
+            autoTranscribeWillSend: aiProcessingConsent.isAutoTranscribeEnabled
+                && aiProcessingConsent.hasAutomaticConsent
+        )
     }
 
-    /// Shares that failed, or that wait for a tap, stay visible until dealt with.
-    private var sharesNeedingAttention: [ShareInboxStore.Item] {
-        uploader.sharesNeedingAttention.filter { model.showsShare(ofKind: $0.resolvedKind) }
-    }
+    private var deviceRecordings: [LocalRecording] { deviceWork.visibleRecordings }
+
+    private var sharesNeedingAttention: [ShareInboxStore.Item] { deviceWork.visibleShares }
 
     private var hasDeviceRows: Bool {
         !deviceRecordings.isEmpty || !sharesNeedingAttention.isEmpty
+    }
+
+    /// Filters hid something waiting on a person. It stays in view on Home too, but
+    /// someone looking here shouldn't have to know that.
+    @ViewBuilder
+    private var hiddenDeviceWorkRow: some View {
+        let hidden = deviceWork.hiddenNeedingAction
+        if hidden > 0 {
+            chromeRow {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.circle")
+                        .foregroundStyle(Theme.warning)
+                        .accessibilityHidden(true)
+                    Text("\(hidden) \(hidden == 1 ? "item" : "items") on this \(UIDevice.current.localizedModel) \(hidden == 1 ? "needs" : "need") you")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.text)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("library.hidden-device-work")
+                    Button("Show") {
+                        withMotion(Theme.quick) { model.clearFiltersForDeviceWork() }
+                    }
+                    .buttonStyle(QuietButtonStyle())
+                    .accessibilityLabel("Show items on this \(UIDevice.current.localizedModel)")
+                    .accessibilityIdentifier("library.show-device-work")
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -203,6 +231,8 @@ struct LibraryView: View {
             if showsFilterSummary {
                 filterSummaryRow
             }
+
+            hiddenDeviceWorkRow
 
             deviceRows
 
@@ -934,6 +964,14 @@ private struct DeviceShareRow: View {
     @Environment(RecordingUploadCoordinator.self) private var uploader
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    private var tileType: String {
+        switch item.resolvedKind {
+        case .audio: "audio"
+        case .pdf: "pdf"
+        case .link: "youtube"
+        }
+    }
+
     var body: some View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
@@ -942,7 +980,7 @@ private struct DeviceShareRow: View {
             Button(action: onTap) {
                 HStack(spacing: 12) {
                     if !dynamicTypeSize.isAccessibilitySize {
-                        TypeTile(itemType: item.resolvedKind == .link ? "youtube" : "audio")
+                        TypeTile(itemType: tileType)
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.originalName)
@@ -1088,8 +1126,11 @@ struct LibraryDetailLoader: View {
     @State private var item: LibraryItem?
     @State private var errorMessage: String?
     @State private var isLoading = false
+    @State private var rowLookup = BoundedLookup()
 
     private let service = MediaToolsService.shared
+    /// How long an open may wait for the collection name, from when it began.
+    private static let rowLookupWait: Duration = .seconds(1)
 
     var body: some View {
         Group {
@@ -1127,6 +1168,7 @@ struct LibraryDetailLoader: View {
             guard previewTitle == nil else { return }
             await load()
         }
+        .onDisappear { rowLookup.cancel() }
     }
 
     private func load() async {
@@ -1136,20 +1178,16 @@ struct LibraryDetailLoader: View {
         defer { isLoading = false }
         do {
             // Opened from a notification, nothing has listed this item yet, and its
-            // collections come only from the list. A new item is on the newest page, and
-            // waiting briefly for that means the header never has to shift afterward.
-            let rowLookup: Task<Void, Never>? = service.libraryRow(for: reference) == nil
-                ? Task { _ = try? await service.listLibraryItems() }
-                : nil
-            let loaded = try await service.getLibraryItem(reference)
-            if let rowLookup {
-                await withTaskGroup(of: Void.self) { group in
-                    group.addTask { await rowLookup.value }
-                    group.addTask { try? await Task.sleep(for: .seconds(1)) }
-                    await group.next()
-                    group.cancelAll()
-                }
+            // collections come only from the list. A new item is on the newest page, so
+            // this asks for that alongside the item, and gives it a moment to land so the
+            // header needn't shift afterward. It never holds the screen past that moment.
+            let deadline = ContinuousClock.now + Self.rowLookupWait
+            if service.libraryRow(for: reference) == nil {
+                let service = service
+                rowLookup.start { _ = try? await service.listLibraryItems() }
             }
+            let loaded = try await service.getLibraryItem(reference)
+            await rowLookup.wait(until: deadline)
             item = loaded
         } catch {
             guard !Task.isCancelled else { return }

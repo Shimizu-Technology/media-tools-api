@@ -587,17 +587,31 @@ struct RecordingPulseDot: View {
     var size: CGFloat = 10
     var isPulsing = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        // A pulse of its own each time, so a resume starts it again rather than finding
+        // the animation already at its dim end.
+        if isPulsing, !reduceMotion {
+            PulsingCircle(size: size)
+        } else {
+            Circle()
+                .fill(Theme.onHero)
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+private struct PulsingCircle: View {
+    let size: CGFloat
     @State private var isDimmed = false
 
     var body: some View {
         Circle()
             .fill(Theme.onHero)
             .frame(width: size, height: size)
-            .opacity(isDimmed && isPulsing && !reduceMotion ? 0.35 : 1)
-            .animation(
-                isPulsing && !reduceMotion ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : nil,
-                value: isDimmed
-            )
+            .opacity(isDimmed ? 0.35 : 1)
+            .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isDimmed)
             .onAppear { isDimmed = true }
             .accessibilityHidden(true)
     }

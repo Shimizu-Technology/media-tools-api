@@ -196,7 +196,7 @@ struct CollectionDetailView: View {
         Group {
             if let collection {
                 List {
-                    if let items = collection.items, !items.isEmpty {
+                    if let items = visibleItems(of: collection), !items.isEmpty {
                         ForEach(items) { item in
                             NavigationLink(value: AppRoute.item(
                                 LibraryReference(itemType: item.itemType, itemId: item.itemId)
@@ -272,6 +272,13 @@ struct CollectionDetailView: View {
         .background(Theme.background)
         // Runs again after any known change, such as deleting one of its items.
         .task(id: service.libraryRevision) { await load() }
+    }
+
+    /// Its list can predate a deletion made somewhere else a moment ago.
+    private func visibleItems(of collection: Collection) -> [CollectionItem]? {
+        collection.items?.filter {
+            !service.deletedReferences.contains(LibraryReference(itemType: $0.itemType, itemId: $0.itemId).normalized)
+        }
     }
 
     private func load() async {

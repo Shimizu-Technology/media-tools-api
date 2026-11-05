@@ -681,20 +681,27 @@ final class KnownChangeTests: XCTestCase {
 
     func testAKnownChangeRefreshesTheLibraryInsideItsThrottle() async {
         var clock = Date(timeIntervalSince1970: 1_000)
-        let item = LibraryListItem(
-            id: "a", itemType: "audio", title: "a", subtitle: "", status: "completed",
-            wordCount: 0, duration: 0, pageCount: 0, summaryStatus: "", favorite: false,
-            archived: false, tags: [], createdAt: nil
+        var requests = 0
+        var server = ["a", "b"]
+        let model = LibraryViewModel(
+            now: { clock },
+            loadPage: { _, _ in
+                requests += 1
+                return self.response(server)
+            }
         )
-        let model = LibraryViewModel(previewItems: [item], now: { clock })
         await model.loadIfNeeded(for: model.query)
-        model.remove([item.reference])
+        XCTAssertEqual(requests, 1)
+
+        server = ["b"]
         clock.addTimeInterval(1)
         await model.refreshIfStale()
-        XCTAssertTrue(model.items.isEmpty, "Inside the throttle, nothing reloads")
+        XCTAssertEqual(requests, 1, "Inside the throttle, nothing reloads")
+
         model.invalidate()
         await model.refreshIfStale()
-        XCTAssertEqual(model.items.map(\.id), ["a"], "A known change goes straight through")
+        XCTAssertEqual(requests, 2, "A known change goes straight through")
+        XCTAssertEqual(model.items.map(\.id), ["b"])
     }
 
     func testRowsAndDetailShareOneKeyAcrossYoutubeAndTranscript() {
@@ -766,42 +773,362 @@ final class ActionButtonSupportTests: XCTestCase {
 }
 
 @MainActor
-final class LibraryShareFilterTests: XCTestCase {
-    func testASharedItemOnlyShowsUnderItsOwnChip() {
-        let model = LibraryViewModel(previewItems: [])
-        XCTAssertTrue(model.showsShare(ofKind: .pdf))
-        XCTAssertTrue(model.showsShare(ofKind: .link))
+final class BoundedLookupTests: XCTestCase {
+    /// The shape the second review reproduced: a lookup that outlasts the deadline.
+    func testTheWaitEndsAtTheDeadlineWhateverTheLookupIsDoing() async {
+        let lookup = BoundedLookup()
+        // Ignores cancellation and never finishes on its own, like a stalled request.
+        let gate = AsyncStream<Void> { _ in }
+        lookup.start { for await _ in gate {} }
 
-        model.selectedChip = .pdfs
-        XCTAssertTrue(model.showsShare(ofKind: .pdf))
-        XCTAssertFalse(model.showsShare(ofKind: .link))
-        XCTAssertFalse(model.showsShare(ofKind: .audio))
+        let start = ContinuousClock.now
+        await lookup.wait(until: start + .milliseconds(100))
+        let elapsed = ContinuousClock.now - start
+        XCTAssertLessThan(elapsed, .seconds(1), "Returned after \(elapsed)")
+        XCTAssertGreaterThanOrEqual(elapsed, .milliseconds(90))
+        lookup.cancel()
+    }
 
-        model.selectedChip = .recordings
-        XCTAssertTrue(model.showsShare(ofKind: .audio))
-        XCTAssertFalse(model.showsShare(ofKind: .pdf))
+    func testAFastLookupEndsTheWaitEarly() async {
+        let lookup = BoundedLookup()
+        lookup.start {}
+        let start = ContinuousClock.now
+        await lookup.wait(until: start + .seconds(30))
+        XCTAssertLessThan(ContinuousClock.now - start, .seconds(5))
+    }
 
-        model.selectedChip = .links
-        XCTAssertTrue(model.showsShare(ofKind: .link))
+    func testNoLookupMeansNoWait() async {
+        let start = ContinuousClock.now
+        await BoundedLookup().wait(until: start + .seconds(30))
+        XCTAssertLessThan(ContinuousClock.now - start, .seconds(5))
+    }
 
-        for chip in [LibraryChip.starred, .archived] {
-            model.selectedChip = chip
-            XCTAssertFalse(model.showsShare(ofKind: .audio), chip.title)
+    func testLeavingTheScreenCancelsTheLookup() async {
+        let lookup = BoundedLookup()
+        let cancelled = expectation(description: "The lookup saw its cancellation")
+        lookup.start {
+            do {
+                try await Task.sleep(for: .seconds(60))
+            } catch {
+                cancelled.fulfill()
+            }
+        }
+        await Task.yield()
+        lookup.cancel()
+        await fulfillment(of: [cancelled], timeout: 5)
+    }
+
+    func testCancellingTheCallerEndsTheWait() async {
+        let lookup = BoundedLookup()
+        let gate = AsyncStream<Void> { _ in }
+        lookup.start { for await _ in gate {} }
+        let start = ContinuousClock.now
+        let waiter = Task { await lookup.wait(until: start + .seconds(60)) }
+        await Task.yield()
+        waiter.cancel()
+        await waiter.value
+        XCTAssertLessThan(ContinuousClock.now - start, .seconds(5))
+        lookup.cancel()
+    }
+}
+
+/// A response the test releases by hand, to land exactly when a race needs it.
+@MainActor
+private final class HeldResponses {
+    private var waiting: [CheckedContinuation<LibraryListResponse, Error>] = []
+    private(set) var requestCount = 0
+
+    func next() async throws -> LibraryListResponse {
+        requestCount += 1
+        return try await withCheckedThrowingContinuation { waiting.append($0) }
+    }
+
+    func release(_ response: LibraryListResponse) {
+        waiting.removeFirst().resume(returning: response)
+    }
+
+    func fail() {
+        waiting.removeFirst().resume(throwing: URLError(.notConnectedToInternet))
+    }
+
+    var hasWaiting: Bool { !waiting.isEmpty }
+}
+
+@MainActor
+final class InFlightResponseTests: XCTestCase {
+    private func item(_ id: String, type: String = "audio") -> LibraryListItem {
+        LibraryListItem(
+            id: id, itemType: type, title: id, subtitle: "", status: "completed",
+            wordCount: 0, duration: 0, pageCount: 0, summaryStatus: "", favorite: false,
+            archived: false, tags: [], createdAt: nil
+        )
+    }
+
+    private func response(_ items: [LibraryListItem]) -> LibraryListResponse {
+        LibraryListResponse(data: items, page: 1, perPage: 20, totalItems: items.count, totalPages: 1)
+    }
+
+    private func waitForRequest(_ held: HeldResponses, count: Int) async {
+        while held.requestCount < count || !held.hasWaiting {
+            await Task.yield()
         }
     }
 
-    func testSearchAndStatusHideSharesToo() {
+    /// The reviewer's sequence, on Home: an older refresh is running, the item is deleted
+    /// in the Library, the old response lands during the debounce, and the next one fails.
+    func testAnOlderResponseCannotRestoreADeletedHomeRow() async {
+        let held = HeldResponses()
+        let model = HomeViewModel(
+            load: { try await held.next() },
+            loadFailures: { self.response([]) }
+        )
+        let older = Task { await model.refresh() }
+        await waitForRequest(held, count: 1)
+
+        model.invalidate()
+        model.remove([LibraryReference(itemType: "audio", itemId: "a")])
+
+        held.release(response([item("a"), item("b")]))
+        await older.value
+        XCTAssertTrue(model.recent.isEmpty, "The older response is dropped whole")
+
+        let failing = Task { await model.refresh() }
+        await waitForRequest(held, count: 2)
+        held.fail()
+        await failing.value
+        XCTAssertFalse(model.recent.contains { $0.id == "a" }, "A failed refresh does not bring it back")
+    }
+
+    func testAResponseThatStillListsADeletedItemCannotRestoreItOnHome() async {
+        let held = HeldResponses()
+        let model = HomeViewModel(
+            load: { try await held.next() },
+            loadFailures: { self.response([self.item("a")]) }
+        )
+        model.remove([LibraryReference(itemType: "audio", itemId: "a")])
+        let refresh = Task { await model.refresh() }
+        await waitForRequest(held, count: 1)
+        held.release(response([item("a"), item("b")]))
+        await refresh.value
+        XCTAssertEqual(model.recent.map(\.id), ["b"])
+        XCTAssertTrue(model.serverFailures.isEmpty)
+    }
+
+    func testAnInvalidatedHomeIsNotStuckLoading() async {
+        let held = HeldResponses()
+        let model = HomeViewModel(load: { try await held.next() }, loadFailures: { self.response([]) })
+        let older = Task { await model.refresh() }
+        await waitForRequest(held, count: 1)
+        XCTAssertTrue(model.isLoading)
+        model.invalidate()
+        XCTAssertFalse(model.isLoading)
+        held.release(response([]))
+        await older.value
+    }
+
+    func testADeletionFromDetailReachesAVideoRowInBothLists() async {
+        // The detail screen says transcript where the list says youtube.
+        let detailReference = LibraryReference(itemType: "transcript", itemId: "v")
+        let home = HomeViewModel(
+            load: { self.response([self.item("v", type: "youtube")]) },
+            loadFailures: { self.response([]) }
+        )
+        await home.refresh()
+        home.remove([detailReference])
+        XCTAssertTrue(home.recent.isEmpty)
+
+        let library = LibraryViewModel(
+            loadPage: { _, _ in self.response([self.item("v", type: "youtube")]) }
+        )
+        await library.refresh()
+        XCTAssertEqual(library.items.count, 1)
+        library.remove([detailReference])
+        XCTAssertTrue(library.items.isEmpty)
+    }
+
+    /// The same sequence on the Library's model.
+    func testAnOlderResponseCannotRestoreADeletedLibraryRow() async {
+        let held = HeldResponses()
+        let model = LibraryViewModel(loadPage: { _, _ in try await held.next() })
+        let older = Task { await model.refresh() }
+        await waitForRequest(held, count: 1)
+
+        model.invalidate()
+        model.remove([LibraryReference(itemType: "audio", itemId: "a")])
+
+        held.release(response([item("a"), item("b")]))
+        await older.value
+        XCTAssertFalse(model.items.contains { $0.id == "a" })
+
+        let failing = Task { await model.refresh() }
+        await waitForRequest(held, count: 2)
+        held.fail()
+        await failing.value
+        XCTAssertFalse(model.items.contains { $0.id == "a" }, "A failed refresh does not bring it back")
+    }
+
+    func testAResponseThatStillListsADeletedItemCannotRestoreItInTheLibrary() async {
+        let held = HeldResponses()
+        let model = LibraryViewModel(loadPage: { _, _ in try await held.next() })
+        model.remove([LibraryReference(itemType: "audio", itemId: "a")])
+        let refresh = Task { await model.refresh() }
+        await waitForRequest(held, count: 1)
+        held.release(response([item("a"), item("b")]))
+        await refresh.value
+        XCTAssertEqual(model.items.map(\.id), ["b"])
+    }
+
+    func testAPageFromBeforeAChangeCannotLandInTheLibrary() async {
+        let held = HeldResponses()
+        let model = LibraryViewModel(pageSize: 1, loadPage: { _, _ in try await held.next() })
+        let first = Task { await model.refresh() }
+        await waitForRequest(held, count: 1)
+        held.release(LibraryListResponse(data: [item("a")], page: 1, perPage: 1, totalItems: 2, totalPages: 2))
+        await first.value
+
+        let page = Task { await model.retryNextPage() }
+        await waitForRequest(held, count: 2)
+        model.invalidate()
+        held.release(LibraryListResponse(data: [item("b")], page: 2, perPage: 1, totalItems: 2, totalPages: 2))
+        await page.value
+        XCTAssertEqual(model.items.map(\.id), ["a"])
+        XCTAssertFalse(model.isLoadingMore)
+    }
+}
+
+@MainActor
+final class LibraryDeviceWorkTests: XCTestCase {
+    private func recording(_ state: LocalRecordingState, auto: Bool? = nil) -> LocalRecording {
+        LocalRecording(
+            id: UUID(), filename: "a.caf", originalFilename: nil, createdAt: Date(), duration: 60,
+            contentType: "general", state: state, autoTranscribeRequested: auto
+        )
+    }
+
+    private func share(_ kind: ShareInboxStore.Kind) -> ShareInboxStore.Item {
+        ShareInboxStore.Item(id: UUID(), originalName: "shared", storedName: "s", createdAt: Date(), kind: kind)
+    }
+
+    private func work(
+        recordings: [LocalRecording] = [],
+        shares: [ShareInboxStore.Item] = [],
+        _ filters: LibraryDeviceWork.Filters = .init()
+    ) -> LibraryDeviceWork {
+        LibraryDeviceWork(recordings: recordings, shares: shares, filters: filters, autoTranscribeWillSend: true)
+    }
+
+    /// The defect: choosing "Needs attention" hid exactly what needed attention.
+    func testNeedsAttentionShowsFailedSharesAndRecordings() {
+        let filters = LibraryDeviceWork.Filters(status: .failed)
+        let result = work(recordings: [recording(.invalid)], shares: [share(.pdf), share(.link), share(.audio)], filters)
+        XCTAssertEqual(result.visibleShares.count, 3)
+        XCTAssertEqual(result.visibleRecordings.count, 1)
+        XCTAssertEqual(result.hiddenNeedingAction, 0)
+    }
+
+    func testNeedsAttentionLeavesOutWorkAlreadyOnItsWay() {
+        let result = work(recordings: [recording(.uploading), recording(.serverProcessing)], .init(status: .failed))
+        XCTAssertTrue(result.visibleRecordings.isEmpty)
+        XCTAssertEqual(result.hiddenNeedingAction, 0, "Nothing here needs a person")
+    }
+
+    /// The audit: every chip and status, with one of everything that needs a person.
+    func testNothingNeedingAPersonEverDisappearsWithoutASign() {
+        let recordings = [recording(.invalid), recording(.interrupted), recording(.uploadFailed), recording(.ready)]
+        let shares = [share(.audio), share(.pdf), share(.link)]
+        let everything = recordings.count + shares.count
+        var cases: [LibraryDeviceWork.Filters] = []
+        for type in LibraryMediaFilter.allCases {
+            for status in LibraryStatusFilter.allCases {
+                cases.append(.init(type: type, status: status))
+            }
+        }
+        cases += [
+            .init(isSearching: true), .init(isCollection: true), .init(isArchived: true), .init(isStarred: true),
+            .init(type: .pdf, status: .completed, isSearching: true, isCollection: true, isArchived: true, isStarred: true),
+        ]
+        for filters in cases {
+            let result = work(recordings: recordings, shares: shares, filters)
+            XCTAssertEqual(
+                result.visibleRecordings.count + result.visibleShares.count + result.hiddenNeedingAction,
+                everything,
+                "Shown or counted under \(filters)"
+            )
+        }
+    }
+
+    func testEachChipShowsItsOwnKindAndCountsTheRest() {
+        let recordings = [recording(.invalid)]
+        let shares = [share(.pdf), share(.link), share(.audio)]
+
+        let pdfs = work(recordings: recordings, shares: shares, .init(type: .pdf))
+        XCTAssertEqual(pdfs.visibleShares.map(\.resolvedKind), [.pdf])
+        XCTAssertTrue(pdfs.visibleRecordings.isEmpty)
+        XCTAssertEqual(pdfs.hiddenNeedingAction, 3)
+
+        let links = work(recordings: recordings, shares: shares, .init(type: .youtube))
+        XCTAssertEqual(links.visibleShares.map(\.resolvedKind), [.link])
+        XCTAssertEqual(links.hiddenNeedingAction, 3)
+
+        let recordingsChip = work(recordings: recordings, shares: shares, .init(type: .audio))
+        XCTAssertEqual(recordingsChip.visibleShares.map(\.resolvedKind), [.audio])
+        XCTAssertEqual(recordingsChip.visibleRecordings.count, 1)
+        XCTAssertEqual(recordingsChip.hiddenNeedingAction, 2)
+    }
+
+    func testStarredArchivedSearchAndCollectionShowNoDeviceWorkButSaySo() {
+        for filters in [
+            LibraryDeviceWork.Filters(isSearching: true),
+            .init(isCollection: true),
+            .init(isArchived: true),
+            .init(isStarred: true),
+        ] {
+            let result = work(recordings: [recording(.invalid)], shares: [share(.link)], filters)
+            XCTAssertTrue(result.visibleRecordings.isEmpty)
+            XCTAssertTrue(result.visibleShares.isEmpty)
+            XCTAssertEqual(result.hiddenNeedingAction, 2, "\(filters)")
+        }
+    }
+
+    func testCompletedHidesEverythingAndCountsOnlyWhatNeedsAPerson() {
+        let result = work(
+            recordings: [recording(.invalid), recording(.uploading)],
+            shares: [share(.pdf)],
+            .init(status: .completed)
+        )
+        XCTAssertTrue(result.visibleRecordings.isEmpty)
+        XCTAssertTrue(result.visibleShares.isEmpty)
+        XCTAssertEqual(result.hiddenNeedingAction, 2, "An upload on its way needs nobody")
+    }
+
+    func testARecordingAboutToSendItselfIsNotCountedAsNeedingAPerson() {
+        let waiting = recording(.ready, auto: true)
+        let willSend = LibraryDeviceWork(
+            recordings: [waiting], shares: [], filters: .init(type: .pdf), autoTranscribeWillSend: true
+        )
+        XCTAssertEqual(willSend.hiddenNeedingAction, 0)
+        let wontSend = LibraryDeviceWork(
+            recordings: [waiting], shares: [], filters: .init(type: .pdf), autoTranscribeWillSend: false
+        )
+        XCTAssertEqual(wontSend.hiddenNeedingAction, 1)
+    }
+
+    func testShowClearsWhatWasHidingItAndKeepsTheSort() {
         let model = LibraryViewModel(previewItems: [])
-        model.searchText = "contract"
-        XCTAssertFalse(model.showsShare(ofKind: .link))
-        model.searchText = ""
+        model.selectedChip = .pdfs
         model.selectedStatus = .completed
-        XCTAssertFalse(model.showsShare(ofKind: .link))
-        model.selectedStatus = .active
-        XCTAssertTrue(model.showsShare(ofKind: .link))
-        model.selectedStatus = .all
+        model.searchText = "contract"
+        model.sortOrder = .oldest
         model.selectedCollection = LibraryCollectionFilter(id: "c", name: "Baby")
-        XCTAssertFalse(model.showsShare(ofKind: .link))
+
+        model.clearFiltersForDeviceWork()
+
+        XCTAssertEqual(model.selectedChip, .all)
+        XCTAssertEqual(model.selectedStatus, .all)
+        XCTAssertEqual(model.searchText, "")
+        XCTAssertNil(model.selectedCollection)
+        XCTAssertEqual(model.sortOrder, .oldest)
+        XCTAssertEqual(model.deviceWorkFilters, .init())
     }
 }
 

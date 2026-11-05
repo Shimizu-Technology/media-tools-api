@@ -339,6 +339,8 @@ final class UITestAPIProtocol: URLProtocol {
         } else if Self.isRichContent, path.hasSuffix("/health") {
             respond(["status": "ok", "version": "test", "database": "ok", "workers": 2, "password_auth_enabled": true])
         } else if path.hasSuffix("/library/items") {
+            // Never answers, as a stalled connection wouldn't. `stopLoading` ends it.
+            if ProcessInfo.processInfo.arguments.contains("-ui-test-stalled-list") { return }
             respond(libraryList(url: url))
         } else if path.hasSuffix("/preferences") {
             respond(Self.isRichContent

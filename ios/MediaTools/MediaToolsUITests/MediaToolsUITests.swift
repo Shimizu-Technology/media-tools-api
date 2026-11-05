@@ -551,7 +551,6 @@ final class MediaToolsUITests: XCTestCase {
         app.buttons["recording.rename.save"].tap()
         XCTAssertTrue(field.waitForNonExistence(timeout: 5))
 
-        // Over in the Library with the detail still open, the new name has already landed.
         more.tap()
         app.buttons["Archive"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Archived'")).firstMatch.waitForExistence(timeout: 5))
@@ -561,6 +560,14 @@ final class MediaToolsUITests: XCTestCase {
         app.buttons["tab.library"].tap()
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: libraryRow)
         waitForExpectations(timeout: 5)
+
+        // It moved to Archived, under its new name, so both changes reached this tab.
+        app.buttons["library.chip.pdfs"].swipeLeft()
+        let archived = app.buttons["library.chip.archived"]
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: archived)
+        waitForExpectations(timeout: 5)
+        archived.tap()
+        XCTAssertTrue(app.staticTexts["Renamed from detail"].waitForExistence(timeout: 5))
     }
 
     func testAnItemDeletedFromItsDetailLeavesEveryList() {
@@ -635,6 +642,111 @@ final class MediaToolsUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Transcribing"].firstMatch.exists)
         XCTAssertTrue(app.staticTexts["1:48"].firstMatch.exists, "Parking lot idea is 1:48 long")
+    }
+
+    // MARK: - Opening never waits on a stalled list
+
+    func testAStalledListCannotHoldUpOpeningAnItem() {
+        let app = XCUIApplication()
+        // The notification opens an item no list has shown, so its row is looked up,
+        // and that lookup never answers.
+        app.launchArguments = signedInFixture + [
+            "-ui-test-rich-content",
+            "-ui-test-stalled-list",
+            "-ui-test-notification-route",
+            "-ui-test-reset-recordings",
+        ]
+        app.launch()
+
+        // A list request would otherwise hold it for the connection's whole timeout.
+        XCTAssertTrue(app.staticTexts["Monday planning call"].waitForExistence(timeout: 10))
+        // The header has simply gone without the collection.
+        XCTAssertFalse(app.staticTexts["detail.metadata"].label.contains("Work"))
+
+        // Back out while the lookup is still stalled, and nothing is stuck.
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.textFields["library.search"].waitForExistence(timeout: 5))
+    }
+
+    // MARK: - On-device work under filters
+
+    private var needsYouFixture: [String] {
+        signedInFixture + [
+            "-ui-test-rich-content",
+            "-ui-test-ai-consent",
+            "-ui-test-reset-recordings",
+            "-ui-test-needs-you",
+        ]
+    }
+
+    private func chooseStatus(_ status: String, in app: XCUIApplication) {
+        app.buttons["Library actions"].tap()
+        let choice = app.buttons[status]
+        XCTAssertTrue(choice.waitForExistence(timeout: 5), status)
+        choice.tap()
+    }
+
+    func testNeedsAttentionShowsRecordingsThatNeedAPerson() {
+        let app = XCUIApplication()
+        app.launchArguments = needsYouFixture
+        app.launch()
+        openLibrary(in: app)
+
+        chooseStatus("Needs attention", in: app)
+        XCTAssertTrue(app.staticTexts["Aug 21 recording"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Aug 26 recording"].exists)
+        XCTAssertFalse(app.staticTexts["library.hidden-device-work"].exists, "Nothing is out of view")
+    }
+
+    func testAFailedShareShowsUnderNeedsAttention() {
+        let app = XCUIApplication()
+        // Without permission, a shared link waits here for a deliberate tap.
+        app.launchArguments = signedInFixture + ["-ui-test-reset-recordings", "-ui-test-staged-link"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Not now"].waitForExistence(timeout: 10))
+        app.buttons["Not now"].tap()
+
+        openLibrary(in: app)
+        let share = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'library-share-'")).firstMatch
+        XCTAssertTrue(share.waitForExistence(timeout: 5))
+
+        chooseStatus("Needs attention", in: app)
+        XCTAssertTrue(app.staticTexts["Fixture shared video"].waitForExistence(timeout: 5))
+        XCTAssertTrue(share.exists)
+    }
+
+    func testAChipHidingWorkSaysSoAndCanBringItBack() {
+        let app = XCUIApplication()
+        app.launchArguments = needsYouFixture
+        app.launch()
+        openLibrary(in: app)
+        XCTAssertTrue(app.staticTexts["Aug 21 recording"].waitForExistence(timeout: 5))
+
+        app.buttons["library.chip.pdfs"].tap()
+        let sign = app.staticTexts["library.hidden-device-work"]
+        XCTAssertTrue(sign.waitForExistence(timeout: 5))
+        XCTAssertTrue(sign.label.hasPrefix("2 items"), sign.label)
+        XCTAssertFalse(app.staticTexts["Aug 21 recording"].exists)
+
+        app.buttons["library.show-device-work"].tap()
+        XCTAssertTrue(app.staticTexts["Aug 21 recording"].waitForExistence(timeout: 5))
+        XCTAssertFalse(sign.exists)
+        XCTAssertTrue(app.buttons["library.chip.all"].isSelected)
+    }
+
+    func testSearchingSaysWhatItLeftOut() {
+        let app = XCUIApplication()
+        app.launchArguments = needsYouFixture
+        app.launch()
+        openLibrary(in: app)
+
+        let search = app.textFields["library.search"]
+        search.tap()
+        search.typeText("contract")
+        XCTAssertTrue(app.staticTexts["library.hidden-device-work"].waitForExistence(timeout: 5))
+        app.buttons["library.show-device-work"].tap()
+        XCTAssertTrue(app.staticTexts["Aug 21 recording"].waitForExistence(timeout: 5))
+        XCTAssertEqual(search.value as? String, "Search transcripts and summaries", "The search was cleared")
     }
 
     // MARK: - Collection metadata

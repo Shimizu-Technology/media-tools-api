@@ -1180,22 +1180,25 @@ final class LibraryFreshnessTests: XCTestCase {
 
     func testAutomaticRefreshIsThrottledButKnownChangesAreNot() async {
         var clock = Date(timeIntervalSince1970: 1_000)
-        let model = LibraryViewModel(previewItems: [sample("a")], now: { clock })
+        var requests = 0
+        let item = sample("a")
+        let model = LibraryViewModel(now: { clock }, loadPage: { _, _ in
+            requests += 1
+            return LibraryListResponse(data: [item], page: 1, perPage: 20, totalItems: 1, totalPages: 1)
+        })
         await model.loadIfNeeded(for: model.query)
         XCTAssertEqual(model.items.count, 1)
-        model.remove([model.items[0].reference])
-        XCTAssertTrue(model.items.isEmpty)
+        XCTAssertEqual(requests, 1)
 
         await model.refreshIfStale()
-        XCTAssertTrue(model.items.isEmpty, "A second glance inside the window stays cached")
+        XCTAssertEqual(requests, 1, "A second glance inside the window stays cached")
 
         clock.addTimeInterval(LibraryViewModel.minimumAutomaticRefreshInterval + 1)
         await model.refreshIfStale()
-        XCTAssertEqual(model.items.count, 1)
+        XCTAssertEqual(requests, 2)
 
-        model.remove([model.items[0].reference])
         await model.refresh()
-        XCTAssertEqual(model.items.count, 1, "An upload changing state always refreshes")
+        XCTAssertEqual(requests, 3, "An upload changing state always refreshes")
     }
 
     func testRefreshIfStaleDoesNotRunBeforeTheFirstLoad() async {

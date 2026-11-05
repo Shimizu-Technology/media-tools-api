@@ -803,12 +803,8 @@ struct RecordView: View {
     }
 
     private func queueForAIProcessing(_ recording: LocalRecording) async {
-        guard await aiProcessingConsent.requestPermission(),
-              let currentRecording = recorder.recording(withID: recording.id),
-              !currentRecording.isUploadInProgress else { return }
         error = nil
-        uploader.queue(currentRecording)
-        Haptics.light()
+        await uploader.transcribe(recording)
     }
 
     private func startPolling(id: String) {

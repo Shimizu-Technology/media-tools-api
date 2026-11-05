@@ -22,6 +22,7 @@ final class HomeViewModel {
     /// A refresh can start while an older one is on the wire. Only the newest may land,
     /// or a list from before a deletion could put the deleted row back.
     private var generation = 0
+    private var deletedReferences: Set<LibraryReference> = []
 
     static let recentLimit = 6
 
@@ -52,21 +53,30 @@ final class HomeViewModel {
         await refresh()
     }
 
-    /// A known change: the next automatic refresh runs whatever the throttle says.
+    /// A known change: the next automatic refresh runs whatever the throttle says, and a
+    /// response already on the wire describes the library from before it, so it can't land.
     func invalidate() {
         lastLoadedAt = nil
+        generation += 1
+        isLoading = false
     }
 
+    /// Deleted items stay gone from every later response too, however late it arrives.
     func remove(_ references: Set<LibraryReference>) {
         guard !references.isEmpty else { return }
-        recent.removeAll { references.contains($0.reference) }
-        serverFailures.removeAll { references.contains($0.reference) }
+        deletedReferences.formUnion(references.map(\.normalized))
+        recent = withoutDeleted(recent)
+        serverFailures = withoutDeleted(serverFailures)
+    }
+
+    private func withoutDeleted(_ source: [LibraryListItem]) -> [LibraryListItem] {
+        source.filter { !deletedReferences.contains($0.reference.normalized) }
     }
 
     func refresh() async {
         if let previewItems {
-            recent = Array(previewItems.prefix(Self.recentLimit))
-            serverFailures = previewItems.filter { $0.status == "failed" }
+            recent = Array(withoutDeleted(previewItems).prefix(Self.recentLimit))
+            serverFailures = withoutDeleted(previewItems).filter { $0.status == "failed" }
             failedTotal = serverFailures.count
             hasLoaded = true
             lastLoadedAt = now()
@@ -79,7 +89,7 @@ final class HomeViewModel {
         do {
             let latest = try await load()
             guard current == generation, !Task.isCancelled else { return }
-            recent = latest.data
+            recent = withoutDeleted(latest.data)
             loadError = nil
             hasLoaded = true
             lastLoadedAt = now()
@@ -92,7 +102,7 @@ final class HomeViewModel {
         // leaves the section as it was. The newest page covers the last seven days.
         if let failed = try? await loadFailures() {
             guard current == generation, !Task.isCancelled else { return }
-            serverFailures = failed.data
+            serverFailures = withoutDeleted(failed.data)
             failedTotal = failed.totalItems
         }
     }
