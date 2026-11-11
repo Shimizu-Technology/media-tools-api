@@ -1521,6 +1521,26 @@ final class MediaToolsUITests: XCTestCase {
         )
     }
 
+    func testCopyAllSitsOnTheTranscriptAndConfirms() {
+        let app = XCUIApplication()
+        app.launchArguments = signedInFixture + [
+            "-ui-test-notification-route",
+            "-ui-test-reset-recordings",
+        ]
+        app.launch()
+
+        XCTAssertTrue(
+            app.staticTexts["Transcript from the UI test fixture."].waitForExistence(timeout: 10)
+        )
+        let copyAll = app.buttons["detail.copy-all"]
+        XCTAssertTrue(copyAll.waitForExistence(timeout: 5))
+        XCTAssertEqual(copyAll.label, "Copy all")
+        copyAll.tap()
+
+        expectation(for: NSPredicate(format: "label == 'Copied'"), evaluatedWith: copyAll)
+        waitForExpectations(timeout: 5)
+    }
+
     func testDetailKeepsEveryRareActionInItsMenu() {
         let app = XCUIApplication()
         app.launchArguments = signedInFixture + [

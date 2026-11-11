@@ -38,8 +38,11 @@ struct ItemDetailView: View {
     @State private var summaryContentType = "general"
     @State private var summaryError: String?
     @State private var transcriptSummaryIsRunning = false
-    @State private var showExportSheet = false
-    @State private var exportText = ""
+    /// The text travels with the sheet. Setting it beside a separate flag left the
+    /// sheet holding the empty text from before, so every export file was blank.
+    @State private var exportPayload: ExportPayload?
+    @State private var copiedTranscript = false
+    @State private var copiedResetTask: Task<Void, Never>?
     @State private var preferences = LibraryPreferences(favorite: false, archived: false, tags: [])
     @State private var tagInput = ""
     @State private var isSavingPreferences = false
@@ -155,8 +158,8 @@ struct ItemDetailView: View {
                 onDismiss: { showAddToCollection = false }
             )
         }
-        .sheet(isPresented: $showExportSheet) {
-            ExportSheet(text: exportText, title: title)
+        .sheet(item: $exportPayload) { payload in
+            ExportSheet(text: payload.text, title: payload.title)
         }
         .sheet(isPresented: $showRenameSheet) {
             renameSheet
@@ -190,7 +193,10 @@ struct ItemDetailView: View {
                 transcriptModeChoice = .readable
             }
         }
-        .onDisappear { detailPollingTask?.cancel() }
+        .onDisappear {
+            detailPollingTask?.cancel()
+            copiedResetTask?.cancel()
+        }
     }
 
     // MARK: - Toolbar
@@ -206,8 +212,9 @@ struct ItemDetailView: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             Button {
-                exportText = visibleTranscriptText ?? ""
-                showExportSheet = true
+                if let text = visibleTranscriptText {
+                    exportPayload = ExportPayload(text: text, title: title)
+                }
             } label: {
                 Image(systemName: "square.and.arrow.up")
                     .frame(minWidth: 44, minHeight: 44)
@@ -250,11 +257,8 @@ struct ItemDetailView: View {
                 } label: {
                     Label("Tags", systemImage: "tag")
                 }
-                if let text = visibleTranscriptText {
-                    Button {
-                        UIPasteboard.general.string = text
-                        Haptics.success()
-                    } label: {
+                if visibleTranscriptText != nil {
+                    Button(action: copyTranscript) {
                         Label("Copy Text", systemImage: "doc.on.doc")
                     }
                 }
@@ -788,22 +792,22 @@ struct ItemDetailView: View {
     private var transcriptSection: some View {
         if let text = contentText, !text.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                if isAudioItem {
-                    HStack(alignment: .firstTextBaseline) {
-                        if transcriptViewMode != .readable || audio?.hasDistinctReadableTranscript == true {
-                            Text(transcriptViewDescription)
-                                .font(.footnote)
-                                .foregroundStyle(Theme.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 8)
-                        if availableTranscriptViewModes.count > 1 {
-                            transcriptModeMenu
-                        }
+                HStack(alignment: .firstTextBaseline) {
+                    if isAudioItem,
+                       transcriptViewMode != .readable || audio?.hasDistinctReadableTranscript == true {
+                        Text(transcriptViewDescription)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    if transcriptViewMode == .readable {
-                        transcriptFormattingState
+                    Spacer(minLength: 8)
+                    copyTranscriptButton
+                    if isAudioItem, availableTranscriptViewModes.count > 1 {
+                        transcriptModeMenu
                     }
+                }
+                if isAudioItem, transcriptViewMode == .readable {
+                    transcriptFormattingState
                 }
 
                 if isAudioItem && transcriptViewMode == .timestamps && !segments.isEmpty {
@@ -815,6 +819,40 @@ struct ItemDetailView: View {
                 }
             }
             .padding(.top, 12)
+        }
+    }
+
+    /// One tap for the whole transcript, so nobody has to select a long one by hand.
+    private var copyTranscriptButton: some View {
+        Button(action: copyTranscript) {
+            Label(
+                copiedTranscript ? "Copied" : "Copy All",
+                systemImage: copiedTranscript ? "checkmark" : "doc.on.doc"
+            )
+            // At the largest sizes the words would push the view menu off the row.
+            .labelStyle(CopyLabelStyle(iconOnly: dynamicTypeSize.isAccessibilitySize))
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(Theme.accentText)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(visibleTranscriptText == nil)
+        .accessibilityLabel(copiedTranscript ? "Copied" : "Copy all")
+        .accessibilityIdentifier("detail.copy-all")
+    }
+
+    private func copyTranscript() {
+        guard let text = visibleTranscriptText else { return }
+        UIPasteboard.general.string = text
+        Haptics.success()
+        UIAccessibility.post(notification: .announcement, argument: "Copied")
+        withMotion(Theme.quick) { copiedTranscript = true }
+        copiedResetTask?.cancel()
+        copiedResetTask = Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            withMotion(Theme.quick) { copiedTranscript = false }
         }
     }
 
@@ -1519,7 +1557,32 @@ extension Swift.Collection {
     }
 }
 
+// MARK: - Copy Label
+
+/// Words and icon, or the icon alone where the words would not fit.
+private struct CopyLabelStyle: LabelStyle {
+    let iconOnly: Bool
+
+    @ViewBuilder
+    func makeBody(configuration: LabelStyleConfiguration) -> some View {
+        if iconOnly {
+            configuration.icon
+        } else {
+            HStack(spacing: 5) {
+                configuration.icon
+                configuration.title
+            }
+        }
+    }
+}
+
 // MARK: - Export Sheet
+
+struct ExportPayload: Identifiable {
+    let id = UUID()
+    let text: String
+    let title: String
+}
 
 struct ExportSheet: View {
     let text: String

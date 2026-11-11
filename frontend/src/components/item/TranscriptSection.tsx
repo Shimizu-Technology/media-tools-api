@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Loader2, Search, X } from 'lucide-react';
+import { Check, Copy, Loader2, Search, X } from 'lucide-react';
 import type { Citation, MediaSegment } from '../../lib/api';
 import { formatTimestamp } from '../../lib/citations';
+import { transcriptCopyText } from '../../lib/transcriptCopy';
 import { Button } from '../ui/Button';
 import { Input, Segmented } from '../ui/Field';
 
@@ -31,6 +32,8 @@ export function TranscriptSection({ title, text, originalText, segments, onCitat
   const [chosenMode, setMode] = useState<Mode | null>(null);
   const [finding, setFinding] = useState(false);
   const [query, setQuery] = useState('');
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const copyResetRef = useRef<number | null>(null);
   const timed = useMemo(() => segments.filter((segment) => typeof segment.start_ms === 'number'), [segments]);
   const paged = useMemo(() => segments.filter((segment) => typeof segment.page_number === 'number'), [segments]);
   const mode: Mode = chosenMode ?? (preferTimestamps && timed.length ? 'timestamps' : 'readable');
@@ -61,6 +64,23 @@ export function TranscriptSection({ title, text, originalText, segments, onCitat
     if (before.bottom > 0 && before.top < window.innerHeight) line.scrollIntoView({ block: 'nearest' });
   }, [activeSegment, mode, playing]);
 
+  useEffect(() => () => {
+    if (copyResetRef.current !== null) window.clearTimeout(copyResetRef.current);
+  }, []);
+
+  // One tap for the whole thing; selecting a long transcript by hand is the alternative.
+  const copyAll = async () => {
+    let next: 'copied' | 'failed' = 'copied';
+    try {
+      await navigator.clipboard.writeText(transcriptCopyText({ mode, chosen: chosenMode !== null, readable, original, segments: timed }));
+    } catch {
+      next = 'failed';
+    }
+    setCopyState(next);
+    if (copyResetRef.current !== null) window.clearTimeout(copyResetRef.current);
+    copyResetRef.current = window.setTimeout(() => setCopyState('idle'), 2000);
+  };
+
   if (!readable) {
     return (
       <section aria-labelledby="transcript-heading">
@@ -76,9 +96,16 @@ export function TranscriptSection({ title, text, originalText, segments, onCitat
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 flex-1 items-center justify-between gap-1">
           {options.length > 1 ? <Segmented label="Transcript view" value={mode} options={options} onChange={setMode} /> : <span />}
-          <button type="button" onClick={() => { setFinding((value) => !value); setQuery(''); }} aria-label={finding ? 'Close find' : `Find in ${title.toLowerCase()}`} aria-expanded={finding} className="pressable inline-flex h-11 w-11 items-center justify-center rounded-full text-accent-text hover:bg-fill">
-            {finding ? <X className="h-5 w-5" /> : <Search className="h-5 w-5" />}
-          </button>
+          <div className="flex shrink-0 items-center">
+            <button type="button" onClick={() => void copyAll()} className="pressable inline-flex h-11 items-center gap-1.5 rounded-full px-3 text-callout font-semibold text-accent-text hover:bg-fill">
+              {copyState === 'copied' ? <Check className="h-[18px] w-[18px]" aria-hidden="true" /> : <Copy className="h-[18px] w-[18px]" aria-hidden="true" />}
+              {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Could not copy' : 'Copy all'}
+            </button>
+            <span className="sr-only" role="status">{copyState === 'copied' ? `Copied the ${title.toLowerCase()}` : copyState === 'failed' ? 'The browser blocked the clipboard' : ''}</span>
+            <button type="button" onClick={() => { setFinding((value) => !value); setQuery(''); }} aria-label={finding ? 'Close find' : `Find in ${title.toLowerCase()}`} aria-expanded={finding} className="pressable inline-flex h-11 w-11 items-center justify-center rounded-full text-accent-text hover:bg-fill">
+              {finding ? <X className="h-5 w-5" /> : <Search className="h-5 w-5" />}
+            </button>
+          </div>
         </div>
       </div>
 
