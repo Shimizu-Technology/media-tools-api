@@ -94,9 +94,10 @@ export function TranscriptSection({ title, text, originalText, segments, onCitat
     <section aria-labelledby="transcript-heading">
       <h2 id="transcript-heading" className="sr-only">{title}</h2>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 flex-1 items-center justify-between gap-1">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-1">
           {options.length > 1 ? <Segmented label="Transcript view" value={mode} options={options} onChange={setMode} /> : <span />}
-          <div className="flex shrink-0 items-center">
+          {/* On a narrow screen with three views, these drop to their own line at the right. */}
+          <div className="ml-auto flex shrink-0 items-center">
             <button type="button" onClick={() => void copyAll()} className="pressable inline-flex h-11 items-center gap-1.5 rounded-full px-3 text-callout font-semibold text-accent-text hover:bg-fill">
               {copyState === 'copied' ? <Check className="h-[18px] w-[18px]" aria-hidden="true" /> : <Copy className="h-[18px] w-[18px]" aria-hidden="true" />}
               {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Could not copy' : 'Copy all'}
