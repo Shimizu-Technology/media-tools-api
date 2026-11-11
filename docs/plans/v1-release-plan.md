@@ -63,6 +63,7 @@ a Clerk development instance, and App Review rejected build 9.
 | I | Server Clerk removal and cleanup | E, F, G, production verification | Merged (#110) |
 | J | Release: TestFlight build and QA | everything above | Build 14 uploaded; production test passed after #113 and #114; reached Leon's iPhone 2026-11-05; superseded by K |
 | K | Redesign: Sunrise Home, Studio Library | J | Merged (#116 to #121); build 15 is the TestFlight release for Leon's device test |
+| L | Export files carry the transcript; Copy All on iOS and web | K | Merged (#123); build 16 supersedes 15 for Leon's device test |
 
 ### A. iOS capture and results flow
 
