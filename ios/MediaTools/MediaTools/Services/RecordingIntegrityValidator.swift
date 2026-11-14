@@ -21,6 +21,10 @@ enum RecordingIntegrityError: LocalizedError, Equatable {
 /// offered for upload. AVAudioRecorder writes the `moov` box only when it
 /// successfully finalizes an M4A. A non-empty file without that box contains
 /// audio bytes but is not seekable or decodable by AVFoundation or ffmpeg.
+///
+/// The check answers only "did the writer finish?", not "can this be decoded?".
+/// Shared and imported files come from other apps, and the server decodes every
+/// upload with ffmpeg before transcribing, keeping the device copy when it can't.
 enum RecordingIntegrityValidator {
     private static let isoMediaExtensions: Set<String> = ["m4a", "mp4", "mov"]
 
@@ -50,25 +54,51 @@ enum RecordingIntegrityValidator {
             var foundMediaData = false
             var foundMovieMetadata = false
 
+            // Once the audio and its index are both present, the writer finished.
+            // Voice Memos can leave a few stale bytes after its last box when it
+            // rewrites a memo's metadata in place, and every decoder ignores data
+            // past the last box, so such a tail is not a reason to refuse the file.
+            func malformedUnlessFinalized() -> Result<Void, RecordingIntegrityError> {
+                foundMediaData && foundMovieMetadata ? .success(()) : .failure(.malformedContainer)
+            }
+
             while offset < length {
                 guard length - offset >= 8 else {
-                    return .failure(.malformedContainer)
+                    return malformedUnlessFinalized()
                 }
                 try handle.seek(toOffset: offset)
                 guard let header = try handle.read(upToCount: 8), header.count == 8 else {
-                    return .failure(.malformedContainer)
+                    return malformedUnlessFinalized()
                 }
 
                 var boxSize = readBigEndianInteger(header.prefix(4))
                 let boxType = String(data: header.suffix(4), encoding: .ascii) ?? ""
                 var headerSize: UInt64 = 8
 
+                // ISO box types are four printable characters. A file that does not
+                // open with one has the wrong extension, such as raw AAC saved as
+                // `.m4a`, and whether that decodes is for the server's ffmpeg to say.
+                // Zeros are what a capture that never flushed leaves, so they are
+                // still judged here.
+                if offset == 0,
+                   !header.allSatisfy({ $0 == 0 }),
+                   !header.suffix(4).allSatisfy({ (0x20...0x7e).contains($0) }) {
+                    return .success(())
+                }
+
+                // QuickTime allows more than one `mdat`, and a fragmented file adds
+                // a `moof` per fragment, so a cut-off media box is missing media
+                // even after the audio and its index were already seen.
+                let cutOffResult = ["mdat", "moov", "moof"].contains(boxType)
+                    ? .failure(.malformedContainer)
+                    : malformedUnlessFinalized()
+
                 if boxSize == 1 {
                     guard length - offset >= 16,
                           let extended = try handle.read(upToCount: 8),
                           extended.count == 8
                     else {
-                        return .failure(.malformedContainer)
+                        return cutOffResult
                     }
                     boxSize = readBigEndianInteger(extended)
                     headerSize = 16
@@ -77,7 +107,7 @@ enum RecordingIntegrityValidator {
                 }
 
                 guard boxSize >= headerSize, boxSize <= length - offset else {
-                    return .failure(.malformedContainer)
+                    return cutOffResult
                 }
                 if boxType == "mdat", boxSize > headerSize {
                     foundMediaData = true

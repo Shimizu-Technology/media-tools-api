@@ -245,4 +245,39 @@ final class ShareInboxStoreTests: XCTestCase {
         XCTAssertEqual(coordinator.pendingRecordings.count, 1)
         XCTAssertEqual(try store.loadRecordings().map(\.id), [item.id])
     }
+
+    /// Voice Memos can leave stale bytes after the last box of a memo it re-saved.
+    /// Such a share used to fail every Retry with "invalid audio container".
+    @MainActor
+    func testSharedVoiceMemoWithStaleTrailingBytesImports() throws {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        func box(_ type: String, _ payload: Data) -> Data {
+            let size = UInt32(payload.count + 8)
+            return Data([
+                UInt8((size >> 24) & 0xff), UInt8((size >> 16) & 0xff),
+                UInt8((size >> 8) & 0xff), UInt8(size & 0xff),
+            ]) + Data(type.utf8) + payload
+        }
+        let source = temp.appendingPathComponent("Lance pt. 1.m4a")
+        try (box("ftyp", Data("M4A ".utf8)) + box("mdat", Data([1, 2])) + box("moov", Data([3]))
+            + box("free", Data("(Build 22H352))".utf8)) + Data("352))".utf8)).write(to: source)
+        let inbox = try ShareInboxStore(rootURL: temp.appendingPathComponent("inbox"))
+        let item = try inbox.stageFile(from: source, originalName: "Lance pt. 1.m4a")
+        let store = try RecordingStore(rootDirectory: temp.appendingPathComponent("recordings"))
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "ShareInboxStoreTests.\(UUID().uuidString)"))
+        let coordinator = RecordingCoordinator(store: store, localAccountDefaults: defaults)
+
+        let recording = try coordinator.importRecording(
+            from: inbox.fileURL(for: item),
+            contentType: "general",
+            shareID: item.id,
+            originalName: item.originalName
+        )
+
+        XCTAssertEqual(recording.state, .ready)
+        XCTAssertEqual(recording.displayTitle, "Lance pt. 1")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.fileURL(for: recording).path))
+    }
 }

@@ -80,6 +80,23 @@ final class ModelDecodingTests: XCTestCase {
             + mediaBox("mdat", payload: Data([0x01, 0x02]))
     }
 
+    /// The layout of a memo Voice Memos (iOS 18.7.8) re-saved in place: a 64-bit
+    /// `mdat`, the index, a `free` box, and five stale bytes after the last box.
+    private func voiceMemosM4AData() -> Data {
+        let audio = Data([0x01, 0x02, 0x03])
+        let mdatSize = UInt64(16 + audio.count)
+        var mdat = Data([0x00, 0x00, 0x00, 0x01]) + Data("mdat".utf8)
+        mdat.append(contentsOf: (0..<8).reversed().map {
+            UInt8((mdatSize >> UInt64($0 * 8)) & 0xff)
+        })
+        mdat.append(audio)
+        return mediaBox("ftyp", payload: Data("M4A ".utf8) + Data(count: 4) + Data("M4A isommp42".utf8))
+            + mdat
+            + mediaBox("moov", payload: Data([0x03]))
+            + mediaBox("free", payload: Data("sion 18.7.8 (Build 22H352))".utf8))
+            + Data("352))".utf8)
+    }
+
     private func cafData(unknownDataLength: Bool) -> Data {
         func chunk(_ type: String, payload: Data, unknownLength: Bool = false) -> Data {
             let size = unknownLength ? UInt64.max : UInt64(payload.count)
@@ -456,6 +473,76 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: invalidURL).get()) { error in
             XCTAssertEqual(error as? RecordingIntegrityError, .unfinalizedContainer)
         }
+    }
+
+    func testRecordingIntegrityValidatorIgnoresATailAfterAFinishedContainer() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let voiceMemoURL = directory.appendingPathComponent("Lance pt. 1.m4a")
+        let longTailURL = directory.appendingPathComponent("long-tail.m4a")
+        try voiceMemosM4AData().write(to: voiceMemoURL)
+        // Twelve bytes read as a box header that claims more than the file holds.
+        try (finalizedM4AData() + Data(repeating: 0xff, count: 12)).write(to: longTailURL)
+
+        XCTAssertNoThrow(try RecordingIntegrityValidator.validate(url: voiceMemoURL).get())
+        XCTAssertNoThrow(try RecordingIntegrityValidator.validate(url: longTailURL).get())
+    }
+
+    func testRecordingIntegrityValidatorStillRejectsATailWithoutMovieMetadata() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("cut-off.m4a")
+        let zerosURL = directory.appendingPathComponent("never-flushed.m4a")
+        let cutSecondMediaURL = directory.appendingPathComponent("cut-second-mdat.mov")
+        try (unfinalizedM4AData() + Data("352))".utf8)).write(to: url)
+        try Data(count: 4_096).write(to: zerosURL)
+        // A complete first `mdat` and index, then a second `mdat` that claims
+        // 100 bytes but holds 4: audio the index points to is missing.
+        try (finalizedM4AData() + Data([0, 0, 0, 100]) + Data("mdat".utf8) + Data([1, 2, 3, 4]))
+            .write(to: cutSecondMediaURL)
+
+        XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: url).get()) { error in
+            XCTAssertEqual(error as? RecordingIntegrityError, .malformedContainer)
+        }
+        XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: cutSecondMediaURL).get()) { error in
+            XCTAssertEqual(error as? RecordingIntegrityError, .malformedContainer)
+        }
+        // The same cut, but in a 64-bit header that ends before its size, and in
+        // a fragment of a fragmented file.
+        for (name, tail) in [
+            ("cut-extended-mdat.mov", Data([0, 0, 0, 1]) + Data("mdat".utf8)),
+            ("cut-extended-moov.mov", Data([0, 0, 0, 1]) + Data("moov".utf8)),
+            ("cut-moof.mp4", Data([0, 0, 0, 100]) + Data("moof".utf8) + Data([1, 2, 3, 4])),
+        ] {
+            let cutURL = directory.appendingPathComponent(name)
+            try (finalizedM4AData() + tail).write(to: cutURL)
+            XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: cutURL).get(), name) { error in
+                XCTAssertEqual(error as? RecordingIntegrityError, .malformedContainer, name)
+            }
+        }
+        XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: zerosURL).get()) { error in
+            XCTAssertEqual(error as? RecordingIntegrityError, .unfinalizedContainer)
+        }
+    }
+
+    func testRecordingIntegrityValidatorLeavesNonISOAudioToTheServer() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        // An ADTS frame header: raw AAC that another app saved with an .m4a name.
+        let url = directory.appendingPathComponent("raw-aac.m4a")
+        try Data([0xff, 0xf1, 0x4c, 0x80, 0x2e, 0x7f, 0xfc, 0x21, 0x00, 0x00]).write(to: url)
+        // A FLAC header has zero bytes where an ISO box type would be.
+        let flacURL = directory.appendingPathComponent("renamed-flac.m4a")
+        try (Data("fLaC".utf8) + Data([0x00, 0x00, 0x00, 0x22]) + Data(count: 34)).write(to: flacURL)
+
+        XCTAssertNoThrow(try RecordingIntegrityValidator.validate(url: url).get())
+        XCTAssertNoThrow(try RecordingIntegrityValidator.validate(url: flacURL).get())
     }
 
     func testRecordingStoreCreatesCrashRecoverableCAF() throws {
