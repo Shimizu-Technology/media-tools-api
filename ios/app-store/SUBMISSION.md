@@ -7,7 +7,7 @@ implements it. Run `make ios-release-preflight` before an archive and again with
 ## Current release status
 
 - Version: `1.0`
-- TestFlight build: `16`, the Sunrise and Studio redesign with working export and Copy All (#123), for owner testing before submission.
+- TestFlight build: `17`, the Sunrise and Studio redesign with working export and Copy All (#123) and shared Voice Memos with stale trailing bytes importing (#125), for owner testing before submission.
 - Bundle ID: `com.ShimizuTechnology.MediaTools`
 - Apple team: `4T358A5S74`
 - Minimum OS: iOS 18.5
