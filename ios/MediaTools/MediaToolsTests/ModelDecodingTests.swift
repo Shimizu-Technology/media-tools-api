@@ -511,6 +511,12 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: cutSecondMediaURL).get()) { error in
             XCTAssertEqual(error as? RecordingIntegrityError, .malformedContainer)
         }
+        // The same cut, but in a 64-bit `mdat` header that ends before its size.
+        let cutExtendedHeaderURL = directory.appendingPathComponent("cut-extended-mdat.mov")
+        try (finalizedM4AData() + Data([0, 0, 0, 1]) + Data("mdat".utf8)).write(to: cutExtendedHeaderURL)
+        XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: cutExtendedHeaderURL).get()) { error in
+            XCTAssertEqual(error as? RecordingIntegrityError, .malformedContainer)
+        }
         XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: zerosURL).get()) { error in
             XCTAssertEqual(error as? RecordingIntegrityError, .unfinalizedContainer)
         }

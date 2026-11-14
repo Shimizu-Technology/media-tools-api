@@ -87,12 +87,18 @@ enum RecordingIntegrityValidator {
                     return .success(())
                 }
 
+                // QuickTime allows more than one `mdat`, so a cut-off audio or
+                // index box is missing media even after both were already seen.
+                let cutOffResult = boxType == "mdat" || boxType == "moov"
+                    ? .failure(.malformedContainer)
+                    : malformedUnlessFinalized()
+
                 if boxSize == 1 {
                     guard length - offset >= 16,
                           let extended = try handle.read(upToCount: 8),
                           extended.count == 8
                     else {
-                        return malformedUnlessFinalized()
+                        return cutOffResult
                     }
                     boxSize = readBigEndianInteger(extended)
                     headerSize = 16
@@ -101,12 +107,7 @@ enum RecordingIntegrityValidator {
                 }
 
                 guard boxSize >= headerSize, boxSize <= length - offset else {
-                    // QuickTime allows more than one `mdat`, so a cut-off audio or
-                    // index box is missing media even after both were already seen.
-                    if boxType == "mdat" || boxType == "moov" {
-                        return .failure(.malformedContainer)
-                    }
-                    return malformedUnlessFinalized()
+                    return cutOffResult
                 }
                 if boxType == "mdat", boxSize > headerSize {
                     foundMediaData = true
