@@ -101,6 +101,11 @@ enum RecordingIntegrityValidator {
                 }
 
                 guard boxSize >= headerSize, boxSize <= length - offset else {
+                    // QuickTime allows more than one `mdat`, so a cut-off audio or
+                    // index box is missing media even after both were already seen.
+                    if boxType == "mdat" || boxType == "moov" {
+                        return .failure(.malformedContainer)
+                    }
                     return malformedUnlessFinalized()
                 }
                 if boxType == "mdat", boxSize > headerSize {

@@ -497,10 +497,18 @@ final class ModelDecodingTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("cut-off.m4a")
         let zerosURL = directory.appendingPathComponent("never-flushed.m4a")
+        let cutSecondMediaURL = directory.appendingPathComponent("cut-second-mdat.mov")
         try (unfinalizedM4AData() + Data("352))".utf8)).write(to: url)
         try Data(count: 4_096).write(to: zerosURL)
+        // A complete first `mdat` and index, then a second `mdat` that claims
+        // 100 bytes but holds 4: audio the index points to is missing.
+        try (finalizedM4AData() + Data([0, 0, 0, 100]) + Data("mdat".utf8) + Data([1, 2, 3, 4]))
+            .write(to: cutSecondMediaURL)
 
         XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: url).get()) { error in
+            XCTAssertEqual(error as? RecordingIntegrityError, .malformedContainer)
+        }
+        XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: cutSecondMediaURL).get()) { error in
             XCTAssertEqual(error as? RecordingIntegrityError, .malformedContainer)
         }
         XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: zerosURL).get()) { error in
