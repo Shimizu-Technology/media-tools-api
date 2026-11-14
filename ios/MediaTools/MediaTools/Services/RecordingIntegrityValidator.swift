@@ -22,10 +22,9 @@ enum RecordingIntegrityError: LocalizedError, Equatable {
 /// successfully finalizes an M4A. A non-empty file without that box contains
 /// audio bytes but is not seekable or decodable by AVFoundation or ffmpeg.
 ///
-/// The check answers only "did the writer finish?", so it stays out of the way
-/// of files it was not built to judge. Shared and imported files come from other
-/// apps, and the server decodes everything with ffmpeg before transcribing, so
-/// it is the final word on whether audio is readable.
+/// The check answers only "did the writer finish?", not "can this be decoded?".
+/// Shared and imported files come from other apps, and the server decodes every
+/// upload with ffmpeg before transcribing, keeping the device copy when it can't.
 enum RecordingIntegrityValidator {
     private static let isoMediaExtensions: Set<String> = ["m4a", "mp4", "mov"]
 
@@ -87,9 +86,10 @@ enum RecordingIntegrityValidator {
                     return .success(())
                 }
 
-                // QuickTime allows more than one `mdat`, so a cut-off audio or
-                // index box is missing media even after both were already seen.
-                let cutOffResult = boxType == "mdat" || boxType == "moov"
+                // QuickTime allows more than one `mdat`, and a fragmented file adds
+                // a `moof` per fragment, so a cut-off media box is missing media
+                // even after the audio and its index were already seen.
+                let cutOffResult = ["mdat", "moov", "moof"].contains(boxType)
                     ? .failure(.malformedContainer)
                     : malformedUnlessFinalized()
 

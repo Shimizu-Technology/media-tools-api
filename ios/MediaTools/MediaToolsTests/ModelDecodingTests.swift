@@ -511,11 +511,18 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: cutSecondMediaURL).get()) { error in
             XCTAssertEqual(error as? RecordingIntegrityError, .malformedContainer)
         }
-        // The same cut, but in a 64-bit `mdat` header that ends before its size.
-        let cutExtendedHeaderURL = directory.appendingPathComponent("cut-extended-mdat.mov")
-        try (finalizedM4AData() + Data([0, 0, 0, 1]) + Data("mdat".utf8)).write(to: cutExtendedHeaderURL)
-        XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: cutExtendedHeaderURL).get()) { error in
-            XCTAssertEqual(error as? RecordingIntegrityError, .malformedContainer)
+        // The same cut, but in a 64-bit header that ends before its size, and in
+        // a fragment of a fragmented file.
+        for (name, tail) in [
+            ("cut-extended-mdat.mov", Data([0, 0, 0, 1]) + Data("mdat".utf8)),
+            ("cut-extended-moov.mov", Data([0, 0, 0, 1]) + Data("moov".utf8)),
+            ("cut-moof.mp4", Data([0, 0, 0, 100]) + Data("moof".utf8) + Data([1, 2, 3, 4])),
+        ] {
+            let cutURL = directory.appendingPathComponent(name)
+            try (finalizedM4AData() + tail).write(to: cutURL)
+            XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: cutURL).get(), name) { error in
+                XCTAssertEqual(error as? RecordingIntegrityError, .malformedContainer, name)
+            }
         }
         XCTAssertThrowsError(try RecordingIntegrityValidator.validate(url: zerosURL).get()) { error in
             XCTAssertEqual(error as? RecordingIntegrityError, .unfinalizedContainer)
@@ -530,8 +537,12 @@ final class ModelDecodingTests: XCTestCase {
         // An ADTS frame header: raw AAC that another app saved with an .m4a name.
         let url = directory.appendingPathComponent("raw-aac.m4a")
         try Data([0xff, 0xf1, 0x4c, 0x80, 0x2e, 0x7f, 0xfc, 0x21, 0x00, 0x00]).write(to: url)
+        // A FLAC header has zero bytes where an ISO box type would be.
+        let flacURL = directory.appendingPathComponent("renamed-flac.m4a")
+        try (Data("fLaC".utf8) + Data([0x00, 0x00, 0x00, 0x22]) + Data(count: 34)).write(to: flacURL)
 
         XCTAssertNoThrow(try RecordingIntegrityValidator.validate(url: url).get())
+        XCTAssertNoThrow(try RecordingIntegrityValidator.validate(url: flacURL).get())
     }
 
     func testRecordingStoreCreatesCrashRecoverableCAF() throws {
