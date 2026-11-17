@@ -1,4 +1,5 @@
 [build]
+  ignore = "bash scripts/netlify-ignore-build.sh"
   base = "frontend"
   publish = "dist"
   command = "npm run build"
