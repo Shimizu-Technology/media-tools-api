@@ -15,6 +15,10 @@ on:
       - 'scripts/gate.sh'
       - 'scripts/ios-release-preflight.sh'
 
+concurrency:
+  group: ios-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -33,12 +37,18 @@ jobs:
       - name: Verify App Store release source
         run: ./scripts/ios-release-preflight.sh
 
-      - name: Resolve Swift packages
+      # Compile before booting CoreSimulator so it cannot compete for runner RAM/CPU.
+      - name: Build for testing
         run: >-
           xcodebuild
           -project ios/MediaTools/MediaTools.xcodeproj
           -scheme MediaTools
-          -resolvePackageDependencies
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath '${{ runner.temp }}/MediaToolsDerivedData'
+          -only-testing:MediaToolsTests
+          -parallel-testing-enabled NO
+          build-for-testing
+          CODE_SIGNING_ALLOWED=NO
 
       - name: Create iOS simulator
         run: |
@@ -50,7 +60,7 @@ jobs:
           xcrun simctl boot "$simulator_id"
           xcrun simctl bootstatus "$simulator_id" -b
 
-      - name: Build and test
+      - name: Test without building
         run: >-
           xcodebuild
           -project ios/MediaTools/MediaTools.xcodeproj
@@ -60,7 +70,7 @@ jobs:
           -resultBundlePath '${{ runner.temp }}/MediaToolsTests.xcresult'
           -only-testing:MediaToolsTests
           -parallel-testing-enabled NO
-          test
+          test-without-building
           CODE_SIGNING_ALLOWED=NO
 
       - name: Verify simulator installation and launch
@@ -79,3 +89,9 @@ jobs:
           name: MediaToolsTests-xcresult
           path: '${{ runner.temp }}/MediaToolsTests.xcresult'
           retention-days: 7
+
+      - name: Clean up owned simulator
+        if: always() && env.SIMULATOR_ID != ''
+        run: |
+          xcrun simctl shutdown "$SIMULATOR_ID" || true
+          xcrun simctl delete "$SIMULATOR_ID"
