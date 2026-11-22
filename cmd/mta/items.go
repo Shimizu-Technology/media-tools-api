@@ -181,9 +181,10 @@ func cmdItems(args []string) error { return runItems(args, os.Stdout, os.Stderr)
 
 const itemsUsage = `usage: mta items <command>
 
-  list [--since DATE] [--type video|audio|pdf] [--status S] [--limit N]
+  list [--since DATE] [--type video|audio|pdf] [--status S] [--tag TAG] [--favorite] [--collection NAME|ID] [--archived] [--limit N]
   search <query> [--type T] [--limit N]
-  get <type:id> [--format md|json]
+  get <type:id> [--format md|json] [--segments]
+  audio-url <audio:id>                    presigned audio URL (audio only)
   rename <type:id> <name>                 audio only
   tag <type:id> [--add a,b] [--remove c] [--set a,b]
   favorite <type:id> [--off]
@@ -196,6 +197,18 @@ const itemsUsage = `usage: mta items <command>
 
 Every command accepts --output text|json. Ids are always the full id.`
 
+func hasHelpFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+		if arg == "-h" || arg == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
 func runItems(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		fmt.Fprintln(stderr, itemsUsage)
@@ -204,10 +217,10 @@ func runItems(args []string, stdout, stderr io.Writer) error {
 		}
 		return nil
 	}
-	if apiKey == "" {
+	rest := args[1:]
+	if apiKey == "" && !hasHelpFlag(rest) {
 		return errors.New("MTA_API_KEY is required")
 	}
-	rest := args[1:]
 	switch args[0] {
 	case "list":
 		return itemsList(rest, stdout, stderr)
@@ -215,6 +228,8 @@ func runItems(args []string, stdout, stderr io.Writer) error {
 		return itemsSearch(rest, stdout, stderr)
 	case "get":
 		return itemsGet(rest, stdout, stderr)
+	case "audio-url":
+		return itemsAudioURL(rest, stdout, stderr)
 	case "rename":
 		return itemsRename(rest, stdout, stderr)
 	case "tag":
@@ -366,11 +381,17 @@ func itemsList(args []string, stdout, stderr io.Writer) error {
 	since := flags.String("since", "", "only items created at or after this date or RFC 3339 time")
 	typ := flags.String("type", "", "video, audio, or pdf")
 	status := flags.String("status", "", "active, pending, processing, completed, or failed")
+	tag := flags.String("tag", "", "only items carrying this tag")
+	favorite := flags.Bool("favorite", false, "only favorited items")
+	collection := flags.String("collection", "", "only items filed in this collection (name or id)")
 	limit := flags.Int("limit", 0, "maximum items to return (0 = all)")
 	archived := flags.Bool("archived", false, "include archived items")
 	output := flags.String("output", "text", "text or json")
 	positional, err := parseInterspersed(flags, args)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if len(positional) != 0 {
@@ -387,9 +408,35 @@ func itemsList(args []string, stdout, stderr io.Writer) error {
 	setIf(query, "type", libType)
 	setIf(query, "status", *status)
 	setIf(query, "since", *since)
+	setIf(query, "tag", strings.TrimSpace(*tag))
+	if *favorite {
+		query.Set("favorite", "true")
+	}
 	if *archived {
 		query.Set("archive", "all")
 	}
+
+	if *collection != "" {
+		_, members, err := fetchCollectionMemberRefs(*collection)
+		if err != nil {
+			return err
+		}
+		items, err := fetchLibrary(query, 0)
+		if err != nil {
+			return err
+		}
+		filtered := make([]itemSummary, 0, len(items))
+		for _, item := range items {
+			if members[strings.ToLower(item.Ref)] {
+				filtered = append(filtered, item)
+				if *limit > 0 && len(filtered) >= *limit {
+					break
+				}
+			}
+		}
+		return printItemSummaries(stdout, filtered, *output)
+	}
+
 	items, err := fetchLibrary(query, *limit)
 	if err != nil {
 		return err
@@ -445,6 +492,15 @@ type itemSummaryText struct {
 	KeyPoints []string `json:"key_points,omitempty"`
 }
 
+type itemSegment struct {
+	ID         string `json:"id"`
+	Ordinal    int    `json:"ordinal"`
+	StartMS    *int64 `json:"start_ms,omitempty"`
+	EndMS      *int64 `json:"end_ms,omitempty"`
+	PageNumber *int   `json:"page_number,omitempty"`
+	Text       string `json:"text"`
+}
+
 // itemDetail is the stable JSON contract for `items get`.
 type itemDetail struct {
 	Ref        string            `json:"ref"`
@@ -460,7 +516,19 @@ type itemDetail struct {
 	Tags       []string          `json:"tags"`
 	Transcript string            `json:"transcript"`
 	Summary    *itemSummaryText  `json:"summary,omitempty"`
+	Segments   *[]itemSegment    `json:"segments,omitempty"`
 	Chats      []itemChatMessage `json:"chats"`
+}
+
+func fetchSegments(ref itemRef) ([]itemSegment, error) {
+	var segments []itemSegment
+	if err := apiGetJSON("/library/items/"+ref.kind.prefType+"/"+ref.id+"/segments", &segments); err != nil {
+		return nil, err
+	}
+	if segments == nil {
+		segments = []itemSegment{}
+	}
+	return segments, nil
 }
 
 func fetchItem(ref itemRef) (*itemDetail, error) {
@@ -597,12 +665,16 @@ func itemsGet(args []string, stdout, stderr io.Writer) error {
 	flags := newFlags("items get", stderr)
 	format := flags.String("format", "md", "md or json")
 	output := flags.String("output", "", "json is the same as --format json")
+	segments := flags.Bool("segments", false, "include timestamped or page-indexed source segments")
 	positional, err := parseInterspersed(flags, args)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if len(positional) != 1 {
-		return errors.New("usage: mta items get <type:id> [--format md|json]")
+		return errors.New("usage: mta items get <type:id> [--format md|json] [--segments]")
 	}
 	if *output == "json" {
 		*format = "json"
@@ -620,10 +692,52 @@ func itemsGet(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if *segments {
+		segs, err := fetchSegments(ref)
+		if err != nil {
+			return err
+		}
+		detail.Segments = &segs
+	}
 	if *format == "json" {
 		return writeJSON(stdout, detail)
 	}
 	_, err = io.WriteString(stdout, renderItemMarkdown(detail, false))
+	return err
+}
+
+func itemsAudioURL(args []string, stdout, stderr io.Writer) error {
+	ref, output, rest, err := refAndOutput("items audio-url", args, stderr, "usage: mta items audio-url <audio:id> [--output text|json]", nil)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if len(rest) != 0 {
+		return errors.New("usage: mta items audio-url <audio:id> [--output text|json]")
+	}
+	if ref.kind.name != "audio" {
+		return fmt.Errorf("audio-url is only available for audio items, not %s", ref.kind.name)
+	}
+	var resp struct {
+		URL       string `json:"url"`
+		ExpiresIn string `json:"expires_in"`
+	}
+	if err := apiGetJSON(ref.kind.path+ref.id+"/audio", &resp); err != nil {
+		return err
+	}
+	if resp.URL == "" {
+		return errors.New("API response omitted audio playback URL")
+	}
+	if output == "json" {
+		return writeJSON(stdout, map[string]interface{}{
+			"ref":        ref.String(),
+			"url":        resp.URL,
+			"expires_in": resp.ExpiresIn,
+		})
+	}
+	_, err = fmt.Fprintln(stdout, resp.URL)
 	return err
 }
 
@@ -800,7 +914,7 @@ func resolveCollection(nameOrID string, create bool) (collectionSummary, error) 
 	}
 	var matches []collectionSummary
 	for _, collection := range collections {
-		if collection.ID == nameOrID {
+		if strings.EqualFold(collection.ID, nameOrID) {
 			return collection, nil
 		}
 		if strings.EqualFold(collection.Name, nameOrID) {
@@ -825,6 +939,46 @@ func resolveCollection(nameOrID string, create bool) (collectionSummary, error) 
 		return collectionSummary{}, errors.New("unexpected response creating collection")
 	}
 	return created, nil
+}
+
+// normalizeCollectionItem maps a collection item's (item_type, item_id) pair
+// into the canonical CLI reference (video:<id>, audio:<id>, or pdf:<id>).
+func normalizeCollectionItem(itemType, itemID string) (string, string, bool) {
+	switch strings.ToLower(itemType) {
+	case "transcript", "youtube", "video":
+		return "video:" + strings.ToLower(itemID), "video", true
+	case "audio":
+		return "audio:" + strings.ToLower(itemID), "audio", true
+	case "pdf":
+		return "pdf:" + strings.ToLower(itemID), "pdf", true
+	default:
+		return "", "", false
+	}
+}
+
+// fetchCollectionMemberRefs resolves a collection by name or id and returns the
+// set of canonical typed refs (e.g. "audio:<uuid>") belonging to it.
+func fetchCollectionMemberRefs(nameOrID string) (collectionSummary, map[string]bool, error) {
+	resolved, err := resolveCollection(nameOrID, false)
+	if err != nil {
+		return collectionSummary{}, nil, err
+	}
+	var detail struct {
+		Items []struct {
+			ItemType string `json:"item_type"`
+			ItemID   string `json:"item_id"`
+		} `json:"items"`
+	}
+	if err := apiGetJSON("/collections/"+resolved.ID, &detail); err != nil {
+		return collectionSummary{}, nil, err
+	}
+	members := make(map[string]bool, len(detail.Items))
+	for _, entry := range detail.Items {
+		if ref, _, ok := normalizeCollectionItem(entry.ItemType, entry.ItemID); ok {
+			members[ref] = true
+		}
+	}
+	return resolved, members, nil
 }
 
 func itemsCollection(args []string, stdout, stderr io.Writer) error {

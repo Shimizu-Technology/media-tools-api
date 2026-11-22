@@ -68,6 +68,18 @@ func renderItemMarkdown(item *itemDetail, frontmatter bool) string {
 	b.WriteString("## Transcript\n\n")
 	b.WriteString(strings.TrimSpace(item.Transcript))
 	b.WriteString("\n")
+	if !frontmatter && item.Segments != nil && len(*item.Segments) > 0 {
+		b.WriteString("\n## Segments\n\n")
+		for _, seg := range *item.Segments {
+			label := formatSegmentLabel(seg)
+			text := strings.TrimSpace(seg.Text)
+			if label != "" {
+				fmt.Fprintf(&b, "- %s %s\n", label, text)
+			} else {
+				fmt.Fprintf(&b, "- %s\n", text)
+			}
+		}
+	}
 	if !frontmatter && len(item.Chats) > 0 {
 		b.WriteString("\n## Chat history\n\n")
 		for _, msg := range item.Chats {
@@ -75,6 +87,23 @@ func renderItemMarkdown(item *itemDetail, frontmatter bool) string {
 		}
 	}
 	return b.String()
+}
+
+func formatSegmentLabel(seg itemSegment) string {
+	if seg.PageNumber != nil && *seg.PageNumber > 0 {
+		return fmt.Sprintf("[p. %d]", *seg.PageNumber)
+	}
+	if seg.StartMS != nil && *seg.StartMS >= 0 {
+		totalSec := *seg.StartMS / 1000
+		hours := totalSec / 3600
+		minutes := (totalSec % 3600) / 60
+		seconds := totalSec % 60
+		if hours > 0 {
+			return fmt.Sprintf("[%02d:%02d:%02d]", hours, minutes, seconds)
+		}
+		return fmt.Sprintf("[%02d:%02d]", minutes, seconds)
+	}
+	return ""
 }
 
 // yamlString quotes a value as a JSON string, which is valid YAML.
@@ -227,26 +256,13 @@ func runSync(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if *collection != "" {
-		resolved, err := resolveCollection(*collection, false)
+		_, members, err := fetchCollectionMemberRefs(*collection)
 		if err != nil {
 			return err
 		}
-		var detail struct {
-			Items []struct {
-				ItemType string `json:"item_type"`
-				ItemID   string `json:"item_id"`
-			} `json:"items"`
-		}
-		if err := apiGetJSON("/collections/"+resolved.ID, &detail); err != nil {
-			return err
-		}
-		members := map[string]bool{}
-		for _, entry := range detail.Items {
-			members[strings.ToLower(entry.ItemID)] = true
-		}
 		filtered := items[:0]
 		for _, item := range items {
-			if members[strings.ToLower(item.ID)] {
+			if members[strings.ToLower(item.Ref)] {
 				filtered = append(filtered, item)
 			}
 		}

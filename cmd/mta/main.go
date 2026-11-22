@@ -63,15 +63,23 @@ func main() {
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]
-	if apiKey == "" && cmd != "transcribe" {
-		fmt.Fprintln(os.Stderr, "Error: MTA_API_KEY not set. Export your API key first.")
-		os.Exit(1)
+	switch cmd {
+	case "transcribe", "pdf", "items", "sync", "collections", "collection", "chat-collection", "health":
+		// These commands validate MTA_API_KEY themselves (after handling --help)
+		// or do not require authentication.
+	default:
+		if apiKey == "" {
+			fmt.Fprintln(os.Stderr, "Error: MTA_API_KEY not set. Export your API key first.")
+			os.Exit(1)
+		}
 	}
 
 	var err error
 	switch cmd {
 	case "transcribe":
 		err = cmdTranscribe(args)
+	case "pdf":
+		err = cmdPDF(args)
 	case "status":
 		err = cmdStatus(args)
 	case "get":
@@ -81,7 +89,7 @@ func main() {
 	case "search":
 		err = cmdSearch(args)
 	case "collections":
-		err = cmdCollections()
+		err = cmdCollections(args)
 	case "collection":
 		err = cmdCollection(args)
 	case "collect":
@@ -121,19 +129,26 @@ Commands:
     --interval 5s              Poll interval
     --content-type general     File context: general, phone_call, meeting,
                                voice_memo, interview, or lecture
+  pdf [flags] <file.pdf>        Extract text from a local PDF (use items get pdf:<id> --segments for pages)
+    --output text|json          Stable JSON or plain extracted text (default text)
+    --timeout 5m               Maximum upload and extraction time
   status <id>                   Check transcript status
   get <id>                      Print full transcript text
   list [--type video|audio|pdf] List library items
   search <query>                Search by title
-  collections                   List all collections
-  collection <id>               Show collection with items
-  collection create <name>      Create a new collection
+  collections [--output text|json]
+                                List all collections
+  collection <name-or-id> [--output text|json]
+                                Show collection with full item refs
+  collection create <name> [description] [--output text|json]
+                                Create a new collection
   collect <item-id> <col-id>    Add an item to a collection
   summary <id> [--type tutorial|lecture|podcast|conference|review]
                                 Generate AI summary for a transcript
   chat <id> <message>           Chat about a transcript/audio/pdf
-  chat-collection <id> <msg>    Chat about all items in a collection
-  items list|search|get|rename|tag|favorite|archive|collection|retry|summarize|chat|delete
+  chat-collection <name-or-id> <msg> [--output text|json]
+                                Chat about all items in a collection
+  items list|search|get|audio-url|rename|tag|favorite|archive|collection|retry|summarize|chat|delete
                                 Read and organize the library with full ids (video:<id>,
                                 audio:<id>, pdf:<id>); every command takes --output json.
                                 Run "mta items help" for details.
@@ -385,98 +400,6 @@ func cmdSearch(args []string) error {
 	return nil
 }
 
-func cmdCollections() error {
-	body, err := doGet("/collections")
-	if err != nil {
-		return err
-	}
-	var collections []struct {
-		ID          string `json:"id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		ItemCount   int    `json:"item_count"`
-	}
-	json.Unmarshal(body, &collections)
-	if len(collections) == 0 {
-		fmt.Println("No collections yet. Create one with: mta collection create <name>")
-		return nil
-	}
-	fmt.Println("Collections:")
-	for _, c := range collections {
-		desc := ""
-		if c.Description != "" {
-			desc = " — " + truncate(c.Description, 40)
-		}
-		fmt.Printf("  %s  %-30s  %d items%s\n", c.ID[:8], c.Name, c.ItemCount, desc)
-	}
-	return nil
-}
-
-func cmdCollection(args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: mta collection <id> | mta collection create <name>")
-	}
-
-	// Handle "collection create <name>"
-	if args[0] == "create" {
-		if len(args) < 2 {
-			return fmt.Errorf("usage: mta collection create <name> [description]")
-		}
-		name := args[1]
-		desc := ""
-		if len(args) > 2 {
-			desc = strings.Join(args[2:], " ")
-		}
-		body, err := doPost("/collections", map[string]string{"name": name, "description": desc})
-		if err != nil {
-			return err
-		}
-		var col struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		}
-		json.Unmarshal(body, &col)
-		fmt.Printf("✅ Created collection: %s (%s)\n", col.Name, col.ID)
-		return nil
-	}
-
-	// Show collection detail
-	body, err := doGet("/collections/" + args[0])
-	if err != nil {
-		return err
-	}
-	var col struct {
-		ID          string `json:"id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Items       []struct {
-			ID         string `json:"id"`
-			ItemType   string `json:"item_type"`
-			ItemID     string `json:"item_id"`
-			ItemTitle  string `json:"item_title"`
-			ItemStatus string `json:"item_status"`
-		} `json:"items"`
-	}
-	json.Unmarshal(body, &col)
-	fmt.Printf("Collection: %s\n", col.Name)
-	if col.Description != "" {
-		fmt.Printf("  %s\n", col.Description)
-	}
-	fmt.Printf("  ID: %s\n\n", col.ID)
-	if len(col.Items) == 0 {
-		fmt.Println("  (no items)")
-	} else {
-		for _, item := range col.Items {
-			title := item.ItemTitle
-			if title == "" {
-				title = item.ItemID[:8]
-			}
-			fmt.Printf("  [%s] %s (%s)\n", item.ItemType, title, item.ItemStatus)
-		}
-	}
-	return nil
-}
-
 func cmdCollect(args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: mta collect <item-id> <collection-id> [--type transcript|audio|pdf]")
@@ -563,32 +486,6 @@ func cmdChat(args []string) error {
 	message := strings.Join(args[1:], " ")
 
 	body, err := doPost("/transcripts/"+id+"/chat", map[string]string{"message": message})
-	if err != nil {
-		return err
-	}
-	var resp struct {
-		Messages []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"messages"`
-	}
-	json.Unmarshal(body, &resp)
-	for _, msg := range resp.Messages {
-		if msg.Role == "assistant" {
-			fmt.Println(msg.Content)
-		}
-	}
-	return nil
-}
-
-func cmdChatCollection(args []string) error {
-	if len(args) < 2 {
-		return fmt.Errorf("usage: mta chat-collection <collection-id> <message>")
-	}
-	id := args[0]
-	message := strings.Join(args[1:], " ")
-
-	body, err := doPost("/collections/"+id+"/chat", map[string]string{"message": message})
 	if err != nil {
 		return err
 	}

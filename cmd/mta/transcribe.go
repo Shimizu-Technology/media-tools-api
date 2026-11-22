@@ -63,7 +63,8 @@ func runTranscribe(args []string, stdout, stderr io.Writer) error {
 	timeout := flags.Duration("timeout", 30*time.Minute, "maximum time for upload and processing")
 	interval := flags.Duration("interval", 5*time.Second, "status polling interval")
 	contentType := flags.String("content-type", "general", "file type: general, phone_call, meeting, voice_memo, interview, lecture")
-	if err := flags.Parse(args); err != nil {
+	positional, err := parseInterspersed(flags, args)
+	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -84,7 +85,7 @@ func runTranscribe(args []string, stdout, stderr io.Writer) error {
 		if *noWait {
 			return fmt.Errorf("--no-wait cannot be combined with --resume")
 		}
-		if flags.NArg() != 0 {
+		if len(positional) != 0 {
 			return fmt.Errorf("--resume cannot be combined with a source")
 		}
 		var err error
@@ -93,7 +94,7 @@ func runTranscribe(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 	} else {
-		if flags.NArg() != 1 {
+		if len(positional) != 1 {
 			return fmt.Errorf("usage: mta transcribe [flags] <url-or-file>")
 		}
 	}
@@ -101,7 +102,7 @@ func runTranscribe(args []string, stdout, stderr io.Writer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 	if *resume == "" {
-		source := flags.Arg(0)
+		source := positional[0]
 		var err error
 		lowerSource := strings.ToLower(source)
 		if strings.HasPrefix(lowerSource, "http://") || strings.HasPrefix(lowerSource, "https://") {
@@ -127,7 +128,7 @@ func runTranscribe(args []string, stdout, stderr io.Writer) error {
 	if *noWait {
 		return printTranscription(stdout, result, *output, true)
 	}
-	result, err := waitForTranscription(ctx, result, *interval, stderr)
+	result, err = waitForTranscription(ctx, result, *interval, stderr)
 	if err != nil {
 		return err
 	}

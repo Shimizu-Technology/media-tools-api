@@ -131,6 +131,21 @@ func (f *fakeLibrary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(200, map[string]interface{}{"original_name": f.title[pdfID], "text_content": "Lease text", "word_count": 2, "status": "completed", "created_at": "2026-11-01T10:00:00Z"})
 	case r.Method == "GET" && path == "/pdf/extractions/"+pdfID+"/chat":
 		reply(200, map[string]interface{}{"messages": []interface{}{}})
+	case r.Method == "GET" && path == "/audio/transcriptions/"+audioID+"/audio":
+		reply(200, map[string]string{"url": "https://s3.example.test/signed-audio.m4a", "expires_in": "60m"})
+	case r.Method == "GET" && path == "/library/items/audio/"+audioID+"/segments":
+		start1, start2 := int64(65000), int64(3665000)
+		reply(200, []map[string]interface{}{
+			{"id": "seg-1", "ordinal": 0, "start_ms": start1, "text": "Opening note."},
+			{"id": "seg-2", "ordinal": 1, "start_ms": start2, "text": "One hour mark."},
+		})
+	case r.Method == "GET" && path == "/library/items/pdf/"+pdfID+"/segments":
+		page := 2
+		reply(200, []map[string]interface{}{
+			{"id": "seg-p1", "ordinal": 0, "page_number": page, "text": "Rent clause."},
+		})
+	case r.Method == "GET" && path == "/library/items/transcript/"+videoID+"/segments":
+		reply(200, []map[string]interface{}{})
 	case r.Method == "GET" && strings.HasSuffix(path, "/preferences"):
 		id := strings.Split(path, "/")[4]
 		tags := f.tags[id]
@@ -513,5 +528,155 @@ func TestLibraryAdditionsSurviveCLIJSON(t *testing.T) {
 	}
 	if !bytes.Contains(encoded, []byte(`"collections":[]`)) || bytes.Contains(encoded, []byte(`"waveform"`)) {
 		t.Fatalf("legacy JSON %s", encoded)
+	}
+}
+
+func TestItemsListTagFavoriteAndCollectionFilters(t *testing.T) {
+	// Put a non-member row BEFORE the Brain Dump member so --limit 1 proves
+	// collection filtering runs before the limit is applied.
+	var lastQuery map[string]string
+	withTestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/library/items":
+			lastQuery = map[string]string{}
+			for key := range r.URL.Query() {
+				lastQuery[key] = r.URL.Query().Get(key)
+			}
+			io.WriteString(w, `{"data":[{"id":"`+videoID+`","item_type":"youtube","title":"Not in collection","status":"completed","tags":["rent"],"favorite":true,"created_at":"2026-11-04T10:00:00Z"},{"id":"`+audioID+`","item_type":"audio","title":"In Brain Dump","status":"completed","tags":["rent"],"favorite":true,"created_at":"2026-11-03T10:00:00Z"}],"page":1,"total_pages":1}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/collections":
+			io.WriteString(w, `[{"id":"`+colID+`","name":"Brain Dump"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/collections/"+colID:
+			io.WriteString(w, `{"id":"`+colID+`","name":"Brain Dump","items":[{"id":"row-1","item_type":"audio","item_id":"`+audioID+`"}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	stdout, _, err := runCLI(t, runItems, "list", "--favorite", "--tag", "rent", "--collection", "Brain Dump", "--limit", "1", "--output", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lastQuery["favorite"] != "true" || lastQuery["tag"] != "rent" {
+		t.Fatalf("filters not forwarded: %v", lastQuery)
+	}
+	var items []itemSummary
+	if err := json.Unmarshal([]byte(stdout), &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Ref != "audio:"+audioID {
+		t.Fatalf("expected only audio item in Brain Dump, got %#v", items)
+	}
+}
+
+func TestSubcommandHelpWorksWithoutAPIKey(t *testing.T) {
+	oldKey := apiKey
+	apiKey = ""
+	t.Cleanup(func() { apiKey = oldKey })
+
+	for _, args := range [][]string{
+		{"list", "--help"},
+		{"get", "--help"},
+		{"audio-url", "--help"},
+	} {
+		if _, _, err := runCLI(t, runItems, args...); err != nil {
+			t.Fatalf("items %v without key failed: %v", args, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"--help"},
+		{"create", "--help"},
+	} {
+		if _, _, err := runCLI(t, runCollection, args...); err != nil {
+			t.Fatalf("collection %v without key failed: %v", args, err)
+		}
+	}
+}
+
+func TestItemsGetWithSegmentsAndAudioURL(t *testing.T) {
+	setupFake(t)
+	// Without --segments, the segments key is omitted from JSON.
+	withoutSegs, _, err := runCLI(t, runItems, "get", "audio:"+audioID, "--format", "json")
+	if err != nil || strings.Contains(withoutSegs, `"segments"`) {
+		t.Fatalf("expected segments omitted without flag, got %q, %v", withoutSegs, err)
+	}
+
+	stdout, _, err := runCLI(t, runItems, "get", "audio:"+audioID, "--segments", "--format", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var detail itemDetail
+	if err := json.Unmarshal([]byte(stdout), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.Segments == nil || len(*detail.Segments) != 2 || (*detail.Segments)[0].Text != "Opening note." {
+		t.Fatalf("segments = %#v", detail.Segments)
+	}
+
+	// Video ref hits /library/items/transcript/<id>/segments and emits explicit [] when empty.
+	videoJSON, _, err := runCLI(t, runItems, "get", "video:"+videoID, "--segments", "--format", "json")
+	if err != nil || !strings.Contains(videoJSON, `"segments": []`) {
+		t.Fatalf("expected explicit empty segments array for video, got %q, %v", videoJSON, err)
+	}
+
+	md, _, err := runCLI(t, runItems, "get", "audio:"+audioID, "--segments")
+	if err != nil || !strings.Contains(md, "## Segments") || !strings.Contains(md, "- [01:05] Opening note.") || !strings.Contains(md, "- [01:01:05] One hour mark.") {
+		t.Fatalf("audio segments md = %q, %v", md, err)
+	}
+
+	pdfMD, _, err := runCLI(t, runItems, "get", "pdf:"+pdfID, "--segments")
+	if err != nil || !strings.Contains(pdfMD, "- [p. 2] Rent clause.") {
+		t.Fatalf("pdf segments md = %q, %v", pdfMD, err)
+	}
+
+	urlText, _, err := runCLI(t, runItems, "audio-url", "audio:"+audioID)
+	if err != nil || strings.TrimSpace(urlText) != "https://s3.example.test/signed-audio.m4a" {
+		t.Fatalf("audio-url text = %q, %v", urlText, err)
+	}
+	urlJSON, _, err := runCLI(t, runItems, "audio-url", "audio:"+audioID, "--output", "json")
+	if err != nil || !strings.Contains(urlJSON, `"expires_in": "60m"`) {
+		t.Fatalf("audio-url json = %q, %v", urlJSON, err)
+	}
+	for _, nonAudio := range []string{"video:" + videoID, "pdf:" + pdfID} {
+		if _, _, err := runCLI(t, runItems, "audio-url", nonAudio); err == nil || !strings.Contains(err.Error(), "audio") {
+			t.Fatalf("audio-url on %s should fail, got %v", nonAudio, err)
+		}
+	}
+	if _, _, err := runCLI(t, runItems, "audio-url", "audio:"+audioID, "--output", "yaml"); err == nil {
+		t.Fatal("invalid --output should fail")
+	}
+}
+
+func TestSyncCollectionMatchesTypedRefNotBareUUID(t *testing.T) {
+	// Both an audio item and a video item share audioID; only audio:<audioID> is in the collection.
+	withTestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/library/items":
+			io.WriteString(w, `{"data":[{"id":"`+audioID+`","item_type":"audio","title":"Real Audio","status":"completed","tags":[],"created_at":"2026-11-03T10:00:00Z"},{"id":"`+audioID+`","item_type":"youtube","title":"Same UUID Video","status":"completed","tags":[],"created_at":"2026-11-02T10:00:00Z"}],"page":1,"total_pages":1}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/collections":
+			io.WriteString(w, `[{"id":"`+colID+`","name":"Brain Dump"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/collections/"+colID:
+			io.WriteString(w, `{"id":"`+colID+`","name":"Brain Dump","items":[{"id":"row-1","item_type":"audio","item_id":"`+audioID+`"}]}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/audio/transcriptions/"+audioID:
+			io.WriteString(w, `{"original_name":"Real Audio","transcript_text":"Audio text","word_count":2,"status":"completed","created_at":"2026-11-03T10:00:00Z"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/audio/transcriptions/"+audioID+"/chat":
+			io.WriteString(w, `{"messages":[]}`)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/preferences"):
+			io.WriteString(w, `{"favorite":false,"archived":false,"tags":[]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	dir := t.TempDir()
+	stdout, _, err := runCLI(t, runSync, "--dir", dir, "--collection", "Brain Dump", "--output", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res syncResult
+	if err := json.Unmarshal([]byte(stdout), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Created != 1 || len(res.Entries) != 1 || res.Entries[0].Ref != "audio:"+audioID {
+		t.Fatalf("expected only audio:%s to sync, got %#v", audioID, res)
 	}
 }

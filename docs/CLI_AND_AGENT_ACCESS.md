@@ -14,14 +14,15 @@ Create a key in Media Tools → Developer (see [Standard and agent keys](#standa
 
 The repository includes an agent skill at `.agents/skills/media-tools-transcription/SKILL.md`. Install or point your agent to that file and give the agent access only to the intended account key. Revoke the key in the Developer page when access should end.
 
-## Transcribe
+## Transcribe and extract PDFs
 
 ```bash
 mta transcribe --output json 'https://www.youtube.com/watch?v=VIDEO_ID'
 mta transcribe --content-type voice_memo '/path/to/memo.m4a'
+mta pdf --output json '/path/to/document.pdf'
 ```
 
-By default, stdout contains only the completed transcript text. `--output json` emits a stable object with `kind`, `id`, `status`, and, on completion, `transcript_text` and `word_count`. Progress and errors go to stderr. An unsuccessful command exits nonzero.
+Flags may appear before or after the URL or file path. By default, stdout contains only the completed transcript or extracted PDF text. `--output json` emits a stable object: for `transcribe`, `kind`, `id`, `status`, and, on completion, `transcript_text` and `word_count`; for `pdf`, `kind`, `ref`, `id`, `status`, `title`, `page_count`, `word_count`, and `text_content` (use `mta items get pdf:<id> --segments` to read page-indexed segments). Progress and errors go to stderr. An unsuccessful command exits nonzero.
 
 For a job that outlasts an agent turn:
 
@@ -60,9 +61,11 @@ All `mta items` commands print full ids as `video:<id>`, `audio:<id>`, or `pdf:<
 
 ```bash
 mta items list --since 2026-11-01 --type audio --status completed --output json
+mta items list --collection "Brain Dump" --tag rent --favorite --output json
 mta items search "landlord" --output json
 mta items get audio:ID                 # Markdown: transcript, summary, chat history
-mta items get audio:ID --format json
+mta items get audio:ID --format json --segments   # include timestamped/page segments
+mta items audio-url audio:ID --output json        # presigned source audio URL (audio only)
 mta items rename audio:ID "Call with landlord"      # audio items only
 mta items tag audio:ID --add rent,legal --remove inbox
 mta items favorite audio:ID            # add --off to undo; same for archive
@@ -71,9 +74,13 @@ mta items retry audio:ID
 mta items summarize audio:ID --length short
 mta items chat audio:ID "When is rent due?"
 mta items delete audio:ID --yes
+
+mta collections --output json
+mta collection "Brain Dump" --output json
+mta chat-collection "Brain Dump" "What deadlines came up?" --output json
 ```
 
-`--since` takes a date (`2026-11-01`) or an RFC 3339 time and keeps items created at or after it. `retry` and `rename` are audio only; `summarize` covers audio and video.
+`--since` takes a date (`2026-11-01`) or an RFC 3339 time and keeps items created at or after it. `audio-url`, `retry`, and `rename` are audio only; `summarize` covers audio and video.
 
 ## Sync to Markdown
 
