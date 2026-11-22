@@ -73,16 +73,20 @@ func runCollections(args []string, stdout, stderr io.Writer) error {
 		return writeJSON(stdout, collections)
 	}
 	if len(collections) == 0 {
-		fmt.Fprintln(stdout, "No collections yet. Create one with: mta collection create <name>")
-		return nil
+		_, err := fmt.Fprintln(stdout, "No collections yet. Create one with: mta collection create <name>")
+		return err
 	}
-	fmt.Fprintln(stdout, "Collections:")
+	if _, err := fmt.Fprintln(stdout, "Collections:"); err != nil {
+		return err
+	}
 	for _, c := range collections {
 		desc := ""
 		if c.Description != "" {
 			desc = " — " + truncate(c.Description, 40)
 		}
-		fmt.Fprintf(stdout, "  %s  %-30s  %d items%s\n", c.ID, c.Name, c.ItemCount, desc)
+		if _, err := fmt.Fprintf(stdout, "  %s  %-30s  %d items%s\n", c.ID, c.Name, c.ItemCount, desc); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -139,8 +143,8 @@ func runCollection(args []string, stdout, stderr io.Writer) error {
 		if *output == "json" {
 			return writeJSON(stdout, col)
 		}
-		fmt.Fprintf(stdout, "Created collection: %s (%s)\n", col.Name, col.ID)
-		return nil
+		_, err = fmt.Fprintf(stdout, "Created collection: %s (%s)\n", col.Name, col.ID)
+		return err
 	}
 
 	if len(positional) != 1 {
@@ -195,21 +199,29 @@ func runCollection(args []string, stdout, stderr io.Writer) error {
 	if *output == "json" {
 		return writeJSON(stdout, view)
 	}
-	fmt.Fprintf(stdout, "Collection: %s\n", view.Name)
-	if view.Description != "" {
-		fmt.Fprintf(stdout, "  %s\n", view.Description)
+	if _, err := fmt.Fprintf(stdout, "Collection: %s\n", view.Name); err != nil {
+		return err
 	}
-	fmt.Fprintf(stdout, "  ID: %s\n\n", view.ID)
+	if view.Description != "" {
+		if _, err := fmt.Fprintf(stdout, "  %s\n", view.Description); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(stdout, "  ID: %s\n\n", view.ID); err != nil {
+		return err
+	}
 	if len(view.Items) == 0 {
-		fmt.Fprintln(stdout, "  (no items)")
-		return nil
+		_, err := fmt.Fprintln(stdout, "  (no items)")
+		return err
 	}
 	for _, item := range view.Items {
 		title := item.Title
 		if title == "" {
 			title = "(untitled)"
 		}
-		fmt.Fprintf(stdout, "  %s  %-10s  %s\n", item.Ref, item.Status, title)
+		if _, err := fmt.Fprintf(stdout, "  %s  %-10s  %s\n", item.Ref, item.Status, title); err != nil {
+			return err
+		}
 	}
 	return nil
 }

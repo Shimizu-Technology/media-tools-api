@@ -532,13 +532,32 @@ func TestLibraryAdditionsSurviveCLIJSON(t *testing.T) {
 }
 
 func TestItemsListTagFavoriteAndCollectionFilters(t *testing.T) {
-	fake := setupFake(t)
+	// Put a non-member row BEFORE the Brain Dump member so --limit 1 proves
+	// collection filtering runs before the limit is applied.
+	var lastQuery map[string]string
+	withTestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/library/items":
+			lastQuery = map[string]string{}
+			for key := range r.URL.Query() {
+				lastQuery[key] = r.URL.Query().Get(key)
+			}
+			io.WriteString(w, `{"data":[{"id":"`+videoID+`","item_type":"youtube","title":"Not in collection","status":"completed","tags":["rent"],"favorite":true,"created_at":"2026-11-04T10:00:00Z"},{"id":"`+audioID+`","item_type":"audio","title":"In Brain Dump","status":"completed","tags":["rent"],"favorite":true,"created_at":"2026-11-03T10:00:00Z"}],"page":1,"total_pages":1}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/collections":
+			io.WriteString(w, `[{"id":"`+colID+`","name":"Brain Dump"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/collections/"+colID:
+			io.WriteString(w, `{"id":"`+colID+`","name":"Brain Dump","items":[{"id":"row-1","item_type":"audio","item_id":"`+audioID+`"}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
 	stdout, _, err := runCLI(t, runItems, "list", "--favorite", "--tag", "rent", "--collection", "Brain Dump", "--limit", "1", "--output", "json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fake.lastQuery["favorite"] != "true" || fake.lastQuery["tag"] != "rent" {
-		t.Fatalf("filters not forwarded: %v", fake.lastQuery)
+	if lastQuery["favorite"] != "true" || lastQuery["tag"] != "rent" {
+		t.Fatalf("filters not forwarded: %v", lastQuery)
 	}
 	var items []itemSummary
 	if err := json.Unmarshal([]byte(stdout), &items); err != nil {
@@ -546,6 +565,30 @@ func TestItemsListTagFavoriteAndCollectionFilters(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Ref != "audio:"+audioID {
 		t.Fatalf("expected only audio item in Brain Dump, got %#v", items)
+	}
+}
+
+func TestSubcommandHelpWorksWithoutAPIKey(t *testing.T) {
+	oldKey := apiKey
+	apiKey = ""
+	t.Cleanup(func() { apiKey = oldKey })
+
+	for _, args := range [][]string{
+		{"list", "--help"},
+		{"get", "--help"},
+		{"audio-url", "--help"},
+	} {
+		if _, _, err := runCLI(t, runItems, args...); err != nil {
+			t.Fatalf("items %v without key failed: %v", args, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"--help"},
+		{"create", "--help"},
+	} {
+		if _, _, err := runCLI(t, runCollection, args...); err != nil {
+			t.Fatalf("collection %v without key failed: %v", args, err)
+		}
 	}
 }
 

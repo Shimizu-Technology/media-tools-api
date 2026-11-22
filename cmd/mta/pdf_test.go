@@ -207,3 +207,47 @@ func TestCollectionsEdgeCasesAmbiguousNameUnknownTypeAnd409Chat(t *testing.T) {
 		t.Fatalf("expected 409 from collection chat, got %v", err)
 	}
 }
+
+func TestPDFMultipartRequestBodyCapEnforced(t *testing.T) {
+	oldMax := maxPDFUploadBytes
+	const testCap int64 = 512
+	maxPDFUploadBytes = testCap
+	t.Cleanup(func() { maxPDFUploadBytes = oldMax })
+
+	overhead, err := pdfMultipartOverhead("cap.pdf", "mta-pdf-upload-boundary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective := testCap - overhead
+
+	var receivedBodyLen int64
+	withTestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		receivedBodyLen = int64(len(body))
+		if receivedBodyLen > testCap {
+			t.Errorf("request body %d exceeded server cap %d", receivedBodyLen, testCap)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"`+pdfID+`","original_name":"cap.pdf","page_count":1,"word_count":1,"status":"completed","text_content":"ok"}`)
+	}))
+
+	dir := t.TempDir()
+	atLimit := filepath.Join(dir, "cap.pdf")
+	if err := os.WriteFile(atLimit, bytes.Repeat([]byte("a"), int(effective)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runCLI(t, runPDF, atLimit, "--output", "json"); err != nil {
+		t.Fatalf("file at effective limit should succeed: %v", err)
+	}
+	if receivedBodyLen != testCap {
+		t.Fatalf("expected exact multipart body size %d, got %d", testCap, receivedBodyLen)
+	}
+
+	overLimit := filepath.Join(dir, "cap.pdf")
+	if err := os.WriteFile(overLimit, bytes.Repeat([]byte("a"), int(effective+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runCLI(t, runPDF, overLimit); err == nil || !strings.Contains(err.Error(), "50 MB PDF request limit") {
+		t.Fatalf("file exceeding multipart cap should fail before upload, got %v", err)
+	}
+}

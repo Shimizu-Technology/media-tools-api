@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,7 +17,25 @@ import (
 	"time"
 )
 
-const maxPDFUploadBytes = 50 << 20 // Matches the API's 50 MB PDF limit.
+var maxPDFUploadBytes int64 = 50 << 20 // Matches the API's 50 MB request body limit.
+
+func pdfMultipartOverhead(filename, boundary string) (int64, error) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.SetBoundary(boundary); err != nil {
+		return 0, err
+	}
+	partHeader := make(textproto.MIMEHeader)
+	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filename))
+	partHeader.Set("Content-Type", "application/pdf")
+	if _, err := mw.CreatePart(partHeader); err != nil {
+		return 0, err
+	}
+	if err := mw.Close(); err != nil {
+		return 0, err
+	}
+	return int64(buf.Len()), nil
+}
 
 // pdfResult is the stable JSON shape for `mta pdf`.
 type pdfResult struct {
@@ -87,12 +106,23 @@ func submitPDF(ctx context.Context, path string) (pdfResult, error) {
 	if !info.Mode().IsRegular() {
 		return pdfResult{}, errors.New("source must be a regular file")
 	}
-	if info.Size() > maxPDFUploadBytes {
-		return pdfResult{}, errors.New("file exceeds the 50 MB PDF upload limit")
+	boundary := "mta-pdf-upload-boundary"
+	overhead, err := pdfMultipartOverhead(filepath.Base(path), boundary)
+	if err != nil {
+		return pdfResult{}, err
+	}
+	effectiveLimit := maxPDFUploadBytes - overhead
+	if info.Size() > effectiveLimit {
+		return pdfResult{}, fmt.Errorf("file exceeds the 50 MB PDF request limit (max file size %d bytes with multipart headers)", effectiveLimit)
 	}
 
 	reader, writer := io.Pipe()
 	multipartWriter := multipart.NewWriter(writer)
+	if err := multipartWriter.SetBoundary(boundary); err != nil {
+		reader.Close()
+		writer.Close()
+		return pdfResult{}, err
+	}
 	go func() {
 		partHeader := make(textproto.MIMEHeader)
 		partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filepath.Base(path)))

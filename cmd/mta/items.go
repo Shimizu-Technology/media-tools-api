@@ -197,6 +197,18 @@ const itemsUsage = `usage: mta items <command>
 
 Every command accepts --output text|json. Ids are always the full id.`
 
+func hasHelpFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+		if arg == "-h" || arg == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
 func runItems(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		fmt.Fprintln(stderr, itemsUsage)
@@ -205,10 +217,10 @@ func runItems(args []string, stdout, stderr io.Writer) error {
 		}
 		return nil
 	}
-	if apiKey == "" {
+	rest := args[1:]
+	if apiKey == "" && !hasHelpFlag(rest) {
 		return errors.New("MTA_API_KEY is required")
 	}
-	rest := args[1:]
 	switch args[0] {
 	case "list":
 		return itemsList(rest, stdout, stderr)
