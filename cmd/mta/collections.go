@@ -95,33 +95,38 @@ func runCollection(args []string, stdout, stderr io.Writer) error {
 		}
 		return nil
 	}
+
+	flags := newFlags("collection", stderr)
+	output := flags.String("output", "text", "text or json")
+	positional, err := parseInterspersed(flags, args)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if err := checkOutput(*output); err != nil {
+		return err
+	}
+	if len(positional) == 0 {
+		return errors.New("usage: mta collection <name-or-id> | mta collection create <name>")
+	}
 	if apiKey == "" {
 		return errors.New("MTA_API_KEY is required")
 	}
 
-	if args[0] == "create" {
-		flags := newFlags("collection create", stderr)
-		output := flags.String("output", "text", "text or json")
-		positional, err := parseInterspersed(flags, args[1:])
-		if err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return nil
-			}
-			return err
-		}
-		if len(positional) < 1 {
+	if positional[0] == "create" {
+		rest := positional[1:]
+		if len(rest) < 1 {
 			return errors.New("usage: mta collection create <name> [description] [--output text|json]")
 		}
-		if err := checkOutput(*output); err != nil {
-			return err
-		}
-		name := strings.TrimSpace(positional[0])
+		name := strings.TrimSpace(rest[0])
 		if name == "" {
 			return errors.New("collection name is required")
 		}
 		desc := ""
-		if len(positional) > 1 {
-			desc = strings.Join(positional[1:], " ")
+		if len(rest) > 1 {
+			desc = strings.Join(rest[1:], " ")
 		}
 		data, err := apiCall(http.MethodPost, "/collections", map[string]string{"name": name, "description": desc})
 		if err != nil {
@@ -138,20 +143,8 @@ func runCollection(args []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 
-	flags := newFlags("collection", stderr)
-	output := flags.String("output", "text", "text or json")
-	positional, err := parseInterspersed(flags, args)
-	if err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
-		}
-		return err
-	}
 	if len(positional) != 1 {
 		return errors.New("usage: mta collection <name-or-id> [--output text|json]")
-	}
-	if err := checkOutput(*output); err != nil {
-		return err
 	}
 
 	resolved, err := resolveCollection(positional[0], false)

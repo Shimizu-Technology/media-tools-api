@@ -504,7 +504,7 @@ type itemDetail struct {
 	Tags       []string          `json:"tags"`
 	Transcript string            `json:"transcript"`
 	Summary    *itemSummaryText  `json:"summary,omitempty"`
-	Segments   []itemSegment     `json:"segments,omitempty"`
+	Segments   *[]itemSegment    `json:"segments,omitempty"`
 	Chats      []itemChatMessage `json:"chats"`
 }
 
@@ -685,7 +685,7 @@ func itemsGet(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		detail.Segments = segs
+		detail.Segments = &segs
 	}
 	if *format == "json" {
 		return writeJSON(stdout, detail)
@@ -902,7 +902,7 @@ func resolveCollection(nameOrID string, create bool) (collectionSummary, error) 
 	}
 	var matches []collectionSummary
 	for _, collection := range collections {
-		if collection.ID == nameOrID {
+		if strings.EqualFold(collection.ID, nameOrID) {
 			return collection, nil
 		}
 		if strings.EqualFold(collection.Name, nameOrID) {

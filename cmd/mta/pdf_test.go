@@ -155,4 +155,55 @@ func TestCollectionsAndCollectionChatJSON(t *testing.T) {
 	if err != nil || !strings.Contains(stdout, `"reply": "Latest answer"`) || strings.Contains(stdout, "Old answer") {
 		t.Fatalf("chat-collection = %q, %v", stdout, err)
 	}
+
+	// Flags before `create` and plain text mode both work.
+	stdout, _, err = runCLI(t, runCollection, "--output", "json", "create", "Taxes", "2026")
+	if err != nil || !strings.Contains(stdout, otherCol) {
+		t.Fatalf("flags-before-create = %q, %v", stdout, err)
+	}
+	stdout, _, err = runCLI(t, runCollection, "create", "Taxes")
+	if err != nil || !strings.Contains(stdout, "Created collection: Taxes") {
+		t.Fatalf("create text = %q, %v", stdout, err)
+	}
+
+	// Uppercase collection UUID resolves cleanly.
+	stdout, _, err = runCLI(t, runCollection, strings.ToUpper(colID), "--output", "json")
+	if err != nil || !strings.Contains(stdout, colID) {
+		t.Fatalf("uppercase UUID lookup = %q, %v", stdout, err)
+	}
+
+	// Invalid --output rejected.
+	if _, _, err := runCLI(t, runCollections, "--output", "xml"); err == nil {
+		t.Fatal("invalid --output should fail")
+	}
+}
+
+func TestCollectionsEdgeCasesAmbiguousNameUnknownTypeAnd409Chat(t *testing.T) {
+	withTestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/collections":
+			io.WriteString(w, `[{"id":"`+colID+`","name":"Dup"},{"id":"`+otherCol+`","name":"Dup"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/collections/"+colID:
+			io.WriteString(w, `{"id":"`+colID+`","name":"Dup","items":[{"id":"row-x","item_type":"custom","item_id":"`+audioID+`","item_title":"Mystery","item_status":"completed"}]}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/collections/"+colID+"/chat":
+			w.WriteHeader(http.StatusConflict)
+			io.WriteString(w, `{"error":"collection_not_ready","message":"No completed items"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+
+	if _, _, err := runCLI(t, runCollection, "Dup"); err == nil || !strings.Contains(err.Error(), "use the collection id") {
+		t.Fatalf("ambiguous name should fail cleanly, got %v", err)
+	}
+
+	stdout, _, err := runCLI(t, runCollection, colID, "--output", "json")
+	if err != nil || !strings.Contains(stdout, `"ref": "custom:`+audioID+`"`) {
+		t.Fatalf("unknown item_type fallback = %q, %v", stdout, err)
+	}
+
+	if _, _, err := runCLI(t, runChatCollection, colID, "Hello?"); err == nil || !strings.Contains(err.Error(), "409") {
+		t.Fatalf("expected 409 from collection chat, got %v", err)
+	}
 }

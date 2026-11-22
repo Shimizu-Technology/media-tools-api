@@ -22,7 +22,7 @@ mta transcribe --content-type voice_memo '/path/to/memo.m4a'
 mta pdf --output json '/path/to/document.pdf'
 ```
 
-Flags may appear before or after the URL or file path. By default, stdout contains only the completed transcript or extracted PDF text. `--output json` emits a stable object with `kind`, `id`, `status`, and, on completion, `transcript_text` (or `text_content` and `page_count` for PDFs) and `word_count`. Progress and errors go to stderr. An unsuccessful command exits nonzero.
+Flags may appear before or after the URL or file path. By default, stdout contains only the completed transcript or extracted PDF text. `--output json` emits a stable object: for `transcribe`, `kind`, `id`, `status`, and, on completion, `transcript_text` and `word_count`; for `pdf`, `kind`, `ref`, `id`, `status`, `title`, `page_count`, `word_count`, and `text_content` (use `mta items get pdf:<id> --segments` to read page-indexed segments). Progress and errors go to stderr. An unsuccessful command exits nonzero.
 
 For a job that outlasts an agent turn:
 

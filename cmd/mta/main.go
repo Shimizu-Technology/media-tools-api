@@ -129,7 +129,7 @@ Commands:
     --interval 5s              Poll interval
     --content-type general     File context: general, phone_call, meeting,
                                voice_memo, interview, or lecture
-  pdf [flags] <file.pdf>        Extract text and page segments from a local PDF
+  pdf [flags] <file.pdf>        Extract text from a local PDF (use items get pdf:<id> --segments for pages)
     --output text|json          Stable JSON or plain extracted text (default text)
     --timeout 5m               Maximum upload and extraction time
   status <id>                   Check transcript status

@@ -144,6 +144,8 @@ func (f *fakeLibrary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(200, []map[string]interface{}{
 			{"id": "seg-p1", "ordinal": 0, "page_number": page, "text": "Rent clause."},
 		})
+	case r.Method == "GET" && path == "/library/items/transcript/"+videoID+"/segments":
+		reply(200, []map[string]interface{}{})
 	case r.Method == "GET" && strings.HasSuffix(path, "/preferences"):
 		id := strings.Split(path, "/")[4]
 		tags := f.tags[id]
@@ -549,6 +551,12 @@ func TestItemsListTagFavoriteAndCollectionFilters(t *testing.T) {
 
 func TestItemsGetWithSegmentsAndAudioURL(t *testing.T) {
 	setupFake(t)
+	// Without --segments, the segments key is omitted from JSON.
+	withoutSegs, _, err := runCLI(t, runItems, "get", "audio:"+audioID, "--format", "json")
+	if err != nil || strings.Contains(withoutSegs, `"segments"`) {
+		t.Fatalf("expected segments omitted without flag, got %q, %v", withoutSegs, err)
+	}
+
 	stdout, _, err := runCLI(t, runItems, "get", "audio:"+audioID, "--segments", "--format", "json")
 	if err != nil {
 		t.Fatal(err)
@@ -557,8 +565,14 @@ func TestItemsGetWithSegmentsAndAudioURL(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &detail); err != nil {
 		t.Fatal(err)
 	}
-	if len(detail.Segments) != 2 || detail.Segments[0].Text != "Opening note." {
+	if detail.Segments == nil || len(*detail.Segments) != 2 || (*detail.Segments)[0].Text != "Opening note." {
 		t.Fatalf("segments = %#v", detail.Segments)
+	}
+
+	// Video ref hits /library/items/transcript/<id>/segments and emits explicit [] when empty.
+	videoJSON, _, err := runCLI(t, runItems, "get", "video:"+videoID, "--segments", "--format", "json")
+	if err != nil || !strings.Contains(videoJSON, `"segments": []`) {
+		t.Fatalf("expected explicit empty segments array for video, got %q, %v", videoJSON, err)
 	}
 
 	md, _, err := runCLI(t, runItems, "get", "audio:"+audioID, "--segments")
@@ -579,8 +593,13 @@ func TestItemsGetWithSegmentsAndAudioURL(t *testing.T) {
 	if err != nil || !strings.Contains(urlJSON, `"expires_in": "60m"`) {
 		t.Fatalf("audio-url json = %q, %v", urlJSON, err)
 	}
-	if _, _, err := runCLI(t, runItems, "audio-url", "video:"+videoID); err == nil || !strings.Contains(err.Error(), "audio") {
-		t.Fatalf("audio-url on video should fail, got %v", err)
+	for _, nonAudio := range []string{"video:" + videoID, "pdf:" + pdfID} {
+		if _, _, err := runCLI(t, runItems, "audio-url", nonAudio); err == nil || !strings.Contains(err.Error(), "audio") {
+			t.Fatalf("audio-url on %s should fail, got %v", nonAudio, err)
+		}
+	}
+	if _, _, err := runCLI(t, runItems, "audio-url", "audio:"+audioID, "--output", "yaml"); err == nil {
+		t.Fatal("invalid --output should fail")
 	}
 }
 

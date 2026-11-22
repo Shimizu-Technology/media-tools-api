@@ -68,9 +68,9 @@ func renderItemMarkdown(item *itemDetail, frontmatter bool) string {
 	b.WriteString("## Transcript\n\n")
 	b.WriteString(strings.TrimSpace(item.Transcript))
 	b.WriteString("\n")
-	if !frontmatter && len(item.Segments) > 0 {
+	if !frontmatter && item.Segments != nil && len(*item.Segments) > 0 {
 		b.WriteString("\n## Segments\n\n")
-		for _, seg := range item.Segments {
+		for _, seg := range *item.Segments {
 			label := formatSegmentLabel(seg)
 			text := strings.TrimSpace(seg.Text)
 			if label != "" {
