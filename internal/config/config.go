@@ -143,20 +143,20 @@ func Load() (*Config, error) {
 
 		// OpenRouter AI
 		OpenRouterAPIKey: getEnv("OPENROUTER_API_KEY", ""),
-		OpenRouterModel:  getEnv("OPENROUTER_MODEL", "openai/gpt-4.1-mini"),
+		OpenRouterModel:  getEnv("OPENROUTER_MODEL", "openai/gpt-6-luna"),
 		// Interactive Q&A favors a fast workhorse model; durable summaries keep
 		// the separately configured quality-oriented model above.
-		OpenRouterChatModel:    getEnv("OPENROUTER_CHAT_MODEL", "openai/gpt-4.1-mini"),
+		OpenRouterChatModel:    getEnv("OPENROUTER_CHAT_MODEL", "openai/gpt-6-luna"),
 		OpenRouterProviderSort: getEnv("OPENROUTER_PROVIDER_SORT", "throughput"),
 
 		// OpenAI (Whisper/API for audio transcription and a direct summary
 		// fallback when OpenRouter cannot accept a request).
 		OpenAIAPIKey:                getEnv("OPENAI_API_KEY", ""),
-		OpenAISummaryFallbackModel:  getEnv("OPENAI_SUMMARY_FALLBACK_MODEL", "gpt-4.1-mini"),
+		OpenAISummaryFallbackModel:  getEnv("OPENAI_SUMMARY_FALLBACK_MODEL", "gpt-6-luna"),
 		OpenAITranscriptionModel:    getEnv("OPENAI_TRANSCRIPTION_MODEL", "whisper-1"),
 		OpenAITranscriptionLanguage: getEnv("OPENAI_TRANSCRIPTION_LANGUAGE", "en"),
 		OpenAITranscriptionPrompt:   getEnv("OPENAI_TRANSCRIPTION_PROMPT", ""),
-		OpenAITranscriptFormatModel: getEnv("OPENAI_TRANSCRIPT_FORMAT_MODEL", "gpt-4.1-mini"),
+		OpenAITranscriptFormatModel: getEnv("OPENAI_TRANSCRIPT_FORMAT_MODEL", "gpt-6-luna"),
 
 		// JWT Authentication
 		JWTSecret:                     getEnv("JWT_SECRET", "dev-jwt-secret-change-in-production"),

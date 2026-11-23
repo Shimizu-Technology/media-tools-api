@@ -413,6 +413,11 @@ func (s *Service) sendOpenAICompletion(
 	}
 	reqBody.Model = s.openAIFallbackModel
 	reqBody.Provider = nil
+	if reqBody.Model == "gpt-6-luna" {
+		reqBody.MaxCompletionTokens = reqBody.MaxTokens
+		reqBody.MaxTokens = 0
+		reqBody.ReasoningEffort = "none"
+	}
 	return s.sendProviderCompletion(
 		ctx,
 		reqBody,

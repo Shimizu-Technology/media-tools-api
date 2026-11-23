@@ -14,6 +14,7 @@ import (
 // Every request requires zero data retention, so each model here needs a ZDR
 // endpoint on OpenRouter. Without one, OpenRouter answers 404 "No endpoints found".
 var publicAIModels = map[string]bool{
+	"openai/gpt-6-luna":   true,
 	"openai/gpt-4o":       true,
 	"openai/gpt-4o-mini":  true,
 	"openai/gpt-4.1-mini": true,

@@ -1198,7 +1198,7 @@ func (p *Pool) processAudioSummary(job Job) error {
 		if payload.TitleSource != "" && at.OriginalName == payload.TitleSource && isGeneratedRecordingName(at.OriginalName) {
 			titleModel := strings.TrimSpace(os.Getenv("OPENROUTER_TITLE_MODEL"))
 			if titleModel == "" {
-				titleModel = "openai/gpt-4o-mini"
+				titleModel = "openai/gpt-6-luna"
 			}
 			text := at.TranscriptText
 			if len(text) > 12000 {

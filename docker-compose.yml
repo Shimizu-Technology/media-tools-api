@@ -32,7 +32,7 @@ services:
       GIN_MODE: "debug"
       DATABASE_URL: "postgres://postgres:postgres@db:5432/media_tools?sslmode=disable"
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
-      OPENROUTER_MODEL: "${OPENROUTER_MODEL:-openai/gpt-4o-mini}"
+      OPENROUTER_MODEL: "${OPENROUTER_MODEL:-openai/gpt-6-luna}"
       WORKER_COUNT: "3"
       JWT_SECRET: "${JWT_SECRET:-dev-jwt-secret-change-in-production}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"

@@ -18,7 +18,7 @@ import (
 
 const (
 	Version              = "readability-v1"
-	defaultModel         = "gpt-4.1-mini"
+	defaultModel         = "gpt-6-luna"
 	defaultEndpoint      = "https://api.openai.com/v1/chat/completions"
 	maxChunkWords        = 2_000
 	maxResponseBodyBytes = 2 << 20
@@ -102,15 +102,24 @@ func (f *Formatter) formatChunk(ctx context.Context, source string) (string, str
 			Role    string `json:"role"`
 			Content string `json:"content"`
 		} `json:"messages"`
-		Temperature    float64 `json:"temperature"`
-		MaxTokens      int     `json:"max_tokens"`
-		ResponseFormat struct {
+		Temperature         *float64 `json:"temperature,omitempty"`
+		MaxTokens           int      `json:"max_tokens,omitempty"`
+		MaxCompletionTokens int      `json:"max_completion_tokens,omitempty"`
+		ReasoningEffort     string   `json:"reasoning_effort,omitempty"`
+		ResponseFormat      struct {
 			Type string `json:"type"`
 		} `json:"response_format"`
 	}{
-		Model:       f.model,
-		Temperature: 0,
-		MaxTokens:   8_192,
+		Model:     f.model,
+		MaxTokens: 8_192,
+	}
+	if f.model == defaultModel {
+		requestBody.MaxCompletionTokens = requestBody.MaxTokens
+		requestBody.MaxTokens = 0
+		requestBody.ReasoningEffort = "none"
+	} else {
+		temperature := 0.0
+		requestBody.Temperature = &temperature
 	}
 	requestBody.ResponseFormat.Type = "json_object"
 	requestBody.Messages = append(requestBody.Messages,
