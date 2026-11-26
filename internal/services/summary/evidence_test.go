@@ -3,6 +3,7 @@ package summary
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,54 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return fn(request)
+}
+
+func TestLunaRequestUsesProviderSpecificReasoningAndTokenFields(t *testing.T) {
+	service := NewWithModels("router-key", "openai/gpt-6-luna", "openai/gpt-6-luna", "throughput").
+		WithOpenAIFallback("openai-key", "gpt-6-luna")
+	var hosts []string
+	service.httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		hosts = append(hosts, request.URL.Host)
+		var body chatRequest
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		switch request.URL.Host {
+		case "openrouter.ai":
+			if body.Model != "openai/gpt-6-luna" || body.Reasoning == nil ||
+				body.Reasoning.Effort != "none" || body.ReasoningEffort != "" ||
+				body.MaxTokens != chatMaxTokens || body.MaxCompletionTokens != 0 {
+				t.Fatalf("wrong OpenRouter Luna request: %+v", body)
+			}
+			if body.Provider == nil || !body.Provider.ZDR || body.Provider.DataCollection != "deny" {
+				t.Fatalf("OpenRouter privacy preferences missing: %+v", body.Provider)
+			}
+			return &http.Response{
+				StatusCode: http.StatusPaymentRequired,
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"payment required"}}`)),
+				Header:     make(http.Header),
+			}, nil
+		case "api.openai.com":
+			if body.Model != "gpt-6-luna" || body.Reasoning != nil ||
+				body.ReasoningEffort != "none" || body.MaxTokens != 0 ||
+				body.MaxCompletionTokens != chatMaxTokens || body.Provider != nil {
+				t.Fatalf("wrong direct OpenAI Luna request: %+v", body)
+			}
+			return jsonCompletionResponse("An answer.", "stop", 3), nil
+		default:
+			t.Fatalf("unexpected host: %s", request.URL.Host)
+			return nil, nil
+		}
+	})}
+
+	got, _, err := service.ChatTranscript(context.Background(), "transcript", "Source text",
+		[]ChatMessage{{Role: "user", Content: "Summarize the source."}}, "")
+	if err != nil || got != "An answer." {
+		t.Fatalf("ChatTranscript() = (%q, %v)", got, err)
+	}
+	if strings.Join(hosts, ",") != "openrouter.ai,api.openai.com" {
+		t.Fatalf("unexpected request order: %v", hosts)
+	}
 }
 
 func TestValidateCitedOutputDropsInventedAndDuplicateCitationIDs(t *testing.T) {

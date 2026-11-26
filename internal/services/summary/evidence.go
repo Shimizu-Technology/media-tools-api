@@ -380,9 +380,14 @@ func (s *Service) sendJSONCompletion(
 		return s.sendOpenAICompletion(ctx, reqBody)
 	}
 
+	openRouterRequest := reqBody
+	if openRouterRequest.Model == "openai/gpt-6-luna" {
+		// OpenRouter counts reasoning against max_tokens. Reserve the budget for output.
+		openRouterRequest.Reasoning = &reasoningOptions{Effort: "none"}
+	}
 	completion, status, responseBody, err = s.sendProviderCompletion(
 		ctx,
-		reqBody,
+		openRouterRequest,
 		"OpenRouter",
 		"https://openrouter.ai/api/v1/chat/completions",
 		s.apiKey,

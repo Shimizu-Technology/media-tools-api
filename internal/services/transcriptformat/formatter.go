@@ -18,7 +18,8 @@ import (
 
 const (
 	Version              = "readability-v1"
-	defaultModel         = "gpt-6-luna"
+	lunaModel            = "gpt-6-luna"
+	defaultModel         = lunaModel
 	defaultEndpoint      = "https://api.openai.com/v1/chat/completions"
 	maxChunkWords        = 2_000
 	maxResponseBodyBytes = 2 << 20
@@ -113,7 +114,7 @@ func (f *Formatter) formatChunk(ctx context.Context, source string) (string, str
 		Model:     f.model,
 		MaxTokens: 8_192,
 	}
-	if f.model == defaultModel {
+	if f.model == lunaModel {
 		requestBody.MaxCompletionTokens = requestBody.MaxTokens
 		requestBody.MaxTokens = 0
 		requestBody.ReasoningEffort = "none"

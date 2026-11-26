@@ -111,6 +111,27 @@ func TestFormatAcceptsSafeProviderOutput(t *testing.T) {
 	}
 }
 
+func TestFormatUsesLunaRequestFieldsForDefaultAndExplicitModel(t *testing.T) {
+	for _, configuredModel := range []string{"", "gpt-6-luna"} {
+		formatter := New("test-key", configuredModel)
+		formatter.httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			var body map[string]any
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatalf("decode request: %v", err)
+			}
+			if body["model"] != "gpt-6-luna" || body["reasoning_effort"] != "none" ||
+				body["max_completion_tokens"] != float64(8192) || body["max_tokens"] != nil ||
+				body["temperature"] != nil {
+				t.Fatalf("wrong Luna request for model %q: %+v", configuredModel, body)
+			}
+			return formatterResponse(`{"text":"Testing."}`), nil
+		})}
+		if _, err := formatter.Format(context.Background(), "testing"); err != nil {
+			t.Fatalf("Format() error = %v", err)
+		}
+	}
+}
+
 func TestFormatRejectsPlausibleWordCorrection(t *testing.T) {
 	formatter := New("test-key", "gpt-test")
 	formatter.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {

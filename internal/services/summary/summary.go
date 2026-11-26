@@ -158,8 +158,13 @@ type chatRequest struct {
 	MaxTokens           int                  `json:"max_tokens,omitempty"`
 	MaxCompletionTokens int                  `json:"max_completion_tokens,omitempty"`
 	ReasoningEffort     string               `json:"reasoning_effort,omitempty"`
+	Reasoning           *reasoningOptions    `json:"reasoning,omitempty"`
 	ResponseFormat      *responseFormat      `json:"response_format,omitempty"`
 	Provider            *providerPreferences `json:"provider,omitempty"`
+}
+
+type reasoningOptions struct {
+	Effort string `json:"effort"`
 }
 
 type responseFormat struct {
