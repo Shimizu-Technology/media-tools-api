@@ -33,7 +33,7 @@ func TestLunaRequestUsesProviderSpecificReasoningAndTokenFields(t *testing.T) {
 		case "openrouter.ai":
 			if body.Model != "openai/gpt-6-luna" || body.Reasoning == nil ||
 				body.Reasoning.Effort != "none" || body.ReasoningEffort != "" ||
-				body.MaxTokens != chatMaxTokens || body.MaxCompletionTokens != 0 {
+				body.MaxTokens != 0 || body.MaxCompletionTokens != chatMaxTokens {
 				t.Fatalf("wrong OpenRouter Luna request: %+v", body)
 			}
 			if body.Provider == nil || !body.Provider.ZDR || body.Provider.DataCollection != "deny" {

@@ -382,7 +382,9 @@ func (s *Service) sendJSONCompletion(
 
 	openRouterRequest := reqBody
 	if openRouterRequest.Model == "openai/gpt-6-luna" {
-		// OpenRouter counts reasoning against max_tokens. Reserve the budget for output.
+		// The Luna zero-data-retention endpoint advertises max_completion_tokens.
+		openRouterRequest.MaxCompletionTokens = openRouterRequest.MaxTokens
+		openRouterRequest.MaxTokens = 0
 		openRouterRequest.Reasoning = &reasoningOptions{Effort: "none"}
 	}
 	completion, status, responseBody, err = s.sendProviderCompletion(
