@@ -130,7 +130,8 @@ func (s *Service) Deliver(ctx context.Context, id, sealed string) error {
 		To      []string `json:"to"`
 		Subject string   `json:"subject"`
 		Text    string   `json:"text"`
-	}{s.From, []string{message.To}, message.Subject, message.Text})
+		ReplyTo string   `json:"reply_to"`
+	}{s.From, []string{message.To}, message.Subject, message.Text, "support@shimizu-technology.com"})
 	if err != nil {
 		return errors.New("encode email")
 	}

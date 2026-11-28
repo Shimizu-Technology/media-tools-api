@@ -7,7 +7,7 @@ export function SupportPage() {
     <main className="mx-auto max-w-[60ch] px-4 py-10 text-body leading-7 sm:px-6 sm:py-16 [&_a]:text-accent-text">
       <div>
         <h1 className="text-large-title">Help, safety, and account support</h1>
-        <p className="mt-4">Email <a href="mailto:shimizutechnology@gmail.com" className="font-semibold underline" style={{ color: 'var(--color-accent-text)' }}>shimizutechnology@gmail.com</a>. Include the device, app version, what you were doing, and any visible error. Do not email passwords, API keys, private recordings, or full transcripts.</p>
+        <p className="mt-4">Email <a href="mailto:support@shimizu-technology.com" className="font-semibold underline" style={{ color: 'var(--color-accent-text)' }}>support@shimizu-technology.com</a>. Include the device, app version, what you were doing, and any visible error. Do not email passwords, API keys, private recordings, or full transcripts.</p>
       </div>
 
       <div className="mt-10 space-y-9">

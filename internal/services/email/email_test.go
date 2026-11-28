@@ -48,11 +48,12 @@ func TestEncryptedEmailResendContractAndSanitizedFailure(t *testing.T) {
 			To      []string
 			Subject string
 			Text    string
+			ReplyTo string `json:"reply_to"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if len(body.To) != 1 || body.To[0] != message.To || body.Text != message.Text || body.From != s.From {
+		if len(body.To) != 1 || body.To[0] != message.To || body.Text != message.Text || body.From != s.From || body.ReplyTo != "support@shimizu-technology.com" {
 			t.Fatal("wrong Resend payload")
 		}
 		return &http.Response{StatusCode: 429, Header: http.Header{"Retry-After": []string{"73"}}, Body: io.NopCloser(strings.NewReader("provider echoed 123456 and person@example.invalid"))}, nil
