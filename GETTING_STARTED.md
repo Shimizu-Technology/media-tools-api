@@ -121,7 +121,7 @@ DATABASE_URL=postgres://YOUR_MAC_USERNAME@localhost:5432/media_tools?sslmode=dis
 # AI Services (both optional for basic use)
 OPENAI_API_KEY=sk-your-key          # For Whisper audio transcription
 OPENROUTER_API_KEY=sk-or-your-key   # For AI summaries
-OPENROUTER_MODEL=google/gemini-2.5-flash  # Default summary model
+OPENROUTER_MODEL=openai/gpt-6-luna  # Default summary model (optional)
 
 # Auth
 JWT_SECRET=any-random-string-for-local-dev

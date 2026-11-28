@@ -224,15 +224,17 @@ curl -X POST http://localhost:8080/api/v1/summaries \
   -d '{
     "transcript_id": "UUID",
     "length": "medium",
-    "style": "bullet",
-    "model": "openai/gpt-4.1-mini"
+    "style": "bullet"
   }'
 ```
 
 Options:
 - `length`: short, medium, detailed
 - `style`: bullet, narrative, academic
-- `model`: `openai/gpt-4o`, `openai/gpt-4o-mini`, or `openai/gpt-4.1-mini`. Other models return `400 invalid_model` unless the account is exempt.
+- `model`: Omit to use the server default (`openai/gpt-6-luna` unless configured
+  otherwise). If a client pins GPT-4o, GPT-4o mini, or GPT-4.1 mini, remove the
+  override or select Luna before OpenAI's January 14, 2027 shutdown.
+  Other unlisted models return `400 invalid_model` unless the account is exempt.
 
 ## Product Roadmap
 

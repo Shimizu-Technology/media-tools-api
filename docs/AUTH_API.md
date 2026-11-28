@@ -213,11 +213,11 @@ Workers initialize missing policies from the server defaults and exact owner
 configuration, so pre-rollout queued enrichment also counts.
 
 All client-supplied `model` overrides are allowlisted server-side. Omit the model
-to use the operator's default, or use `openai/gpt-4o`, `openai/gpt-4o-mini`, or
-`openai/gpt-4.1-mini`. Each needs a zero-data-retention endpoint on OpenRouter,
-because every request requires one. This covers the choices on current main:
-iOS sends nil, web defaults to no override and documents GPT-4o, and CLI defaults
-to no override. CLI's arbitrary `--model` is intentionally restricted for capped
+to use the operator's default, which is `openai/gpt-6-luna` unless configured
+otherwise. Existing `openai/gpt-4o`, `openai/gpt-4o-mini`, and
+`openai/gpt-4.1-mini` overrides are accepted for compatibility during migration.
+Every OpenRouter request requires a zero-data-retention endpoint. iOS, web, and
+CLI default to no override. CLI's arbitrary `--model` is restricted for capped
 accounts. Unknown choices return 400 `invalid_model` before provider work. Only
 the owner account, identified by `OWNER_USER_ID` or exact `OWNER_API_KEY_ID`, may
 request any model. A matching key prefix never grants this permission.

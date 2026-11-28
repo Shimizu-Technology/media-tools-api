@@ -153,11 +153,18 @@ type Result struct {
 // These match the OpenAI chat completions format used by OpenRouter.
 
 type chatRequest struct {
-	Model          string               `json:"model"`
-	Messages       []chatMessage        `json:"messages"`
-	MaxTokens      int                  `json:"max_tokens"`
-	ResponseFormat *responseFormat      `json:"response_format,omitempty"`
-	Provider       *providerPreferences `json:"provider,omitempty"`
+	Model               string               `json:"model"`
+	Messages            []chatMessage        `json:"messages"`
+	MaxTokens           int                  `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int                  `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string               `json:"reasoning_effort,omitempty"`
+	Reasoning           *reasoningOptions    `json:"reasoning,omitempty"`
+	ResponseFormat      *responseFormat      `json:"response_format,omitempty"`
+	Provider            *providerPreferences `json:"provider,omitempty"`
+}
+
+type reasoningOptions struct {
+	Effort string `json:"effort"`
 }
 
 type responseFormat struct {
