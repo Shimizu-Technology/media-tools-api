@@ -39,7 +39,7 @@ export function TermsPage() {
         </TermsSection>
 
         <TermsSection title="Governing law and contact">
-          <p>These terms are governed by the laws applicable in Guam, without regard to conflict-of-law rules. Questions can be sent through our <Link to="/support" className="underline" style={{ color: 'var(--color-accent-text)' }}>support page</Link> or to <a href="mailto:shimizutechnology@gmail.com" className="underline" style={{ color: 'var(--color-accent-text)' }}>shimizutechnology@gmail.com</a>.</p>
+          <p>These terms are governed by the laws applicable in Guam, without regard to conflict-of-law rules. Questions can be sent through our <Link to="/support" className="underline" style={{ color: 'var(--color-accent-text)' }}>support page</Link> or to <a href="mailto:support@shimizu-technology.com" className="underline" style={{ color: 'var(--color-accent-text)' }}>support@shimizu-technology.com</a>.</p>
         </TermsSection>
       </div>
     </main>

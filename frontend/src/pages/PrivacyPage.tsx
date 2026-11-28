@@ -199,11 +199,11 @@ export function PrivacyPage() {
             </Link>{' '}
             or contact us at:{' '}
             <a
-              href="mailto:shimizutechnology@gmail.com"
+              href="mailto:support@shimizu-technology.com"
               className="underline"
               style={{ color: 'var(--color-accent-text)' }}
             >
-              shimizutechnology@gmail.com
+              support@shimizu-technology.com
             </a>
           </p>
         </PrivacySection>
